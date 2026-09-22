@@ -11,7 +11,7 @@ $ vtt print-file test.txt
 initial content
 ```
 
-## `vtt replace-file-content vite-task.json '"cache": true' '"cache": true, "input": ["test.txt"]'`
+## `vtt replace-file-content vite-task.json '"env": ["MY_ENV"]' '"env": ["MY_ENV"], "input": ["test.txt"]'`
 
 change input config
 

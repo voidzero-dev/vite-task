@@ -2,33 +2,33 @@
   "tasks": {
     "auto-with-negative": {
       "command": "vtt print-file src/main.ts dist/output.js",
-      "input": [
-        {
-          "auto": true
-        },
-        "!dist/**"
-      ],
-      "cache": true
+      "cache": {
+        "input": [
+          {
+            "auto": true
+          },
+          "!dist/**"
+        ]
+      }
     },
     "dotdot-positive": {
       "command": "vtt print-file ../shared/src/utils.ts",
-      "input": ["../shared/src/**"],
-      "cache": true
+      "cache": { "input": ["../shared/src/**"] }
     },
     "dotdot-positive-negative": {
       "command": "vtt print-file ../shared/src/utils.ts ../shared/dist/output.js",
-      "input": ["../shared/**", "!../shared/dist/**"],
-      "cache": true
+      "cache": { "input": ["../shared/**", "!../shared/dist/**"] }
     },
     "dotdot-auto-negative": {
       "command": "vtt print-file ../shared/src/utils.ts ../shared/dist/output.js",
-      "input": [
-        {
-          "auto": true
-        },
-        "!../shared/dist/**"
-      ],
-      "cache": true
+      "cache": {
+        "input": [
+          {
+            "auto": true
+          },
+          "!../shared/dist/**"
+        ]
+      }
     }
   }
 }

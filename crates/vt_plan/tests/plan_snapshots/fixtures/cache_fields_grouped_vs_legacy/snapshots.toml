@@ -1,0 +1,3 @@
+# Tests that task cache settings under `cache` and the deprecated top-level
+# fields resolve to the same cache config, and that `cache` omitted, `true`,
+# and `{}` all enable caching with default settings.

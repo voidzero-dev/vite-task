@@ -1,0 +1,18 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt print-file input.txt",
+      "cache": true,
+      "input": ["input.txt"],
+      "output": []
+    },
+    "test": {
+      "command": "vtt print-env TEST_ENV",
+      "env": ["TEST_ENV"]
+    },
+    "grouped": {
+      "command": "vtt print grouped",
+      "cache": { "input": [] }
+    }
+  }
+}

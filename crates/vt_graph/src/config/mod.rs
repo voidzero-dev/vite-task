@@ -2,14 +2,13 @@ pub mod user;
 
 use std::{collections::BTreeSet, sync::Arc};
 
-use monostate::MustBe;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 pub use user::{
-    AutoTracking, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
-    UserCacheConfig, UserDependencyType, UserDependsOnEntry, UserDependsOnFrom,
-    UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
-    UserPackageDependency, UserRunConfig, UserTaskConfig, UserTaskDefinition,
+    AutoTracking, Command, EnabledCacheConfig, GlobWithBase, InputBase, LegacyCacheFields,
+    ResolvedGlobalCacheConfig, UserCacheConfig, UserDependencyType, UserDependsOnEntry,
+    UserDependsOnFrom, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
+    UserPackageDependency, UserRunConfig, UserTaskCache, UserTaskConfig, UserTaskDefinition,
 };
 use vt_path::AbsolutePath;
 use vt_str::Str;
@@ -63,9 +62,9 @@ impl ResolvedTaskOptions {
             Some(ref cwd) if !cwd.as_str().is_empty() => dir.join(cwd).into(),
             _ => Arc::clone(dir),
         };
-        let cache_config = match user_options.cache_config {
-            UserCacheConfig::Disabled { cache: MustBe!(false) } => None,
-            UserCacheConfig::Enabled { cache: _, enabled_cache_config } => {
+        let cache_config = match user_options.cache_config.into_enabled() {
+            None => None,
+            Some(enabled_cache_config) => {
                 let mut untracked_env: FxHashSet<Str> =
                     enabled_cache_config.untracked_env.unwrap_or_default().into_iter().collect();
                 untracked_env.extend(DEFAULT_UNTRACKED_ENV.iter().copied().map(Str::from));

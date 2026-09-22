@@ -155,20 +155,25 @@ pub enum UserOutputEntry {
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
 #[serde(untagged, deny_unknown_fields, rename_all = "camelCase")]
 pub enum UserCacheConfig {
-    /// Cache is enabled
-    Enabled {
+    /// Cache settings grouped under `cache`.
+    ///
+    /// Tried first so that `{}` and `{ "cache": true }` never match [`Self::Legacy`].
+    Grouped {
+        /// Whether and how to cache the task.
+        ///
+        /// - Omitted or `true`: caching enabled with default settings (same as `{}`)
+        /// - `false`: caching disabled
+        /// - Object: caching enabled with the given settings
+        cache: Option<UserTaskCache>,
+    },
+    /// Cache settings as top-level task fields (deprecated).
+    Legacy {
         /// Whether to cache the task
         #[cfg_attr(all(test, not(clippy)), ts(type = "true", optional))]
         cache: Option<MustBe!(true)>,
 
         #[serde(flatten)]
-        enabled_cache_config: EnabledCacheConfig,
-    },
-    /// Cache is disabled
-    Disabled {
-        /// Whether to cache the task
-        #[cfg_attr(all(test, not(clippy)), ts(type = "false"))]
-        cache: MustBe!(false),
+        legacy_fields: LegacyCacheFields,
     },
 }
 
@@ -176,21 +181,64 @@ impl UserCacheConfig {
     /// Create an enabled cache config with the given `EnabledCacheConfig`.
     #[must_use]
     pub const fn with_config(config: EnabledCacheConfig) -> Self {
-        Self::Enabled { cache: Some(MustBe!(true)), enabled_cache_config: config }
+        Self::Grouped { cache: Some(UserTaskCache::Config(config)) }
     }
 
     /// Create a disabled cache config.
     #[must_use]
     pub const fn disabled() -> Self {
-        Self::Disabled { cache: MustBe!(false) }
+        Self::Grouped { cache: Some(UserTaskCache::Bool(false)) }
+    }
+
+    /// Returns the cache settings, or `None` if caching is disabled.
+    #[must_use]
+    pub fn into_enabled(self) -> Option<EnabledCacheConfig> {
+        match self {
+            Self::Grouped { cache: None | Some(UserTaskCache::Bool(true)) } => {
+                Some(EnabledCacheConfig::default())
+            }
+            Self::Grouped { cache: Some(UserTaskCache::Bool(false)) } => None,
+            Self::Grouped { cache: Some(UserTaskCache::Config(config)) } => Some(config),
+            Self::Legacy { cache: _, legacy_fields } => Some(legacy_fields.into()),
+        }
+    }
+
+    /// Returns the names of deprecated top-level cache fields set in this config.
+    #[must_use]
+    pub fn deprecated_fields(&self) -> Vec<&'static str> {
+        let Self::Legacy { legacy_fields, .. } = self else {
+            return Vec::new();
+        };
+        let LegacyCacheFields { env, untracked_env, input, output } = legacy_fields;
+        [
+            ("env", env.is_some()),
+            ("untrackedEnv", untracked_env.is_some()),
+            ("input", input.is_some()),
+            ("output", output.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(name, is_set)| is_set.then_some(name))
+        .collect()
     }
 }
 
-/// Cache configuration fields when caching is enabled
+/// The value of a task's `cache` field.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
-#[serde(rename_all = "camelCase")]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "TaskCache"))]
+#[serde(untagged)]
+pub enum UserTaskCache {
+    /// `true` enables caching with default settings; `false` disables caching.
+    Bool(bool),
+    /// Enables caching with the given settings.
+    Config(EnabledCacheConfig),
+}
+
+/// Cache configuration fields when caching is enabled
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "TaskCacheConfig"))]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct EnabledCacheConfig {
     /// Environment variable names to be fingerprinted and passed to the task.
     pub env: Option<Box<[Str]>>,
@@ -221,6 +269,38 @@ pub struct EnabledCacheConfig {
     #[serde(default)]
     #[cfg_attr(all(test, not(clippy)), ts(inline))]
     pub output: Option<Vec<UserOutputEntry>>,
+}
+
+/// Cache configuration fields set at the top level of a task (deprecated).
+///
+/// Superseded by the same fields under `cache`, e.g. `cache: { input: [...] }`.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyCacheFields {
+    /// @deprecated Use `cache.env` instead.
+    pub env: Option<Box<[Str]>>,
+
+    /// @deprecated Use `cache.untrackedEnv` instead.
+    pub untracked_env: Option<Vec<Str>>,
+
+    /// @deprecated Use `cache.input` instead.
+    #[serde(default)]
+    #[cfg_attr(all(test, not(clippy)), ts(inline))]
+    pub input: Option<UserInputsConfig>,
+
+    /// @deprecated Use `cache.output` instead.
+    #[serde(default)]
+    #[cfg_attr(all(test, not(clippy)), ts(inline))]
+    pub output: Option<Vec<UserOutputEntry>>,
+}
+
+impl From<LegacyCacheFields> for EnabledCacheConfig {
+    fn from(fields: LegacyCacheFields) -> Self {
+        let LegacyCacheFields { env, untracked_env, input, output } = fields;
+        Self { env, untracked_env, input, output }
+    }
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
@@ -256,16 +336,8 @@ impl Default for UserTaskOptions {
             cwd_relative_to_package: None,
             // No dependencies
             depends_on: None,
-            // Caching enabled with no fingerprinted env
-            cache_config: UserCacheConfig::Enabled {
-                cache: None,
-                enabled_cache_config: EnabledCacheConfig {
-                    env: None,
-                    untracked_env: None,
-                    input: None,
-                    output: None,
-                },
-            },
+            // Caching enabled with default settings
+            cache_config: UserCacheConfig::Grouped { cache: None },
         }
     }
 }
@@ -336,7 +408,8 @@ pub enum UserGlobalCacheConfig {
 
         /// Global cache kill switch for task entries.
         ///
-        /// When `false`, overrides all tasks to disable caching, even tasks with `cache: true`.
+        /// When `false`, overrides all tasks to disable caching, even tasks with `cache: true`
+        /// or a `cache` object.
         /// When `true`, respects each task's individual `cache` setting
         /// (each task's `cache` defaults to `true` if omitted).
         ///
@@ -586,7 +659,7 @@ mod tests {
             options.depends_on.as_ref().unwrap().as_ref(),
             [UserDependsOnEntry::Task(Str::from("build"))]
         );
-        assert_eq!(options.cache_config, UserCacheConfig::Disabled { cache: MustBe!(false) });
+        assert_eq!(options.cache_config, UserCacheConfig::disabled());
     }
 
     #[test]
@@ -684,31 +757,125 @@ mod tests {
             "cache": false
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
-        assert_eq!(
-            user_config.options.cache_config,
-            UserCacheConfig::Disabled { cache: MustBe!(false) }
-        );
+        assert_eq!(user_config.options.cache_config, UserCacheConfig::disabled());
+        assert_eq!(user_config.options.cache_config.into_enabled(), None);
+    }
+
+    fn sample_enabled_cache_config() -> EnabledCacheConfig {
+        EnabledCacheConfig {
+            env: Some(std::iter::once("NODE_ENV".into()).collect()),
+            untracked_env: Some(std::iter::once("FOO".into()).collect()),
+            input: Some(vec![UserInputEntry::Glob("src/**".into())]),
+            output: Some(vec![UserOutputEntry::Glob("dist/**".into())]),
+        }
     }
 
     #[test]
-    fn test_cache_explicitly_enabled() {
+    fn test_cache_default_settings_forms() {
+        for user_config_json in [json!({}), json!({ "cache": true }), json!({ "cache": {} })] {
+            let config: UserCacheConfig = serde_json::from_value(user_config_json.clone()).unwrap();
+            assert!(config.deprecated_fields().is_empty(), "{user_config_json}");
+            assert_eq!(
+                config.into_enabled(),
+                Some(EnabledCacheConfig::default()),
+                "{user_config_json}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cache_object() {
+        let user_config_json = json!({
+            "cache": {
+                "env": ["NODE_ENV"],
+                "untrackedEnv": ["FOO"],
+                "input": ["src/**"],
+                "output": ["dist/**"],
+            },
+        });
+        let config: UserCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert!(config.deprecated_fields().is_empty());
+        assert_eq!(config.into_enabled(), Some(sample_enabled_cache_config()));
+    }
+
+    #[test]
+    fn test_cache_object_unknown_field_error() {
+        let user_config_json = json!({
+            "cache": { "foo": 42 },
+        });
+        assert!(serde_json::from_value::<UserCacheConfig>(user_config_json).is_err());
+    }
+
+    #[test]
+    fn test_legacy_cache_fields() {
         let user_config_json = json!({
             "cache": true,
             "env": ["NODE_ENV"],
             "untrackedEnv": ["FOO"],
+            "input": ["src/**"],
+            "output": ["dist/**"],
         });
+        let config: UserCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(config.deprecated_fields(), ["env", "untrackedEnv", "input", "output"]);
+        assert_eq!(config.into_enabled(), Some(sample_enabled_cache_config()));
+    }
+
+    #[test]
+    fn test_legacy_cache_fields_without_cache() {
+        let user_config_json = json!({
+            "input": ["src/**"],
+        });
+        let config: UserCacheConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(config.deprecated_fields(), ["input"]);
         assert_eq!(
-            serde_json::from_value::<UserCacheConfig>(user_config_json).unwrap(),
-            UserCacheConfig::Enabled {
-                cache: Some(MustBe!(true)),
-                enabled_cache_config: EnabledCacheConfig {
-                    env: Some(std::iter::once("NODE_ENV".into()).collect()),
-                    untracked_env: Some(std::iter::once("FOO".into()).collect()),
-                    input: None,
-                    output: None,
-                }
-            },
+            config.into_enabled(),
+            Some(EnabledCacheConfig {
+                input: Some(vec![UserInputEntry::Glob("src/**".into())]),
+                ..EnabledCacheConfig::default()
+            })
         );
+    }
+
+    #[test]
+    fn test_mixed_cache_object_and_top_level_fields_error() {
+        for user_config_json in [
+            json!({ "cache": { "env": ["NODE_ENV"] }, "input": ["src/**"] }),
+            json!({ "cache": {}, "output": [] }),
+            json!({ "cache": { "input": ["src/**"] }, "input": ["src/**"] }),
+        ] {
+            assert!(
+                serde_json::from_value::<UserCacheConfig>(user_config_json.clone()).is_err(),
+                "{user_config_json}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_task_config_with_cache_object() {
+        let user_config_json = json!({
+            "command": "echo test",
+            "cwd": "src",
+            "cache": { "input": ["src/**"] },
+        });
+        let user_config: UserTaskConfig = serde_json::from_value(user_config_json).unwrap();
+        assert_eq!(user_config.options.cwd_relative_to_package.as_ref().unwrap().as_str(), "src");
+        assert_eq!(
+            user_config.options.cache_config.into_enabled(),
+            Some(EnabledCacheConfig {
+                input: Some(vec![UserInputEntry::Glob("src/**".into())]),
+                ..EnabledCacheConfig::default()
+            })
+        );
+    }
+
+    #[test]
+    fn test_task_config_mixed_cache_fields_error() {
+        let user_config_json = json!({
+            "command": "echo test",
+            "cache": { "env": ["NODE_ENV"] },
+            "input": ["src/**"],
+        });
+        assert!(serde_json::from_value::<UserTaskConfig>(user_config_json).is_err());
     }
 
     #[test]

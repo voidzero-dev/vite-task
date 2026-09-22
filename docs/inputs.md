@@ -1,10 +1,10 @@
 # Task Inputs Configuration
 
-The `inputs` field controls which files are tracked for cache invalidation. When any tracked input file changes, the task's cache is invalidated and the task will re-run.
+The `input` field under a task's `cache` controls which files are tracked for cache invalidation. When any tracked input file changes, the task's cache is invalidated and the task will re-run.
 
 ## Default Behavior
 
-When `inputs` is omitted, vite-task automatically tracks files that the command reads during execution using fspy (file system spy):
+When `input` is omitted, vite-task automatically tracks files that the command reads during execution using fspy (file system spy):
 
 ```json
 {
@@ -16,7 +16,7 @@ When `inputs` is omitted, vite-task automatically tracks files that the command 
 }
 ```
 
-Files read by `tsc` are automatically tracked. **In most cases, you don't need to configure `inputs` at all.**
+Files read by `tsc` are automatically tracked. **In most cases, you don't need to configure `input` at all.**
 
 ## Input Types
 
@@ -26,7 +26,7 @@ Specify files using glob patterns relative to the package directory:
 
 ```json
 {
-  "inputs": ["src/**/*.ts", "package.json"]
+  "cache": { "input": ["src/**/*.ts", "package.json"] }
 }
 ```
 
@@ -44,11 +44,11 @@ Enable automatic input detection using fspy (file system spy):
 
 ```json
 {
-  "inputs": [{ "auto": true }]
+  "cache": { "input": [{ "auto": true }] }
 }
 ```
 
-When enabled, vite-task automatically tracks files that the command actually reads during execution. This is the default behavior when `inputs` is omitted.
+When enabled, vite-task automatically tracks files that the command actually reads during execution. This is the default behavior when `input` is omitted.
 
 ### Negative Patterns
 
@@ -56,7 +56,7 @@ Exclude files from tracking using `!` prefix:
 
 ```json
 {
-  "inputs": ["src/**", "!src/**/*.test.ts"]
+  "cache": { "input": ["src/**", "!src/**/*.test.ts"] }
 }
 ```
 
@@ -68,11 +68,13 @@ By default, glob patterns are resolved relative to the package directory. Use th
 
 ```json
 {
-  "input": [
-    "src/**",
-    { "pattern": "configs/tsconfig.json", "base": "workspace" },
-    { "pattern": "!dist/**", "base": "workspace" }
-  ]
+  "cache": {
+    "input": [
+      "src/**",
+      { "pattern": "configs/tsconfig.json", "base": "workspace" },
+      { "pattern": "!dist/**", "base": "workspace" }
+    ]
+  }
 }
 ```
 
@@ -96,7 +98,7 @@ Specify exact files to track, disabling auto-inference:
   "tasks": {
     "build": {
       "command": "tsc",
-      "inputs": ["src/**/*.ts", "tsconfig.json"]
+      "cache": { "input": ["src/**/*.ts", "tsconfig.json"] }
     }
   }
 }
@@ -113,7 +115,7 @@ Track inferred files but exclude certain patterns:
   "tasks": {
     "build": {
       "command": "tsc",
-      "inputs": [{ "auto": true }, "!dist/**", "!node_modules/**"]
+      "cache": { "input": [{ "auto": true }, "!dist/**", "!node_modules/**"] }
     }
   }
 }
@@ -130,7 +132,7 @@ Combine explicit globs with auto-inference:
   "tasks": {
     "build": {
       "command": "tsc",
-      "inputs": ["package.json", { "auto": true }, "!**/*.test.ts"]
+      "cache": { "input": ["package.json", { "auto": true }, "!**/*.test.ts"] }
     }
   }
 }
@@ -149,7 +151,7 @@ Disable all file tracking (cache only on command/env changes):
   "tasks": {
     "echo": {
       "command": "echo hello",
-      "inputs": []
+      "cache": { "input": [] }
     }
   }
 }
@@ -159,15 +161,15 @@ The cache will only invalidate when the command itself or environment variables 
 
 ## Behavior Summary
 
-| Configuration                                                  | Auto-Inference | File Tracking                      |
-| -------------------------------------------------------------- | -------------- | ---------------------------------- |
-| `inputs` omitted                                               | Enabled        | Inferred files                     |
-| `inputs: [{ "auto": true }]`                                   | Enabled        | Inferred files                     |
-| `inputs: ["src/**"]`                                           | Disabled       | Matched files only                 |
-| `inputs: [{ "auto": true }, "!dist/**"]`                       | Enabled        | Inferred files except `dist/`      |
-| `inputs: ["pkg.json", { "auto": true }]`                       | Enabled        | `pkg.json` + inferred files        |
-| `input: [{ "pattern": "tsconfig.json", "base": "workspace" }]` | Disabled       | Matched files (workspace-relative) |
-| `inputs: []`                                                   | Disabled       | No files tracked                   |
+| `cache.input`                                           | Auto-Inference | File Tracking                      |
+| ------------------------------------------------------- | -------------- | ---------------------------------- |
+| omitted                                                 | Enabled        | Inferred files                     |
+| `[{ "auto": true }]`                                    | Enabled        | Inferred files                     |
+| `["src/**"]`                                            | Disabled       | Matched files only                 |
+| `[{ "auto": true }, "!dist/**"]`                        | Enabled        | Inferred files except `dist/`      |
+| `["pkg.json", { "auto": true }]`                        | Enabled        | `pkg.json` + inferred files        |
+| `[{ "pattern": "tsconfig.json", "base": "workspace" }]` | Disabled       | Matched files (workspace-relative) |
+| `[]`                                                    | Disabled       | No files tracked                   |
 
 ## Important Notes
 
@@ -181,7 +183,7 @@ By default, glob patterns (bare strings) are resolved relative to the **package 
     "build": {
       "command": "tsc",
       "cwd": "src",
-      "inputs": ["src/**/*.ts"] // Still relative to package root
+      "cache": { "input": ["src/**/*.ts"] } // Still relative to package root
     }
   }
 }
@@ -193,7 +195,7 @@ When using mixed mode, negative patterns filter both explicit globs AND auto-inf
 
 ```json
 {
-  "inputs": ["src/**", { "auto": true }, "!**/*.generated.ts"]
+  "cache": { "input": ["src/**", { "auto": true }, "!**/*.generated.ts"] }
 }
 ```
 
@@ -207,12 +209,14 @@ Common files you might want to exclude:
 
 ```json
 {
-  "inputs": [
-    { "auto": true },
-    "!**/*.tsbuildinfo", // TypeScript incremental build info
-    "!**/tsconfig.tsbuildinfo",
-    "!dist/**" // Build outputs that get read during builds
-  ]
+  "cache": {
+    "input": [
+      { "auto": true },
+      "!**/*.tsbuildinfo", // TypeScript incremental build info
+      "!**/tsconfig.tsbuildinfo",
+      "!dist/**" // Build outputs that get read during builds
+    ]
+  }
 }
 ```
 
@@ -229,16 +233,16 @@ If you encounter a case where fspy fails to detect a file read, please [report t
 
 ### Cache Disabled
 
-The `inputs` field cannot be used with `cache: false`:
+`input` is part of the `cache` object, so it cannot be combined with `cache: false`. Setting `input` at the top level of a task is deprecated, and combining it with `cache: false` or a `cache` object is a parse error:
 
 ```json
-// ERROR: inputs cannot be specified when cache is disabled
+// ERROR: top-level input cannot be combined with cache: false
 {
   "tasks": {
     "dev": {
       "command": "vite dev",
       "cache": false,
-      "inputs": ["src/**"] // This will cause a parse error
+      "input": ["src/**"] // This will cause a parse error
     }
   }
 }

@@ -3,8 +3,7 @@
   "tasks": {
     "probe": {
       "command": "probe-cli",
-      "cache": true,
-      "input": []
+      "cache": { "input": [] }
     }
   }
 }

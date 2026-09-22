@@ -1,0 +1,29 @@
+[[e2e]]
+name = "deprecated_cache_fields"
+comment = """
+Top-level cache fields still work but print one deprecation warning listing the fields and affected tasks.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "warning, cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "input.txt",
+    "initial",
+    "modified",
+  ], comment = "modify declared input" },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "warning, cache miss: input modified" },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "warning, cache hit" },
+]

@@ -11,7 +11,7 @@ $ vtt print-file test.txt
 initial content
 ```
 
-## `vtt replace-file-content vite-task.json '"cache": true' '"cache": true, "untrackedEnv": ["MY_UNTRACKED"]'`
+## `vtt replace-file-content vite-task.json '"env": ["MY_ENV"]' '"env": ["MY_ENV"], "untrackedEnv": ["MY_UNTRACKED"]'`
 
 add untracked env
 

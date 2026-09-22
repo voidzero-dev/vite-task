@@ -13,7 +13,9 @@ Currently, vite-plus requires explicit listing of environment variables in task 
   "tasks": {
     "build": {
       "command": "vite build",
-      "env": ["NODE_ENV", "NODE_OPTIONS", "VITE_API_URL", "VITE_APP_TITLE", "MY_APP_PORT"]
+      "cache": {
+        "env": ["NODE_ENV", "NODE_OPTIONS", "VITE_API_URL", "VITE_APP_TITLE", "MY_APP_PORT"]
+      }
     }
   }
 }
@@ -23,7 +25,7 @@ This approach becomes cumbersome when dealing with multiple environment variable
 
 ## Goals
 
-1. **Simplify Configuration**: Allow wildcard patterns in the `env` array to match multiple environment variables
+1. **Simplify Configuration**: Allow wildcard patterns in the `cache.env` array to match multiple environment variables
 2. **Maintain Cache Correctness**: Ensure wildcard-matched variables are properly included in cache fingerprints
 3. **Backward Compatibility**: Support both explicit variable names and wildcard patterns
 4. **Performance**: Minimal overhead when resolving environment variables
@@ -155,14 +157,16 @@ pub struct CommandFingerprint {
   "tasks": {
     "build": {
       "command": "vite build",
-      "env": [
-        "NODE_ENV",
-        "NODE_OPTIONS",
-        "VITE_API_URL",
-        "VITE_APP_TITLE",
-        "VITE_PUBLIC_PATH",
-        "VITE_BASE_URL"
-      ]
+      "cache": {
+        "env": [
+          "NODE_ENV",
+          "NODE_OPTIONS",
+          "VITE_API_URL",
+          "VITE_APP_TITLE",
+          "VITE_PUBLIC_PATH",
+          "VITE_BASE_URL"
+        ]
+      }
     }
   }
 }
@@ -175,7 +179,7 @@ pub struct CommandFingerprint {
   "tasks": {
     "build": {
       "command": "vite build",
-      "env": ["NODE_*", "VITE_*"]
+      "cache": { "env": ["NODE_*", "VITE_*"] }
     }
   }
 }

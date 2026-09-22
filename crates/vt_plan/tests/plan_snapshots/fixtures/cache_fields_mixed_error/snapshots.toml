@@ -1,0 +1,1 @@
+# Tests that combining a `cache` object with top-level cache fields fails to load

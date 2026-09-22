@@ -21,7 +21,7 @@ initial content
 ```
 ```
 
-## `vtt replace-file-content vite-task.json '"cache": true' '"cache": true, "cwd": "subfolder"'`
+## `vtt replace-file-content vite-task.json '"command": "vtt print-file test.txt"' '"command": "vtt print-file test.txt", "cwd": "subfolder"'`
 
 change cwd
 

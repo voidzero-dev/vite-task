@@ -10,7 +10,7 @@
     },
     "lint-with-untracked-env": {
       "command": "vt tool print lint",
-      "untrackedEnv": ["CUSTOM_VAR"]
+      "cache": { "untrackedEnv": ["CUSTOM_VAR"] }
     },
     "build": {
       "command": "vt tool print lint",

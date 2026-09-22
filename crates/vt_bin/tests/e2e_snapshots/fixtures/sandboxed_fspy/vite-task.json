@@ -2,13 +2,14 @@
   "tasks": {
     "inner": {
       "command": "vtt print-file input.txt",
-      "cache": true,
-      "input": [
-        {
-          "auto": true
-        }
-      ],
-      "output": []
+      "cache": {
+        "input": [
+          {
+            "auto": true
+          }
+        ],
+        "output": []
+      }
     }
   }
 }

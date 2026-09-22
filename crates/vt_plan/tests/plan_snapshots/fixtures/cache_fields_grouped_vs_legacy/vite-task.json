@@ -1,0 +1,43 @@
+{
+  "tasks": {
+    "grouped": {
+      "command": "echo build",
+      "cache": {
+        "env": ["MY_ENV"],
+        "untrackedEnv": ["MY_UNTRACKED"],
+        "input": ["src/**", "!src/**/*.test.ts"],
+        "output": ["dist/**"]
+      }
+    },
+    "legacy": {
+      "command": "echo build",
+      "cache": true,
+      "env": ["MY_ENV"],
+      "untrackedEnv": ["MY_UNTRACKED"],
+      "input": ["src/**", "!src/**/*.test.ts"],
+      "output": ["dist/**"]
+    },
+    "legacy-without-cache": {
+      "command": "echo build",
+      "env": ["MY_ENV"],
+      "untrackedEnv": ["MY_UNTRACKED"],
+      "input": ["src/**", "!src/**/*.test.ts"],
+      "output": ["dist/**"]
+    },
+    "cache-omitted": {
+      "command": "echo build"
+    },
+    "cache-true": {
+      "command": "echo build",
+      "cache": true
+    },
+    "cache-empty-object": {
+      "command": "echo build",
+      "cache": {}
+    },
+    "cache-false": {
+      "command": "echo build",
+      "cache": false
+    }
+  }
+}
