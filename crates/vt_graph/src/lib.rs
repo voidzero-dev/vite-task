@@ -3,13 +3,12 @@ pub mod display;
 pub mod loader;
 pub mod query;
 mod specifier;
-mod top_level_cache_fields;
 
-use std::{collections::BTreeSet, convert::Infallible, sync::Arc};
+use std::{convert::Infallible, sync::Arc};
 
 use config::{
     ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
-    UserTaskDefinition,
+    UserTaskDefinition, user::TopLevelCacheFieldsCollector,
 };
 use petgraph::{
     graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
@@ -18,7 +17,6 @@ use petgraph::{
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use serde::Serialize;
 pub use specifier::TaskSpecifier;
-pub use top_level_cache_fields::TopLevelCacheFieldsError;
 use vt_path::AbsolutePath;
 use vt_str::Str;
 use vt_workspace::{
@@ -133,7 +131,7 @@ pub enum TaskGraphLoadError {
     PrePostScriptsInNonRootPackage { package_path: Arc<AbsolutePath> },
 
     #[error(transparent)]
-    TopLevelCacheFields(TopLevelCacheFieldsError),
+    TopLevelCacheFields(config::user::TopLevelCacheFieldsError),
 }
 
 /// Error when looking up a task by its specifier.
@@ -320,8 +318,7 @@ impl IndexedTaskGraph {
 
         let resolved_global_cache = ResolvedGlobalCacheConfig::resolve_from(root_cache.as_ref());
 
-        let mut top_level_cache_fields = BTreeSet::<&'static str>::new();
-        let mut tasks_with_top_level_cache_fields = Vec::<TaskDisplay>::new();
+        let mut top_level_cache_fields = TopLevelCacheFieldsCollector::default();
 
         // Second pass: create task nodes (cache is NOT applied here; it's applied at plan time)
         for (package_index, package_dir, user_config) in package_configs {
@@ -359,16 +356,13 @@ impl IndexedTaskGraph {
                 };
                 let depends_on_entries = task_user_config.options.depends_on.clone();
 
-                let mut task_top_level_cache_fields =
-                    task_user_config.top_level_cache_fields.names().peekable();
-                if task_top_level_cache_fields.peek().is_some() {
-                    top_level_cache_fields.extend(task_top_level_cache_fields);
-                    tasks_with_top_level_cache_fields.push(TaskDisplay {
+                top_level_cache_fields.record(task_user_config.top_level_cache_fields, || {
+                    TaskDisplay {
                         package_name: package.package_json.name.clone(),
                         task_name: task_name.clone(),
                         package_path: Arc::clone(&package_dir),
-                    });
-                }
+                    }
+                });
 
                 // Resolve the task configuration from the user config
                 let resolved_config = ResolvedTaskConfig::resolve(
@@ -431,19 +425,7 @@ impl IndexedTaskGraph {
             }
         }
 
-        if !tasks_with_top_level_cache_fields.is_empty() {
-            tasks_with_top_level_cache_fields.sort_unstable_by(|a, b| {
-                (&a.package_name, &a.task_name, &a.package_path).cmp(&(
-                    &b.package_name,
-                    &b.task_name,
-                    &b.package_path,
-                ))
-            });
-            return Err(TaskGraphLoadError::TopLevelCacheFields(TopLevelCacheFieldsError {
-                fields: top_level_cache_fields,
-                tasks: tasks_with_top_level_cache_fields,
-            }));
-        }
+        top_level_cache_fields.finish().map_err(TaskGraphLoadError::TopLevelCacheFields)?;
 
         // Construct `Self` with task_graph with all task nodes ready and indexed, but no edges.
         let mut me = Self {
