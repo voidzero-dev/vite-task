@@ -83,6 +83,7 @@ impl ResolvedTaskOptions {
                 )?;
 
                 Some(CacheConfig {
+                    remote_cache: true,
                     env_config: EnvConfig {
                         fingerprinted_envs: enabled_cache_config
                             .env
@@ -100,11 +101,9 @@ impl ResolvedTaskOptions {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[expect(
-    clippy::struct_field_names,
-    reason = "env_config, input_config, output_config are distinct config categories, not a naming smell"
-)]
 pub struct CacheConfig {
+    /// Whether this task permits remote caching when local caching is enabled.
+    pub remote_cache: bool,
     pub env_config: EnvConfig,
     pub input_config: ResolvedGlobConfig,
     pub output_config: ResolvedGlobConfig,
@@ -444,6 +443,9 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     // GitHub Actions
     "GITHUB_*",
     "RUNNER_*",
+    // https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-cloud-providers#using-custom-actions
+    // ACTIONS_ID_TOKEN_REQUEST_TOKEN is covered by *_TOKEN below.
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
     // Windows specific
     "APPDATA",
     // Node's compile cache uses LOCALAPPDATA to pick its cache directory

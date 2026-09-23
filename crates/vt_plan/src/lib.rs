@@ -8,6 +8,7 @@ mod path_env;
 mod plan;
 pub mod plan_request;
 mod ps1_shim;
+pub mod remote_cache;
 
 use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, sync::Arc};
 

@@ -7,8 +7,8 @@ use vt_path::RelativePathBuf;
 use vt_str::{self, Str};
 use wincode::{SchemaRead, SchemaWrite};
 
-use crate::envs::EnvFingerprints;
 pub use crate::envs::EnvValueHash;
+use crate::{envs::EnvFingerprints, remote_cache::RemoteCacheConfig};
 
 /// Key to identify an execution across sessions.
 #[derive(Debug, SchemaWrite, SchemaRead, Serialize)]
@@ -34,9 +34,8 @@ pub enum ExecutionCacheKey {
     ExecAPI(Arc<[Str]>),
 }
 
-/// Cache information for a spawn execution.
+/// Cache information available before a spawn execution.
 ///
-/// It only contains information needed for hitting existing cache entries pre-execution.
 /// It doesn't contain any post-execution information like file fingerprints
 /// (which needs actual execution and is out of scope for planning).
 #[derive(Debug, Serialize)]
@@ -54,6 +53,9 @@ pub struct CacheMetadata {
     /// Resolved output configuration for cache restoration.
     /// Used at execution time to determine what output files to archive.
     pub output_config: ResolvedGlobConfig,
+
+    /// Remote cache access. `None` means local caching only.
+    pub remote_cache: Option<RemoteCacheConfig>,
 
     /// The unfiltered env context for runner-aware APIs. This is the planning
     /// context's envs before spawn-env filtering, including command prefix envs

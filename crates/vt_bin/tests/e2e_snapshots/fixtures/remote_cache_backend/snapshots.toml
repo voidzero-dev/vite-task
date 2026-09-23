@@ -1,0 +1,514 @@
+# Windows is skipped because the PTY launcher cannot execute pnpm command shims.
+[[e2e]]
+name = "entries_and_associations"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'A', \"secondary_key\": 'S'}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'VA'}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'U', \"value\": 'VA'}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'B', \"secondary_key\": 'S', \"value\": 'VB'}",
+  ],
+  { argv = [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'A', \"secondary_key\": 'S'}",
+  ], comment = "The exact entry survives reassignment of S to B." },
+  { argv = [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'C', \"secondary_key\": 'S'}",
+  ], comment = "The previous fetch did not change S. Fallback returns only B's key." },
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'T', \"value\": 'VA2'}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'A', \"secondary_key\": 'missing'}",
+  ],
+  { argv = [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'C', \"secondary_key\": 'U'}",
+  ], comment = "An older association to A still resolves after A is replaced." },
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'C', \"secondary_key\": 'T'}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'C', \"secondary_key\": 'S'}",
+  ],
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "blob_replacement"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  [
+    "cbor-http",
+    "GET",
+    "/blob/missing",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "archive.txt",
+    "first archive",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'first'}",
+    "--form-file",
+    "blob=archive.txt",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'A', \"secondary_key\": 'S'}",
+  ],
+  [
+    "cbor-http",
+    "GET",
+    "/blob/1",
+  ],
+  { argv = [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-data",
+    "blob='second archive'",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'second'}",
+  ], comment = "Accept blob before metadata, with neither part supplying a filename." },
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'A', \"secondary_key\": 'S'}",
+  ],
+  [
+    "cbor-http",
+    "GET",
+    "/blob/2",
+  ],
+  { argv = [
+    "cbor-http",
+    "GET",
+    "/blob/1",
+  ], comment = "Previously returned IDs retain their original bytes." },
+  { argv = [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'no archive'}",
+  ], comment = "Omitting blob clears the association." },
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'A', \"secondary_key\": 'S'}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'empty archive'}",
+    "--form-data",
+    "blob=''",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'A', \"secondary_key\": 'S'}",
+  ],
+  { argv = [
+    "cbor-http",
+    "GET",
+    "/blob/3",
+  ], comment = "An empty blob has an ID and downloads as an empty byte string." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "opaque_binary_data"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": b64'AP+A', \"secondary_key\": '', \"value\": b64'AP+A'}",
+    "--form-data",
+    "blob=b64'AP+A'",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": b64'AP+A', \"secondary_key\": ''}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": '', \"secondary_key\": ''}",
+  ],
+  [
+    "cbor-http",
+    "GET",
+    "/blob/1",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": '', \"secondary_key\": '', \"value\": ''}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": '', \"secondary_key\": ''}",
+  ],
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "invalid_requests"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  [
+    "cbor-http",
+    "GET",
+    "/missing",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--data",
+    "'bad'",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--data",
+    "'bad'",
+    "--content-type",
+    "application/cbor",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": \"text\", \"secondary_key\": ''}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": ''}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "[]",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": '', \"key\": 'duplicate', \"secondary_key\": ''}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'original'}",
+    "--form-data",
+    "blob='original archive'",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--cbor",
+    "{}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-data",
+    "blob='missing metadata'",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'T', \"value\": \"wrong type\"}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'T', \"value\": 'replacement'}",
+    "--form-cbor",
+    "metadata={}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'T', \"value\": 'replacement'}",
+    "--form-data",
+    "blob='one'",
+    "--form-data",
+    "blob='two'",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={}",
+    "--form-data",
+    "unexpected='part'",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-data",
+    "metadata='wrong content type'",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--data",
+    "'--boundary\\r\\nContent-Disposition: form-data; name=\"metadata\"\\r\\nContent-Type: application/cbor\\r\\n\\r\\n'",
+    "--content-type",
+    "multipart/form-data; boundary=boundary",
+  ],
+  { argv = [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'A', \"secondary_key\": 'S'}",
+  ], comment = "Failed stores did not replace the value or blob." },
+  [
+    "cbor-http",
+    "GET",
+    "/blob/1",
+  ],
+  { argv = [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'B', \"secondary_key\": 'T'}",
+  ], comment = "Failed stores did not publish a secondary association." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "request_limit"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+    "--max-request-bytes",
+    "1024",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'original'}",
+  ],
+  [
+    "node",
+    "-e",
+    "require('node:fs').writeFileSync('large.bin', Buffer.alloc(2048))",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'T', \"value\": 'replacement'}",
+    "--form-file",
+    "blob=large.bin",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'A', \"secondary_key\": 'S'}",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'B', \"secondary_key\": 'T'}",
+  ],
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "daemon_lifecycle"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+    "--base-path",
+    "/projects/test",
+  ],
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  [
+    "cbor-http",
+    "POST",
+    "/store",
+    "--form-cbor",
+    "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'first daemon'}",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "stop",
+  ], comment = "Connect before deleting cache.url, then wait for the connection to close before restarting." },
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "cbor-http",
+    "POST",
+    "/fetch",
+    "--cbor",
+    "{\"key\": 'A', \"secondary_key\": 'S'}",
+  ], comment = "A new daemon starts with empty state." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]

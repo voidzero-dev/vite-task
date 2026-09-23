@@ -672,6 +672,7 @@ fn plan_spawn_execution(
                 execution_cache_key,
                 input_config: cache_config.input_config.clone(),
                 output_config: cache_config.output_config.clone(),
+                remote_cache: None,
                 unfiltered_envs: Arc::clone(envs),
             });
         }
@@ -939,6 +940,7 @@ mod tests {
 
     fn parent_config(includes_auto: bool, positive_globs: &[&str]) -> CacheConfig {
         CacheConfig {
+            remote_cache: true,
             env_config: EnvConfig {
                 fingerprinted_envs: FxHashSet::default(),
                 untracked_env: FxHashSet::default(),

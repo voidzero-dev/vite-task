@@ -30,6 +30,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -71,6 +72,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -111,6 +113,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -151,6 +154,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -191,6 +195,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -232,6 +237,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -271,6 +277,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/",
       "cache_config": {
+        "remote_cache": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [

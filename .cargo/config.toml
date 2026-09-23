@@ -1,5 +1,5 @@
 [build]
-rustflags = ["--cfg", "tokio_unstable", "-D", "warnings"]
+rustflags = ["-D", "warnings"]
 
 [unstable]
 bindeps = true

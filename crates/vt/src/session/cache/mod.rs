@@ -2,6 +2,7 @@
 
 pub mod archive;
 pub mod display;
+mod validation;
 
 use std::{collections::BTreeMap, fmt::Display, fs::File, io::Write, sync::Arc, time::Duration};
 
@@ -327,26 +328,16 @@ impl ExecutionCache {
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         workspace_root: &AbsolutePath,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
-        let spawn_fingerprint = &cache_metadata.spawn_fingerprint;
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
 
         // Try to find the cache entry by key (spawn fingerprint + input config)
         if let Some(cache_value) = self.get_by_cache_key(&cache_key).await? {
-            // Validate explicit globbed inputs against the stored values
             if let Some(mismatch) =
-                detect_globbed_input_change(&cache_value.globbed_inputs, globbed_inputs)
+                cache_value.validate(cache_metadata, globbed_inputs, workspace_root)?
             {
                 return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
-            }
-
-            // Validate post-run fingerprint (inferred inputs + tracked envs)
-            if let Some(mismatch) = cache_value
-                .post_run_fingerprint
-                .validate(workspace_root, &cache_metadata.unfiltered_envs)?
-            {
-                return Ok(Err(CacheMiss::FingerprintMismatch(mismatch.into())));
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed
@@ -359,26 +350,9 @@ impl ExecutionCache {
         if let Some(old_cache_key) =
             self.get_cache_key_by_execution_key(execution_cache_key).await?
         {
-            // Destructure to ensure we handle all fields when new ones are added.
             // `get_by_cache_key` above returned None for the *current* cache key,
-            // so at least one field on `old_cache_key` must differ from the
-            // current metadata — checked in priority order (spawn → input → output).
-            let CacheEntryKey {
-                spawn_fingerprint: old_spawn_fingerprint,
-                input_config: old_input_config,
-                output_config: old_output_config,
-            } = old_cache_key;
-            let mismatch = if old_spawn_fingerprint != *spawn_fingerprint {
-                FingerprintMismatch::SpawnFingerprint {
-                    old: old_spawn_fingerprint,
-                    new: spawn_fingerprint.clone(),
-                }
-            } else if old_input_config != cache_metadata.input_config {
-                FingerprintMismatch::InputConfig
-            } else {
-                debug_assert_ne!(old_output_config, cache_metadata.output_config);
-                FingerprintMismatch::OutputConfig
-            };
+            // so the associated key must differ.
+            let mismatch = old_cache_key.into_mismatch(&cache_key);
             return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
         }
 
@@ -416,60 +390,6 @@ impl ExecutionCache {
         self.upsert_cache_entry(&cache_key, &cache_value).await?;
         self.upsert_task_fingerprint(execution_cache_key, &cache_key).await?;
         Ok(())
-    }
-}
-
-/// Compare stored and current globbed inputs, returning the first changed path.
-/// Both maps are `BTreeMap` so we iterate them in sorted lockstep.
-fn detect_globbed_input_change(
-    stored: &BTreeMap<RelativePathBuf, u64>,
-    current: &BTreeMap<RelativePathBuf, u64>,
-) -> Option<FingerprintMismatch> {
-    let mut stored_iter = stored.iter();
-    let mut current_iter = current.iter();
-    let mut s = stored_iter.next();
-    let mut c = current_iter.next();
-
-    loop {
-        match (s, c) {
-            (None, None) => return None,
-            (Some((sp, _)), None) => {
-                return Some(FingerprintMismatch::InputChanged {
-                    kind: InputChangeKind::Removed,
-                    path: sp.clone(),
-                });
-            }
-            (None, Some((cp, _))) => {
-                return Some(FingerprintMismatch::InputChanged {
-                    kind: InputChangeKind::Added,
-                    path: cp.clone(),
-                });
-            }
-            (Some((sp, sh)), Some((cp, ch))) => match sp.cmp(cp) {
-                std::cmp::Ordering::Equal => {
-                    if sh != ch {
-                        return Some(FingerprintMismatch::InputChanged {
-                            kind: InputChangeKind::ContentModified,
-                            path: sp.clone(),
-                        });
-                    }
-                    s = stored_iter.next();
-                    c = current_iter.next();
-                }
-                std::cmp::Ordering::Less => {
-                    return Some(FingerprintMismatch::InputChanged {
-                        kind: InputChangeKind::Removed,
-                        path: sp.clone(),
-                    });
-                }
-                std::cmp::Ordering::Greater => {
-                    return Some(FingerprintMismatch::InputChanged {
-                        kind: InputChangeKind::Added,
-                        path: cp.clone(),
-                    });
-                }
-            },
-        }
     }
 }
 

@@ -1,5 +1,11 @@
 # Tests cache key generation for various task configurations
 
+[fields]
+key = true
+neighbors = true
+execution_item_display = { command = true }
+cache_metadata = { execution_cache_key = true }
+
 [[plan]]
 name = "synthetic_task_in_user_task"
 args = ["run", "lint"]

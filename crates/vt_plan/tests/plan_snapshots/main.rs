@@ -1,3 +1,4 @@
+mod fields;
 mod redact;
 mod task_graph_markdown;
 
@@ -10,6 +11,7 @@ use std::{
 use clap::Parser;
 use copy_dir::copy_dir;
 use cow_utils::CowUtils as _;
+use fields::Fields;
 use redact::redact_snapshot;
 use rustc_hash::FxHashMap;
 use serde::Serialize;
@@ -31,6 +33,7 @@ enum Cli {
 }
 
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 struct Plan {
     pub name: Str,
     pub args: Vec<Str>,
@@ -44,6 +47,8 @@ struct Plan {
 
 #[derive(serde::Deserialize, Default)]
 struct SnapshotsFile {
+    /// Fields to retain in every plan snapshot in this fixture.
+    pub fields: Option<Fields>,
     /// Optional platform filter: `"unix"` or `"windows"`. If set, the whole
     /// fixture only runs on that platform. Fixtures whose filter doesn't
     /// match the current build are dropped during trial enumeration so they
@@ -304,7 +309,12 @@ fn run_case_inner(
                     &compact_plan,
                 )?;
             } else {
-                let plan_json = redact_snapshot(&plan, workspace_root_str);
+                let mut plan_json = redact_snapshot(&plan, workspace_root_str);
+                if let Some(fields) = &cases_file.fields {
+                    fields.select(&mut plan_json).map_err(|err| {
+                        vt_str::format!("{fixture_name}/{snapshot_base}: {err}").to_string()
+                    })?;
+                }
                 snapshots.check_json_snapshot(
                     snapshot_base.as_str(),
                     comment.as_str(),

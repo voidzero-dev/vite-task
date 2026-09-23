@@ -1,22 +1,36 @@
 {
   "name": "vite-task-tools",
   "private": true,
+  "bin": {
+    "cbor-http": "./src/cbor-http.ts",
+    "remote-cache-server": "./src/remote-cache/cli.ts"
+  },
   "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test src/*.test.ts"
+  },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "catalog:",
+    "@fastify/busboy": "catalog:",
     "@openai/codex": "catalog:",
     "@playwright/browser-chromium": "catalog:",
     "@vitest/browser-playwright": "catalog:",
     "@voidzero-dev/vite-task-client": "workspace:*",
     "bun": "catalog:",
+    "cbor-edn": "catalog:",
+    "cbor2": "catalog:",
     "cross-env": "catalog:",
     "deno": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "playwright": "catalog:",
-    "typescript": "7.1.0-dev.20260826.1",
+    "typescript": "7.1.0-dev.20260917.1",
     "vite": "catalog:",
     "vitest": "catalog:"
+  },
+  "devDependencies": {
+    "vite-task-tools": "workspace:*"
   }
 }
