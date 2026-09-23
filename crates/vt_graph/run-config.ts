@@ -45,7 +45,7 @@ cwd?: string,
  *   `{ "task": "build", "from": "dependencies" }` runs `build` in each
  *   direct workspace dependency that defines a `build` task.
  */
-dependsOn?: Array<DependsOnEntry>, } & ({
+dependsOn?: Array<DependsOnEntry>,
 /**
  * Whether and how to cache the task.
  *
@@ -53,27 +53,7 @@ dependsOn?: Array<DependsOnEntry>, } & ({
  * - `false`: caching disabled
  * - Object: caching enabled with the given settings
  */
-cache?: TaskCache, } | {
-/**
- * Whether to cache the task
- */
-cache?: true,
-/**
- * @deprecated Use `cache.env` instead.
- */
-env?: Array<string>,
-/**
- * @deprecated Use `cache.untrackedEnv` instead.
- */
-untrackedEnv?: Array<string>,
-/**
- * @deprecated Use `cache.input` instead.
- */
-input?: Array<string | GlobWithBase | AutoTracking>,
-/**
- * @deprecated Use `cache.output` instead.
- */
-output?: Array<string | GlobWithBase | AutoTracking>, });
+cache?: TaskCache, };
 
 export type TaskCache = boolean | TaskCacheConfig;
 

@@ -472,7 +472,7 @@ fn resolve_synthetic_cache_config(
             // Top-level: resolve from synthetic's own config
             Ok(ResolvedTaskOptions::resolve(
                 UserTaskOptions {
-                    cache_config: synthetic_cache_config,
+                    cache_config: Some(synthetic_cache_config),
                     cwd_relative_to_package: None,
                     depends_on: None,
                 },

@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "grouped": {
+    "cache-object": {
       "command": "echo build",
       "cache": {
         "env": ["MY_ENV"],
@@ -8,21 +8,6 @@
         "input": ["src/**", "!src/**/*.test.ts"],
         "output": ["dist/**"]
       }
-    },
-    "legacy": {
-      "command": "echo build",
-      "cache": true,
-      "env": ["MY_ENV"],
-      "untrackedEnv": ["MY_UNTRACKED"],
-      "input": ["src/**", "!src/**/*.test.ts"],
-      "output": ["dist/**"]
-    },
-    "legacy-without-cache": {
-      "command": "echo build",
-      "env": ["MY_ENV"],
-      "untrackedEnv": ["MY_UNTRACKED"],
-      "input": ["src/**", "!src/**/*.test.ts"],
-      "output": ["dist/**"]
     },
     "cache-omitted": {
       "command": "echo build"

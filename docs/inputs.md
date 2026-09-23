@@ -233,17 +233,4 @@ If you encounter a case where fspy fails to detect a file read, please [report t
 
 ### Cache Disabled
 
-`input` is part of the `cache` object, so it cannot be used with `cache: false`. The deprecated top-level `input` field is also rejected with `cache: false`:
-
-```json
-// ERROR: top-level input cannot be combined with cache: false
-{
-  "tasks": {
-    "dev": {
-      "command": "vite dev",
-      "cache": false,
-      "input": ["src/**"] // This will cause a parse error
-    }
-  }
-}
-```
+`input` is part of the `cache` object, so it cannot be used when caching is disabled with `cache: false`.

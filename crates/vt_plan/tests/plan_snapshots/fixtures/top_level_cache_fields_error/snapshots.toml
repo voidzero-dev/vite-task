@@ -1,0 +1,2 @@
+# Tests that cache settings at the top level of a task, instead of under
+# `cache`, fail to load

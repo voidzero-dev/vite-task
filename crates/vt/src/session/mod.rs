@@ -67,9 +67,6 @@ impl TaskGraphLoader for LazyTaskGraph<'_> {
         Ok(match self {
             Self::Uninitialized { workspace_root, config_loader } => {
                 let graph = IndexedTaskGraph::load(workspace_root, *config_loader).await?;
-                for warning in graph.warnings() {
-                    print_warning(warning);
-                }
                 *self = Self::Initialized(graph);
                 match self {
                     Self::Initialized(graph) => &*graph,
@@ -840,18 +837,6 @@ pub fn print_error(error: &anyhow::Error) {
         let _ = write!(stderr, "\n* {source}");
     }
     let _ = writeln!(stderr);
-}
-
-/// Print `warning` to stderr with a `warning:` prefix, which is bold yellow
-/// when stderr supports ANSI colors.
-fn print_warning(warning: &dyn std::fmt::Display) {
-    use std::io::Write as _;
-
-    use owo_colors::{OwoColorize as _, Stream, Style};
-
-    let prefix =
-        "warning:".if_supports_color(Stream::Stderr, |s| s.style(Style::new().yellow().bold()));
-    let _ = writeln!(std::io::stderr().lock(), "{prefix} {warning}");
 }
 
 /// Whether stdout supports ANSI color output for the current process. Honors

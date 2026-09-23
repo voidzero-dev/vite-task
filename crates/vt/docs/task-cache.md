@@ -442,8 +442,6 @@ Individual tasks can enable or disable caching, and configure it with a `cache` 
 - `false` — caching disabled
 - An object — caching enabled with the given `env`, `untrackedEnv`, `input`, and `output`
 
-Setting `env`, `untrackedEnv`, `input`, or `output` at the top level of a task still works but is deprecated and prints a warning.
-
 ### CLI Cache Override
 
 The `--cache` and `--no-cache` flags override all cache configuration for a single run:

@@ -3,9 +3,8 @@ pub mod display;
 pub mod loader;
 pub mod query;
 mod specifier;
-mod warning;
 
-use std::{collections::BTreeSet, convert::Infallible, sync::Arc};
+use std::{convert::Infallible, sync::Arc};
 
 use config::{
     ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
@@ -23,7 +22,6 @@ use vt_str::Str;
 use vt_workspace::{
     DependencyType, PackageNodeIndex, WorkspaceRoot, package_graph::IndexedPackageGraph,
 };
-pub use warning::TaskGraphWarning;
 
 use crate::{
     config::user::{
@@ -236,9 +234,6 @@ pub struct IndexedTaskGraph {
 
     /// Whether pre/post script hooks are enabled (from `enablePrePostScripts` in workspace root config).
     pre_post_scripts_enabled: bool,
-
-    /// Non-fatal configuration issues found while loading.
-    warnings: Vec<TaskGraphWarning>,
 }
 
 pub type TaskGraph = DiGraph<TaskNode, TaskDependencyType, TaskIx>;
@@ -319,9 +314,6 @@ impl IndexedTaskGraph {
 
         let resolved_global_cache = ResolvedGlobalCacheConfig::resolve_from(root_cache.as_ref());
 
-        let mut deprecated_cache_fields = BTreeSet::<&'static str>::new();
-        let mut tasks_with_deprecated_cache_fields = Vec::<TaskDisplay>::new();
-
         // Second pass: create task nodes (cache is NOT applied here; it's applied at plan time)
         for (package_index, package_dir, user_config) in package_configs {
             let package = &package_graph[package_index];
@@ -355,17 +347,6 @@ impl IndexedTaskGraph {
                     }
                 };
                 let depends_on_entries = task_user_config.options.depends_on.clone();
-
-                let task_deprecated_fields =
-                    task_user_config.options.cache_config.deprecated_fields();
-                if !task_deprecated_fields.is_empty() {
-                    deprecated_cache_fields.extend(task_deprecated_fields);
-                    tasks_with_deprecated_cache_fields.push(TaskDisplay {
-                        package_name: package.package_json.name.clone(),
-                        task_name: task_name.clone(),
-                        package_path: Arc::clone(&package_dir),
-                    });
-                }
 
                 // Resolve the task configuration from the user config
                 let resolved_config = ResolvedTaskConfig::resolve(
@@ -428,21 +409,6 @@ impl IndexedTaskGraph {
             }
         }
 
-        let mut warnings = Vec::new();
-        if !tasks_with_deprecated_cache_fields.is_empty() {
-            tasks_with_deprecated_cache_fields.sort_unstable_by(|a, b| {
-                (&a.package_name, &a.task_name, &a.package_path).cmp(&(
-                    &b.package_name,
-                    &b.task_name,
-                    &b.package_path,
-                ))
-            });
-            warnings.push(TaskGraphWarning::DeprecatedCacheFields {
-                fields: deprecated_cache_fields,
-                tasks: tasks_with_deprecated_cache_fields,
-            });
-        }
-
         // Construct `Self` with task_graph with all task nodes ready and indexed, but no edges.
         let mut me = Self {
             task_graph,
@@ -451,7 +417,6 @@ impl IndexedTaskGraph {
             task_ids_by_node_index,
             resolved_global_cache,
             pre_post_scripts_enabled: root_pre_post_scripts_enabled.unwrap_or(true),
-            warnings,
         };
 
         // Add explicit dependencies. String-form entries resolve to fixed task
@@ -621,12 +586,6 @@ impl IndexedTaskGraph {
     #[must_use]
     pub const fn pre_post_scripts_enabled(&self) -> bool {
         self.pre_post_scripts_enabled
-    }
-
-    /// Non-fatal configuration issues found while loading the task graph.
-    #[must_use]
-    pub fn warnings(&self) -> &[TaskGraphWarning] {
-        &self.warnings
     }
 
     /// Returns the `TaskNodeIndex` of the pre/post hook for a `PackageJsonScript` task.

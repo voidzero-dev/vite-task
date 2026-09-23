@@ -4,11 +4,9 @@
 flowchart TD
   task_0["<workspace>/#cache-empty-object"]
   task_1["<workspace>/#cache-false"]
-  task_2["<workspace>/#cache-omitted"]
-  task_3["<workspace>/#cache-true"]
-  task_4["<workspace>/#grouped"]
-  task_5["<workspace>/#legacy"]
-  task_6["<workspace>/#legacy-without-cache"]
+  task_2["<workspace>/#cache-object"]
+  task_3["<workspace>/#cache-omitted"]
+  task_4["<workspace>/#cache-true"]
 ```
 
 ## `<workspace>/#cache-empty-object`
@@ -67,6 +65,55 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/",
       "cache_config": null
+    }
+  },
+  "source": "TaskConfig"
+}
+```
+
+## `<workspace>/#cache-object`
+
+```json
+{
+  "task_display": {
+    "package_name": "test",
+    "task_name": "cache-object",
+    "package_path": "<workspace>/"
+  },
+  "resolved_config": {
+    "commands": [
+      "echo build"
+    ],
+    "resolved_options": {
+      "cwd": "<workspace>/",
+      "cache_config": {
+        "remote_cache": true,
+        "env_config": {
+          "fingerprinted_envs": [
+            "MY_ENV"
+          ],
+          "untracked_env": [
+            "MY_UNTRACKED",
+            "<default untracked envs>"
+          ]
+        },
+        "input_config": {
+          "includes_auto": false,
+          "positive_globs": [
+            "src/**"
+          ],
+          "negative_globs": [
+            "src/**/*.test.ts"
+          ]
+        },
+        "output_config": {
+          "includes_auto": false,
+          "positive_globs": [
+            "dist/**"
+          ],
+          "negative_globs": []
+        }
+      }
     }
   },
   "source": "TaskConfig"
@@ -144,153 +191,6 @@ flowchart TD
         "output_config": {
           "includes_auto": true,
           "positive_globs": [],
-          "negative_globs": []
-        }
-      }
-    }
-  },
-  "source": "TaskConfig"
-}
-```
-
-## `<workspace>/#grouped`
-
-```json
-{
-  "task_display": {
-    "package_name": "test",
-    "task_name": "grouped",
-    "package_path": "<workspace>/"
-  },
-  "resolved_config": {
-    "commands": [
-      "echo build"
-    ],
-    "resolved_options": {
-      "cwd": "<workspace>/",
-      "cache_config": {
-        "remote_cache": true,
-        "env_config": {
-          "fingerprinted_envs": [
-            "MY_ENV"
-          ],
-          "untracked_env": [
-            "MY_UNTRACKED",
-            "<default untracked envs>"
-          ]
-        },
-        "input_config": {
-          "includes_auto": false,
-          "positive_globs": [
-            "src/**"
-          ],
-          "negative_globs": [
-            "src/**/*.test.ts"
-          ]
-        },
-        "output_config": {
-          "includes_auto": false,
-          "positive_globs": [
-            "dist/**"
-          ],
-          "negative_globs": []
-        }
-      }
-    }
-  },
-  "source": "TaskConfig"
-}
-```
-
-## `<workspace>/#legacy`
-
-```json
-{
-  "task_display": {
-    "package_name": "test",
-    "task_name": "legacy",
-    "package_path": "<workspace>/"
-  },
-  "resolved_config": {
-    "commands": [
-      "echo build"
-    ],
-    "resolved_options": {
-      "cwd": "<workspace>/",
-      "cache_config": {
-        "remote_cache": true,
-        "env_config": {
-          "fingerprinted_envs": [
-            "MY_ENV"
-          ],
-          "untracked_env": [
-            "MY_UNTRACKED",
-            "<default untracked envs>"
-          ]
-        },
-        "input_config": {
-          "includes_auto": false,
-          "positive_globs": [
-            "src/**"
-          ],
-          "negative_globs": [
-            "src/**/*.test.ts"
-          ]
-        },
-        "output_config": {
-          "includes_auto": false,
-          "positive_globs": [
-            "dist/**"
-          ],
-          "negative_globs": []
-        }
-      }
-    }
-  },
-  "source": "TaskConfig"
-}
-```
-
-## `<workspace>/#legacy-without-cache`
-
-```json
-{
-  "task_display": {
-    "package_name": "test",
-    "task_name": "legacy-without-cache",
-    "package_path": "<workspace>/"
-  },
-  "resolved_config": {
-    "commands": [
-      "echo build"
-    ],
-    "resolved_options": {
-      "cwd": "<workspace>/",
-      "cache_config": {
-        "remote_cache": true,
-        "env_config": {
-          "fingerprinted_envs": [
-            "MY_ENV"
-          ],
-          "untracked_env": [
-            "MY_UNTRACKED",
-            "<default untracked envs>"
-          ]
-        },
-        "input_config": {
-          "includes_auto": false,
-          "positive_globs": [
-            "src/**"
-          ],
-          "negative_globs": [
-            "src/**/*.test.ts"
-          ]
-        },
-        "output_config": {
-          "includes_auto": false,
-          "positive_globs": [
-            "dist/**"
-          ],
           "negative_globs": []
         }
       }
