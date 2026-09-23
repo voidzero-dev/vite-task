@@ -72,16 +72,13 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
     (
         "aarch64",
         &[
-            // Carries the Process::RunProcess getpgid ESRCH fix on top of stock
-            // 0.37.0 until an upstream release includes it
-            // (https://github.com/oils-for-unix/oils/pull/2689). Stock builds:
-            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.37.0
+            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.38.0
             BinaryDownload {
                 name: "oils_for_unix",
                 env_var: "FSPY_MACOS_ARTIFACT_OILS_FOR_UNIX",
-                url: "https://github.com/lifeiscontent/oils-for-unix-build/releases/download/oils-for-unix-0.37.0-fspy.1/oils-for-unix-0.37.0-fspy.1-darwin-arm64.tar.gz",
+                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.38.0/oils-for-unix-0.38.0-darwin-arm64.tar.gz",
                 path_in_targz: "oils-for-unix",
-                expected_sha256: "b61c45ee8c240d58fc75d6d2ae20f6a89790036362c30aa5f2c21c8f328643f7",
+                expected_sha256: "b6e9d77aa6b22692f6132ca03346a8e166f1f57d966712f0ffff14c89412df15",
             },
             // https://github.com/uutils/coreutils/releases/tag/0.4.0
             BinaryDownload {
@@ -96,16 +93,13 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
     (
         "x86_64",
         &[
-            // Carries the Process::RunProcess getpgid ESRCH fix on top of stock
-            // 0.37.0 until an upstream release includes it
-            // (https://github.com/oils-for-unix/oils/pull/2689). Stock builds:
-            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.37.0
+            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.38.0
             BinaryDownload {
                 name: "oils_for_unix",
                 env_var: "FSPY_MACOS_ARTIFACT_OILS_FOR_UNIX",
-                url: "https://github.com/lifeiscontent/oils-for-unix-build/releases/download/oils-for-unix-0.37.0-fspy.1/oils-for-unix-0.37.0-fspy.1-darwin-x86_64.tar.gz",
+                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.38.0/oils-for-unix-0.38.0-darwin-x86_64.tar.gz",
                 path_in_targz: "oils-for-unix",
-                expected_sha256: "bf570d54a78dbe0a55712620f746c2b90bbc2aedc633c80d41ca9bbd934424d3",
+                expected_sha256: "1a41a729538fd3663809c70f72179503345ea717b956607771ba766574ab6382",
             },
             // https://github.com/uutils/coreutils/releases/tag/0.4.0
             BinaryDownload {

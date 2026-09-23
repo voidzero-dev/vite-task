@@ -1,11 +1,12 @@
-//! The bundled osh substitute must not lose the getpgid race against a fast
-//! child: stock oils 0.37.0 calls getpgid(child) after fork even when job
-//! control is disabled, and on macOS getpgid of an already-exited child fails
-//! with ESRCH, killing the shell with "oils I/O error (main)" and exit 2
+//! On macOS, fspy runs `/bin/sh` commands under the bundled osh, which must not
+//! lose the getpgid race against a fast child. Oils before 0.38.0 called
+//! getpgid(child) after fork even when job control was disabled, and on macOS
+//! getpgid of an already-exited child fails with ESRCH, killing the shell with
+//! "oils I/O error (main): No such process" and exit 2
 //! (oils-for-unix/oils#2689). Under CPU contention a few percent of runs died.
 //!
-//! The race is gone (not just rarer) with a fixed osh, so this fails
-//! deterministically if the bundled artifact regresses to a stock build.
+//! A fixed osh never fails here, while an affected one fails a few percent of
+//! runs, so 200 runs catch a bundled osh that reintroduces the race.
 #![cfg(target_os = "macos")]
 
 use std::{fs, path::Path};
