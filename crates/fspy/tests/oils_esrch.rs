@@ -9,7 +9,7 @@
 //! runs, so 200 runs catch a bundled osh that reintroduces the race.
 #![cfg(target_os = "macos")]
 
-use std::{fs, path::Path};
+use std::{fs, path::Path, process::Stdio};
 
 use test_log::test;
 
@@ -28,6 +28,7 @@ async fn fast_external_commands_under_contention() -> anyhow::Result<()> {
                     let mut cmd = fspy::Command::new("/bin/sh");
                     cmd.arg("-c").arg(format!("cat {}", input.display()));
                     cmd.env("PATH", "/usr/bin:/bin");
+                    cmd.stdout(Stdio::null());
                     let child = cmd.spawn(tokio_util::sync::CancellationToken::new()).await?;
                     let termination = child.wait_handle.await?;
                     anyhow::Ok(termination.status.code())
