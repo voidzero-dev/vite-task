@@ -1,0 +1,26 @@
+// run build
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "build"
+      ],
+      "node": {
+        "items": [
+          {
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "remote_cache": null
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

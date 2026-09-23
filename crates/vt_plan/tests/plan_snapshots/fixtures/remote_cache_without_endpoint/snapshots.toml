@@ -28,11 +28,11 @@ name = "invalid_cli_mode"
 args = ["run", "--remote-cache=invalid", "build"]
 
 [[plan]]
-name = "invalid_endpoint"
+name = "endpoint_not_validated"
 args = ["run", "build"]
 env = { "VP_REMOTE_CACHE_URL" = "cache.example/projects/test" }
 
 [[plan]]
-name = "unsupported_endpoint_scheme"
+name = "empty_controls_unset"
 args = ["run", "build"]
-env = { "VP_REMOTE_CACHE_URL" = "file:///cache" }
+env = { "VP_REMOTE_CACHE" = "", "VP_REMOTE_CACHE_URL" = "" }

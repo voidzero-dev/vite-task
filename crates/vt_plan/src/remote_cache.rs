@@ -4,7 +4,6 @@ use std::{ffi::OsStr, str::FromStr, sync::Arc};
 
 use rustc_hash::FxHashMap;
 use serde::Serialize;
-use url::Url;
 use vt_casefold::EnvName;
 use vt_graph::config::user::UserRemoteCacheConfig;
 use vt_str::Str;
@@ -48,7 +47,8 @@ impl FromStr for RemoteCacheMode {
 #[derive(Debug, Clone, Serialize)]
 pub struct RemoteCacheConfig {
     pub mode: RemoteCacheAccess,
-    pub url: Arc<Url>,
+    /// Endpoint as configured. It is validated when the remote cache is used.
+    pub url: Str,
 }
 
 /// Access permitted when remote caching is enabled.
@@ -67,21 +67,20 @@ pub enum RemoteCacheConfigError {
     InvalidEnv(&'static str),
     #[error("Remote caching requires remoteCache.url or VP_REMOTE_CACHE_URL")]
     MissingEndpoint,
-    #[error("Invalid remote cache endpoint: {0}")]
-    InvalidEndpoint(#[from] url::ParseError),
-    #[error("Remote cache endpoint must be an HTTP or HTTPS URL with a host")]
-    InvalidEndpointScheme,
 }
 
 pub(crate) fn is_control_env<S: AsRef<OsStr> + ?Sized>(name: &EnvName<S>) -> bool {
     [MODE_ENV, URL_ENV].into_iter().any(|control| name == EnvName::from_ref(OsStr::new(control)))
 }
 
+/// Reads a control env. An empty value counts as unset, like a CI secret that
+/// isn't available to the job.
 fn env_value<'a>(
     envs: &'a FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     name: &'static str,
 ) -> Result<Option<&'a str>, RemoteCacheConfigError> {
     envs.get(EnvName::from_ref(OsStr::new(name)))
+        .filter(|value| !value.is_empty())
         .map(|value| value.to_str().ok_or(RemoteCacheConfigError::InvalidEnv(name)))
         .transpose()
 }
@@ -92,17 +91,10 @@ pub(crate) fn resolve(
     envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
 ) -> Result<Option<RemoteCacheConfig>, RemoteCacheConfigError> {
     let mode = env_value(envs, MODE_ENV)?.map(str::parse).transpose()?;
-    let endpoint =
-        env_value(envs, URL_ENV)?.or_else(|| configured.map(|config| config.url.as_str()));
-    let url = endpoint
-        .map(|endpoint| {
-            let url = Url::parse(endpoint)?;
-            if !matches!(url.scheme(), "http" | "https") || !url.has_host() {
-                return Err(RemoteCacheConfigError::InvalidEndpointScheme);
-            }
-            Ok(Arc::new(url))
-        })
-        .transpose()?;
+    let url = env_value(envs, URL_ENV)?
+        .or_else(|| configured.map(|config| config.url.as_str()))
+        .filter(|url| !url.is_empty())
+        .map(Str::from);
 
     match (mode, url) {
         (Some(RemoteCacheMode::Off), _) | (None, None) => Ok(None),

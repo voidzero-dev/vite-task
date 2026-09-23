@@ -24,7 +24,6 @@ sha2 = { workspace = true }
 shell-escape = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-url = { workspace = true, features = ["serde"] }
 vt_casefold = { workspace = true }
 vt_glob = { workspace = true }
 vt_graph_ser = { workspace = true }

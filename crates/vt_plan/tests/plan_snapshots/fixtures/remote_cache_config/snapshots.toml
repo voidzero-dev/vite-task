@@ -35,6 +35,11 @@ name = "synthetic_local_only"
 args = ["run", "synthetic"]
 
 [[plan]]
+name = "empty_env_endpoint_uses_config"
+args = ["run", "build"]
+env = { "VP_REMOTE_CACHE_URL" = "" }
+
+[[plan]]
 name = "controls_excluded"
 args = ["run", "tracked-controls"]
 env = { "VP_REMOTE_CACHE" = "read-write", "VP_REMOTE_CACHE_URL" = "https://other.example/projects/test" }

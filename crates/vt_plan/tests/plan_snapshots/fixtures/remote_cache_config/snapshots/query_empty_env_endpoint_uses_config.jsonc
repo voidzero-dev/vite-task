@@ -1,0 +1,40 @@
+// run build
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "build"
+      ],
+      "node": {
+        "items": [
+          {
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "remote_cache": {
+                      "mode": "read",
+                      "url": "https://cache.example/projects/test"
+                    }
+                  },
+                  "spawn_command": {
+                    "spawn_envs": {}
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
