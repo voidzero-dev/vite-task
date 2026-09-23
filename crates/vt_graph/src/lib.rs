@@ -3,8 +3,9 @@ pub mod display;
 pub mod loader;
 pub mod query;
 mod specifier;
+mod top_level_cache_fields;
 
-use std::{convert::Infallible, sync::Arc};
+use std::{collections::BTreeSet, convert::Infallible, sync::Arc};
 
 use config::{
     ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
@@ -17,6 +18,7 @@ use petgraph::{
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use serde::Serialize;
 pub use specifier::TaskSpecifier;
+pub use top_level_cache_fields::TopLevelCacheFieldsError;
 use vt_path::AbsolutePath;
 use vt_str::Str;
 use vt_workspace::{
@@ -25,7 +27,8 @@ use vt_workspace::{
 
 use crate::{
     config::user::{
-        UserDependencyType, UserDependsOnEntry, UserPackageDependency, UserTaskOptions,
+        TopLevelCacheFields, UserDependencyType, UserDependsOnEntry, UserPackageDependency,
+        UserTaskOptions,
     },
     display::TaskDisplay,
 };
@@ -128,6 +131,9 @@ pub enum TaskGraphLoadError {
         "`enablePrePostScripts` can only be set in the workspace root config, but found in {package_path}"
     )]
     PrePostScriptsInNonRootPackage { package_path: Arc<AbsolutePath> },
+
+    #[error(transparent)]
+    TopLevelCacheFields(TopLevelCacheFieldsError),
 }
 
 /// Error when looking up a task by its specifier.
@@ -314,6 +320,9 @@ impl IndexedTaskGraph {
 
         let resolved_global_cache = ResolvedGlobalCacheConfig::resolve_from(root_cache.as_ref());
 
+        let mut top_level_cache_fields = BTreeSet::<&'static str>::new();
+        let mut tasks_with_top_level_cache_fields = Vec::<TaskDisplay>::new();
+
         // Second pass: create task nodes (cache is NOT applied here; it's applied at plan time)
         for (package_index, package_dir, user_config) in package_configs {
             let package = &package_graph[package_index];
@@ -342,11 +351,24 @@ impl IndexedTaskGraph {
 
                 let task_user_config = match task_user_config {
                     UserTaskDefinition::Object(config) => config,
-                    UserTaskDefinition::CommandShorthand(command) => {
-                        UserTaskConfig { command, options: UserTaskOptions::default() }
-                    }
+                    UserTaskDefinition::CommandShorthand(command) => UserTaskConfig {
+                        command,
+                        options: UserTaskOptions::default(),
+                        top_level_cache_fields: TopLevelCacheFields::default(),
+                    },
                 };
                 let depends_on_entries = task_user_config.options.depends_on.clone();
+
+                let mut task_top_level_cache_fields =
+                    task_user_config.top_level_cache_fields.names().peekable();
+                if task_top_level_cache_fields.peek().is_some() {
+                    top_level_cache_fields.extend(task_top_level_cache_fields);
+                    tasks_with_top_level_cache_fields.push(TaskDisplay {
+                        package_name: package.package_json.name.clone(),
+                        task_name: task_name.clone(),
+                        package_path: Arc::clone(&package_dir),
+                    });
+                }
 
                 // Resolve the task configuration from the user config
                 let resolved_config = ResolvedTaskConfig::resolve(
@@ -407,6 +429,20 @@ impl IndexedTaskGraph {
                 task_ids_by_node_index.insert(node_index, task_id.clone());
                 node_indices_by_task_id.insert(task_id, node_index);
             }
+        }
+
+        if !tasks_with_top_level_cache_fields.is_empty() {
+            tasks_with_top_level_cache_fields.sort_unstable_by(|a, b| {
+                (&a.package_name, &a.task_name, &a.package_path).cmp(&(
+                    &b.package_name,
+                    &b.task_name,
+                    &b.package_path,
+                ))
+            });
+            return Err(TaskGraphLoadError::TopLevelCacheFields(TopLevelCacheFieldsError {
+                fields: top_level_cache_fields,
+                tasks: tasks_with_top_level_cache_fields,
+            }));
         }
 
         // Construct `Self` with task_graph with all task nodes ready and indexed, but no edges.

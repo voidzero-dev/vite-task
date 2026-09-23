@@ -1,2 +1,3 @@
 # Tests that cache settings at the top level of a task, instead of under
-# `cache`, fail to load
+# `cache`, fail to load with one error listing every affected task and
+# pointing to `vp migrate`

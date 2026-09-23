@@ -1,1 +1,1 @@
-Failed to load task config file for package at <workspace>/
+Cache settings `env`, `input`, `output` must be set under `cache` in tasks test#build, test#test, e.g. `cache: { env: [...] }`. Run `vp migrate` to update your config automatically. See https://viteplus.dev/config/run for details.

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, de::IgnoredAny};
 #[cfg(all(test, not(clippy)))]
 use ts_rs::TS;
 use vec1::Vec1;
@@ -286,8 +286,8 @@ pub enum Command {
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "Task"))]
-// `deny_unknown_fields` works with the flattened `options` only because
-// `UserTaskOptions` has no flattened fields of its own.
+// `deny_unknown_fields` works with the flattened fields only because neither
+// has flattened fields of its own.
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct UserTaskConfig {
     /// Command to run, or an array of commands to run in order.
@@ -296,6 +296,47 @@ pub struct UserTaskConfig {
     /// Fields other than the command.
     #[serde(flatten)]
     pub options: UserTaskOptions,
+
+    /// Cache settings written at the top level, reported when loading the task graph.
+    #[serde(flatten)]
+    #[cfg_attr(all(test, not(clippy)), ts(skip))]
+    pub top_level_cache_fields: TopLevelCacheFields,
+}
+
+/// Cache settings written at the top level of a task instead of under `cache`.
+///
+/// These are no longer supported. They are parsed only so that loading the task
+/// graph can explain how to migrate, instead of failing with a generic parse error.
+#[derive(Debug, Default, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag independently records whether one config field is present"
+)]
+pub struct TopLevelCacheFields {
+    #[serde(default, deserialize_with = "deserialize_present")]
+    pub env: bool,
+    #[serde(default, deserialize_with = "deserialize_present")]
+    pub untracked_env: bool,
+    #[serde(default, deserialize_with = "deserialize_present")]
+    pub input: bool,
+    #[serde(default, deserialize_with = "deserialize_present")]
+    pub output: bool,
+}
+
+impl TopLevelCacheFields {
+    /// Returns the names of the fields that are set, as written in the config.
+    pub fn names(self) -> impl Iterator<Item = &'static str> {
+        let Self { env, untracked_env, input, output } = self;
+        [("env", env), ("untrackedEnv", untracked_env), ("input", input), ("output", output)]
+            .into_iter()
+            .filter_map(|(name, is_set)| is_set.then_some(name))
+    }
+}
+
+/// Marks a field as present regardless of its value.
+fn deserialize_present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    IgnoredAny::deserialize(deserializer).map(|IgnoredAny| true)
 }
 
 /// User-defined task configuration or command-only shorthand in `vite.config.*`.
@@ -519,7 +560,8 @@ mod tests {
             user_config,
             UserTaskConfig {
                 command: Command::Single("echo hello".into()),
-                options: UserTaskOptions::default()
+                options: UserTaskOptions::default(),
+                top_level_cache_fields: TopLevelCacheFields::default(),
             }
         );
     }
@@ -747,12 +789,13 @@ mod tests {
     }
 
     #[test]
-    fn test_top_level_cache_fields_error() {
+    fn test_top_level_cache_fields() {
         let fields = [
             ("env", json!(["NODE_ENV"])),
             ("untrackedEnv", json!(["FOO"])),
             ("input", json!(["src/**"])),
-            ("output", json!([])),
+            // Any value is recorded, even invalid ones, so the migration error still applies.
+            ("output", json!(null)),
         ];
         let cache_values = [None, Some(json!(true)), Some(json!(false)), Some(json!({}))];
         for (field, value) in fields {
@@ -762,15 +805,28 @@ mod tests {
                 if let Some(cache) = cache {
                     user_config_json["cache"] = cache.clone();
                 }
-                let error = serde_json::from_value::<UserTaskConfig>(user_config_json.clone())
-                    .expect_err(&user_config_json.to_string());
+                let user_config: UserTaskConfig =
+                    serde_json::from_value(user_config_json.clone()).unwrap();
                 assert_eq!(
-                    error.to_string(),
-                    vt_str::format!("unknown field `{field}`").as_str(),
+                    user_config.top_level_cache_fields.names().collect::<Vec<_>>(),
+                    [field],
                     "{user_config_json}"
                 );
             }
         }
+
+        let user_config: UserTaskConfig = serde_json::from_value(json!({
+            "command": "echo test",
+            "output": [],
+            "env": [],
+            "untrackedEnv": [],
+            "input": [],
+        }))
+        .unwrap();
+        assert_eq!(
+            user_config.top_level_cache_fields.names().collect::<Vec<_>>(),
+            ["env", "untrackedEnv", "input", "output"]
+        );
     }
 
     #[test]

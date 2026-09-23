@@ -377,7 +377,7 @@ impl ResolvedTaskConfig {
         package_dir: &Arc<AbsolutePath>,
         workspace_root: &AbsolutePath,
     ) -> Result<Self, ResolveTaskConfigError> {
-        let UserTaskConfig { command, options } = user_config;
+        let UserTaskConfig { command, options, top_level_cache_fields: _ } = user_config;
         let commands = match command {
             Command::Single(command) => Arc::from([command]),
             Command::Array(commands) => commands,

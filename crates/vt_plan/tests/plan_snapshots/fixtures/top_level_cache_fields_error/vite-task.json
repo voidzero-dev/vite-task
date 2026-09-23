@@ -4,6 +4,15 @@
       "command": "echo build",
       "cache": true,
       "input": ["src/**"]
+    },
+    "test": {
+      "command": "echo test",
+      "env": ["NODE_ENV"],
+      "output": []
+    },
+    "lint": {
+      "command": "echo lint",
+      "cache": { "input": [] }
     }
   }
 }
