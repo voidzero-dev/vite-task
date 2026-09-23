@@ -4534,6 +4534,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vt_casefold"
+version = "0.0.0"
+dependencies = [
+ "ref-cast",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "vt_client"
 version = "0.0.0"
 dependencies = [
