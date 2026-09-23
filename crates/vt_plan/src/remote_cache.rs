@@ -69,8 +69,26 @@ pub enum RemoteCacheConfigError {
     MissingEndpoint,
 }
 
+/// Whether `name` is one of the env vars that select remote cache access.
+/// They pass through to tasks like other `VP_*` variables, but never enter a
+/// cache fingerprint, so runs with different remote access share entries.
 pub(crate) fn is_control_env<S: AsRef<OsStr> + ?Sized>(name: &EnvName<S>) -> bool {
     [MODE_ENV, URL_ENV].into_iter().any(|control| name == EnvName::from_ref(OsStr::new(control)))
+}
+
+/// `envs` without the remote cache controls.
+pub(crate) fn without_control_envs(
+    envs: &Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
+) -> Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>> {
+    if !envs.keys().any(is_control_env) {
+        return Arc::clone(envs);
+    }
+    Arc::new(
+        envs.iter()
+            .filter(|(name, _)| !is_control_env(name))
+            .map(|(name, value)| (name.clone(), Arc::clone(value)))
+            .collect(),
+    )
 }
 
 /// Reads a control env. An empty value counts as unset, like a CI secret that

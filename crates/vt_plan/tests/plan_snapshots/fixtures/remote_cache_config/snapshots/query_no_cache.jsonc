@@ -14,7 +14,9 @@
                 "Spawn": {
                   "cache_metadata": null,
                   "spawn_command": {
-                    "spawn_envs": {}
+                    "spawn_envs": {
+                      "VP_REMOTE_CACHE": "read-write"
+                    }
                   }
                 }
               }

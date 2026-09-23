@@ -625,19 +625,10 @@ fn plan_spawn_execution(
     program_path: Arc<AbsolutePath>,
     args: Arc<[Str]>,
 ) -> Result<SpawnExecution, Error> {
-    // Controls are for planning only. Remove them before either task env
-    // filtering or post-run environment tracking can observe them.
-    let envs = if envs.keys().any(|name| crate::remote_cache::is_control_env(name)) {
-        Arc::new(
-            envs.iter()
-                .filter(|(name, _)| !crate::remote_cache::is_control_env(name))
-                .map(|(name, value)| (name.clone(), Arc::clone(value)))
-                .collect(),
-        )
-    } else {
-        Arc::clone(envs)
-    };
-    let mut spawn_envs = (*envs).clone();
+    // The child env starts from the full context and is filtered in place by
+    // `EnvFingerprints::resolve` below — this clone is the one place the map's
+    // contents are actually copied per spawn.
+    let mut spawn_envs = (**envs).clone();
     let cwd = Arc::clone(&resolved_task_options.cwd);
 
     let mut resolved_cache_metadata = None;
@@ -652,7 +643,7 @@ fn plan_spawn_execution(
         // differently, like `foo` for `Foo=1` on Windows.
         let fingerprinted_envs = &mut env_fingerprints.fingerprinted_envs;
         for (name, value) in prefix_envs {
-            if crate::remote_cache::is_control_env(name) {
+            if remote_cache::is_control_env(name) {
                 continue;
             }
             fingerprinted_envs.retain(|existing, _| EnvName::from_ref(existing) != name);
@@ -707,7 +698,9 @@ fn plan_spawn_execution(
                 input_config: cache_config.input_config.clone(),
                 output_config: cache_config.output_config.clone(),
                 remote_cache: if cache_config.remote_cache { remote_cache.cloned() } else { None },
-                unfiltered_envs: Arc::clone(&envs),
+                // Runner-aware env queries must not record the controls in the
+                // post-run fingerprint either.
+                unfiltered_envs: remote_cache::without_control_envs(envs),
             });
         }
     }
@@ -723,9 +716,6 @@ fn plan_spawn_execution(
     // spelling, so remove the entry first: the task then sees the
     // assignment's spelling, which is the one fingerprinted above.
     for (name, value) in prefix_envs {
-        if crate::remote_cache::is_control_env(name) {
-            continue;
-        }
         let name = EnvName::new(Arc::<OsStr>::from(OsStr::new(name.inner().as_str())));
         spawn_envs.remove(&name);
         spawn_envs.insert(name, OsStr::new(value.as_str()).into());

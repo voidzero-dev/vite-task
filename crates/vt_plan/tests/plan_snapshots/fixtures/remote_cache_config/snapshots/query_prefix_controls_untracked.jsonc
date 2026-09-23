@@ -27,7 +27,10 @@
                     }
                   },
                   "spawn_command": {
-                    "spawn_envs": {}
+                    "spawn_envs": {
+                      "VP_REMOTE_CACHE": "off",
+                      "VP_REMOTE_CACHE_URL": "https://other.example"
+                    }
                   }
                 }
               }

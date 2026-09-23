@@ -134,7 +134,10 @@ impl EnvFingerprints {
                 let Some(name) = name.inner().to_str() else {
                     continue;
                 };
-                if !fingerprinted_env_patterns.is_match(name) {
+                // Matching controls still reach the task, just untracked.
+                if !fingerprinted_env_patterns.is_match(name)
+                    || crate::remote_cache::is_control_env(EnvName::from_ref(name))
+                {
                     continue;
                 }
                 let Some(value) = value.to_str() else {
@@ -151,12 +154,7 @@ impl EnvFingerprints {
             fingerprinted_envs,
             // Save untracked_env names sorted for deterministic cache fingerprinting
             untracked_env_config: {
-                let mut sorted: Vec<Str> = env_config
-                    .untracked_env
-                    .iter()
-                    .filter(|name| !crate::remote_cache::is_control_env(EnvName::from_ref(*name)))
-                    .cloned()
-                    .collect();
+                let mut sorted: Vec<Str> = env_config.untracked_env.iter().cloned().collect();
                 sorted.sort();
                 sorted.into()
             },

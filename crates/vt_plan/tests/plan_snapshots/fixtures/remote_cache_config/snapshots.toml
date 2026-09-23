@@ -29,6 +29,7 @@ args = ["run", "--remote-cache=read-write", "local-only"]
 [[plan]]
 name = "no_cache"
 args = ["run", "--no-cache", "build"]
+env = { "VP_REMOTE_CACHE" = "read-write" }
 
 [[plan]]
 name = "synthetic_local_only"
@@ -40,12 +41,12 @@ args = ["run", "build"]
 env = { "VP_REMOTE_CACHE_URL" = "" }
 
 [[plan]]
-name = "controls_excluded"
+name = "controls_untracked"
 args = ["run", "tracked-controls"]
 env = { "VP_REMOTE_CACHE" = "read-write", "VP_REMOTE_CACHE_URL" = "https://other.example/projects/test" }
 
 [[plan]]
-name = "prefix_controls_excluded"
+name = "prefix_controls_untracked"
 args = ["run", "prefix"]
 
 [[plan]]
