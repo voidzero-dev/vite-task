@@ -72,13 +72,13 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
     (
         "aarch64",
         &[
-            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.38.0
+            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.37.0
             BinaryDownload {
                 name: "oils_for_unix",
                 env_var: "FSPY_MACOS_ARTIFACT_OILS_FOR_UNIX",
-                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.38.0/oils-for-unix-0.38.0-darwin-arm64.tar.gz",
+                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-arm64.tar.gz",
                 path_in_targz: "oils-for-unix",
-                expected_sha256: "b6e9d77aa6b22692f6132ca03346a8e166f1f57d966712f0ffff14c89412df15",
+                expected_sha256: "ce4bb80b15f0a0371af08b19b65bfa5ea17d30429ebb911f487de3d2bcc7a07d",
             },
             // https://github.com/uutils/coreutils/releases/tag/0.4.0
             BinaryDownload {
@@ -93,13 +93,13 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
     (
         "x86_64",
         &[
-            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.38.0
+            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.37.0
             BinaryDownload {
                 name: "oils_for_unix",
                 env_var: "FSPY_MACOS_ARTIFACT_OILS_FOR_UNIX",
-                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.38.0/oils-for-unix-0.38.0-darwin-x86_64.tar.gz",
+                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.37.0/oils-for-unix-0.37.0-darwin-x86_64.tar.gz",
                 path_in_targz: "oils-for-unix",
-                expected_sha256: "1a41a729538fd3663809c70f72179503345ea717b956607771ba766574ab6382",
+                expected_sha256: "cf1a95993127770e2a5fff277cd256a2bb28cf97d7f83ae42fdccc172cdb540d",
             },
             // https://github.com/uutils/coreutils/releases/tag/0.4.0
             BinaryDownload {
