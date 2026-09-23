@@ -1,6 +1,6 @@
-import { playwright } from '@vitest/browser-playwright';
-import { defineConfig } from 'vitest/config';
-import { DefaultReporter } from 'vitest/node';
+import { playwright } from 'vite-plus/test/browser-playwright';
+import { defineConfig } from 'vite-plus';
+import { DefaultReporter } from 'vite-plus/test/node';
 
 class NoTestSummaryReporter extends DefaultReporter {
   reportTestSummary() {}

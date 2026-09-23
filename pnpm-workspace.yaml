@@ -19,7 +19,7 @@ catalog:
   '@tsconfig/strictest': ^2.0.8
   '@types/node': 25.0.3
   '@playwright/browser-chromium': 1.63.0
-  '@vitest/browser-playwright': 4.1.11
+  '@vitest/browser-playwright': 5.0.1
   bun: 1.4.2
   cbor-edn: 0.2.2
   cbor2: 1.12.0
@@ -33,21 +33,24 @@ catalog:
   # Playwright 1.52 pins the browser package to Chromium 136.
   playwright: 1.63.0
   typescript: ^6.0.3
-  vite: npm:@voidzero-dev/vite-plus-core@0.3.3
-  vite-plus: 0.3.3
-  vitest: 4.1.11
+  vite: npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0
+  vite-plus: 1.0.0-rc.0
+  vitest: 5.0.1
 
 catalogMode: prefer
 overrides:
   playwright: 1.63.0
-  vite: 'catalog:'
+  vite@*: 'catalog:'
   # The e2e harness symlinks packages/tools' `vite` binary into fixtures to
-  # exercise the real vite-task-client integration. The global `vite: catalog:`
-  # override above routes vite to the Vite+ toolchain fork, which does not carry
-  # the integration — so scope vite-task-tools' `vite` to a real upstream build.
+  # exercise the real vite-task-client integration. The global `vite@*` override
+  # above routes vite to the Vite+ toolchain fork, which does not carry the
+  # integration — so scope vite-task-tools' `vite` to a real upstream build.
   vite-task-tools>vite: 8.3.0
+  vitest@*: 'catalog:'
 peerDependencyRules:
   allowAny:
     - vite
+    - vitest
   allowedVersions:
     vite: '*'
+    vitest: '*'

@@ -8,8 +8,10 @@ first browser run: cache miss writes dist/result.json
 
 ```
 $ vitest run
+Plugin "vitest:mocks:interceptor" defines Vite-specific hooks (configureServer) in a plugin returned from applyToEnvironment. These hooks will be ignored.
 
  RUN  v<version> <workspace>
+      API started at http://localhost:<port>/
 
  ✓  chromium  src/greeting.test.js (1 test) <duration>
 JSON report written to <workspace>/dist/result.json
@@ -36,8 +38,10 @@ unchanged inputs: cache hit restores dist/result.json
 
 ```
 $ vitest run ◉ cache hit, replaying
+Plugin "vitest:mocks:interceptor" defines Vite-specific hooks (configureServer) in a plugin returned from applyToEnvironment. These hooks will be ignored.
 
  RUN  v<version> <workspace>
+      API started at http://localhost:<port>/
 
  ✓  chromium  src/greeting.test.js (1 test) <duration>
 JSON report written to <workspace>/dist/result.json
@@ -67,8 +71,10 @@ automatic input changed: cache miss reruns the browser test
 
 ```
 $ vitest run ○ cache miss: 'src/greeting.js' modified, executing
+Plugin "vitest:mocks:interceptor" defines Vite-specific hooks (configureServer) in a plugin returned from applyToEnvironment. These hooks will be ignored.
 
  RUN  v<version> <workspace>
+      API started at http://localhost:<port>/
 
  ✓  chromium  src/greeting.test.js (1 test) <duration>
 JSON report written to <workspace>/dist/result.json
