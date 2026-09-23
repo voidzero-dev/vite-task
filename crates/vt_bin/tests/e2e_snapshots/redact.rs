@@ -85,6 +85,12 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     let vitest_version_regex = regex::Regex::new(r"(?m)^ RUN  v\d+\.\d+\.\d+").unwrap();
     output = vitest_version_regex.replace_all(&output, " RUN  v<version>").into_owned();
 
+    // The browser API selects another port when its default port is busy.
+    let vitest_api_port_regex = regex::Regex::new(r"API started at http://localhost:\d+").unwrap();
+    output = vitest_api_port_regex
+        .replace_all(&output, "API started at http://localhost:<port>")
+        .into_owned();
+
     // Normalize the ", <duration> saved" suffix in cache hit summaries.
     // When tools are fast (e.g., Rust binaries), saved time may be 0ns and the
     // runner omits the suffix entirely. Stripping it ensures stable snapshots.

@@ -28,6 +28,7 @@
     "playwright": "catalog:",
     "typescript": "7.1.0-dev.20260917.1",
     "vite": "catalog:",
+    "vite-plus": "catalog:",
     "vitest": "catalog:"
   },
   "devDependencies": {

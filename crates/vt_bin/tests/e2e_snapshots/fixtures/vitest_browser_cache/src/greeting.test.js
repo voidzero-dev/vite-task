@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest';
-import { page, server } from 'vitest/browser';
+import { expect, test } from 'vite-plus/test';
+import { page, server } from 'vite-plus/test/browser';
 import { greeting } from './greeting.js';
 
 test(greeting, async () => {
