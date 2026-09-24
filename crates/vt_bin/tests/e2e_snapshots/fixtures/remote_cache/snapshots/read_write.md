@@ -2,11 +2,12 @@
 
 ## `VP_REMOTE_CACHE=read-write remote-cache-server vt run build`
 
-A new execution is uploaded with one store request.
+The fetch finds no entry. The new execution is uploaded with one store request.
 
 ```
 $ vtt write-file dist/output.txt built
 
+[remote-cache] POST /fetch 200 not_found
 [remote-cache] POST /store 200
 ```
 

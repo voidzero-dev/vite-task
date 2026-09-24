@@ -30,7 +30,7 @@ use wincode::{
     io::{Reader, Writer},
 };
 
-use self::remote::{RemoteClients, UploadError};
+use self::remote::{ReadError, RemoteClients, RemoteEntry, UploadError};
 use super::execute::{
     fingerprint::{PostRunFingerprint, TrackedEnvQuery},
     pipe::StdOutput,
@@ -149,13 +149,12 @@ pub struct ExecutionCache {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "FingerprintMismatch contains SpawnFingerprint which is intentionally large; boxing would add unnecessary indirection for a short-lived enum"
-)]
 pub enum CacheMiss {
     NotFound,
     FingerprintMismatch(FingerprintMismatch),
+    /// Reading the remote cache failed, and the local cache has no entry for
+    /// the task. The message names the cause.
+    RemoteReadFailed(Str),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -327,19 +326,63 @@ impl ExecutionCache {
 
     /// Try to hit cache by looking up the cache entry key and validating inputs.
     /// Returns `Ok(Ok(cache_value))` on cache hit, `Ok(Err(cache_miss))` on miss.
+    ///
+    /// After a local miss, the remote cache is queried if the task has one. A
+    /// remote hit is recorded locally, with its output archive downloaded into
+    /// `cache_dir`, and is never uploaded. If the local cache has an entry for
+    /// the task, its miss reason is kept. Otherwise the reason comes from the
+    /// remote cache.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn try_hit(
         &self,
         cache_metadata: &CacheMetadata,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         workspace_root: &AbsolutePath,
+        cache_dir: &AbsolutePath,
+    ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
+        let cache_key = CacheEntryKey::from_metadata(cache_metadata);
+
+        let local_miss = match self
+            .try_hit_local(cache_metadata, &cache_key, globbed_inputs, workspace_root)
+            .await?
+        {
+            Ok(cache_value) => return Ok(Ok(cache_value)),
+            Err(miss) => miss,
+        };
+        let Some(ResolvedRemoteCacheConfig { url, .. }) = &cache_metadata.remote_cache else {
+            return Ok(Err(local_miss));
+        };
+        let remote_miss = match self
+            .try_hit_remote(
+                url,
+                cache_metadata,
+                &cache_key,
+                globbed_inputs,
+                workspace_root,
+                cache_dir,
+            )
+            .await?
+        {
+            Ok(cache_value) => return Ok(Ok(cache_value)),
+            Err(miss) => miss,
+        };
+        Ok(Err(match local_miss {
+            CacheMiss::NotFound => remote_miss,
+            local_miss => local_miss,
+        }))
+    }
+
+    async fn try_hit_local(
+        &self,
+        cache_metadata: &CacheMetadata,
+        cache_key: &CacheEntryKey,
+        globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
+        workspace_root: &AbsolutePath,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
-        let cache_key = CacheEntryKey::from_metadata(cache_metadata);
-
         // Try to find the cache entry by key (spawn fingerprint + input config)
-        if let Some(cache_value) = self.get_by_cache_key(&cache_key).await? {
+        if let Some(cache_value) = self.get_by_cache_key(cache_key).await? {
             if let Some(mismatch) =
                 cache_value.validate(cache_metadata, globbed_inputs, workspace_root)?
             {
@@ -347,7 +390,7 @@ impl ExecutionCache {
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed
-            self.upsert_task_fingerprint(execution_cache_key, &cache_key).await?;
+            self.upsert_task_fingerprint(execution_cache_key, cache_key).await?;
             return Ok(Ok(cache_value));
         }
 
@@ -358,18 +401,95 @@ impl ExecutionCache {
         {
             // `get_by_cache_key` above returned None for the *current* cache key,
             // so the associated key must differ.
-            let mismatch = old_cache_key.into_mismatch(&cache_key);
+            let mismatch = old_cache_key.into_mismatch(cache_key);
             return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
         }
 
         Ok(Err(CacheMiss::NotFound))
     }
 
-    /// Update cache after successful execution.
+    /// Fetch the entry from the remote cache at `endpoint`. An exact entry
+    /// that passes validation is a hit once its output archive is downloaded
+    /// and the entry is recorded locally. A fallback entry, a failed
+    /// validation, or a failed read is a miss.
+    async fn try_hit_remote(
+        &self,
+        endpoint: &Arc<str>,
+        cache_metadata: &CacheMetadata,
+        cache_key: &CacheEntryKey,
+        globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
+        workspace_root: &AbsolutePath,
+        cache_dir: &AbsolutePath,
+    ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
+        let read_failed = |err: ReadError| {
+            tracing::debug!(?err, "remote cache read failed");
+            CacheMiss::from(err)
+        };
+
+        let fetched = self
+            .remote_clients
+            .fetch(endpoint, cache_key, &cache_metadata.execution_cache_key)
+            .await;
+        let (cache_value, blob_id) = match fetched {
+            Ok(RemoteEntry::Exact { value, blob_id }) => (value, blob_id),
+            Ok(RemoteEntry::Fallback { key }) => {
+                return Ok(Err(CacheMiss::FingerprintMismatch(key.into_mismatch(cache_key))));
+            }
+            Ok(RemoteEntry::NotFound) => return Ok(Err(CacheMiss::NotFound)),
+            Err(err) => return Ok(Err(read_failed(err))),
+        };
+        if let Some(mismatch) =
+            cache_value.validate(cache_metadata, globbed_inputs, workspace_root)?
+        {
+            return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
+        }
+
+        let output_archive = match blob_id {
+            Some(blob_id) => {
+                match self.remote_clients.download_archive(endpoint, &blob_id, cache_dir).await {
+                    Ok(archive_name) => Some(archive_name),
+                    Err(err) => return Ok(Err(read_failed(err))),
+                }
+            }
+            None => None,
+        };
+        let cache_value = CacheEntryValue { output_archive, ..cache_value };
+        self.record(cache_key, &cache_metadata.execution_cache_key, &cache_value, cache_dir)
+            .await?;
+        Ok(Ok(cache_value))
+    }
+
+    /// Record an entry locally.
     ///
     /// If a previous entry exists for the same cache key with a different
     /// `output_archive`, the stale archive file in `cache_dir` is removed
     /// (best-effort) so it doesn't accumulate on disk.
+    async fn record(
+        &self,
+        cache_key: &CacheEntryKey,
+        execution_cache_key: &ExecutionCacheKey,
+        cache_value: &CacheEntryValue,
+        cache_dir: &AbsolutePath,
+    ) -> anyhow::Result<()> {
+        // If a previous entry exists with a stale output archive, delete the
+        // old file so the cache directory doesn't accumulate orphaned archives.
+        if let Some(old_value) = self.get_by_cache_key(cache_key).await?
+            && let Some(old_archive) = old_value.output_archive
+            && cache_value.output_archive.as_ref() != Some(&old_archive)
+        {
+            let old_archive_path = cache_dir.join(old_archive.as_str());
+            // Best-effort cleanup: a missing file (e.g. after a crash or manual
+            // cache clear) is fine, so we ignore the error.
+            let _ = std::fs::remove_file(old_archive_path.as_path());
+        }
+
+        self.upsert_cache_entry(cache_key, cache_value).await?;
+        self.upsert_task_fingerprint(execution_cache_key, cache_key).await?;
+        Ok(())
+    }
+
+    /// Update cache after successful execution, recording the entry locally
+    /// as [`Self::record`] does.
     ///
     /// In `read-write` remote mode, the entry is then uploaded to the remote
     /// cache. Returns `Ok(Err(_))` if the local update succeeded but the
@@ -385,20 +505,7 @@ impl ExecutionCache {
 
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
 
-        // If a previous entry exists with a stale output archive, delete the
-        // old file so the cache directory doesn't accumulate orphaned archives.
-        if let Some(old_value) = self.get_by_cache_key(&cache_key).await?
-            && let Some(old_archive) = old_value.output_archive
-            && cache_value.output_archive.as_ref() != Some(&old_archive)
-        {
-            let old_archive_path = cache_dir.join(old_archive.as_str());
-            // Best-effort cleanup: a missing file (e.g. after a crash or manual
-            // cache clear) is fine, so we ignore the error.
-            let _ = std::fs::remove_file(old_archive_path.as_path());
-        }
-
-        self.upsert_cache_entry(&cache_key, &cache_value).await?;
-        self.upsert_task_fingerprint(execution_cache_key, &cache_key).await?;
+        self.record(&cache_key, execution_cache_key, &cache_value, cache_dir).await?;
 
         let Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::ReadWrite, url }) =
             &cache_metadata.remote_cache

@@ -16,7 +16,7 @@ steps = [
       "VP_REMOTE_CACHE",
       "read-write",
     ],
-  ], comment = "A new execution is uploaded with one store request." },
+  ], comment = "The fetch finds no entry. The new execution is uploaded with one store request." },
   { argv = [
     "remote-cache-server",
     "vt",
@@ -61,6 +61,153 @@ steps = [
 ]
 
 [[e2e]]
+name = "restore"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ] },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  [
+    "vtt",
+    "rm",
+    "-rf",
+    "dist",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ], comment = "A remote hit downloads the output archive. Hits never upload." },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/output.txt",
+  ], comment = "The outputs are restored." },
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The remote hit was recorded locally, so this is a local hit with no requests." },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "changed",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The exact entry fails validation, so the archive isn't downloaded." },
+]
+
+[[e2e]]
+name = "fallback"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ] },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "built",
+    "rebuilt",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The entry stored for this task has a different key. The miss reason compares it with the current key." },
+]
+
+[[e2e]]
+name = "corrupt_archive"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ] },
+  { argv = [
+    "vtt",
+    "write-file",
+    "remote-cache/blobs/1",
+    "corrupt",
+  ], comment = "Overwrite the stored archive." },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The downloaded archive doesn't decode, so the task reruns." },
+  { argv = [
+    "vtt",
+    "list-dir",
+    "node_modules/.vite/task-cache",
+    "--ext",
+    ".tar.zst",
+    "--recursive",
+  ], comment = "Only the rerun's archive is on disk. The corrupt download was removed." },
+]
+
+[[e2e]]
 name = "invalid_endpoint"
 steps = [
   { argv = [
@@ -76,7 +223,7 @@ steps = [
       "VP_REMOTE_CACHE_URL",
       "cache.example/projects/test",
     ],
-  ], comment = "The failed upload is a warning. The task succeeds." },
+  ], comment = "The failed fetch is the miss reason, and the failed upload is a warning. The task succeeds." },
   { argv = [
     "vt",
     "run",
@@ -114,5 +261,40 @@ steps = [
       "VP_REMOTE_CACHE_URL",
       "http://127.0.0.1:0/projects/test",
     ],
-  ], comment = "Nothing can listen on port 0. The failed upload is a warning. The task succeeds." },
+  ], comment = "Nothing can listen on port 0. The failed fetch is the miss reason, and the failed upload is a warning. The task succeeds." },
+]
+
+[[e2e]]
+name = "read_invalid_endpoint"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE_URL",
+      "cache.example/projects/test",
+    ],
+  ], comment = "The failed fetch is the miss reason. Read failures aren't warnings." },
+  [
+    "vt",
+    "run",
+    "--last-details",
+  ],
+]
+
+[[e2e]]
+name = "read_unreachable_endpoint"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE_URL",
+      "http://127.0.0.1:1/projects/test",
+    ],
+  ], comment = "Nothing listens on port 1. The failed fetch is the miss reason. Read failures aren't warnings." },
 ]
