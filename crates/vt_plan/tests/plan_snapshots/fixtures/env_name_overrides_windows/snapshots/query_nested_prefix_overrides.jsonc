@@ -1,0 +1,59 @@
+// run outer
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "outer"
+      ],
+      "node": {
+        "items": [
+          {
+            "kind": {
+              "Expanded": {
+                "graph": [
+                  {
+                    "key": [
+                      "<workspace>/",
+                      "inner"
+                    ],
+                    "node": {
+                      "items": [
+                        {
+                          "kind": {
+                            "Leaf": {
+                              "Spawn": {
+                                "cache_metadata": {
+                                  "spawn_fingerprint": {
+                                    "env_fingerprints": {
+                                      "fingerprinted_envs": {
+                                        "Foo": "sha256:3547cb112ac4489af2310c0626cdba6f3097a2ad5a3b42ddd3b59c76c7a079a3",
+                                        "force_color": "sha256:5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+                                        "vp_run": "sha256:6cdfd271da635d491e37a2b4a1044b306e6e9e039aeadee95bb355efadf8cb33"
+                                      }
+                                    }
+                                  }
+                                },
+                                "spawn_command": {
+                                  "spawn_envs": {
+                                    "Foo": "last",
+                                    "force_color": "0",
+                                    "vp_run": "custom"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

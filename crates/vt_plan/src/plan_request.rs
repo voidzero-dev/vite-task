@@ -1,6 +1,7 @@
 use std::{ffi::OsStr, sync::Arc};
 
 use rustc_hash::FxHashMap;
+use vt_casefold::EnvName;
 use vt_graph::{config::UserCacheConfig, query::TaskQuery};
 use vt_path::AbsolutePath;
 use vt_str::Str;
@@ -14,7 +15,7 @@ use vt_str::Str;
 pub struct ScriptCommand {
     pub program: Str,
     pub args: Arc<[Str]>,
-    pub envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+    pub envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
     pub cwd: Arc<AbsolutePath>,
 }
 
@@ -94,7 +95,7 @@ pub struct SyntheticPlanRequest {
     /// - To set envs that are not subject to caching but still passed to the spawned child, use `task_options` to configure `untracked_env`.
     /// - To set envs that should be fingerprinted, use `task_options` to configure `env`.
     /// - If neither is set, and caching is enabled, these envs will have not effect.
-    pub envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+    pub envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
 }
 
 #[derive(Debug)]

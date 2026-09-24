@@ -42,11 +42,7 @@ async fn track_oxlint(dir: &std::path::Path, args: &[&str]) -> anyhow::Result<Pa
         OsString::from(&tools_dir)
     };
 
-    command
-        .args(args)
-        .envs(vars_os().filter(|(k, _)| !k.eq_ignore_ascii_case("PATH")))
-        .env("PATH", new_path)
-        .current_dir(dir);
+    command.args(args).envs(vars_os()).env("PATH", new_path).current_dir(dir);
 
     let child = command.spawn(tokio_util::sync::CancellationToken::new()).await?;
     let termination = child.wait_handle.await?;

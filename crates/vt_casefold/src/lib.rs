@@ -54,10 +54,9 @@ impl CaseRule for AsciiCaseInsensitive {
 /// Case rule for environment variable names: ASCII letters ignore case on
 /// Windows.
 ///
-/// Windows also ignores case for non-ASCII letters, but ASCII is enough here: a
-/// process environment never contains two names that Windows treats as equal,
-/// and the names `vp` adds (task command assignments, `VP_RUN`, `FORCE_COLOR`,
-/// `PATH`) are ASCII.
+/// Windows ignores the case of non-ASCII letters too, but this rule compares
+/// them exactly: `état` and `ÉTAT` name the same variable on Windows but are
+/// different names here.
 #[cfg(windows)]
 pub type EnvNameCaseRule = AsciiCaseInsensitive;
 

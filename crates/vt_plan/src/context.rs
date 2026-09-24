@@ -1,6 +1,7 @@
 use std::{env::JoinPathsError, ffi::OsStr, ops::Range, sync::Arc};
 
 use rustc_hash::FxHashMap;
+use vt_casefold::EnvName;
 use vt_graph::{
     IndexedTaskGraph, TaskNodeIndex, config::ResolvedGlobalCacheConfig, query::TaskQuery,
 };
@@ -34,7 +35,7 @@ pub struct PlanContext<'a> {
     /// mutations ([`add_envs`](Self::add_envs),
     /// [`prepend_path`](Self::prepend_path)) clone only when the map is
     /// currently shared.
-    envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+    envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
 
     /// The callbacks for loading task graphs and parsing commands.
     callbacks: &'a mut (dyn PlanRequestParser + 'a),
@@ -60,7 +61,7 @@ impl<'a> PlanContext<'a> {
     pub fn new(
         workspace_path: &'a Arc<AbsolutePath>,
         cwd: Arc<AbsolutePath>,
-        envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+        envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
         callbacks: &'a mut (dyn PlanRequestParser + 'a),
         indexed_task_graph: &'a IndexedTaskGraph,
         resolved_global_cache: ResolvedGlobalCacheConfig,
@@ -79,7 +80,7 @@ impl<'a> PlanContext<'a> {
         }
     }
 
-    pub const fn envs(&self) -> &Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>> {
+    pub const fn envs(&self) -> &Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>> {
         &self.envs
     }
 
@@ -129,7 +130,7 @@ impl<'a> PlanContext<'a> {
         }
         let envs = Arc::make_mut(&mut self.envs);
         for (key, value) in new_envs {
-            envs.insert(Arc::from(key.as_ref()), Arc::from(value.as_ref()));
+            envs.insert(EnvName::new(Arc::from(key.as_ref())), Arc::from(value.as_ref()));
         }
     }
 

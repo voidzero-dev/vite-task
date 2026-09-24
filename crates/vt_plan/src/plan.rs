@@ -14,6 +14,7 @@ use std::{
 use futures_util::FutureExt;
 use petgraph::Direction;
 use rustc_hash::FxHashMap;
+use vt_casefold::EnvName;
 use vt_graph::{
     TaskNodeIndex, TaskSource,
     config::{
@@ -46,7 +47,7 @@ use crate::{
 /// Locate the executable path for a given program name in the provided envs and cwd.
 fn which(
     program: &Arc<OsStr>,
-    envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     cwd: &Arc<AbsolutePath>,
 ) -> Result<Arc<AbsolutePath>, crate::error::WhichError> {
     let path_env = get_path_env(envs);
@@ -543,7 +544,7 @@ fn resolve_synthetic_cache_config(
 
 pub fn plan_synthetic_request(
     workspace_path: &Arc<AbsolutePath>,
-    prefix_envs: &BTreeMap<Str, Str>,
+    prefix_envs: &BTreeMap<EnvName<Str>, Str>,
     synthetic_plan_request: SyntheticPlanRequest,
     execution_cache_key: Option<ExecutionCacheKey>,
     cwd: &Arc<AbsolutePath>,
@@ -599,9 +600,9 @@ fn strip_prefix_for_cache(
 fn plan_spawn_execution(
     workspace_path: &Arc<AbsolutePath>,
     execution_cache_key: Option<ExecutionCacheKey>,
-    prefix_envs: &BTreeMap<Str, Str>,
+    prefix_envs: &BTreeMap<EnvName<Str>, Str>,
     resolved_task_options: &ResolvedTaskOptions,
-    envs: &Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+    envs: &Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
     program_path: Arc<AbsolutePath>,
     args: Arc<[Str]>,
 ) -> Result<SpawnExecution, Error> {
@@ -618,12 +619,14 @@ fn plan_spawn_execution(
             EnvFingerprints::resolve(&mut spawn_envs, &cache_config.env_config)
                 .map_err(Error::ResolveEnv)?;
 
-        // Add prefix envs to fingerprinted envs
-        env_fingerprints.fingerprinted_envs.extend(
-            prefix_envs
-                .iter()
-                .map(|(name, value)| (name.clone(), EnvValueHash::new(value.as_str()))),
-        );
+        // Add prefix envs to fingerprinted envs. This map compares names
+        // exactly, so first remove any entry for the same variable spelled
+        // differently, like `foo` for `Foo=1` on Windows.
+        let fingerprinted_envs = &mut env_fingerprints.fingerprinted_envs;
+        for (name, value) in prefix_envs {
+            fingerprinted_envs.retain(|existing, _| EnvName::from_ref(existing) != name);
+            fingerprinted_envs.insert(name.inner().clone(), EnvValueHash::new(value.as_str()));
+        }
 
         let program_fingerprint = match strip_prefix_for_cache(&program_path, workspace_path) {
             Ok(relative_program_path) => {
@@ -683,12 +686,16 @@ fn plan_spawn_execution(
     // drop it, and always to `1`, so a stale value in the parent environment
     // cannot make a task look like it was invoked directly. A prefix
     // assignment (`VP_RUN=… command`) still wins: those are applied below.
-    spawn_envs.insert(OsStr::new(MARKER_ENV_NAME).into(), OsStr::new("1").into());
+    spawn_envs.insert(EnvName::new(OsStr::new(MARKER_ENV_NAME).into()), OsStr::new("1").into());
 
-    // Add prefix envs to spawn envs.
-    spawn_envs.extend(prefix_envs.iter().map(|(name, value)| {
-        (OsStr::new(name.as_str()).into(), OsStr::new(value.as_str()).into())
-    }));
+    // Add prefix envs to spawn envs. Inserting keeps an existing key's
+    // spelling, so remove the entry first: the task then sees the
+    // assignment's spelling, which is the one fingerprinted above.
+    for (name, value) in prefix_envs {
+        let name = EnvName::new(Arc::<OsStr>::from(OsStr::new(name.inner().as_str())));
+        spawn_envs.remove(&name);
+        spawn_envs.insert(name, OsStr::new(value.as_str()).into());
+    }
 
     Ok(SpawnExecution {
         spawn_command: SpawnCommand {
@@ -900,9 +907,9 @@ pub async fn plan_query_request(
 /// Returns `Ok(None)` if the variable is not set.
 /// Returns `Err` if the variable is set but cannot be parsed as a positive integer.
 fn concurrency_limit_from_env(
-    envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
 ) -> Result<Option<usize>, Error> {
-    let Some(value) = envs.get(OsStr::new("VP_RUN_CONCURRENCY_LIMIT")) else {
+    let Some(value) = envs.get(EnvName::from_ref(OsStr::new("VP_RUN_CONCURRENCY_LIMIT"))) else {
         return Ok(None);
     };
     let s = value.to_str().ok_or_else(|| Error::InvalidConcurrencyLimitEnv(Arc::clone(value)))?;

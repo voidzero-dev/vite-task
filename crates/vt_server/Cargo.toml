@@ -15,6 +15,7 @@ tokio = { workspace = true, features = ["io-util", "rt", "macros"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 socket_ipc = { workspace = true }
+vt_casefold = { workspace = true }
 vt_glob = { workspace = true }
 vt_path = { workspace = true }
 vt_ipc_shared = { workspace = true }

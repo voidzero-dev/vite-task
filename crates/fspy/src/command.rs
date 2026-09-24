@@ -9,6 +9,7 @@ use fspy_shared_unix::exec::Exec;
 use rustc_hash::FxHashMap;
 use tokio::process::Command as TokioCommand;
 use tokio_util::sync::CancellationToken;
+use vt_casefold::EnvName;
 
 use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
 
@@ -16,7 +17,7 @@ use crate::{SPY_IMPL, TrackedChild, error::SpawnError};
 pub struct Command {
     program: OsString,
     args: Vec<OsString>,
-    envs: FxHashMap<OsString, OsString>,
+    envs: FxHashMap<EnvName<OsString>, OsString>,
     cwd: Option<PathBuf>,
     #[cfg(unix)]
     arg0: Option<OsString>,
@@ -69,7 +70,9 @@ impl Command {
             envs: self
                 .envs
                 .iter()
-                .map(|(name, value)| (name.as_bytes().into(), Some(value.as_bytes().into())))
+                .map(|(name, value)| {
+                    (name.inner().as_bytes().into(), Some(value.as_bytes().into()))
+                })
                 .collect(),
         }
     }
@@ -86,7 +89,7 @@ impl Command {
             .into_iter()
             .map(|(name, value)| {
                 (
-                    OsString::from_vec(name.into()),
+                    EnvName::new(OsString::from_vec(name.into())),
                     OsString::from_vec(value.unwrap_or_default().into()),
                 )
             })
@@ -94,7 +97,7 @@ impl Command {
     }
 
     pub fn env_remove<K: AsRef<OsStr>>(&mut self, key: K) -> &mut Self {
-        self.envs.remove(key.as_ref());
+        self.envs.remove(EnvName::from_ref(key.as_ref()));
         self
     }
 
@@ -118,7 +121,7 @@ impl Command {
         K: AsRef<OsStr>,
         V: AsRef<OsStr>,
     {
-        self.envs.insert(key.as_ref().to_os_string(), val.as_ref().to_os_string());
+        self.envs.insert(EnvName::new(key.as_ref().to_os_string()), val.as_ref().to_os_string());
         self
     }
 
@@ -128,10 +131,9 @@ impl Command {
         K: AsRef<OsStr>,
         V: AsRef<OsStr>,
     {
-        self.envs.extend(
-            vars.into_iter()
-                .map(|(key, val)| (key.as_ref().to_os_string(), val.as_ref().to_os_string())),
-        );
+        self.envs.extend(vars.into_iter().map(|(key, val)| {
+            (EnvName::new(key.as_ref().to_os_string()), val.as_ref().to_os_string())
+        }));
         self
     }
 
@@ -186,16 +188,8 @@ impl Command {
     ///
     /// Panics if no `cwd` is set and `std::env::current_dir()` fails.
     pub fn resolve_program(&mut self) -> Result<(), SpawnError> {
-        let mut path_env: Option<&OsStr> = None;
-        for (env_name, env_value) in &self.envs {
-            let Some(env_name) = env_name.to_str() else {
-                continue;
-            };
-            if env_name.eq_ignore_ascii_case("path") {
-                path_env = Some(env_value.as_ref());
-                break;
-            }
-        }
+        let path_env =
+            self.envs.get(EnvName::from_ref(OsStr::new("PATH"))).map(OsString::as_os_str);
 
         let cwd = self
             .cwd
@@ -261,5 +255,34 @@ impl Command {
         }
 
         tokio_cmd
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_names_follow_platform_rules() {
+        let mut command = Command::new("program");
+        command.env("Path", "first").env("PATH", "second");
+
+        let mut envs: Vec<_> =
+            command.envs.iter().map(|(name, value)| (&**name.inner(), &**value)).collect();
+        envs.sort_unstable();
+        if cfg!(windows) {
+            assert_eq!(envs, [(OsStr::new("Path"), OsStr::new("second"))]);
+        } else {
+            assert_eq!(
+                envs,
+                [
+                    (OsStr::new("PATH"), OsStr::new("second")),
+                    (OsStr::new("Path"), OsStr::new("first"))
+                ]
+            );
+        }
+
+        command.env_remove("path");
+        assert_eq!(command.envs.len(), if cfg!(windows) { 0 } else { 2 });
     }
 }

@@ -9,19 +9,22 @@ use fspy_ipc_str::IpcStr;
 use rustc_hash::FxHashMap;
 use socket_ipc::Client as RawStream;
 use tokio::runtime::Builder;
+use vt_casefold::EnvName;
 use vt_client::{Client, GetEnvsQuery};
 use vt_ipc_shared::{EnvQuery as RawEnvQuery, GetEnvResponse, Request};
 use vt_server::{EnvQuery, Error, Recorder, Reports, ServerHandle, serve};
 
-fn env_map(pairs: &[(&str, &str)]) -> FxHashMap<Arc<OsStr>, Arc<OsStr>> {
+fn env_map(pairs: &[(&str, &str)]) -> FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>> {
     pairs
         .iter()
-        .map(|(k, v)| (Arc::<OsStr>::from(OsStr::new(k)), Arc::<OsStr>::from(OsStr::new(v))))
+        .map(|(k, v)| {
+            (EnvName::new(Arc::<OsStr>::from(OsStr::new(k))), Arc::<OsStr>::from(OsStr::new(v)))
+        })
         .collect()
 }
 
 fn run_with_server<F>(
-    envs: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    envs: FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     client_work: F,
 ) -> Result<Reports, Error>
 where
@@ -148,10 +151,13 @@ fn client_gone_mid_response_only_ends_its_own_stream() {
     for i in 0..ENV_COUNT {
         let mut key = OsString::from("VP_TEST_");
         key.push(i.to_string());
-        envs.insert(Arc::<OsStr>::from(&*key), Arc::<OsStr>::from(OsStr::new(&*"v".repeat(64))));
+        envs.insert(
+            EnvName::new(Arc::<OsStr>::from(&*key)),
+            Arc::<OsStr>::from(OsStr::new(&*"v".repeat(64))),
+        );
     }
     envs.insert(
-        Arc::<OsStr>::from(OsStr::new("SURVIVOR")),
+        EnvName::new(Arc::<OsStr>::from(OsStr::new("SURVIVOR"))),
         Arc::<OsStr>::from(OsStr::new("alive")),
     );
 
@@ -193,7 +199,10 @@ fn client_gone_mid_response_only_ends_its_own_stream() {
     assert_eq!(answered.matches.len(), ENV_COUNT);
 
     // The other stream was untouched by the death.
-    let served = reports.tracked_get_env.get(OsStr::new("SURVIVOR")).expect("survivor recorded");
+    let served = reports
+        .tracked_get_env
+        .get(EnvName::from_ref(OsStr::new("SURVIVOR")))
+        .expect("survivor recorded");
     assert_eq!(served.as_deref(), Some(OsStr::new("alive")));
 }
 
@@ -209,11 +218,14 @@ fn get_env_found_and_not_found() {
     .expect("driver returned error");
 
     assert!(!reports.cache_disabled);
-    let node = reports.tracked_get_env.get(OsStr::new("NODE_ENV")).expect("NODE_ENV recorded");
+    let node = reports
+        .tracked_get_env
+        .get(EnvName::from_ref(OsStr::new("NODE_ENV")))
+        .expect("NODE_ENV recorded");
     assert_eq!(node.as_deref(), Some(OsStr::new("production")));
 
     assert!(
-        !reports.tracked_get_env.contains_key(OsStr::new("MISSING")),
+        !reports.tracked_get_env.contains_key(EnvName::from_ref(OsStr::new("MISSING"))),
         "untracked getEnv calls are not recorded"
     );
 }
@@ -231,7 +243,8 @@ fn get_env_untracked_then_tracked_records_once() {
     })
     .expect("driver returned error");
 
-    let node = reports.tracked_get_env.get(OsStr::new("NODE_ENV")).expect("recorded");
+    let node =
+        reports.tracked_get_env.get(EnvName::from_ref(OsStr::new("NODE_ENV"))).expect("recorded");
     assert_eq!(node.as_deref(), Some(OsStr::new("production")));
 }
 
@@ -264,7 +277,8 @@ fn concurrent_clients() {
 
     assert!(!reports.cache_disabled);
     assert_eq!(reports.ignored_inputs.len(), 4);
-    let shared = reports.tracked_get_env.get(OsStr::new("SHARED")).expect("recorded");
+    let shared =
+        reports.tracked_get_env.get(EnvName::from_ref(OsStr::new("SHARED"))).expect("recorded");
     assert_eq!(shared.as_deref(), Some(OsStr::new("value")));
 }
 
@@ -413,4 +427,45 @@ fn get_envs_invalid_pattern_surfaces_error() {
         }
         other => panic!("unexpected error variant: {other:?}"),
     }
+}
+
+#[test]
+fn env_names_match_by_platform_rules() {
+    let reports = run_with_server(env_map(&[("Probe_A", "alpha")]), |envs| {
+        let client = connect(&envs);
+        let upper = client.get_env(OsStr::new("PROBE_A"), true).unwrap();
+        let lower = client.get_env(OsStr::new("probe_a"), true).unwrap();
+        let matches = client.get_envs(GetEnvsQuery::Prefix("PROBE_"), false).unwrap();
+        if cfg!(windows) {
+            assert_eq!(upper.as_deref(), Some(OsStr::new("alpha")));
+            assert_eq!(lower.as_deref(), Some(OsStr::new("alpha")));
+            assert_eq!(matches.len(), 1);
+        } else {
+            assert_eq!(upper, None);
+            assert_eq!(lower, None);
+            assert!(matches.is_empty());
+        }
+    })
+    .expect("driver returned error");
+
+    // Both requests name the same variable on Windows, so only the first
+    // spelling is recorded.
+    let recorded: Vec<&OsStr> =
+        reports.tracked_get_env.keys().map(|name| &**name.inner()).collect();
+    if cfg!(windows) {
+        assert_eq!(recorded, [OsStr::new("PROBE_A")]);
+    } else {
+        assert_eq!(recorded.len(), 2);
+    }
+}
+
+#[test]
+fn client_finds_ipc_env_by_platform_rules() {
+    run_with_server(env_map(&[]), |envs| {
+        let lowercase: Vec<(OsString, OsString)> =
+            envs.iter().map(|(name, value)| (name.to_ascii_lowercase(), value.clone())).collect();
+        let client = Client::from_envs(lowercase.iter().map(|(k, v)| (k, v))).expect("connect");
+        assert_eq!(client.is_some(), cfg!(windows));
+    })
+    .expect("driver returned error");
 }

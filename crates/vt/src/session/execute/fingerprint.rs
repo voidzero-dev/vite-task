@@ -14,6 +14,7 @@ use std::{
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+use vt_casefold::EnvName;
 use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::cache_metadata::EnvValueHash;
 use vt_str::Str;
@@ -150,7 +151,7 @@ impl PostRunFingerprint {
     pub fn validate(
         &self,
         base_dir: &AbsolutePath,
-        unfiltered_envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+        unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     ) -> anyhow::Result<Option<PostRunMismatch>> {
         let input_mismatch = self.inferred_inputs.par_iter().find_map_any(
             |(input_relative_path, path_fingerprint)| {
@@ -187,7 +188,7 @@ impl PostRunFingerprint {
 
         for (name, stored_value) in &self.tracked_envs {
             let current_value = unfiltered_envs
-                .get(OsStr::new(name.as_str()))
+                .get(EnvName::from_ref(OsStr::new(name.as_str())))
                 .map(|value| {
                     let value_str = value.to_str().ok_or_else(|| {
                         anyhow::anyhow!("tracked env value for {name} is not valid UTF-8")
@@ -229,7 +230,7 @@ impl PostRunFingerprint {
 /// value, return a changed mismatch so the stale cache entry is not replayed.
 fn match_env_query(
     query: &TrackedEnvQuery,
-    envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
 ) -> anyhow::Result<EnvQueryValidation> {
     Ok(match query {
         TrackedEnvQuery::Glob(pattern) => {
@@ -237,18 +238,18 @@ fn match_env_query(
             collect_matching_envs(envs, |name| glob.is_match(name))
         }
         TrackedEnvQuery::Prefix(prefix) => {
-            collect_matching_envs(envs, |name| env_name_starts_with(name, prefix.as_str()))
+            collect_matching_envs(envs, |name| EnvName::from_ref(name).starts_with(prefix.as_str()))
         }
     })
 }
 
 fn collect_matching_envs(
-    envs: &FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     is_match: impl Fn(&str) -> bool,
 ) -> EnvQueryValidation {
     let mut matches = BTreeMap::new();
     for (name, value) in envs {
-        let Some(name_str) = name.to_str() else {
+        let Some(name_str) = name.inner().to_str() else {
             continue;
         };
         if !is_match(name_str) {
@@ -267,25 +268,6 @@ fn collect_matching_envs(
 enum EnvQueryValidation {
     Matches(BTreeMap<Str, EnvValueHash>),
     NonUtf8Value(EnvMismatch),
-}
-
-#[cfg(not(windows))]
-fn env_name_starts_with(name: &str, prefix: &str) -> bool {
-    name.starts_with(prefix)
-}
-
-#[cfg(windows)]
-fn env_name_starts_with(name: &str, prefix: &str) -> bool {
-    let mut name_chars = name.chars();
-    for prefix_char in prefix.chars() {
-        let Some(name_char) = name_chars.next() else {
-            return false;
-        };
-        if !name_char.eq_ignore_ascii_case(&prefix_char) {
-            return false;
-        }
-    }
-    true
 }
 
 /// Find the first deterministic difference between stored and current env
@@ -542,7 +524,7 @@ mod tests {
 
         let mut unfiltered_envs = FxHashMap::default();
         unfiltered_envs.insert(
-            Arc::<OsStr>::from(OsStr::new("PROBE_ENV")),
+            EnvName::new(Arc::<OsStr>::from(OsStr::new("PROBE_ENV"))),
             Arc::<OsStr>::from(non_utf8_os_string()),
         );
 
@@ -563,7 +545,7 @@ mod tests {
 
         let mut unfiltered_envs = FxHashMap::default();
         unfiltered_envs.insert(
-            Arc::<OsStr>::from(OsStr::new("PROBE_BAD")),
+            EnvName::new(Arc::<OsStr>::from(OsStr::new("PROBE_BAD"))),
             Arc::<OsStr>::from(non_utf8_os_string()),
         );
 
@@ -594,11 +576,11 @@ mod tests {
 
         let mut unfiltered_envs = FxHashMap::default();
         unfiltered_envs.insert(
-            Arc::<OsStr>::from(OsStr::new("PROBE_*A")),
+            EnvName::new(Arc::<OsStr>::from(OsStr::new("PROBE_*A"))),
             Arc::<OsStr>::from(OsStr::new("literal")),
         );
         unfiltered_envs.insert(
-            Arc::<OsStr>::from(OsStr::new("PROBE_XA")),
+            EnvName::new(Arc::<OsStr>::from(OsStr::new("PROBE_XA"))),
             Arc::<OsStr>::from(OsStr::new("wildcard if interpreted as glob")),
         );
 
@@ -618,7 +600,7 @@ mod tests {
 
         let mut unfiltered_envs = FxHashMap::default();
         unfiltered_envs.insert(
-            Arc::<OsStr>::from(non_utf8_os_string()),
+            EnvName::new(Arc::<OsStr>::from(non_utf8_os_string())),
             Arc::<OsStr>::from(OsStr::new("value")),
         );
 
@@ -627,5 +609,46 @@ mod tests {
             fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
 
         assert!(mismatch.is_none());
+    }
+
+    #[test]
+    fn validate_looks_up_tracked_env_names_by_platform_rules() {
+        let mut tracked_envs = BTreeMap::new();
+        tracked_envs.insert(Str::from("PROBE_ENV"), Some(EnvValueHash::new("value")));
+        let fingerprint = PostRunFingerprint { tracked_envs, ..PostRunFingerprint::default() };
+
+        let mut unfiltered_envs = FxHashMap::default();
+        unfiltered_envs.insert(
+            EnvName::new(Arc::<OsStr>::from(OsStr::new("probe_env"))),
+            Arc::<OsStr>::from(OsStr::new("value")),
+        );
+
+        let workspace_root = vt_path::current_dir().expect("cwd");
+        let mismatch =
+            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+
+        assert_eq!(mismatch.is_none(), cfg!(windows));
+    }
+
+    #[test]
+    fn validate_matches_tracked_env_prefix_by_platform_rules() {
+        let mut tracked_env_queries = BTreeMap::new();
+        let mut stored_matches = BTreeMap::new();
+        stored_matches.insert(Str::from("probe_a"), EnvValueHash::new("value"));
+        tracked_env_queries.insert(TrackedEnvQuery::Prefix(Str::from("PROBE_")), stored_matches);
+        let fingerprint =
+            PostRunFingerprint { tracked_env_queries, ..PostRunFingerprint::default() };
+
+        let mut unfiltered_envs = FxHashMap::default();
+        unfiltered_envs.insert(
+            EnvName::new(Arc::<OsStr>::from(OsStr::new("probe_a"))),
+            Arc::<OsStr>::from(OsStr::new("value")),
+        );
+
+        let workspace_root = vt_path::current_dir().expect("cwd");
+        let mismatch =
+            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+
+        assert_eq!(mismatch.is_none(), cfg!(windows));
     }
 }

@@ -11,6 +11,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use socket_ipc::{Server as TransportServer, ServerConnection as Stream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
+use vt_casefold::EnvName;
 use vt_ipc_shared::{
     EnvQuery as IpcEnvQuery, GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request,
 };
@@ -31,7 +32,7 @@ pub trait Handler {
         &mut self,
         query: &IpcEnvQuery<'_>,
         tracked: bool,
-    ) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vt_glob::env::EnvGlobError>;
+    ) -> Result<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>, vt_glob::env::EnvGlobError>;
 }
 
 /// A protocol-level failure observed while servicing a client.
@@ -72,11 +73,11 @@ pub struct Recorder {
     ignored_inputs: FxHashSet<Arc<AbsolutePath>>,
     ignored_outputs: FxHashSet<Arc<AbsolutePath>>,
     cache_disabled: bool,
-    tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
+    tracked_get_env: FxHashMap<EnvName<Arc<OsStr>>, Option<Arc<OsStr>>>,
     tracked_get_envs: FxHashMap<EnvQuery, EnvQueryRecord>,
     /// The envs `get_env` resolves against. The runner supplies these for the
     /// spawned task; the server never re-reads the live process env.
-    envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+    envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
 }
 
 /// Owned env query key recorded for tracked `get_envs` calls.
@@ -92,7 +93,7 @@ pub enum EnvQuery {
 /// server's env map is immutable for a task's lifetime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvQueryRecord {
-    pub matches: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+    pub matches: FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
 }
 
 /// The data collected by a [`Recorder`] over the server's lifetime.
@@ -101,13 +102,13 @@ pub struct Reports {
     pub ignored_inputs: FxHashSet<Arc<AbsolutePath>>,
     pub ignored_outputs: FxHashSet<Arc<AbsolutePath>>,
     pub cache_disabled: bool,
-    pub tracked_get_env: FxHashMap<Arc<OsStr>, Option<Arc<OsStr>>>,
+    pub tracked_get_env: FxHashMap<EnvName<Arc<OsStr>>, Option<Arc<OsStr>>>,
     pub tracked_get_envs: FxHashMap<EnvQuery, EnvQueryRecord>,
 }
 
 impl Recorder {
     #[must_use]
-    pub fn new(envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>) -> Self {
+    pub fn new(envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>) -> Self {
         Self {
             ignored_inputs: FxHashSet::default(),
             ignored_outputs: FxHashSet::default(),
@@ -144,9 +145,9 @@ impl Handler for Recorder {
     }
 
     fn get_env(&mut self, name: &OsStr, tracked: bool) -> Option<Arc<OsStr>> {
-        let value = self.envs.get(name).cloned();
+        let value = self.envs.get(EnvName::from_ref(name)).cloned();
         if tracked {
-            self.tracked_get_env.entry(name.into()).or_insert_with(|| value.clone());
+            self.tracked_get_env.entry(EnvName::new(name.into())).or_insert_with(|| value.clone());
         }
         value
     }
@@ -155,7 +156,7 @@ impl Handler for Recorder {
         &mut self,
         query: &IpcEnvQuery<'_>,
         tracked: bool,
-    ) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vt_glob::env::EnvGlobError> {
+    ) -> Result<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>, vt_glob::env::EnvGlobError> {
         let key = match query {
             IpcEnvQuery::Glob(pattern) => EnvQuery::Glob(Arc::from(*pattern)),
             IpcEnvQuery::Prefix(prefix) => EnvQuery::Prefix(Arc::from(*prefix)),
@@ -163,15 +164,15 @@ impl Handler for Recorder {
         if let Some(existing) = self.tracked_get_envs.get(&key) {
             return Ok(existing.matches.clone());
         }
-        let matches: FxHashMap<Arc<OsStr>, Arc<OsStr>> = match query {
+        let matches: FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>> = match query {
             IpcEnvQuery::Glob(pattern) => {
                 let glob = vt_glob::env::EnvGlob::new(pattern)?;
                 self.envs
                     .iter()
                     .filter_map(|(name, value)| {
-                        let name_str = name.to_str()?;
+                        let name_str = name.inner().to_str()?;
                         if glob.is_match(name_str) {
-                            Some((Arc::clone(name), Arc::clone(value)))
+                            Some((name.clone(), Arc::clone(value)))
                         } else {
                             None
                         }
@@ -181,14 +182,8 @@ impl Handler for Recorder {
             IpcEnvQuery::Prefix(prefix) => self
                 .envs
                 .iter()
-                .filter_map(|(name, value)| {
-                    let name_str = name.to_str()?;
-                    if env_name_starts_with(name_str, prefix) {
-                        Some((Arc::clone(name), Arc::clone(value)))
-                    } else {
-                        None
-                    }
-                })
+                .filter(|(name, _)| name.inner().to_str().is_some() && name.starts_with(*prefix))
+                .map(|(name, value)| (name.clone(), Arc::clone(value)))
                 .collect(),
         };
         if tracked {
@@ -196,25 +191,6 @@ impl Handler for Recorder {
         }
         Ok(matches)
     }
-}
-
-#[cfg(not(windows))]
-fn env_name_starts_with(name: &str, prefix: &str) -> bool {
-    name.starts_with(prefix)
-}
-
-#[cfg(windows)]
-fn env_name_starts_with(name: &str, prefix: &str) -> bool {
-    let mut name_chars = name.chars();
-    for prefix_char in prefix.chars() {
-        let Some(name_char) = name_chars.next() else {
-            return false;
-        };
-        if !name_char.eq_ignore_ascii_case(&prefix_char) {
-            return false;
-        }
-    }
-    true
 }
 
 /// Handle to a running IPC server.
@@ -394,7 +370,10 @@ async fn handle_client<H: Handler>(mut stream: Stream, handler: &RefCell<H>) -> 
                     }))
                 })?;
                 let response = GetEnvsResponse {
-                    entries: matches.iter().map(|(k, v)| ((&**k).into(), (&**v).into())).collect(),
+                    entries: matches
+                        .iter()
+                        .map(|(k, v)| ((&**k.inner()).into(), (&**v).into()))
+                        .collect(),
                 };
                 if let Err(err) = write_response(&mut stream, &response).await {
                     return if is_client_gone(&err) {

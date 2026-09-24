@@ -21,6 +21,7 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "process", "io-util", "sync", "rt"] }
 tokio-util = { workspace = true }
+vt_casefold = { workspace = true }
 which = { workspace = true, features = ["tracing"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

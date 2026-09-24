@@ -8,11 +8,10 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-wincode = { workspace = true, features = ["derive"] }
 brush-parser = { workspace = true }
-diff-struct = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 shell-escape = { workspace = true }
+vt_casefold = { workspace = true, features = ["serde"] }
 vt_str = { workspace = true }
 
 [lints]

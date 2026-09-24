@@ -17,6 +17,7 @@ use reporter::{
     summary::{LastRunSummary, ReadSummaryError, format_full_summary},
 };
 use rustc_hash::FxHashMap;
+use vt_casefold::EnvName;
 use vt_graph::{
     IndexedTaskGraph, TaskGraph, TaskGraphLoadError, config::user::UserCacheConfig,
     loader::UserConfigLoader, query::TaskQuery,
@@ -157,7 +158,7 @@ pub struct Session<'a> {
     /// The task graph is loaded on-demand and cached for future use.
     lazy_task_graph: LazyTaskGraph<'a>,
 
-    envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+    envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
     cwd: Arc<AbsolutePath>,
 
     plan_request_parser: PlanRequestParser<'a>,
@@ -199,7 +200,9 @@ impl<'a> Session<'a> {
             reason = "Session::init is the only place that bootstraps the session env snapshot"
         )]
         let envs = std::env::vars_os()
-            .map(|(k, v)| (Arc::<OsStr>::from(k.as_os_str()), Arc::<OsStr>::from(v.as_os_str())))
+            .map(|(k, v)| {
+                (EnvName::new(Arc::<OsStr>::from(k.as_os_str())), Arc::<OsStr>::from(v.as_os_str()))
+            })
             .collect();
         Self::init_with(envs, vt_path::current_dir()?.into(), config)
     }
@@ -223,7 +226,7 @@ impl<'a> Session<'a> {
     /// Returns an error if workspace root cannot be found or PATH env cannot be prepended.
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn init_with(
-        mut envs: FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+        mut envs: FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
         cwd: Arc<AbsolutePath>,
         config: SessionConfig<'a>,
     ) -> anyhow::Result<Self> {
@@ -665,7 +668,7 @@ impl<'a> Session<'a> {
         }
     }
 
-    pub const fn envs(&self) -> &Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>> {
+    pub const fn envs(&self) -> &Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>> {
         &self.envs
     }
 

@@ -18,6 +18,7 @@ use serde::Serialize;
 use task_graph_markdown::render_task_graph_markdown;
 use tokio::runtime::Runtime;
 use vt::{Command, Session};
+use vt_casefold::EnvName;
 use vt_graph::display::TaskDisplay;
 use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vt_plan::{ExecutionGraph, ExecutionItemKind};
@@ -205,9 +206,12 @@ fn run_case_inner(
     let combined_path =
         Arc::<OsStr>::from(std::ffi::OsString::from(fake_bin_dir.to_str().unwrap()));
 
-    let plan_envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> = [
-        (Arc::<OsStr>::from(OsStr::new("PATH")), combined_path),
-        (Arc::<OsStr>::from(OsStr::new("NO_COLOR")), Arc::<OsStr>::from(OsStr::new("1"))),
+    let plan_envs: FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>> = [
+        (EnvName::new(Arc::<OsStr>::from(OsStr::new("PATH"))), combined_path),
+        (
+            EnvName::new(Arc::<OsStr>::from(OsStr::new("NO_COLOR"))),
+            Arc::<OsStr>::from(OsStr::new("1")),
+        ),
     ]
     .into_iter()
     .collect();
@@ -266,8 +270,10 @@ fn run_case_inner(
             // Create a fresh session per plan case with case-specific env vars and cwd.
             let mut case_envs = plan_envs.clone();
             for (k, v) in &plan.env {
-                case_envs
-                    .insert(Arc::from(OsStr::new(k.as_str())), Arc::from(OsStr::new(v.as_str())));
+                case_envs.insert(
+                    EnvName::new(Arc::from(OsStr::new(k.as_str()))),
+                    Arc::from(OsStr::new(v.as_str())),
+                );
             }
             let case_cwd: Arc<AbsolutePath> = workspace_root.path.join(plan.cwd).into();
             let mut case_owned_config = vt_bin::OwnedSessionConfig::default();

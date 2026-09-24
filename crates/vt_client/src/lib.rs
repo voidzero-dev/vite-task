@@ -8,6 +8,7 @@ use std::{
 use fspy_ipc_str::IpcStr;
 use rustc_hash::FxHashMap;
 use socket_ipc::Client as Stream;
+use vt_casefold::EnvName;
 use vt_ipc_shared::{
     EnvQuery as IpcEnvQuery, GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request,
 };
@@ -39,7 +40,7 @@ impl Client {
         envs: impl Iterator<Item = (impl AsRef<OsStr>, impl AsRef<OsStr>)>,
     ) -> io::Result<Option<Self>> {
         for (name, value) in envs {
-            if name.as_ref() == IPC_ENV_NAME {
+            if EnvName::from_ref(name.as_ref()) == EnvName::from_ref(IPC_ENV_NAME) {
                 let stream = Stream::connect(value.as_ref())?;
                 return Ok(Some(Self::from_stream(stream)));
             }

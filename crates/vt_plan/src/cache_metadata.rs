@@ -2,6 +2,7 @@ use std::{ffi::OsStr, sync::Arc};
 
 use rustc_hash::FxHashMap;
 use serde::Serialize;
+use vt_casefold::EnvName;
 use vt_graph::config::ResolvedGlobConfig;
 use vt_path::RelativePathBuf;
 use vt_str::{self, Str};
@@ -65,7 +66,7 @@ pub struct CacheMetadata {
     /// `SpawnCommand::spawn_envs`. It is skipped in serialized plans because it
     /// mirrors the ambient environment and would make snapshots noisy.
     #[serde(skip)]
-    pub unfiltered_envs: Arc<FxHashMap<Arc<OsStr>, Arc<OsStr>>>,
+    pub unfiltered_envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
 }
 
 /// Fingerprint for spawn execution that affects caching.

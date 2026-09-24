@@ -1285,6 +1285,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "vt_casefold",
  "which",
  "winapi",
  "wincode",
@@ -4470,6 +4471,7 @@ dependencies = [
  "tracing",
  "twox-hash",
  "uuid",
+ "vt_casefold",
  "vt_client_napi",
  "vt_glob",
  "vt_graph",
@@ -4550,6 +4552,7 @@ dependencies = [
  "fspy_ipc_str",
  "rustc-hash",
  "socket_ipc",
+ "vt_casefold",
  "vt_ipc_shared",
  "vt_path",
  "wincode",
@@ -4660,6 +4663,7 @@ dependencies = [
  "url",
  "vt",
  "vt_bin",
+ "vt_casefold",
  "vt_glob",
  "vt_graph",
  "vt_graph_ser",
@@ -4704,6 +4708,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "vt_casefold",
  "vt_client",
  "vt_glob",
  "vt_ipc_shared",
@@ -4716,11 +4721,10 @@ name = "vt_shell"
 version = "0.0.0"
 dependencies = [
  "brush-parser",
- "diff-struct",
  "serde",
  "shell-escape",
+ "vt_casefold",
  "vt_str",
- "wincode",
 ]
 
 [[package]]

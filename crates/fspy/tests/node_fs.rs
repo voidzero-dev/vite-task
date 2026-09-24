@@ -29,9 +29,7 @@ fn track_script(
     let (program, path) = resolve_runtime(runtime)?;
 
     let mut command = fspy::Command::new(program);
-    command
-        .envs(vars_os().filter(|(name, _)| !name.eq_ignore_ascii_case("PATH")))
-        .env("PATH", path); // https://github.com/jdx/mise/discussions/5968
+    command.envs(vars_os()).env("PATH", path); // https://github.com/jdx/mise/discussions/5968
     let script = format!(
         "const fs = require('node:fs'); \
          const child_process = require('node:child_process'); \

@@ -316,8 +316,10 @@ fn collect_tracked_envs(
     let mut tracked_envs = BTreeMap::new();
 
     for (name, value) in &reports.tracked_get_env {
-        let name_str =
-            name.to_str().ok_or_else(|| anyhow::anyhow!("tracked env name is not valid UTF-8"))?;
+        let name_str = name
+            .inner()
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("tracked env name is not valid UTF-8"))?;
         if fingerprinted.contains_key(name_str) {
             continue;
         }
@@ -345,6 +347,7 @@ fn collect_tracked_env_queries(reports: &Reports) -> anyhow::Result<TrackedEnvQu
         let mut matches = BTreeMap::new();
         for (name, value) in &record.matches {
             let name_str = name
+                .inner()
                 .to_str()
                 .ok_or_else(|| anyhow::anyhow!("tracked env match name is not valid UTF-8"))?;
             let value_str = value.to_str().ok_or_else(|| {

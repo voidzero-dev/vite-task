@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, ffi::OsStr, fmt, sync::Arc};
 use rustc_hash::FxHashMap;
 use serde::{Serialize, Serializer};
 use sha2::{Digest as _, Sha256};
+use vt_casefold::EnvName;
 use vt_glob::env::EnvGlobSet;
 use vt_graph::config::EnvConfig;
 use vt_str::Str;
@@ -104,7 +105,7 @@ impl EnvFingerprints {
     /// ANSI for a misbehaving tool) can opt in to passthrough by listing
     /// `FORCE_COLOR` in `env` or `untrackedEnv`.
     pub fn resolve(
-        envs: &mut FxHashMap<Arc<OsStr>, Arc<OsStr>>,
+        envs: &mut FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
         env_config: &EnvConfig,
     ) -> Result<Self, ResolveEnvError> {
         // Collect all envs matching fingerprinted or untracked envs in env_config
@@ -122,7 +123,7 @@ impl EnvFingerprints {
         // opted into passing `FORCE_COLOR` through (via `env` / `untrackedEnv`)
         // and the parent supplied a value — in that case the user's choice
         // wins, even `FORCE_COLOR=0`.
-        envs.entry(Arc::<OsStr>::from(OsStr::new("FORCE_COLOR")))
+        envs.entry(EnvName::new(Arc::<OsStr>::from(OsStr::new("FORCE_COLOR"))))
             .or_insert_with(|| Arc::<OsStr>::from(OsStr::new("1")));
 
         // Resolve fingerprinted envs
@@ -130,7 +131,7 @@ impl EnvFingerprints {
         if !env_config.fingerprinted_envs.is_empty() {
             let fingerprinted_env_patterns = EnvGlobSet::new(env_config.fingerprinted_envs.iter())?;
             for (name, value) in envs.iter() {
-                let Some(name) = name.to_str() else {
+                let Some(name) = name.inner().to_str() else {
                     continue;
                 };
                 if !fingerprinted_env_patterns.is_match(name) {
@@ -159,18 +160,14 @@ impl EnvFingerprints {
 }
 
 fn resolve_envs_with_patterns<'a>(
-    env_vars: impl Iterator<Item = (&'a Arc<OsStr>, &'a Arc<OsStr>)>,
+    env_vars: impl Iterator<Item = (&'a EnvName<Arc<OsStr>>, &'a Arc<OsStr>)>,
     patterns: &[&str],
-) -> Result<FxHashMap<Arc<OsStr>, Arc<OsStr>>, vt_glob::env::EnvGlobError> {
+) -> Result<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>, vt_glob::env::EnvGlobError> {
     let patterns = EnvGlobSet::new(patterns.iter())?;
-    let envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> = env_vars
+    let envs: FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>> = env_vars
         .filter_map(|(name, value)| {
-            let name_str = name.as_ref().to_str()?;
-            if patterns.is_match(name_str) {
-                Some((Arc::clone(name), Arc::clone(value)))
-            } else {
-                None
-            }
+            let name_str = name.inner().to_str()?;
+            if patterns.is_match(name_str) { Some((name.clone(), Arc::clone(value))) } else { None }
         })
         .collect();
     Ok(envs)
@@ -182,10 +179,10 @@ mod tests {
 
     use super::*;
 
-    fn create_test_envs(pairs: Vec<(&str, &str)>) -> FxHashMap<Arc<OsStr>, Arc<OsStr>> {
+    fn create_test_envs(pairs: Vec<(&str, &str)>) -> FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>> {
         pairs
             .into_iter()
-            .map(|(k, v)| (Arc::from(OsStr::new(k)), Arc::from(OsStr::new(v))))
+            .map(|(k, v)| (EnvName::new(Arc::from(OsStr::new(k))), Arc::from(OsStr::new(v))))
             .collect()
     }
 
@@ -212,7 +209,7 @@ mod tests {
         let _result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
         let force_color_value = envs
-            .get(OsStr::new("FORCE_COLOR"))
+            .get(EnvName::from_ref(OsStr::new("FORCE_COLOR")))
             .expect("FORCE_COLOR should be present after resolution");
         assert_eq!(force_color_value.to_str().unwrap(), "1");
     }
@@ -226,7 +223,10 @@ mod tests {
 
         let _result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        assert_eq!(envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "1");
+        assert_eq!(
+            envs.get(EnvName::from_ref(OsStr::new("FORCE_COLOR"))).unwrap().to_str().unwrap(),
+            "1"
+        );
     }
 
     #[test]
@@ -238,7 +238,10 @@ mod tests {
 
         let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        assert_eq!(envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "0");
+        assert_eq!(
+            envs.get(EnvName::from_ref(OsStr::new("FORCE_COLOR"))).unwrap().to_str().unwrap(),
+            "0"
+        );
         assert!(!result.fingerprinted_envs.contains_key("FORCE_COLOR"));
     }
 
@@ -251,8 +254,33 @@ mod tests {
 
         let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        assert_eq!(envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "3");
+        assert_eq!(
+            envs.get(EnvName::from_ref(OsStr::new("FORCE_COLOR"))).unwrap().to_str().unwrap(),
+            "3"
+        );
         assert_eq!(result.fingerprinted_envs.get("FORCE_COLOR").copied(), Some(hash("3")));
+    }
+
+    #[test]
+    fn test_force_color_fallback_finds_parent_value_by_platform_rules() {
+        // The parent spells the name in lowercase and the user opts in to
+        // passing it through. On Windows that is the same variable, so the
+        // fallback must not add a second `FORCE_COLOR`.
+        let mut envs = create_test_envs(vec![("force_color", "0")]);
+        let env_config = create_env_config(&[], &["force_color"]);
+
+        EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
+
+        let mut envs: Vec<_> = envs
+            .iter()
+            .map(|(name, value)| (name.inner().to_str().unwrap(), value.to_str().unwrap()))
+            .collect();
+        envs.sort_unstable();
+        if cfg!(windows) {
+            assert_eq!(envs, [("force_color", "0")]);
+        } else {
+            assert_eq!(envs, [("FORCE_COLOR", "1"), ("force_color", "0")]);
+        }
     }
 
     #[test]
@@ -266,7 +294,10 @@ mod tests {
 
         let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        assert_eq!(envs.get(OsStr::new("FORCE_COLOR")).unwrap().to_str().unwrap(), "1");
+        assert_eq!(
+            envs.get(EnvName::from_ref(OsStr::new("FORCE_COLOR"))).unwrap().to_str().unwrap(),
+            "1"
+        );
         assert_eq!(result.fingerprinted_envs.get("FORCE_COLOR").copied(), Some(hash("1")));
     }
 
@@ -333,10 +364,10 @@ mod tests {
         assert_eq!(*app_name, hash("app1_value"));
 
         // Verify untracked envs are present in envs
-        assert!(envs1.contains_key(OsStr::new("VSCODE_VAR")));
-        assert!(envs1.contains_key(OsStr::new("PATH")));
-        assert!(envs1.contains_key(OsStr::new("HOME")));
-        assert!(envs1.contains_key(OsStr::new("OXLINT_TSGOLINT_PATH")));
+        assert!(envs1.contains_key(EnvName::from_ref(OsStr::new("VSCODE_VAR"))));
+        assert!(envs1.contains_key(EnvName::from_ref(OsStr::new("PATH"))));
+        assert!(envs1.contains_key(EnvName::from_ref(OsStr::new("HOME"))));
+        assert!(envs1.contains_key(EnvName::from_ref(OsStr::new("OXLINT_TSGOLINT_PATH"))));
     }
 
     #[test]
@@ -411,8 +442,8 @@ mod tests {
         assert!(fingerprinted_envs1.iter().any(|(k, _)| k.as_str() == "app2_name"));
 
         // Verify untracked envs are present
-        assert!(envs1.contains_key(OsStr::new("VSCODE_VAR")));
-        assert!(envs1.contains_key(OsStr::new("Path")) || envs1.contains_key(OsStr::new("PATH")));
+        assert!(envs1.contains_key(EnvName::from_ref(OsStr::new("VSCODE_VAR"))));
+        assert!(envs1.contains_key(EnvName::from_ref(OsStr::new("PATH"))));
     }
 
     // ============================================
@@ -477,10 +508,10 @@ mod tests {
         let _result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
         // envs should only contain fingerprinted + untracked envs (plus auto-added ones)
-        assert!(envs.contains_key(OsStr::new("KEEP_THIS")));
-        assert!(envs.contains_key(OsStr::new("PASS_THROUGH")));
-        assert!(!envs.contains_key(OsStr::new("FILTER_OUT")));
-        assert!(!envs.contains_key(OsStr::new("ANOTHER_FILTERED")));
+        assert!(envs.contains_key(EnvName::from_ref(OsStr::new("KEEP_THIS"))));
+        assert!(envs.contains_key(EnvName::from_ref(OsStr::new("PASS_THROUGH"))));
+        assert!(!envs.contains_key(EnvName::from_ref(OsStr::new("FILTER_OUT"))));
+        assert!(!envs.contains_key(EnvName::from_ref(OsStr::new("ANOTHER_FILTERED"))));
     }
 
     #[test]
@@ -492,9 +523,11 @@ mod tests {
 
         // Create invalid UTF-8 sequence
         let invalid_utf8 = OsStr::from_bytes(&[0xff, 0xfe]);
-        let mut envs: FxHashMap<Arc<OsStr>, Arc<OsStr>> =
-            std::iter::once((Arc::from(OsStr::new("INVALID_UTF8")), Arc::from(invalid_utf8)))
-                .collect();
+        let mut envs: FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>> = std::iter::once((
+            EnvName::new(Arc::from(OsStr::new("INVALID_UTF8"))),
+            Arc::from(invalid_utf8),
+        ))
+        .collect();
 
         let result = EnvFingerprints::resolve(&mut envs, &env_config);
 
@@ -554,11 +587,15 @@ mod tests {
         let _result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
         // PLAYWRIGHT_* envs should be passed through
-        assert!(envs.contains_key(OsStr::new("PLAYWRIGHT_BROWSERS_PATH")));
-        assert!(envs.contains_key(OsStr::new("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD")));
-        assert!(envs.contains_key(OsStr::new("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH")));
+        assert!(envs.contains_key(EnvName::from_ref(OsStr::new("PLAYWRIGHT_BROWSERS_PATH"))));
+        assert!(
+            envs.contains_key(EnvName::from_ref(OsStr::new("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD")))
+        );
+        assert!(
+            envs.contains_key(EnvName::from_ref(OsStr::new("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH")))
+        );
         // Non-matching env should be filtered out
-        assert!(!envs.contains_key(OsStr::new("OTHER_VAR")));
+        assert!(!envs.contains_key(EnvName::from_ref(OsStr::new("OTHER_VAR"))));
     }
 
     #[test]
@@ -573,8 +610,8 @@ mod tests {
 
         let _result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
 
-        assert!(envs.contains_key(OsStr::new("ACTIONS_ID_TOKEN_REQUEST_URL")));
-        assert!(envs.contains_key(OsStr::new("ACTIONS_ID_TOKEN_REQUEST_TOKEN")));
-        assert!(!envs.contains_key(OsStr::new("ACTIONS_UNRELATED")));
+        assert!(envs.contains_key(EnvName::from_ref(OsStr::new("ACTIONS_ID_TOKEN_REQUEST_URL"))));
+        assert!(envs.contains_key(EnvName::from_ref(OsStr::new("ACTIONS_ID_TOKEN_REQUEST_TOKEN"))));
+        assert!(!envs.contains_key(EnvName::from_ref(OsStr::new("ACTIONS_UNRELATED"))));
     }
 }
