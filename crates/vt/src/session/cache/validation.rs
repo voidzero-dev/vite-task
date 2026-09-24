@@ -1,22 +1,25 @@
 //! Cache entry validation and fallback diagnostics, independent of storage.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ffi::OsStr, sync::Arc};
 
+use rustc_hash::FxHashMap;
+use vt_casefold::EnvName;
 use vt_path::{AbsolutePath, RelativePathBuf};
-use vt_plan::cache_metadata::CacheMetadata;
 
 use super::{CacheEntryKey, CacheEntryValue, FingerprintMismatch, InputChangeKind};
 
 impl CacheEntryValue {
-    /// Validate explicit inputs, then inferred inputs and tracked environment values.
-    /// Returns the first mismatch, or `None` when the entry is valid.
+    /// Validate explicit inputs, then inferred inputs and tracked environment
+    /// values against `unfiltered_envs`, the execution's
+    /// `CacheMetadata::unfiltered_envs`. Returns the first mismatch, or `None`
+    /// when the entry is valid.
     ///
     /// # Errors
     ///
     /// Propagates errors from post-run fingerprint validation.
     pub(crate) fn validate(
         &self,
-        cache_metadata: &CacheMetadata,
+        unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         workspace_root: &AbsolutePath,
     ) -> anyhow::Result<Option<FingerprintMismatch>> {
@@ -25,7 +28,7 @@ impl CacheEntryValue {
         }
 
         self.post_run_fingerprint
-            .validate(workspace_root, &cache_metadata.unfiltered_envs)
+            .validate(workspace_root, unfiltered_envs)
             .map(|mismatch| mismatch.map(FingerprintMismatch::from))
     }
 }

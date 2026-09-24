@@ -87,7 +87,9 @@ pub enum Fetched {
         /// The stored value.
         #[serde(with = "serde_bytes")]
         value: Vec<u8>,
-        /// The ID to download the entry's blob with, if it has one.
+        /// The ID to download the entry's blob with, if it has one. The field
+        /// must be present, with null for no blob.
+        #[serde(deserialize_with = "Option::deserialize")]
         blob_id: Option<Str>,
     },
     /// No entry is stored under the requested key, but the secondary key is
@@ -359,7 +361,16 @@ mod tests {
             b"\xffnot cbor".to_vec(),
             cbor_map(vec![("kind", "unknown".into())]),
             // The value must be a byte string.
-            cbor_map(vec![("kind", "exact".into()), ("value", 1.into())]),
+            cbor_map(vec![
+                ("kind", "exact".into()),
+                ("value", 1.into()),
+                ("blob_id", ciborium::Value::Null),
+            ]),
+            // `blob_id` is nullable, but it must be present.
+            cbor_map(vec![
+                ("kind", "exact".into()),
+                ("value", ciborium::Value::Bytes(b"value".to_vec())),
+            ]),
         ] {
             let error = decode_fetched(&body).unwrap_err();
             assert!(matches!(error, Error::MalformedResponse(_)), "{error:?}");
