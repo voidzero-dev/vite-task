@@ -287,6 +287,32 @@ mod tests {
     }
 
     #[test]
+    fn test_remote_cache_controls_are_not_fingerprinted() {
+        // Controls pass through when a pattern matches them, but never enter
+        // the fingerprint. On Windows the lowercase spellings are the same
+        // variables.
+        let mut envs = create_test_envs(vec![
+            ("VP_REMOTE_CACHE", "read-write"),
+            ("vp_remote_cache_url", "https://cache.example"),
+            ("OTHER", "value"),
+        ]);
+        let env_config = create_env_config(&["*"], &[]);
+
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
+
+        assert!(envs.contains_key(EnvName::from_ref(OsStr::new("VP_REMOTE_CACHE"))));
+        assert!(envs.contains_key(EnvName::from_ref(OsStr::new("vp_remote_cache_url"))));
+        let mut fingerprinted: Vec<&str> =
+            result.fingerprinted_envs.keys().map(Str::as_str).collect();
+        fingerprinted.sort_unstable();
+        if cfg!(windows) {
+            assert_eq!(fingerprinted, ["FORCE_COLOR", "OTHER"]);
+        } else {
+            assert_eq!(fingerprinted, ["FORCE_COLOR", "OTHER", "vp_remote_cache_url"]);
+        }
+    }
+
+    #[test]
     fn test_force_color_fallback_fingerprinted_when_opted_in_but_parent_absent() {
         // User opts in to `FORCE_COLOR` as fingerprinted, but parent has no
         // value. The fallback supplies `1`, and because the fingerprint scan

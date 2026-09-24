@@ -127,3 +127,38 @@ pub(crate) fn resolve(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn controls_match_env_names_by_platform_rules() {
+        for name in ["VP_REMOTE_CACHE", "VP_REMOTE_CACHE_URL"] {
+            assert!(is_control_env(EnvName::from_ref(name)));
+        }
+        for name in ["vp_remote_cache", "Vp_Remote_Cache_Url"] {
+            assert_eq!(is_control_env(EnvName::from_ref(name)), cfg!(windows), "{name}");
+        }
+        assert!(!is_control_env(EnvName::from_ref("VP_REMOTE_CACHE_TOKEN")));
+
+        let envs =
+            [("vp_remote_cache", "read-write"), ("vp_remote_cache_url", "https://cache.example")]
+                .into_iter()
+                .map(|(name, value)| {
+                    (
+                        EnvName::new(Arc::<OsStr>::from(OsStr::new(name))),
+                        Arc::<OsStr>::from(OsStr::new(value)),
+                    )
+                })
+                .collect();
+        let resolved = resolve(None, &envs).unwrap();
+        if cfg!(windows) {
+            let resolved = resolved.unwrap();
+            assert_eq!(resolved.mode, RemoteCacheAccess::ReadWrite);
+            assert_eq!(resolved.url.as_str(), "https://cache.example");
+        } else {
+            assert!(resolved.is_none());
+        }
+    }
+}
