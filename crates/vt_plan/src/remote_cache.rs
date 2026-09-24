@@ -1,11 +1,12 @@
 //! Remote cache settings resolved for each invocation during planning.
 
-use std::{ffi::OsStr, str::FromStr, sync::Arc};
+use std::{ffi::OsStr, sync::Arc};
 
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use vt_casefold::EnvName;
-use vt_str::Str;
+
+use crate::Error;
 
 pub(crate) const MODE_ENV: &str = "VP_REMOTE_CACHE";
 const URL_ENV: &str = "VP_REMOTE_CACHE_URL";
@@ -29,19 +30,6 @@ impl RemoteCacheMode {
     }
 }
 
-impl FromStr for RemoteCacheMode {
-    type Err = RemoteCacheConfigError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "off" => Ok(Self::Off),
-            "read" => Ok(Self::Read),
-            "read-write" => Ok(Self::ReadWrite),
-            _ => Err(RemoteCacheConfigError::InvalidMode(value.into())),
-        }
-    }
-}
-
 /// Remote endpoint and access mode for a cacheable execution.
 #[derive(Debug, Clone, Serialize)]
 pub struct RemoteCacheConfig {
@@ -58,60 +46,42 @@ pub enum RemoteCacheAccess {
     ReadWrite,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum RemoteCacheConfigError {
-    #[error("Invalid remote cache mode {0:?}: expected off, read, or read-write")]
-    InvalidMode(Str),
-    #[error("{0} must be valid Unicode")]
-    InvalidEnv(&'static str),
-    #[error("Remote caching requires cache.remote.url or VP_REMOTE_CACHE_URL")]
-    MissingEndpoint,
-}
-
 /// Whether `name` is one of the env vars that select remote cache access.
-/// They pass through to tasks like other `VP_*` variables, but never enter a
-/// cache fingerprint, so runs with different remote access share entries.
+/// They pass through to tasks like other `VP_*` variables, but stay out of
+/// fingerprinted envs, so runs with different remote access share entries.
 pub(crate) fn is_control_env<S: AsRef<OsStr> + ?Sized>(name: &EnvName<S>) -> bool {
     [MODE_ENV, URL_ENV].into_iter().any(|control| name == EnvName::from_ref(OsStr::new(control)))
-}
-
-/// `envs` without the remote cache controls.
-pub(crate) fn without_control_envs(
-    envs: &Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
-) -> Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>> {
-    if !envs.keys().any(is_control_env) {
-        return Arc::clone(envs);
-    }
-    Arc::new(
-        envs.iter()
-            .filter(|(name, _)| !is_control_env(name))
-            .map(|(name, value)| (name.clone(), Arc::clone(value)))
-            .collect(),
-    )
 }
 
 /// Reads a control env. An empty value counts as unset, like a CI secret that
 /// isn't available to the job.
 fn env_value<'a>(
     envs: &'a FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
-    name: &'static str,
-) -> Result<Option<&'a str>, RemoteCacheConfigError> {
-    envs.get(EnvName::from_ref(OsStr::new(name)))
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_str().ok_or(RemoteCacheConfigError::InvalidEnv(name)))
-        .transpose()
+    name: &str,
+) -> Option<&'a Arc<OsStr>> {
+    envs.get(EnvName::from_ref(OsStr::new(name))).filter(|value| !value.is_empty())
 }
 
 /// Resolve against this invocation's environment, including inherited overrides.
 pub(crate) fn resolve(
     configured_url: Option<&Arc<str>>,
     envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
-) -> Result<Option<RemoteCacheConfig>, RemoteCacheConfigError> {
-    let mode = env_value(envs, MODE_ENV)?.map(str::parse).transpose()?;
-    let url: Option<Arc<str>> = env_value(envs, URL_ENV)?
-        .map(Arc::from)
-        .or_else(|| configured_url.cloned())
-        .filter(|url| !url.is_empty());
+) -> Result<Option<RemoteCacheConfig>, Error> {
+    let mode = match env_value(envs, MODE_ENV) {
+        None => None,
+        Some(value) => Some(match value.to_str() {
+            Some("off") => RemoteCacheMode::Off,
+            Some("read") => RemoteCacheMode::Read,
+            Some("read-write") => RemoteCacheMode::ReadWrite,
+            _ => return Err(Error::InvalidRemoteCacheModeEnv(Arc::clone(value))),
+        }),
+    };
+    let url = match env_value(envs, URL_ENV) {
+        Some(value) => Some(Arc::<str>::from(
+            value.to_str().ok_or_else(|| Error::InvalidRemoteCacheUrlEnv(Arc::clone(value)))?,
+        )),
+        None => configured_url.filter(|url| !url.is_empty()).cloned(),
+    };
 
     match (mode, url) {
         (Some(RemoteCacheMode::Off), _) | (None, None) => Ok(None),
@@ -122,7 +92,7 @@ pub(crate) fn resolve(
             Ok(Some(RemoteCacheConfig { url, mode: RemoteCacheAccess::ReadWrite }))
         }
         (Some(RemoteCacheMode::Read | RemoteCacheMode::ReadWrite), None) => {
-            Err(RemoteCacheConfigError::MissingEndpoint)
+            Err(Error::MissingRemoteCacheEndpoint)
         }
     }
 }

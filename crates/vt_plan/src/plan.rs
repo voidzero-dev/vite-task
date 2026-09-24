@@ -89,7 +89,6 @@ fn effective_cache_config(
 async fn plan_task_as_execution_node(
     task_node_index: TaskNodeIndex,
     mut context: PlanContext<'_>,
-    remote_cache: Option<&RemoteCacheConfig>,
     with_hooks: bool,
 ) -> Result<TaskExecution, Error> {
     // Check for recursions in the task call stack.
@@ -122,8 +121,7 @@ async fn plan_task_as_execution_node(
         // Extra args (e.g. `vt run test --coverage`) must not be forwarded to hooks.
         pre_context.set_extra_args(Arc::new([]));
         let pre_execution =
-            Box::pin(plan_task_as_execution_node(pre_hook_idx, pre_context, remote_cache, false))
-                .await?;
+            Box::pin(plan_task_as_execution_node(pre_hook_idx, pre_context, false)).await?;
         items.extend(pre_execution.items);
     }
 
@@ -308,7 +306,7 @@ async fn plan_task_as_execution_node(
                             &cwd,
                             package_path,
                             parent_cache_config,
-                            remote_cache,
+                            context.remote_cache(),
                         )?;
                         ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                     }
@@ -339,7 +337,7 @@ async fn plan_task_as_execution_node(
                             Some(task_execution_cache_key),
                             &and_item.envs,
                             &resolved_options,
-                            remote_cache,
+                            context.remote_cache(),
                             &script_command.envs,
                             program_path,
                             spawn_args,
@@ -407,7 +405,7 @@ async fn plan_task_as_execution_node(
                 }),
                 &BTreeMap::new(),
                 &resolved_options,
-                remote_cache,
+                context.remote_cache(),
                 context.envs(),
                 Arc::clone(&*SHELL_PROGRAM_PATH),
                 SHELL_ARGS.iter().map(|s| Str::from(*s)).chain(std::iter::once(script)).collect(),
@@ -430,8 +428,7 @@ async fn plan_task_as_execution_node(
         // Extra args must not be forwarded to hooks.
         post_context.set_extra_args(Arc::new([]));
         let post_execution =
-            Box::pin(plan_task_as_execution_node(post_hook_idx, post_context, remote_cache, false))
-                .await?;
+            Box::pin(plan_task_as_execution_node(post_hook_idx, post_context, false)).await?;
         items.extend(post_execution.items);
     }
 
@@ -698,9 +695,7 @@ fn plan_spawn_execution(
                 input_config: cache_config.input_config.clone(),
                 output_config: cache_config.output_config.clone(),
                 remote_cache: if cache_config.remote_cache { remote_cache.cloned() } else { None },
-                // Runner-aware env queries must not record the controls in the
-                // post-run fingerprint either.
-                unfiltered_envs: remote_cache::without_control_envs(envs),
+                unfiltered_envs: Arc::clone(envs),
             });
         }
     }
@@ -775,6 +770,7 @@ pub async fn plan_query_request(
     }
     let remote_cache =
         remote_cache::resolve(context.resolved_global_cache().remote_url.as_ref(), context.envs())?;
+    context.set_remote_cache(remote_cache);
 
     // Resolve effective concurrency for this level.
     //
@@ -863,9 +859,7 @@ pub async fn plan_query_request(
             task_context.set_extra_args(Arc::clone(&empty_extra_args));
         }
         let task_execution =
-            plan_task_as_execution_node(task_index, task_context, remote_cache.as_ref(), true)
-                .boxed_local()
-                .await?;
+            plan_task_as_execution_node(task_index, task_context, true).boxed_local().await?;
         execution_node_indices_by_task_index
             .insert(task_index, inner_graph.add_node(task_execution));
     }
