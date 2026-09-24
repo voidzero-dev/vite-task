@@ -24,10 +24,10 @@ $ vtt write-file dist/output.txt built
 A remote hit downloads the output archive. Hits never upload.
 
 ```
-$ vtt write-file dist/output.txt built ◉ cache hit, replaying
+$ vtt write-file dist/output.txt built ◉ remote cache hit, replaying
 
 ---
-vt run: cache hit.
+vt run: remote cache hit.
 [remote-cache] POST /fetch 200 exact
 [remote-cache] GET /blob/1 200
 ```
