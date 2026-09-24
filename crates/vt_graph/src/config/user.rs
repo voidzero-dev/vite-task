@@ -334,7 +334,7 @@ pub enum UserTaskDefinition {
 ///
 /// This option can only be set in the workspace root's config file.
 /// Setting it in a package's config will result in an error.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
 #[serde(untagged, deny_unknown_fields)]
@@ -359,7 +359,21 @@ pub enum UserGlobalCacheConfig {
         ///
         /// Default: `true`
         tasks: Option<bool>,
+
+        /// Remote cache shared by tasks in the workspace.
+        remote: Option<UserRemoteCacheConfig>,
     },
+}
+
+impl UserGlobalCacheConfig {
+    /// The remote cache settings, if configured.
+    #[must_use]
+    pub fn into_remote(self) -> Option<UserRemoteCacheConfig> {
+        match self {
+            Self::Bool(_) => None,
+            Self::Detailed { remote, .. } => remote,
+        }
+    }
 }
 
 /// Resolved global cache configuration with concrete boolean values.
@@ -379,15 +393,16 @@ impl ResolvedGlobalCacheConfig {
             None => Self { scripts: false, tasks: true },
             Some(UserGlobalCacheConfig::Bool(true)) => Self { scripts: true, tasks: true },
             Some(UserGlobalCacheConfig::Bool(false)) => Self { scripts: false, tasks: false },
-            Some(UserGlobalCacheConfig::Detailed { scripts, tasks }) => {
+            Some(UserGlobalCacheConfig::Detailed { scripts, tasks, .. }) => {
                 Self { scripts: scripts.unwrap_or(false), tasks: tasks.unwrap_or(true) }
             }
         }
     }
 }
 
-/// Remote cache endpoint shared by tasks in a workspace.
-#[derive(Debug, Clone, Deserialize)]
+/// Remote cache settings in the workspace root's `cache` config.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "RemoteCacheConfig"))]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct UserRemoteCacheConfig {
@@ -406,9 +421,6 @@ pub struct UserRunConfig {
     /// This option can only be set in the workspace root's config file.
     /// Setting it in a package's config will result in an error.
     pub cache: Option<UserGlobalCacheConfig>,
-
-    /// Remote cache endpoint. Only allowed in the workspace root config.
-    pub remote_cache: Option<UserRemoteCacheConfig>,
 
     /// Task definitions: full task objects, command strings, or command string arrays.
     pub tasks: Option<FxHashMap<Str, UserTaskDefinition>>,
@@ -998,6 +1010,28 @@ mod tests {
         let resolved = ResolvedGlobalCacheConfig::resolve_from(Some(&config));
         assert!(resolved.scripts);
         assert!(!resolved.tasks);
+    }
+
+    #[test]
+    fn test_global_cache_detailed_remote() {
+        let config: UserGlobalCacheConfig = serde_json::from_value(json!({
+            "scripts": true,
+            "remote": { "url": "https://cache.example/projects/test" },
+        }))
+        .unwrap();
+        let resolved = ResolvedGlobalCacheConfig::resolve_from(Some(&config));
+        assert!(resolved.scripts);
+        assert!(resolved.tasks);
+        assert_eq!(
+            config.into_remote(),
+            Some(UserRemoteCacheConfig { url: "https://cache.example/projects/test".into() })
+        );
+
+        assert!(
+            serde_json::from_value::<UserGlobalCacheConfig>(json!({ "remote": { "foo": 42 } }))
+                .is_err()
+        );
+        assert!(serde_json::from_value::<UserRunConfig>(json!({ "remoteCache": {} })).is_err());
     }
 
     #[test]

@@ -1,1 +1,1 @@
-Remote caching requires remoteCache.url or VP_REMOTE_CACHE_URL
+Remote caching requires cache.remote.url or VP_REMOTE_CACHE_URL

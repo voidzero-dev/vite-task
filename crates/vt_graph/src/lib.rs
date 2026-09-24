@@ -126,11 +126,6 @@ pub enum TaskGraphLoadError {
     CacheInNonRootPackage { package_path: Arc<AbsolutePath> },
 
     #[error(
-        "`remoteCache` can only be set in the workspace root config, but found in {package_path}"
-    )]
-    RemoteCacheInNonRootPackage { package_path: Arc<AbsolutePath> },
-
-    #[error(
         "`enablePrePostScripts` can only be set in the workspace root config, but found in {package_path}"
     )]
     PrePostScriptsInNonRootPackage { package_path: Arc<AbsolutePath> },
@@ -241,7 +236,7 @@ pub struct IndexedTaskGraph {
     /// Global cache configuration resolved from the workspace root config.
     resolved_global_cache: ResolvedGlobalCacheConfig,
 
-    /// Remote cache endpoint from the workspace root.
+    /// Remote cache settings from the workspace root's `cache.remote`.
     remote_cache: Option<config::user::UserRemoteCacheConfig>,
 
     /// Whether pre/post script hooks are enabled (from `enablePrePostScripts` in workspace root config).
@@ -283,7 +278,6 @@ impl IndexedTaskGraph {
 
         // First pass: load all configs, extract root cache config, validate
         let mut root_cache = None;
-        let mut remote_cache = None;
         let mut root_pre_post_scripts_enabled = None;
         let mut package_configs: Vec<(PackageNodeIndex, Arc<AbsolutePath>, UserRunConfig)> =
             Vec::with_capacity(package_graph.node_count());
@@ -293,7 +287,7 @@ impl IndexedTaskGraph {
             let package_dir: Arc<AbsolutePath> = workspace_root.path.join(&package.path).into();
             let is_workspace_root = package.path.as_str().is_empty();
 
-            let user_config = config_loader
+            let mut user_config = config_loader
                 .load_user_config_file(&package_dir)
                 .await
                 .map_err(|error| TaskGraphLoadError::ConfigLoadError {
@@ -302,7 +296,7 @@ impl IndexedTaskGraph {
                 })?
                 .unwrap_or_default();
 
-            if let Some(cache) = user_config.cache {
+            if let Some(cache) = user_config.cache.take() {
                 if is_workspace_root {
                     root_cache = Some(cache);
                 } else {
@@ -310,15 +304,6 @@ impl IndexedTaskGraph {
                         package_path: package_dir.clone(),
                     });
                 }
-            }
-
-            if let Some(config) = &user_config.remote_cache {
-                if !is_workspace_root {
-                    return Err(TaskGraphLoadError::RemoteCacheInNonRootPackage {
-                        package_path: package_dir.clone(),
-                    });
-                }
-                remote_cache = Some(config.clone());
             }
 
             if let Some(val) = user_config.enable_pre_post_scripts {
@@ -335,6 +320,7 @@ impl IndexedTaskGraph {
         }
 
         let resolved_global_cache = ResolvedGlobalCacheConfig::resolve_from(root_cache.as_ref());
+        let remote_cache = root_cache.and_then(config::user::UserGlobalCacheConfig::into_remote);
 
         let mut top_level_cache_fields = TopLevelCacheFieldsCollector::default();
 
@@ -619,6 +605,7 @@ impl IndexedTaskGraph {
         &self.resolved_global_cache
     }
 
+    /// Remote cache settings from the workspace root config.
     #[must_use]
     pub const fn remote_cache_config(&self) -> Option<&config::user::UserRemoteCacheConfig> {
         self.remote_cache.as_ref()

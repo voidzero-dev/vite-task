@@ -1,6 +1,0 @@
-{
-  "name": "@test/remote-cache-non-root-config",
-  "workspaces": [
-    "packages/*"
-  ]
-}

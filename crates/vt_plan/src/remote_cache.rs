@@ -65,7 +65,7 @@ pub enum RemoteCacheConfigError {
     InvalidMode(Str),
     #[error("{0} must be valid Unicode")]
     InvalidEnv(&'static str),
-    #[error("Remote caching requires remoteCache.url or VP_REMOTE_CACHE_URL")]
+    #[error("Remote caching requires cache.remote.url or VP_REMOTE_CACHE_URL")]
     MissingEndpoint,
 }
 

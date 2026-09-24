@@ -121,7 +121,11 @@ scripts?: boolean,
  *
  * Default: `true`
  */
-tasks?: boolean, };
+tasks?: boolean,
+/**
+ * Remote cache shared by tasks in the workspace.
+ */
+remote?: RemoteCacheConfig, };
 
 export type UserPackageDependency = {
 /**
@@ -141,10 +145,6 @@ export type RunConfig = {
  * Setting it in a package's config will result in an error.
  */
 cache?: UserGlobalCacheConfig,
-/**
- * Remote cache endpoint. Only allowed in the workspace root config.
- */
-remoteCache?: RemoteCacheConfig,
 /**
  * Task definitions: full task objects, command strings, or command string arrays.
  */

@@ -1,7 +1,9 @@
 {
-  "cache": true,
-  "remoteCache": {
-    "url": "https://cache.example/projects/test"
+  "cache": {
+    "scripts": true,
+    "remote": {
+      "url": "https://cache.example/projects/test"
+    }
   },
   "tasks": {
     "build": {
