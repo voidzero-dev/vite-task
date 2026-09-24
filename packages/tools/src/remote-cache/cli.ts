@@ -7,7 +7,12 @@ import { createCacheServer } from './server.ts';
 const basePath = '/projects/test';
 
 const [command, ...args] = process.argv.slice(2);
-const server = createCacheServer({ basePath, directory: 'remote-cache' });
+const requests: string[] = [];
+const server = createCacheServer({
+  basePath,
+  directory: 'remote-cache',
+  logRequest: (line) => requests.push(line),
+});
 server.listen(0, '127.0.0.1');
 await once(server, 'listening');
 const { port } = server.address() as AddressInfo;
@@ -17,4 +22,5 @@ const child = spawn(command!, args, {
 });
 const [code] = (await once(child, 'exit')) as [number | null];
 server.close();
+for (const line of requests) console.error(`[remote-cache] ${line}`);
 process.exitCode = code;

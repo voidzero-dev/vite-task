@@ -1,0 +1,11 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt write-file dist/output.txt built",
+      "cache": {
+        "input": ["src/**"],
+        "output": ["dist/**"]
+      }
+    }
+  }
+}

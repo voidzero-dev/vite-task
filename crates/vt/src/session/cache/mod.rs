@@ -2,6 +2,7 @@
 
 pub mod archive;
 pub mod display;
+pub mod remote;
 mod validation;
 
 use std::{collections::BTreeMap, fmt::Display, fs::File, io::Write, sync::Arc, time::Duration};
@@ -17,7 +18,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use vt_graph::config::ResolvedGlobConfig;
 use vt_path::{AbsolutePath, RelativePathBuf};
-use vt_plan::cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint};
+use vt_plan::{
+    cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint},
+    remote_cache::{RemoteCacheAccess, ResolvedRemoteCacheConfig},
+};
 use vt_str::Str;
 use wincode::{
     SchemaRead, SchemaReadOwned, SchemaWrite,
@@ -26,6 +30,7 @@ use wincode::{
     io::{Reader, Writer},
 };
 
+use self::remote::{RemoteClients, UploadError};
 use super::execute::{
     fingerprint::{PostRunFingerprint, TrackedEnvQuery},
     pipe::StdOutput,
@@ -140,6 +145,7 @@ pub struct CacheEntryValue {
 #[derive(Debug)]
 pub struct ExecutionCache {
     conn: Mutex<Connection>,
+    remote_clients: RemoteClients,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -310,7 +316,7 @@ impl ExecutionCache {
              CREATE TABLE IF NOT EXISTS task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
         )?;
         // Lock is released when lock_file is dropped
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self { conn: Mutex::new(conn), remote_clients: RemoteClients::default() })
     }
 
     #[tracing::instrument]
@@ -364,13 +370,17 @@ impl ExecutionCache {
     /// If a previous entry exists for the same cache key with a different
     /// `output_archive`, the stale archive file in `cache_dir` is removed
     /// (best-effort) so it doesn't accumulate on disk.
+    ///
+    /// In `read-write` remote mode, the entry is then uploaded to the remote
+    /// cache. Returns `Ok(Err(_))` if the local update succeeded but the
+    /// upload failed.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn update(
         &self,
         cache_metadata: &CacheMetadata,
         cache_value: CacheEntryValue,
         cache_dir: &AbsolutePath,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Result<(), UploadError>> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
@@ -389,7 +399,20 @@ impl ExecutionCache {
 
         self.upsert_cache_entry(&cache_key, &cache_value).await?;
         self.upsert_task_fingerprint(execution_cache_key, &cache_key).await?;
-        Ok(())
+
+        let Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::ReadWrite, url }) =
+            &cache_metadata.remote_cache
+        else {
+            return Ok(Ok(()));
+        };
+        let upload = self
+            .remote_clients
+            .upload(url, &cache_key, execution_cache_key, &cache_value, cache_dir)
+            .await;
+        if let Err(err) = &upload {
+            tracing::debug!(?err, "remote cache upload failed");
+        }
+        Ok(upload)
     }
 }
 

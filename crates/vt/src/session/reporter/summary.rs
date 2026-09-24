@@ -120,6 +120,9 @@ pub enum SpawnOutcome {
         /// Set when a runner-aware tool called `disableCache()`, skipping
         /// cache update.
         tool_disabled_cache: bool,
+        /// Why uploading the entry to the remote cache failed, if it did.
+        /// The local cache was still updated.
+        upload_error: Option<Str>,
     },
 
     /// Process exited with non-zero status.
@@ -183,6 +186,13 @@ struct SummaryStats {
     total_saved: Duration,
     /// Display names of tasks that were not cached due to read-write overlap.
     input_modified_task_names: Vec<Str>,
+    /// Tasks whose upload to the remote cache failed.
+    upload_failures: Vec<UploadFailure>,
+}
+
+struct UploadFailure {
+    task_name: Str,
+    reason: Str,
 }
 
 impl SummaryStats {
@@ -195,6 +205,7 @@ impl SummaryStats {
             failed: 0,
             total_saved: Duration::ZERO,
             input_modified_task_names: Vec::new(),
+            upload_failures: Vec::new(),
         };
 
         for task in tasks {
@@ -219,6 +230,12 @@ impl SummaryStats {
                             stats.input_modified_task_names.push(task.format_task_display());
                         }
                         SpawnOutcome::Success { .. } => {}
+                    }
+                    if let SpawnOutcome::Success { upload_error: Some(reason), .. } = outcome {
+                        stats.upload_failures.push(UploadFailure {
+                            task_name: task.format_task_display(),
+                            reason: reason.clone(),
+                        });
                     }
                 }
             }
@@ -353,6 +370,12 @@ impl TaskResult {
             cache_update_status,
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete)
         );
+        let upload_error = match cache_update_status {
+            CacheUpdateStatus::Updated { upload_error: Some(err) } => {
+                Some(vt_str::format!("{err}"))
+            }
+            _ => None,
+        };
 
         match cache_status {
             CacheStatus::Hit { replayed_duration } => {
@@ -369,6 +392,7 @@ impl TaskResult {
                     ipc_server_error,
                     tool_disabled_cache,
                     tracking_incomplete,
+                    upload_error,
                 ),
             },
             CacheStatus::Miss(cache_miss) => Self::Spawned {
@@ -383,6 +407,7 @@ impl TaskResult {
                     ipc_server_error,
                     tool_disabled_cache,
                     tracking_incomplete,
+                    upload_error,
                 ),
             },
         }
@@ -390,6 +415,10 @@ impl TaskResult {
 }
 
 /// Build a [`SpawnOutcome`] from process exit status and optional pre-converted error.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each cache update detail is extracted by the caller and passed through"
+)]
 fn spawn_outcome_from_execution(
     exit_status: Option<std::process::ExitStatus>,
     saved_error: Option<&SavedExecutionError>,
@@ -398,6 +427,7 @@ fn spawn_outcome_from_execution(
     ipc_server_error: Option<Str>,
     tool_disabled_cache: bool,
     tracking_incomplete: bool,
+    upload_error: Option<Str>,
 ) -> SpawnOutcome {
     match (exit_status, saved_error) {
         // Spawn error — process never ran
@@ -410,6 +440,7 @@ fn spawn_outcome_from_execution(
             ipc_server_error,
             tool_disabled_cache,
             tracking_incomplete,
+            upload_error,
         },
         // Process exited with non-zero code
         (Some(status), _) => {
@@ -431,6 +462,7 @@ fn spawn_outcome_from_execution(
             ipc_server_error: None,
             tool_disabled_cache: false,
             tracking_incomplete: false,
+            upload_error: None,
         },
     }
 }
@@ -641,6 +673,16 @@ impl TaskResult {
         }
     }
 
+    /// Why uploading the entry to the remote cache failed, if it did.
+    const fn upload_error(&self) -> Option<&Str> {
+        match self {
+            Self::Spawned { outcome: SpawnOutcome::Success { upload_error, .. }, .. } => {
+                upload_error.as_ref()
+            }
+            _ => None,
+        }
+    }
+
     /// Optional error associated with this result.
     pub const fn error(&self) -> Option<&SavedExecutionError> {
         match self {
@@ -801,6 +843,15 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
         let cache_detail = task.result.format_cache_detail();
         let _ = writeln!(buf, "      {}", cache_detail.style(task.result.cache_detail_style()));
 
+        if let Some(reason) = task.result.upload_error() {
+            let _ = writeln!(
+                buf,
+                "      {}",
+                vt_str::format!("⚠ Not uploaded to the remote cache: {reason}")
+                    .style(Style::new().yellow())
+            );
+        }
+
         // Error message if present
         if let Some(err) = task.result.error() {
             let msg = err.display_message();
@@ -848,8 +899,12 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
 
     let is_single_task = summary.tasks.len() == 1;
 
-    // Single task + not cache hit + no input modification → no summary
-    if is_single_task && stats.cache_hits == 0 && stats.input_modified_task_names.is_empty() {
+    // Single task + not cache hit + no notice → no summary
+    if is_single_task
+        && stats.cache_hits == 0
+        && stats.input_modified_task_names.is_empty()
+        && stats.upload_failures.is_empty()
+    {
         return Vec::new();
     }
 
@@ -908,13 +963,16 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
 
         let _ = write!(buf, ".");
     } else {
-        // Single task, no cache hit — only shown when input_modified is non-empty
+        // Single task, no cache hit — only shown with a notice below
         let _ = write!(buf, "{}", run_label.as_str().style(Style::new().blue().bold()));
     }
 
-    // Inline input-modified notice before the --last-details hint
+    // Inline notices before the --last-details hint
     if !stats.input_modified_task_names.is_empty() {
         format_input_modified_notice(&mut buf, &stats.input_modified_task_names);
+    }
+    if !stats.upload_failures.is_empty() {
+        format_upload_failed_notice(&mut buf, &stats.upload_failures);
     }
 
     if show_last_details_hint {
@@ -946,9 +1004,77 @@ fn format_input_modified_notice(buf: &mut Vec<u8>, task_names: &[Str]) {
     }
 }
 
+/// Write the "not uploaded to the remote cache" notice inline. The reason is
+/// shown when all failed uploads share it.
+fn format_upload_failed_notice(buf: &mut Vec<u8>, failures: &[UploadFailure]) {
+    let _ = write!(buf, " ");
+
+    let first = &failures[0];
+    let _ = write!(buf, "{}", first.task_name.as_str().style(Style::new().bold()));
+    let remaining = failures.len() - 1;
+    if remaining > 0 {
+        let _ = write!(buf, " (and {remaining} more)");
+    }
+
+    let _ = write!(buf, " not uploaded to the remote cache");
+    if failures.iter().all(|failure| failure.reason == first.reason) {
+        let _ = write!(buf, ": {}", first.reason);
+    }
+    let _ = write!(buf, ".");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn upload_failed_task(task_name: &str, reason: &str) -> TaskSummary {
+        TaskSummary {
+            package_name: Str::from("pkg"),
+            task_name: Str::from(task_name),
+            command: Str::from("build"),
+            cwd: Str::default(),
+            result: TaskResult::Spawned {
+                cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::NotFound),
+                outcome: SpawnOutcome::Success {
+                    infra_error: None,
+                    input_modified_path: None,
+                    fspy_unsupported: false,
+                    ipc_server_error: None,
+                    tracking_incomplete: false,
+                    tool_disabled_cache: false,
+                    upload_error: Some(Str::from(reason)),
+                },
+            },
+        }
+    }
+
+    fn compact_summary(tasks: Vec<TaskSummary>) -> Str {
+        let bytes = format_compact_summary(&LastRunSummary { tasks, exit_code: 0 }, "vp");
+        vt_str::format!("{}", anstream::adapter::strip_str(std::str::from_utf8(&bytes).unwrap()))
+    }
+
+    #[test]
+    fn upload_failure_notice_shows_a_shared_reason() {
+        let summary = compact_summary(vec![
+            upload_failed_task("a", "network error"),
+            upload_failed_task("b", "network error"),
+        ]);
+        assert_eq!(
+            summary.as_str(),
+            "---\nvp run: 0/2 cache hit (0%). pkg#a (and 1 more) not uploaded to the remote cache: \
+             network error. (Run `vp run --last-details` for full details)\n"
+        );
+
+        let summary = compact_summary(vec![
+            upload_failed_task("a", "network error"),
+            upload_failed_task("b", "HTTP status 500"),
+        ]);
+        assert_eq!(
+            summary.as_str(),
+            "---\nvp run: 0/2 cache hit (0%). pkg#a (and 1 more) not uploaded to the remote cache. \
+             (Run `vp run --last-details` for full details)\n"
+        );
+    }
 
     #[test]
     fn output_forwarding_error_has_distinct_message() {
