@@ -30,7 +30,7 @@ use wincode::{
     io::{Reader, Writer},
 };
 
-use self::remote::{ReadError, RemoteClients, RemoteEntry, UploadError};
+use self::remote::{RemoteClients, Restore, UploadError};
 use super::execute::{
     fingerprint::{PostRunFingerprint, TrackedEnvQuery},
     pipe::StdOutput,
@@ -383,9 +383,11 @@ impl ExecutionCache {
 
         // Try to find the cache entry by key (spawn fingerprint + input config)
         if let Some(cache_value) = self.get_by_cache_key(cache_key).await? {
-            if let Some(mismatch) =
-                cache_value.validate(cache_metadata, globbed_inputs, workspace_root)?
-            {
+            if let Some(mismatch) = cache_value.validate(
+                &cache_metadata.unfiltered_envs,
+                globbed_inputs,
+                workspace_root,
+            )? {
                 return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
             }
             // Associate the execution key to the cache entry key if not already,
@@ -411,7 +413,8 @@ impl ExecutionCache {
     /// Fetch the entry from the remote cache at `endpoint`. An exact entry
     /// that passes validation is a hit once its output archive is downloaded
     /// and the entry is recorded locally. A fallback entry, a failed
-    /// validation, or a failed read is a miss.
+    /// validation, or a failed read is a miss. An error while validating
+    /// counts as a failed read, so the remote entry never fails the task.
     async fn try_hit_remote(
         &self,
         endpoint: &Arc<str>,
@@ -421,34 +424,24 @@ impl ExecutionCache {
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
-        let read_failed = |err: ReadError| {
-            tracing::debug!(?err, "remote cache read failed");
-            CacheMiss::from(err)
-        };
-
         let fetched = self
             .remote_clients
             .fetch(endpoint, cache_key, &cache_metadata.execution_cache_key)
             .await;
-        let (cache_value, blob_id) = match fetched {
-            Ok(RemoteEntry::Exact { value, blob_id }) => (value, blob_id),
-            Ok(RemoteEntry::Fallback { key }) => {
-                return Ok(Err(CacheMiss::FingerprintMismatch(key.into_mismatch(cache_key))));
-            }
-            Ok(RemoteEntry::NotFound) => return Ok(Err(CacheMiss::NotFound)),
-            Err(err) => return Ok(Err(read_failed(err))),
+        let validate = |cache_value: &CacheEntryValue| {
+            cache_value.validate(&cache_metadata.unfiltered_envs, globbed_inputs, workspace_root)
         };
-        if let Some(mismatch) =
-            cache_value.validate(cache_metadata, globbed_inputs, workspace_root)?
-        {
-            return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
-        }
+        let Restore { value: cache_value, blob_id } =
+            match remote::resolve(fetched, cache_key, validate) {
+                Ok(restore) => restore,
+                Err(miss) => return Ok(Err(miss)),
+            };
 
         let output_archive = match blob_id {
             Some(blob_id) => {
                 match self.remote_clients.download_archive(endpoint, &blob_id, cache_dir).await {
                     Ok(archive_name) => Some(archive_name),
-                    Err(err) => return Ok(Err(read_failed(err))),
+                    Err(err) => return Ok(Err(err.into_miss())),
                 }
             }
             None => None,

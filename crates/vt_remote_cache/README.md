@@ -4,7 +4,7 @@ Client for the [remote cache server API](https://github.com/voidzero-dev/vite-ta
 
 `Client::new` takes the configured endpoint, which can include a namespace path, such as `https://cache.example.com/projects/my-project`. Each operation appends its route to that path, so a store goes to `https://cache.example.com/projects/my-project/store`. Endpoints that aren't HTTP or HTTPS URLs are rejected.
 
-`Client::fetch` sends a key and a secondary key as a CBOR map of byte strings. It decodes the response into `Fetched`: an exact match with its value and optional blob ID, a fallback match with the key it's stored under, or no match. The fallback's value and blob ID aren't decoded.
+`Client::fetch` sends a key and a secondary key as a CBOR map of byte strings. It decodes the response into `Fetched`: an exact match with its value and blob ID, a fallback match with the key it's stored under, or no match. An exact match must include `blob_id`, which is null when there's no blob. The fallback's value and blob ID aren't decoded.
 
 `Client::download` gets a blob by its ID and streams it into a file. The file is created only after a 200 response. A download that fails after that can leave the file incomplete, so the caller removes it.
 
