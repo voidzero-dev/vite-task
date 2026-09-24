@@ -209,7 +209,7 @@ pub async fn plan_query(
 ) -> Result<PlanResult, Error> {
     let indexed_task_graph = task_graph_loader.load_task_graph().await?;
 
-    let resolved_global_cache = *indexed_task_graph.global_cache_config();
+    let resolved_global_cache = indexed_task_graph.global_cache_config().clone();
 
     let QueryPlanRequest { query, plan_options } = query_plan_request;
     let query = Arc::new(query);
@@ -225,17 +225,21 @@ pub async fn plan_query(
     plan_query_request(query, plan_options, context).await
 }
 
-const fn resolve_cache_with_override(
+fn resolve_cache_with_override(
     graph_cache: vt_graph::config::ResolvedGlobalCacheConfig,
     cache_override: CacheOverride,
 ) -> vt_graph::config::ResolvedGlobalCacheConfig {
     match cache_override {
-        CacheOverride::ForceEnabled => {
-            vt_graph::config::ResolvedGlobalCacheConfig { scripts: true, tasks: true }
-        }
-        CacheOverride::ForceDisabled => {
-            vt_graph::config::ResolvedGlobalCacheConfig { scripts: false, tasks: false }
-        }
+        CacheOverride::ForceEnabled => vt_graph::config::ResolvedGlobalCacheConfig {
+            scripts: true,
+            tasks: true,
+            ..graph_cache
+        },
+        CacheOverride::ForceDisabled => vt_graph::config::ResolvedGlobalCacheConfig {
+            scripts: false,
+            tasks: false,
+            ..graph_cache
+        },
         CacheOverride::None => graph_cache,
     }
 }

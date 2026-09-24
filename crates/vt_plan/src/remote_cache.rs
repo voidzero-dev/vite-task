@@ -5,7 +5,6 @@ use std::{ffi::OsStr, str::FromStr, sync::Arc};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use vt_casefold::EnvName;
-use vt_graph::config::user::UserRemoteCacheConfig;
 use vt_str::Str;
 
 pub(crate) const MODE_ENV: &str = "VP_REMOTE_CACHE";
@@ -48,7 +47,7 @@ impl FromStr for RemoteCacheMode {
 pub struct RemoteCacheConfig {
     pub mode: RemoteCacheAccess,
     /// Endpoint as configured. It is validated when the remote cache is used.
-    pub url: Str,
+    pub url: Arc<str>,
 }
 
 /// Access permitted when remote caching is enabled.
@@ -105,14 +104,14 @@ fn env_value<'a>(
 
 /// Resolve against this invocation's environment, including inherited overrides.
 pub(crate) fn resolve(
-    configured: Option<&UserRemoteCacheConfig>,
+    configured_url: Option<&Arc<str>>,
     envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
 ) -> Result<Option<RemoteCacheConfig>, RemoteCacheConfigError> {
     let mode = env_value(envs, MODE_ENV)?.map(str::parse).transpose()?;
-    let url = env_value(envs, URL_ENV)?
-        .or_else(|| configured.map(|config| config.url.as_str()))
-        .filter(|url| !url.is_empty())
-        .map(Str::from);
+    let url: Option<Arc<str>> = env_value(envs, URL_ENV)?
+        .map(Arc::from)
+        .or_else(|| configured_url.cloned())
+        .filter(|url| !url.is_empty());
 
     match (mode, url) {
         (Some(RemoteCacheMode::Off), _) | (None, None) => Ok(None),
@@ -156,7 +155,7 @@ mod tests {
         if cfg!(windows) {
             let resolved = resolved.unwrap();
             assert_eq!(resolved.mode, RemoteCacheAccess::ReadWrite);
-            assert_eq!(resolved.url.as_str(), "https://cache.example");
+            assert_eq!(&*resolved.url, "https://cache.example");
         } else {
             assert!(resolved.is_none());
         }

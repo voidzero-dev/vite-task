@@ -236,9 +236,6 @@ pub struct IndexedTaskGraph {
     /// Global cache configuration resolved from the workspace root config.
     resolved_global_cache: ResolvedGlobalCacheConfig,
 
-    /// Remote cache settings from the workspace root's `cache.remote`.
-    remote_cache: Option<config::user::UserRemoteCacheConfig>,
-
     /// Whether pre/post script hooks are enabled (from `enablePrePostScripts` in workspace root config).
     pre_post_scripts_enabled: bool,
 }
@@ -320,7 +317,6 @@ impl IndexedTaskGraph {
         }
 
         let resolved_global_cache = ResolvedGlobalCacheConfig::resolve_from(root_cache.as_ref());
-        let remote_cache = root_cache.and_then(config::user::UserGlobalCacheConfig::into_remote);
 
         let mut top_level_cache_fields = TopLevelCacheFieldsCollector::default();
 
@@ -438,7 +434,6 @@ impl IndexedTaskGraph {
             node_indices_by_task_id,
             task_ids_by_node_index,
             resolved_global_cache,
-            remote_cache,
             pre_post_scripts_enabled: root_pre_post_scripts_enabled.unwrap_or(true),
         };
 
@@ -603,12 +598,6 @@ impl IndexedTaskGraph {
     #[must_use]
     pub const fn global_cache_config(&self) -> &ResolvedGlobalCacheConfig {
         &self.resolved_global_cache
-    }
-
-    /// Remote cache settings from the workspace root config.
-    #[must_use]
-    pub const fn remote_cache_config(&self) -> Option<&config::user::UserRemoteCacheConfig> {
-        self.remote_cache.as_ref()
     }
 
     /// Whether pre/post script hooks are enabled workspace-wide.

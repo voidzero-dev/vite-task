@@ -146,7 +146,7 @@ impl<'a> PlanContext<'a> {
         &self.resolved_global_cache
     }
 
-    pub const fn set_resolved_global_cache(&mut self, config: ResolvedGlobalCacheConfig) {
+    pub fn set_resolved_global_cache(&mut self, config: ResolvedGlobalCacheConfig) {
         self.resolved_global_cache = config;
     }
 
@@ -173,7 +173,7 @@ impl<'a> PlanContext<'a> {
             task_call_stack: self.task_call_stack.clone(),
             indexed_task_graph: self.indexed_task_graph,
             extra_args: Arc::clone(&self.extra_args),
-            resolved_global_cache: self.resolved_global_cache,
+            resolved_global_cache: self.resolved_global_cache.clone(),
             parent_query: Arc::clone(&self.parent_query),
         }
     }

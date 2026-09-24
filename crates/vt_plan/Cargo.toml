@@ -19,7 +19,7 @@ futures-util = { workspace = true }
 pathdiff = { workspace = true }
 petgraph = { workspace = true }
 rustc-hash = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive", "rc"] }
 sha2 = { workspace = true }
 shell-escape = { workspace = true }
 thiserror = { workspace = true }

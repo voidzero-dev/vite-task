@@ -365,22 +365,13 @@ pub enum UserGlobalCacheConfig {
     },
 }
 
-impl UserGlobalCacheConfig {
-    /// The remote cache settings, if configured.
-    #[must_use]
-    pub fn into_remote(self) -> Option<UserRemoteCacheConfig> {
-        match self {
-            Self::Bool(_) => None,
-            Self::Detailed { remote, .. } => remote,
-        }
-    }
-}
-
-/// Resolved global cache configuration with concrete boolean values.
-#[derive(Debug, Clone, Copy)]
+/// Resolved global cache configuration with concrete values.
+#[derive(Debug, Clone)]
 pub struct ResolvedGlobalCacheConfig {
     pub scripts: bool,
     pub tasks: bool,
+    /// Remote cache endpoint from `cache.remote.url`, if configured.
+    pub remote_url: Option<Arc<str>>,
 }
 
 impl ResolvedGlobalCacheConfig {
@@ -390,12 +381,18 @@ impl ResolvedGlobalCacheConfig {
     #[must_use]
     pub fn resolve_from(config: Option<&UserGlobalCacheConfig>) -> Self {
         match config {
-            None => Self { scripts: false, tasks: true },
-            Some(UserGlobalCacheConfig::Bool(true)) => Self { scripts: true, tasks: true },
-            Some(UserGlobalCacheConfig::Bool(false)) => Self { scripts: false, tasks: false },
-            Some(UserGlobalCacheConfig::Detailed { scripts, tasks, .. }) => {
-                Self { scripts: scripts.unwrap_or(false), tasks: tasks.unwrap_or(true) }
+            None => Self { scripts: false, tasks: true, remote_url: None },
+            Some(UserGlobalCacheConfig::Bool(true)) => {
+                Self { scripts: true, tasks: true, remote_url: None }
             }
+            Some(UserGlobalCacheConfig::Bool(false)) => {
+                Self { scripts: false, tasks: false, remote_url: None }
+            }
+            Some(UserGlobalCacheConfig::Detailed { scripts, tasks, remote }) => Self {
+                scripts: scripts.unwrap_or(false),
+                tasks: tasks.unwrap_or(true),
+                remote_url: remote.as_ref().map(|remote| Arc::clone(&remote.url)),
+            },
         }
     }
 }
@@ -407,7 +404,7 @@ impl ResolvedGlobalCacheConfig {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct UserRemoteCacheConfig {
     /// HTTP or HTTPS namespace endpoint. Overridden by `VP_REMOTE_CACHE_URL`.
-    pub url: Str,
+    pub url: Arc<str>,
 }
 
 /// User configuration structure for `run` field in `vite.config.*`
@@ -1022,10 +1019,7 @@ mod tests {
         let resolved = ResolvedGlobalCacheConfig::resolve_from(Some(&config));
         assert!(resolved.scripts);
         assert!(resolved.tasks);
-        assert_eq!(
-            config.into_remote(),
-            Some(UserRemoteCacheConfig { url: "https://cache.example/projects/test".into() })
-        );
+        assert_eq!(resolved.remote_url.as_deref(), Some("https://cache.example/projects/test"));
 
         assert!(
             serde_json::from_value::<UserGlobalCacheConfig>(json!({ "remote": { "foo": 42 } }))

@@ -73,7 +73,7 @@ fn which(
 fn effective_cache_config(
     task_cache_config: Option<&CacheConfig>,
     source: TaskSource,
-    resolved_global_cache: ResolvedGlobalCacheConfig,
+    resolved_global_cache: &ResolvedGlobalCacheConfig,
 ) -> Option<CacheConfig> {
     let enabled = match source {
         TaskSource::PackageJsonScript => resolved_global_cache.scripts,
@@ -293,7 +293,7 @@ async fn plan_task_as_execution_node(
                         let task_effective_cache = effective_cache_config(
                             task_node.resolved_config.resolved_options.cache_config.as_ref(),
                             task_node.source,
-                            *context.resolved_global_cache(),
+                            context.resolved_global_cache(),
                         );
                         let parent_cache_config = task_effective_cache
                             .as_ref()
@@ -331,7 +331,7 @@ async fn plan_task_as_execution_node(
                             cache_config: effective_cache_config(
                                 task_node.resolved_config.resolved_options.cache_config.as_ref(),
                                 task_node.source,
-                                *context.resolved_global_cache(),
+                                context.resolved_global_cache(),
                             ),
                         };
                         let spawn_execution = plan_spawn_execution(
@@ -389,7 +389,7 @@ async fn plan_task_as_execution_node(
                 cache_config: effective_cache_config(
                     task_node.resolved_config.resolved_options.cache_config.as_ref(),
                     task_node.source,
-                    *context.resolved_global_cache(),
+                    context.resolved_global_cache(),
                 ),
             };
             let spawn_execution = plan_spawn_execution(
@@ -763,7 +763,7 @@ pub async fn plan_query_request(
         // runs `vp run --cache inner` re-enables caching from the workspace
         // defaults, rather than from the parent's disabled state.
         let final_cache = resolve_cache_with_override(
-            *context.indexed_task_graph().global_cache_config(),
+            context.indexed_task_graph().global_cache_config().clone(),
             cache_override,
         );
         context.set_resolved_global_cache(final_cache);
@@ -774,7 +774,7 @@ pub async fn plan_query_request(
         context.add_envs(std::iter::once((remote_cache::MODE_ENV, mode.as_str())));
     }
     let remote_cache =
-        remote_cache::resolve(context.indexed_task_graph().remote_cache_config(), context.envs())?;
+        remote_cache::resolve(context.resolved_global_cache().remote_url.as_ref(), context.envs())?;
 
     // Resolve effective concurrency for this level.
     //
