@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use vt_plan::cache_metadata::SpawnFingerprint;
 use vt_str::Str;
 
-use super::{CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind, split_path};
+use super::{
+    CacheHitSource, CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind, split_path,
+};
 use crate::session::event::CacheStatus;
 
 /// Describes a single atomic change between two spawn fingerprints.
@@ -141,7 +143,7 @@ fn format_env_changed_inline(names: &[&Str]) -> Str {
 /// Format cache status for inline display (during Start event).
 ///
 /// Returns `Some(formatted_string)` for Hit, Miss with reason, and Disabled, None for `NotFound`.
-/// - Cache Hit: Shows "cache hit" indicator
+/// - Cache Hit: Shows "cache hit" indicator, or "remote cache hit" for a remote hit
 /// - Cache Miss (NotFound): No inline message (just command)
 /// - Cache Miss (with mismatch): Shows "cache miss" with brief reason
 /// - Cache Disabled: Shows "cache disabled" with reason
@@ -149,9 +151,12 @@ fn format_env_changed_inline(names: &[&Str]) -> Str {
 /// Note: Returns plain text without styling. The reporter applies colors.
 pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
     match cache_status {
-        CacheStatus::Hit { .. } => {
+        CacheStatus::Hit { source, .. } => {
             // Show "cache hit" indicator when replaying from cache
-            Some(Str::from("◉ cache hit, replaying"))
+            Some(match source {
+                CacheHitSource::Local => Str::from("◉ cache hit, replaying"),
+                CacheHitSource::Remote => Str::from("◉ remote cache hit, replaying"),
+            })
         }
         CacheStatus::Miss(CacheMiss::NotFound) => {
             // No inline message for "not found" case - just show command
@@ -246,6 +251,21 @@ mod tests {
         assert_eq!(
             format_env_changed_inline(&[&first, &second]).as_str(),
             "envs 'API_KEY', 'NODE_ENV' changed"
+        );
+    }
+
+    #[test]
+    fn inline_cache_hit_names_remote_source() {
+        let hit =
+            |source| CacheStatus::Hit { replayed_duration: std::time::Duration::ZERO, source };
+
+        assert_eq!(
+            format_cache_status_inline(&hit(CacheHitSource::Local)).as_deref(),
+            Some("◉ cache hit, replaying")
+        );
+        assert_eq!(
+            format_cache_status_inline(&hit(CacheHitSource::Remote)).as_deref(),
+            Some("◉ remote cache hit, replaying")
         );
     }
 

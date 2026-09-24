@@ -148,6 +148,23 @@ pub struct ExecutionCache {
     remote_clients: RemoteClients,
 }
 
+/// A cache hit: the entry to replay, and the cache it came from.
+#[derive(Debug)]
+pub struct CacheHit {
+    pub value: CacheEntryValue,
+    pub source: CacheHitSource,
+}
+
+/// The cache a hit came from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CacheHitSource {
+    /// The local cache.
+    #[default]
+    Local,
+    /// The remote cache. The entry has since been recorded locally.
+    Remote,
+}
+
 #[derive(Debug, Clone)]
 #[expect(
     clippy::large_enum_variant,
@@ -329,7 +346,7 @@ impl ExecutionCache {
     }
 
     /// Try to hit cache by looking up the cache entry key and validating inputs.
-    /// Returns `Ok(Ok(cache_value))` on cache hit, `Ok(Err(cache_miss))` on miss.
+    /// Returns `Ok(Ok(cache_hit))` on cache hit, `Ok(Err(cache_miss))` on miss.
     ///
     /// After a local miss, the remote cache is queried if the task has one. A
     /// remote hit is recorded locally, with its output archive downloaded into
@@ -343,14 +360,14 @@ impl ExecutionCache {
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
-    ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
+    ) -> anyhow::Result<Result<CacheHit, CacheMiss>> {
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
 
         let local_miss = match self
             .try_hit_local(cache_metadata, &cache_key, globbed_inputs, workspace_root)
             .await?
         {
-            Ok(cache_value) => return Ok(Ok(cache_value)),
+            Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Local })),
             Err(miss) => miss,
         };
         #[expect(
@@ -375,7 +392,7 @@ impl ExecutionCache {
             )
             .await?
         {
-            Ok(cache_value) => return Ok(Ok(cache_value)),
+            Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Remote })),
             Err(miss) => miss,
         };
         Ok(Err(match local_miss {

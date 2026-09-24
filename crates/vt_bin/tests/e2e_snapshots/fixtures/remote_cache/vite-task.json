@@ -6,6 +6,16 @@
         "input": ["src/**"],
         "output": ["dist/**"]
       }
+    },
+    "check": {
+      "command": "vtt print checked",
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
+    "all": {
+      "command": "vt run build && vt run check"
     }
   }
 }

@@ -129,6 +129,45 @@ steps = [
 ]
 
 [[e2e]]
+name = "local_and_remote_hits"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ] },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "check",
+  ], comment = "Without an endpoint, check is cached only locally." },
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "all",
+  ], comment = "build is a remote hit, and check is a local hit. The summary counts the remote hit." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details show which hit came from the remote cache." },
+]
+
+[[e2e]]
 name = "fallback"
 cfg = "not(windows)"
 ignore = true

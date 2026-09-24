@@ -31,7 +31,7 @@ use self::{
     spawn::{ChildHandle, ChildOutcome, SpawnStdio, spawn},
 };
 use super::{
-    cache::{CacheEntryValue, CacheMiss, ExecutionCache, archive},
+    cache::{CacheEntryValue, CacheHit, CacheMiss, ExecutionCache, archive},
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
         ExecutionError,
@@ -384,9 +384,9 @@ async fn run(
     //    runs exactly once on every arm) and either replay the hit — no need
     //    to execute the command — or carry the globbed inputs into the run.
     let (stdio_config, globbed_inputs) = match lookup {
-        CacheLookup::Hit(cached) => {
+        CacheLookup::Hit(CacheHit { value: cached, source }) => {
             let mut stdio_config =
-                reporter.start(CacheStatus::Hit { replayed_duration: cached.duration });
+                reporter.start(CacheStatus::Hit { replayed_duration: cached.duration, source });
             return Ok(replay_cache_hit(
                 &mut stdio_config,
                 &cached,
@@ -501,8 +501,8 @@ async fn run(
 /// reason plus the globbed inputs (reused by the cache-update phase after the
 /// run), and disabled has neither.
 enum CacheLookup {
-    /// Cache hit — the cached entry to replay.
-    Hit(CacheEntryValue),
+    /// Cache hit — the cached entry to replay, and where it came from.
+    Hit(CacheHit),
     /// Cache miss — the detailed reason (`NotFound` or `FingerprintMismatch`).
     Miss { miss: CacheMiss, globbed_inputs: BTreeMap<RelativePathBuf, u64> },
     /// Caching is disabled for this task (no cache metadata).
