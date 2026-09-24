@@ -48,6 +48,7 @@ uuid = { workspace = true, features = ["v4"] }
 vt_casefold = { workspace = true }
 vt_glob = { workspace = true }
 vt_path = { workspace = true }
+vt_remote_cache = { workspace = true }
 vt_select = { workspace = true }
 vt_str = { workspace = true }
 # Artifact dep under `[dependencies]` — not `[build-dependencies]`, where

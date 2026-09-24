@@ -4,34 +4,40 @@
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"blob_id": "1"}}
+[remote-cache] POST /store 200
 ```
 
 ## `remote-cache-server cbor-http POST /fetch --cbor '{"key": b64'\''AP+A'\'', "secondary_key": '\'''\''}'`
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"kind": "exact", "value": b64'AP+A', "blob_id": "1"}}
+[remote-cache] POST /fetch 200 exact
 ```
 
 ## `remote-cache-server cbor-http POST /fetch --cbor '{"key": '\'''\'', "secondary_key": '\'''\''}'`
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"kind": "fallback", "key": b64'AP+A', "value": b64'AP+A', "blob_id": "1"}}
+[remote-cache] POST /fetch 200 fallback
 ```
 
 ## `remote-cache-server cbor-http GET /blob/1`
 
 ```
 {"status": 200, "content_type": "application/octet-stream", "body": b64'AP+A'}
+[remote-cache] GET /blob/1 200
 ```
 
 ## `remote-cache-server cbor-http POST /store --form-cbor 'metadata={"key": '\'''\'', "secondary_key": '\'''\'', "value": '\'''\''}'`
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"blob_id": null}}
+[remote-cache] POST /store 200
 ```
 
 ## `remote-cache-server cbor-http POST /fetch --cbor '{"key": '\'''\'', "secondary_key": '\'''\''}'`
 
 ```
 {"status": 200, "content_type": "application/cbor", "body": {"kind": "exact", "value": '', "blob_id": null}}
+[remote-cache] POST /fetch 200 exact
 ```

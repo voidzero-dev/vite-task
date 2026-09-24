@@ -97,14 +97,18 @@ function cbor(response: ServerResponse, value: unknown): void {
 /**
  * A test backend that keeps its state in `directory`: entries and associations
  * in `state.json`, and each blob in `blobs/` under its ID. Keys, values, and
- * blobs remain opaque bytes.
+ * blobs remain opaque bytes. After each response, `logRequest` receives a line
+ * with the method, the route below `basePath`, the status, and for fetch
+ * responses, the kind.
  */
 export function createCacheServer({
   basePath,
   directory,
+  logRequest,
 }: {
   basePath: string;
   directory: string;
+  logRequest: (line: string) => void;
 }) {
   const stateFile = join(directory, 'state.json');
   const blobDirectory = join(directory, 'blobs');
@@ -115,14 +119,18 @@ export function createCacheServer({
   const associations = new Map(Object.entries(state.associations));
   let nextBlobId = state.next_blob_id;
 
-  async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+  /** Respond to `request`, returning the kind of a fetch response. */
+  async function handle(
+    request: IncomingMessage,
+    response: ServerResponse,
+    path: string,
+  ): Promise<string | undefined> {
     if (request.method === 'GET' && path.startsWith(`${basePath}/blob/`)) {
       const file = join(blobDirectory, path.slice(`${basePath}/blob/`.length));
       if (!existsSync(file)) throw new RequestError(404, 'Blob not found');
       response.writeHead(200, { 'content-type': 'application/octet-stream' });
       response.end(readFileSync(file));
-      return;
+      return undefined;
     }
     if (request.method !== 'POST' || ![`${basePath}/fetch`, `${basePath}/store`].includes(path)) {
       throw new RequestError(404, 'Route not found');
@@ -140,17 +148,19 @@ export function createCacheServer({
       const fallback = associatedKey === undefined ? undefined : entries.get(associatedKey);
       if (exact) {
         cbor(response, { kind: 'exact', value: fromHex(exact.value), blob_id: exact.blob_id });
-      } else if (fallback) {
+        return 'exact';
+      }
+      if (fallback) {
         cbor(response, {
           kind: 'fallback',
           key: fromHex(associatedKey!),
           value: fromHex(fallback.value),
           blob_id: fallback.blob_id,
         });
-      } else {
-        cbor(response, { kind: 'not_found' });
+        return 'fallback';
       }
-      return;
+      cbor(response, { kind: 'not_found' });
+      return 'not_found';
     }
 
     if (mediaType(contentType) !== 'multipart/form-data') {
@@ -179,10 +189,16 @@ export function createCacheServer({
     };
     writeFileSync(stateFile, `${JSON.stringify(saved, null, 2)}\n`);
     cbor(response, { blob_id: blobId });
+    return undefined;
   }
 
   return createServer((request, response) => {
-    void handle(request, response).catch((error: unknown) => {
+    const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+    const log = (kind?: string) => {
+      const parts = [request.method, path.slice(basePath.length), response.statusCode, kind];
+      logRequest(parts.filter((part) => part !== undefined).join(' '));
+    };
+    void handle(request, response, path).then(log, (error: unknown) => {
       const known = error instanceof RequestError;
       if (!known) console.error(error);
       response.writeHead(known ? error.status : 500, {
@@ -190,6 +206,7 @@ export function createCacheServer({
       });
       response.end(known ? error.message : 'Internal server error');
       request.resume();
+      log();
     });
   });
 }
