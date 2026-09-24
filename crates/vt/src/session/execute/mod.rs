@@ -378,7 +378,7 @@ async fn run(
     // 1. Determine cache status FIRST by trying cache hit, so the reporter can
     //    display cache status immediately when execution begins. On a lookup
     //    error, `start()` is never called — there is no valid status to show.
-    let lookup = lookup_cache(cache_metadata, cache, workspace_root).await?;
+    let lookup = lookup_cache(cache_metadata, cache, workspace_root, cache_dir).await?;
 
     // 2. Report execution start with the looked-up cache status (`start()`
     //    runs exactly once on every arm) and either replay the hit — no need
@@ -509,11 +509,13 @@ enum CacheLookup {
     Disabled,
 }
 
-/// Phase 1: compute the globbed inputs and try to hit the cache.
+/// Phase 1: compute the globbed inputs and try to hit the cache. A remote hit
+/// downloads its output archive into `cache_dir`.
 async fn lookup_cache(
     cache_metadata: Option<&CacheMetadata>,
     cache: &ExecutionCache,
     workspace_root: &Arc<AbsolutePath>,
+    cache_dir: &AbsolutePath,
 ) -> Result<CacheLookup, Report> {
     let Some(cache_metadata) = cache_metadata else {
         return Ok(CacheLookup::Disabled);
@@ -530,7 +532,7 @@ async fn lookup_cache(
         Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err })
     })?;
 
-    match cache.try_hit(cache_metadata, &globbed_inputs, workspace_root).await {
+    match cache.try_hit(cache_metadata, &globbed_inputs, workspace_root, cache_dir).await {
         Ok(Ok(cached)) => Ok(CacheLookup::Hit(cached)),
         Ok(Err(miss)) => Ok(CacheLookup::Miss { miss, globbed_inputs }),
         Err(err) => {

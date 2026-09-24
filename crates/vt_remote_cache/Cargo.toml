@@ -14,7 +14,7 @@ rustls = { workspace = true, features = ["ring", "std"] }
 serde = { workspace = true, features = ["derive"] }
 serde_bytes = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "io-util"] }
 url = { workspace = true }
 vt_path = { workspace = true }
 vt_str = { workspace = true }
