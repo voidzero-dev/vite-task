@@ -215,9 +215,9 @@ mod tests {
         haystack.windows(needle.len()).any(|window| window == needle)
     }
 
-    /// Accept one HTTP request, respond with `status_line`, and return the
-    /// raw request.
-    fn serve_once(listener: &TcpListener, status_line: &str) -> Vec<u8> {
+    /// Accept one HTTP request, respond with `status_line` and `body`, and
+    /// return the raw request.
+    fn serve_once(listener: &TcpListener, status_line: &str, body: &[u8]) -> Vec<u8> {
         let (mut stream, _) = listener.accept().unwrap();
         let mut request = Vec::new();
         let mut buf = [0; 4096];
@@ -242,9 +242,18 @@ mod tests {
             assert_ne!(n, 0, "connection closed before the request body ended");
             request.extend_from_slice(&buf[..n]);
         }
-        let response = vt_str::format!("{status_line}\r\ncontent-length: 0\r\n\r\n");
-        stream.write_all(response.as_bytes()).unwrap();
+        let headers = vt_str::format!("{status_line}\r\ncontent-length: {}\r\n\r\n", body.len());
+        stream.write_all(&[headers.as_bytes(), body].concat()).unwrap();
         request
+    }
+
+    fn metadata_part_bytes(entry: &Entry<'_>) -> Vec<u8> {
+        [
+            b"name=\"metadata\"\r\nContent-Type: application/cbor\r\n\r\n".as_slice(),
+            &encode_metadata(entry),
+            b"\r\n",
+        ]
+        .concat()
     }
 
     #[tokio::test]
@@ -254,8 +263,9 @@ mod tests {
         std::fs::write(blob.as_path(), b"archive bytes").unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let server =
-            std::thread::spawn(move || serve_once(&listener, "HTTP/1.1 500 Internal Server Error"));
+        let server = std::thread::spawn(move || {
+            serve_once(&listener, "HTTP/1.1 500 Internal Server Error", b"")
+        });
 
         let client =
             Client::new(&vt_str::format!("http://127.0.0.1:{port}/projects/test")).unwrap();
@@ -267,15 +277,28 @@ mod tests {
         let request = server.join().unwrap();
         assert!(request.starts_with(b"POST /projects/test/store HTTP/1.1\r\n"));
         assert!(contains(&request, b"content-type: multipart/form-data; boundary="));
-        let metadata = [
-            b"name=\"metadata\"\r\nContent-Type: application/cbor\r\n\r\n".as_slice(),
-            &encode_metadata(&entry),
-            b"\r\n",
-        ]
-        .concat();
-        assert!(contains(&request, &metadata));
+        assert!(contains(&request, &metadata_part_bytes(&entry)));
         let blob =
             b"name=\"blob\"\r\nContent-Type: application/octet-stream\r\n\r\narchive bytes\r\n";
         assert!(contains(&request, blob));
+    }
+
+    #[tokio::test]
+    async fn store_without_a_blob_sends_only_metadata() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // `0xff` can't start a CBOR item, so this body doesn't decode.
+        let server =
+            std::thread::spawn(move || serve_once(&listener, "HTTP/1.1 200 OK", b"\xffnot cbor"));
+
+        let client =
+            Client::new(&vt_str::format!("http://127.0.0.1:{port}/projects/test")).unwrap();
+        let entry = Entry { key: b"k", secondary_key: b"s", value: b"v" };
+        client.store(&entry, None).await.unwrap();
+
+        let request = server.join().unwrap();
+        assert!(request.starts_with(b"POST /projects/test/store HTTP/1.1\r\n"));
+        assert!(contains(&request, &metadata_part_bytes(&entry)));
+        assert!(!contains(&request, b"name=\"blob\""));
     }
 }
