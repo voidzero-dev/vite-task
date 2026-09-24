@@ -77,9 +77,12 @@ async function main(): Promise<void> {
     contentType = `multipart/form-data; boundary=${boundary}`;
   }
   contentType = values['content-type'] ?? contentType;
-  const url = /^https?:\/\//.test(path)
-    ? path
-    : `${(await readFile('cache.url', 'utf8')).trim().replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+  let url = path;
+  if (!/^https?:\/\//.test(path)) {
+    const endpoint = process.env['VP_REMOTE_CACHE_URL'];
+    if (!endpoint) throw new Error('VP_REMOTE_CACHE_URL is not set');
+    url = `${endpoint.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+  }
   const response = await fetch(url, {
     method,
     ...(body === undefined ? {} : { body }),

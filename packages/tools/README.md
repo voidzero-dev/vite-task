@@ -5,25 +5,19 @@ This package provides Node.js dependencies and commands for the test suites.
 Run `pnpm install` at the repository root to install `remote-cache-server` and `cbor-http` into this package's `node_modules/.bin`. The workspace self-dependency makes pnpm link the package's own commands there. The E2E harness already includes that directory in PATH. Both commands run TypeScript directly using the Node version in `.node-version`.
 
 ```sh
-remote-cache-server start
-cbor-http POST /store --form-cbor "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'record'}"
-cbor-http POST /fetch --cbor "{\"key\": 'A', \"secondary_key\": 'S'}"
-remote-cache-server stop
+remote-cache-server cbor-http POST /store --form-cbor "metadata={\"key\": 'A', \"secondary_key\": 'S', \"value\": 'record'}"
+remote-cache-server cbor-http POST /fetch --cbor "{\"key\": 'A', \"secondary_key\": 'S'}"
 ```
 
-`start` creates `cache.url` exclusively in the current directory, refusing to start if it already exists. It launches an in-memory daemon on a free loopback port and fills the file with its endpoint before returning. Each E2E case has its own directory and server state.
+`remote-cache-server COMMAND [ARGS...]` starts the backend on a free loopback port and runs the command with `VP_REMOTE_CACHE_URL` set to the endpoint, `http://127.0.0.1:<port>/projects/test`. The fixed base path gives every endpoint a namespace path. The wrapper takes no options and passes all arguments to the command unchanged. The command inherits stdio. When it exits, the server stops and the wrapper exits with the command's exit code, or 128 plus the signal number if a signal ended it. The terminal delivers Ctrl-C to the command too, so the wrapper keeps serving until the command exits. The wrapper forwards `SIGTERM` to the command.
 
-`stop` connects to the endpoint, deletes `cache.url`, and reads until EOF or a connection reset confirms shutdown. The daemon watches the directory for file changes and closes its listener before closing active connections. Wait for `stop` to finish before restarting in the same directory. Deleting the file manually also requests shutdown, but a later `stop` cannot wait for the server because the endpoint is gone. The harness enforces step timeouts and skips remaining steps when one times out. The detached daemon exits after five minutes so it is cleaned up even if `stop` never runs. Use `--max-lifetime-ms` on `start` for longer tests.
+State persists in `remote-cache/` in the current directory, so consecutive commands share it. Each E2E case has its own directory and state. `state.json` holds the entries, associations, and next blob ID, with keys and values hex-encoded. Each blob is a file in `remote-cache/blobs/` named by its blob ID. Blob IDs are sequential strings and continue across invocations, keeping snapshots deterministic.
 
-Daemon output goes to `cache.log`, and startup failures include that log. The log stays in the test's directory.
-
-The backend implements `POST /fetch`, `POST /store`, and `GET /blob/{blob_id}` from the [remote cache RFC](https://github.com/voidzero-dev/vite-task/blob/rfc-cloudflare-remote-cache/docs/rfcs/0001-remote-cache.md#4-http-api-mapping). Keys and values are opaque bytes. Blobs remain unchanged until the daemon exits. Blob IDs are sequential strings to keep snapshots deterministic. There is no authentication or persistent storage.
-
-`start --base-path /projects/test` places the API under that path and includes it in `cache.url`. Requests are limited to 64 MiB by default; use `--max-request-bytes` to change the limit. Keys, values, and blobs have no separate length limits.
+The backend implements `POST /fetch`, `POST /store`, and `GET /blob/{blob_id}` from the [remote cache server API](https://github.com/voidzero-dev/vite-task/pull/713). Keys, values, and blobs are opaque bytes without length limits. There is no authentication.
 
 ## CBOR HTTP client
 
-`cbor-http METHOD PATH` resolves the path against `cache.url`. An absolute HTTP URL works without that file. Request bodies use [CBOR extended diagnostic notation (EDN)](https://www.rfc-editor.org/rfc/rfc8610.html#appendix-G): `"text"` is text, `'bytes'` is a UTF-8 byte string, and `b64'AP+A'` contains arbitrary binary bytes.
+`cbor-http METHOD PATH` joins the path onto `VP_REMOTE_CACHE_URL`, including its base path, so run it through `remote-cache-server`. An absolute HTTP URL works without the variable. Request bodies use [CBOR extended diagnostic notation (EDN)](https://www.rfc-editor.org/rfc/rfc8610.html#appendix-G): `"text"` is text, `'bytes'` is a UTF-8 byte string, and `b64'AP+A'` contains arbitrary binary bytes.
 
 | Option                  | Body                                                      |
 | ----------------------- | --------------------------------------------------------- |
