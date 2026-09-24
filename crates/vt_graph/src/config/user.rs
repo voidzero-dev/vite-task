@@ -288,7 +288,7 @@ pub enum Command {
 }
 
 /// Full user-defined task configuration in `vite.config.*`, including the command and options.
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "Task"))]
 // `deny_unknown_fields` works with the flattened fields only because neither
@@ -309,7 +309,7 @@ pub struct UserTaskConfig {
 }
 
 /// User-defined task configuration or command-only shorthand in `vite.config.*`.
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "TaskDefinition"))]
 #[serde(untagged)]

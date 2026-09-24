@@ -5,26 +5,21 @@
 
 use std::{collections::BTreeSet, fmt::Display};
 
-use serde::{Deserialize, Deserializer, de::IgnoredAny};
+use serde::{Deserialize, de::IgnoredAny};
 
 use crate::display::TaskDisplay;
 
 /// Which cache settings a task sets at the top level instead of under `cache`.
-#[derive(Debug, Default, Clone, Copy, Deserialize, PartialEq, Eq)]
+///
+/// A field set to `null` counts as not set, which is what `null` meant before these
+/// fields moved under `cache`.
+#[derive(Debug, Default, Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "each flag independently records whether one config field is present"
-)]
 pub struct TopLevelCacheFields {
-    #[serde(default, deserialize_with = "deserialize_present")]
-    env: bool,
-    #[serde(default, deserialize_with = "deserialize_present")]
-    untracked_env: bool,
-    #[serde(default, deserialize_with = "deserialize_present")]
-    input: bool,
-    #[serde(default, deserialize_with = "deserialize_present")]
-    output: bool,
+    env: Option<IgnoredAny>,
+    untracked_env: Option<IgnoredAny>,
+    input: Option<IgnoredAny>,
+    output: Option<IgnoredAny>,
 }
 
 impl TopLevelCacheFields {
@@ -33,13 +28,8 @@ impl TopLevelCacheFields {
         let Self { env, untracked_env, input, output } = self;
         [("env", env), ("untrackedEnv", untracked_env), ("input", input), ("output", output)]
             .into_iter()
-            .filter_map(|(name, is_set)| is_set.then_some(name))
+            .filter_map(|(name, value)| value.is_some().then_some(name))
     }
-}
-
-/// Marks a field as present regardless of its value.
-fn deserialize_present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
-    IgnoredAny::deserialize(deserializer).map(|IgnoredAny| true)
 }
 
 /// Collects tasks that set top-level cache fields while loading the task graph.
@@ -146,8 +136,8 @@ mod tests {
             ("env", json!(["NODE_ENV"])),
             ("untrackedEnv", json!(["FOO"])),
             ("input", json!(["src/**"])),
-            // Any value is recorded, even invalid ones, so the migration error still applies.
-            ("output", json!(null)),
+            // Any non-null value is recorded, even invalid ones, so the migration error still applies.
+            ("output", json!(42)),
         ];
         let cache_values = [None, Some(json!(true)), Some(json!(false)), Some(json!({}))];
         for (field, value) in fields {
@@ -164,6 +154,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn parse_null_as_not_set() {
+        let fields = parse(json!({
+            "command": "echo test",
+            "env": null,
+            "untrackedEnv": null,
+            "input": null,
+            "output": null,
+        }));
+        assert_eq!(fields.names().count(), 0);
     }
 
     #[test]
