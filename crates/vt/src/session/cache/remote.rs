@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use rustc_hash::FxHashMap;
 use vt_path::AbsolutePath;
 use vt_plan::cache_metadata::ExecutionCacheKey;
-use vt_remote_cache::{Client, Entry};
+use vt_remote_cache::Client;
 use vt_str::Str;
 use wincode::{
     SchemaWrite,
@@ -71,8 +71,7 @@ impl RemoteClients {
         let secondary_key = encode_key(execution_cache_key)?;
         let value = serialize_cache(cache_value)?;
         let archive = cache_value.output_archive.as_ref().map(|name| cache_dir.join(name.as_str()));
-        let entry = Entry { key: &key, secondary_key: &secondary_key, value: &value };
-        client.store(&entry, archive.as_deref()).await?;
+        client.store(&key, &secondary_key, &value, archive.as_deref()).await?;
         Ok(())
     }
 }
