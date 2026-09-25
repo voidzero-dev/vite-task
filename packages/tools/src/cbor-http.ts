@@ -77,13 +77,7 @@ async function main(): Promise<void> {
     contentType = `multipart/form-data; boundary=${boundary}`;
   }
   contentType = values['content-type'] ?? contentType;
-  let url = path;
-  if (!/^https?:\/\//.test(path)) {
-    const endpoint = process.env['VP_REMOTE_CACHE_URL'];
-    if (!endpoint) throw new Error('VP_REMOTE_CACHE_URL is not set');
-    url = `${endpoint.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
-  }
-  const response = await fetch(url, {
+  const response = await fetch(`${process.env['VP_REMOTE_CACHE_URL']}${path}`, {
     method,
     ...(body === undefined ? {} : { body }),
     ...(contentType === undefined ? {} : { headers: { 'content-type': contentType } }),

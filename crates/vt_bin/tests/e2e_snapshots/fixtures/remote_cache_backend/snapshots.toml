@@ -432,25 +432,6 @@ steps = [
 ]
 
 [[e2e]]
-name = "command_wrapper"
-cfg = "not(windows)"
-ignore = true
-steps = [
-  { argv = [
-    "remote-cache-server",
-    "node",
-    "-e",
-    "console.log(new URL(process.env.VP_REMOTE_CACHE_URL).pathname)",
-  ], comment = "The endpoint includes a namespace base path." },
-  { argv = [
-    "remote-cache-server",
-    "vtt",
-    "exit",
-    "3",
-  ], comment = "The wrapper exits with the command's exit code." },
-]
-
-[[e2e]]
 name = "state_across_invocations"
 cfg = "not(windows)"
 ignore = true

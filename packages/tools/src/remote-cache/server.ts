@@ -1,8 +1,7 @@
 import { Busboy } from '@fastify/busboy';
 import { decode } from 'cbor2/decoder';
 import { encode } from 'cbor2/encoder';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 
@@ -95,24 +94,6 @@ function cbor(response: ServerResponse, value: unknown): void {
   response.end(encode(value));
 }
 
-function loadState(file: string): State {
-  try {
-    return JSON.parse(readFileSync(file, 'utf8')) as State;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    return { next_blob_id: 1, entries: {}, associations: {} };
-  }
-}
-
-async function readBlob(file: string): Promise<Buffer | undefined> {
-  try {
-    return await readFile(file);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
-  }
-}
-
 /**
  * A test backend that keeps its state in `directory`: entries and associations
  * in `state.json`, and each blob in `blobs/` under its ID. Keys, values, and
@@ -127,7 +108,9 @@ export function createCacheServer({
 }) {
   const stateFile = join(directory, 'state.json');
   const blobDirectory = join(directory, 'blobs');
-  const state = loadState(stateFile);
+  const state: State = existsSync(stateFile)
+    ? JSON.parse(readFileSync(stateFile, 'utf8'))
+    : { next_blob_id: 1, entries: {}, associations: {} };
   const entries = new Map(Object.entries(state.entries));
   const associations = new Map(Object.entries(state.associations));
   let nextBlobId = state.next_blob_id;
@@ -135,12 +118,10 @@ export function createCacheServer({
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const path = new URL(request.url ?? '/', 'http://localhost').pathname;
     if (request.method === 'GET' && path.startsWith(`${basePath}/blob/`)) {
-      const blobId = path.slice(`${basePath}/blob/`.length);
-      // Blob IDs are sequential numbers, so other IDs cannot name a blob file.
-      const blob = /^\d+$/.test(blobId) ? await readBlob(join(blobDirectory, blobId)) : undefined;
-      if (blob === undefined) throw new RequestError(404, 'Blob not found');
+      const file = join(blobDirectory, path.slice(`${basePath}/blob/`.length));
+      if (!existsSync(file)) throw new RequestError(404, 'Blob not found');
       response.writeHead(200, { 'content-type': 'application/octet-stream' });
-      response.end(blob);
+      response.end(readFileSync(file));
       return;
     }
     if (request.method !== 'POST' || ![`${basePath}/fetch`, `${basePath}/store`].includes(path)) {
@@ -186,9 +167,6 @@ export function createCacheServer({
     const fields = byteFields(metadata, ['key', 'secondary_key', 'value']);
     const key = toHex(fields.get('key')!);
     const blob = parts.get('blob');
-
-    // Publish only after the complete request is validated. The writes are
-    // synchronous, so concurrent stores cannot interleave them.
     mkdirSync(blobDirectory, { recursive: true });
     const blobId = blob === undefined ? null : String(nextBlobId++);
     if (blobId !== null) writeFileSync(join(blobDirectory, blobId), blob!);
