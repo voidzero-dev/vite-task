@@ -294,7 +294,7 @@ steps = [
   ], envs = [
     [
       "VP_REMOTE_CACHE_URL",
-      "http://127.0.0.1:1/projects/test",
+      "http://127.0.0.1:0/projects/test",
     ],
-  ], comment = "Nothing listens on port 1. The failed fetch is the miss reason. Read failures aren't warnings." },
+  ], comment = "Nothing can listen on port 0. The failed fetch is the miss reason. Read failures aren't warnings." },
 ]
