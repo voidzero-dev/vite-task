@@ -4,7 +4,7 @@ use fspy_shared_unix::exec::ExecResolveConfig;
 use libc::{c_char, c_int};
 
 use crate::{
-    client::{global_client, raw_exec::RawExec},
+    client::{ExecInjectionError, global_client, raw_exec::RawExec},
     macros::intercept,
 };
 
@@ -78,8 +78,21 @@ unsafe fn handle_posix_spawn(
         )
     };
     match result {
-        Err(errno) => errno as _,
         Ok(ret) => ret,
+        Err(ExecInjectionError::Resolution(errno)) => {
+            // Resolution failed the way the real spawn would have;
+            // posix_spawn returns the errno code rather than -1.
+            errno as _
+        }
+        Err(ExecInjectionError::Injection(_)) => {
+            // The injection machinery failed. Mark the run's trace incomplete
+            // so it is not cached, then spawn untracked with the original
+            // arguments.
+            client.report_loss();
+            // SAFETY: all arguments are the interposed posix_spawn(p)
+            // function's own valid arguments.
+            unsafe { original(pid, file, file_actions, attrp, argv, envp) }
+        }
     }
 }
 
