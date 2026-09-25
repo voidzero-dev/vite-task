@@ -3,7 +3,7 @@ use std::{process::ExitStatus, time::Duration};
 use vt_path::RelativePathBuf;
 use vt_server::Error as IpcServerError;
 
-use super::cache::CacheMiss;
+use super::cache::{CacheMiss, remote::UploadError};
 
 /// The cache operation that failed.
 #[derive(Debug)]
@@ -110,7 +110,11 @@ pub enum CacheNotUpdatedReason {
 #[derive(Debug)]
 pub enum CacheUpdateStatus {
     /// Cache was successfully updated with new fingerprint and outputs
-    Updated,
+    Updated {
+        /// Why uploading the entry to the remote cache failed. `None` if the
+        /// upload succeeded or wasn't attempted.
+        upload_error: Option<UploadError>,
+    },
     /// Cache was not updated (with reason).
     /// The reason is part of the `LeafExecutionReporter` trait contract — reporters
     /// can use it for detailed logging, even if current implementations don't.

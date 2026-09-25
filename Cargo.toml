@@ -46,6 +46,7 @@ assert2 = "0.4.0"
 assertables = "10.0.0"
 async-trait = "0.1.89"
 base64 = "0.22.1"
+url = "2.5.8"
 wincode = "0.6.0"
 bindgen = "0.72.1"
 bitflags = "2.10.0"
@@ -56,6 +57,7 @@ bumpalo = "3.17.0"
 bytemuck = "1.23.0"
 cargo-platform = "=0.3.2"
 cc = "1.2.39"
+ciborium = "0.2.2"
 clap = "4.5.53"
 color-eyre = "0.6.5"
 compact_str = "0.9.0"
@@ -125,11 +127,14 @@ ratatui = "0.30.0"
 rayon = "1.10.0"
 ref-cast = "1.0.24"
 regex = "1.11.3"
+reqwest = { version = "0.13.5", default-features = false }
 rusqlite = "0.39.0"
 rustc-hash = "2.1.1"
+rustls = { version = "0.23.44", default-features = false }
 # SeccompAction::UserNotif (SECCOMP_RET_USER_NOTIF) was added after the latest published release (v0.5.0)
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler", rev = "08587106340b8e3cb361c7561411510039436857" }
 serde = "1.0.219"
+serde_bytes = "0.11.19"
 serde_json = "1.0.140"
 serde_norway = "0.9.42"
 sha2 = "0.11.0"
@@ -166,6 +171,7 @@ vt_glob = { path = "crates/vt_glob" }
 vt_graph_ser = { path = "crates/vt_graph_ser" }
 vt_path = { path = "crates/vt_path" }
 vt_powershell = { path = "crates/vt_powershell" }
+vt_remote_cache = { path = "crates/vt_remote_cache" }
 vt_select = { path = "crates/vt_select" }
 vt_shell = { path = "crates/vt_shell" }
 vt_str = { path = "crates/vt_str" }

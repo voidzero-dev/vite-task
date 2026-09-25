@@ -1,0 +1,118 @@
+# Cases that use the remote cache backend are ignored because it runs on
+# Node.js. Windows is skipped because the PTY launcher cannot execute pnpm
+# command shims.
+[[e2e]]
+name = "read_write"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ], comment = "A new execution is uploaded with one store request." },
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ], comment = "A local hit makes no requests." },
+]
+
+[[e2e]]
+name = "read"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ] },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "changed",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], comment = "An endpoint without a mode selects read. The task reruns without uploading." },
+]
+
+[[e2e]]
+name = "invalid_endpoint"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_REMOTE_CACHE_URL",
+      "cache.example/projects/test",
+    ],
+  ], comment = "The failed upload is a warning. The task succeeds." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details include the underlying error." },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_REMOTE_CACHE_URL",
+      "cache.example/projects/test",
+    ],
+  ], comment = "The local cache was updated. Hits never upload." },
+]
+
+[[e2e]]
+name = "unreachable_endpoint"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_REMOTE_CACHE_URL",
+      "http://127.0.0.1:0/projects/test",
+    ],
+  ], comment = "Nothing can listen on port 0. The failed upload is a warning. The task succeeds." },
+]

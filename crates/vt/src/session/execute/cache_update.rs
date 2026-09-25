@@ -186,7 +186,7 @@ pub(super) async fn update_cache(
         output_archive,
     };
     match cache.update(metadata, new_cache_value, cache_dir).await {
-        Ok(()) => (CacheUpdateStatus::Updated, None),
+        Ok(upload) => (CacheUpdateStatus::Updated { upload_error: upload.err() }, None),
         Err(err) => (
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
             Some(ExecutionError::Cache { kind: CacheErrorKind::Update, source: err }),

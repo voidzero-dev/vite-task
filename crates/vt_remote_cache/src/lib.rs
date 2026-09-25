@@ -1,0 +1,313 @@
+//! Client for the remote cache server API. Keys, values, and blobs are opaque
+//! bytes; the caller decides what they contain.
+
+use std::time::Duration;
+
+use reqwest::{
+    Response, StatusCode,
+    multipart::{Form, Part},
+};
+use serde::Serialize;
+use url::{ParseError, Url};
+use vt_path::AbsolutePath;
+use vt_str::Str;
+
+/// Time allowed to establish a connection, including the TLS handshake.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Time allowed for each read of a response. Until the response headers
+/// arrive, it also bounds sending the request.
+const READ_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// A failed remote cache operation. The messages name only the kind of
+/// failure, so they are the same on every platform. The details, if any, are
+/// in the source.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// The endpoint isn't an HTTP or HTTPS URL that can have a path. The
+    /// source is the parse error if it isn't a URL at all.
+    #[error("invalid endpoint")]
+    InvalidEndpoint(#[source] Option<ParseError>),
+    /// The HTTP client couldn't be created, for example because no root
+    /// certificates could be loaded.
+    #[error("failed to create the HTTP client")]
+    HttpClient(#[source] reqwest::Error),
+    /// The blob file couldn't be opened.
+    #[error("failed to read the blob")]
+    ReadBlob(#[source] std::io::Error),
+    /// No complete response arrived, for example because the connection
+    /// failed or timed out.
+    #[error("network error")]
+    Network(#[source] reqwest::Error),
+    /// The server responded with a status other than 200. The source is the
+    /// message in the response body, if any.
+    #[error("HTTP status {}", .0.as_u16())]
+    Status(StatusCode, #[source] Option<ServerMessage>),
+}
+
+/// The message in the body of an error response.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct ServerMessage(Str);
+
+/// The `metadata` part of a store request.
+#[derive(Serialize)]
+struct StoreMetadata<'a> {
+    #[serde(with = "serde_bytes")]
+    key: &'a [u8],
+    #[serde(with = "serde_bytes")]
+    secondary_key: &'a [u8],
+    #[serde(with = "serde_bytes")]
+    value: &'a [u8],
+}
+
+/// A client for one remote cache endpoint.
+#[derive(Debug)]
+pub struct Client {
+    http: reqwest::Client,
+    store_url: Url,
+}
+
+impl Client {
+    /// Create a client for `endpoint`, a base URL that may include a
+    /// namespace path, such as `https://cache.example.com/projects/my-project`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidEndpoint`] if `endpoint` isn't a usable URL, or
+    /// [`Error::HttpClient`] if the HTTP client can't be created.
+    pub fn new(endpoint: &str) -> Result<Self, Error> {
+        let endpoint = parse_endpoint(endpoint)?;
+        let store_url = route_url(&endpoint, "store")?;
+        // reqwest configures TLS with the process's default crypto provider.
+        // Installing fails if one is already installed; vite-plus installs
+        // ring too.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let http = reqwest::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(READ_TIMEOUT)
+            .build()
+            .map_err(Error::HttpClient)?;
+        Ok(Self { http, store_url })
+    }
+
+    /// Store `value` under `key` with `POST {endpoint}/store`, uploading the
+    /// file at `blob` as its blob. Fetches that match no key fall back to this
+    /// entry through `secondary_key`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the blob file can't be opened, the request fails,
+    /// or the server responds with a status other than 200.
+    pub async fn store(
+        &self,
+        key: &[u8],
+        secondary_key: &[u8],
+        value: &[u8],
+        blob: Option<&AbsolutePath>,
+    ) -> Result<(), Error> {
+        let metadata = StoreMetadata { key, secondary_key, value };
+        let mut form = Form::new().part("metadata", metadata_part(&metadata));
+        if let Some(blob) = blob {
+            form = form.part("blob", blob_part(blob).await?);
+        }
+        let response = self
+            .http
+            .post(self.store_url.clone())
+            .multipart(form)
+            .send()
+            .await
+            .map_err(Error::Network)?;
+        if response.status() != StatusCode::OK {
+            return Err(status_error(response).await);
+        }
+        // The response's blob ID isn't needed. Read the body anyway, so the
+        // connection can be reused.
+        response.bytes().await.map_err(Error::Network)?;
+        Ok(())
+    }
+}
+
+fn parse_endpoint(endpoint: &str) -> Result<Url, Error> {
+    let url = Url::parse(endpoint).map_err(|err| Error::InvalidEndpoint(Some(err)))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(Error::InvalidEndpoint(None));
+    }
+    Ok(url)
+}
+
+/// Append `route` to the endpoint's path, keeping its namespace path.
+fn route_url(endpoint: &Url, route: &str) -> Result<Url, Error> {
+    let mut url = endpoint.clone();
+    url.path_segments_mut().map_err(|()| Error::InvalidEndpoint(None))?.pop_if_empty().push(route);
+    Ok(url)
+}
+
+/// The error for a response with a status other than 200, with the message in
+/// its body.
+async fn status_error(response: Response) -> Error {
+    let status = response.status();
+    let message = response.text().await.ok().and_then(|text| {
+        let text = text.trim();
+        (!text.is_empty()).then(|| ServerMessage(Str::from(text)))
+    });
+    Error::Status(status, message)
+}
+
+fn encode_metadata(metadata: &StoreMetadata<'_>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    ciborium::into_writer(metadata, &mut bytes)
+        .expect("encoding byte strings into a Vec can't fail");
+    bytes
+}
+
+fn metadata_part(metadata: &StoreMetadata<'_>) -> Part {
+    Part::bytes(encode_metadata(metadata)).mime_str("application/cbor").expect("valid MIME type")
+}
+
+async fn blob_part(path: &AbsolutePath) -> Result<Part, Error> {
+    let file = tokio::fs::File::open(path).await.map_err(Error::ReadBlob)?;
+    let length = file.metadata().await.map_err(Error::ReadBlob)?.len();
+    Ok(Part::stream_with_length(file, length)
+        .mime_str("application/octet-stream")
+        .expect("valid MIME type"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io::{Read as _, Write as _},
+        net::TcpListener,
+    };
+
+    use vt_path::AbsolutePathBuf;
+
+    use super::*;
+
+    fn store_url(endpoint: &str) -> Result<Url, Error> {
+        route_url(&parse_endpoint(endpoint)?, "store")
+    }
+
+    #[test]
+    fn store_url_keeps_the_namespace_path() {
+        for (endpoint, expected) in [
+            ("http://cache.example/projects/test", "http://cache.example/projects/test/store"),
+            ("http://cache.example/projects/test/", "http://cache.example/projects/test/store"),
+            ("https://cache.example", "https://cache.example/store"),
+            ("https://cache.example/ns?token=a", "https://cache.example/ns/store?token=a"),
+        ] {
+            assert_eq!(store_url(endpoint).unwrap().as_str(), expected, "{endpoint}");
+        }
+    }
+
+    #[test]
+    fn rejects_endpoints_that_are_not_http_urls() {
+        for endpoint in ["cache.example/projects/test", "ftp://cache.example", "mailto:a@b.example"]
+        {
+            assert!(matches!(Client::new(endpoint), Err(Error::InvalidEndpoint(_))), "{endpoint}");
+        }
+    }
+
+    #[test]
+    fn metadata_is_a_cbor_map_of_byte_strings() {
+        let metadata = StoreMetadata { key: b"k", secondary_key: b"", value: &[0x00, 0xff] };
+        let mut expected = vec![0xa3];
+        expected.extend(b"\x63key\x41k");
+        expected.extend(b"\x6dsecondary_key\x40");
+        expected.extend(b"\x65value\x42\x00\xff");
+        assert_eq!(encode_metadata(&metadata), expected);
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|window| window == needle)
+    }
+
+    /// Accept one HTTP request, respond with `status_line` and `body`, and
+    /// return the raw request.
+    fn serve_once(listener: &TcpListener, status_line: &str, body: &[u8]) -> Vec<u8> {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        let mut buf = [0; 4096];
+        let header_end = loop {
+            let n = stream.read(&mut buf).unwrap();
+            assert_ne!(n, 0, "connection closed before the request headers ended");
+            request.extend_from_slice(&buf[..n]);
+            if let Some(pos) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break pos + 4;
+            }
+        };
+        let content_length: usize = std::str::from_utf8(&request[..header_end])
+            .unwrap()
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse().unwrap())
+            })
+            .expect("request has a content length");
+        while request.len() < header_end + content_length {
+            let n = stream.read(&mut buf).unwrap();
+            assert_ne!(n, 0, "connection closed before the request body ended");
+            request.extend_from_slice(&buf[..n]);
+        }
+        let headers = vt_str::format!("{status_line}\r\ncontent-length: {}\r\n\r\n", body.len());
+        stream.write_all(&[headers.as_bytes(), body].concat()).unwrap();
+        request
+    }
+
+    /// The `metadata` part of a store request for key `k`, secondary key `s`,
+    /// and value `v`.
+    fn metadata_part_bytes() -> Vec<u8> {
+        let metadata = StoreMetadata { key: b"k", secondary_key: b"s", value: b"v" };
+        [
+            b"name=\"metadata\"\r\nContent-Type: application/cbor\r\n\r\n".as_slice(),
+            &encode_metadata(&metadata),
+            b"\r\n",
+        ]
+        .concat()
+    }
+
+    #[tokio::test]
+    async fn store_posts_metadata_and_blob_parts() {
+        let dir = tempfile::tempdir().unwrap();
+        let blob = AbsolutePathBuf::new(dir.path().join("archive.tar.zst")).unwrap();
+        std::fs::write(blob.as_path(), b"archive bytes").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            serve_once(&listener, "HTTP/1.1 500 Internal Server Error", b"storage failed\n")
+        });
+
+        let client =
+            Client::new(&vt_str::format!("http://127.0.0.1:{port}/projects/test")).unwrap();
+        let err = client.store(b"k", b"s", b"v", Some(&blob)).await.unwrap_err();
+        assert!(matches!(err, Error::Status(StatusCode::INTERNAL_SERVER_ERROR, _)));
+        assert_eq!(err.to_string(), "HTTP status 500");
+        assert_eq!(std::error::Error::source(&err).unwrap().to_string(), "storage failed");
+
+        let request = server.join().unwrap();
+        assert!(request.starts_with(b"POST /projects/test/store HTTP/1.1\r\n"));
+        assert!(contains(&request, b"content-type: multipart/form-data; boundary="));
+        assert!(contains(&request, &metadata_part_bytes()));
+        let blob =
+            b"name=\"blob\"\r\nContent-Type: application/octet-stream\r\n\r\narchive bytes\r\n";
+        assert!(contains(&request, blob));
+    }
+
+    #[tokio::test]
+    async fn store_without_a_blob_sends_only_metadata() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // `0xff` can't start a CBOR item, so this body doesn't decode.
+        let server =
+            std::thread::spawn(move || serve_once(&listener, "HTTP/1.1 200 OK", b"\xffnot cbor"));
+
+        let client =
+            Client::new(&vt_str::format!("http://127.0.0.1:{port}/projects/test")).unwrap();
+        client.store(b"k", b"s", b"v", None).await.unwrap();
+
+        let request = server.join().unwrap();
+        assert!(request.starts_with(b"POST /projects/test/store HTTP/1.1\r\n"));
+        assert!(contains(&request, &metadata_part_bytes()));
+        assert!(!contains(&request, b"name=\"blob\""));
+    }
+}
