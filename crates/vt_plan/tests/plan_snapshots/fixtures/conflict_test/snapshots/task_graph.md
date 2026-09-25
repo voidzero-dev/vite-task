@@ -24,7 +24,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/scope-a",
       "cache_config": {
-        "remote_cache": true,
+        "remote_cache_allowed": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -64,7 +64,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/scope-a-b",
       "cache_config": {
-        "remote_cache": true,
+        "remote_cache_allowed": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -104,7 +104,7 @@ flowchart TD
     "resolved_options": {
       "cwd": "<workspace>/packages/test-package",
       "cache_config": {
-        "remote_cache": true,
+        "remote_cache_allowed": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [

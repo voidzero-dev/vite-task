@@ -582,7 +582,7 @@ impl<'a> Session<'a> {
             plan_options: PlanOptions {
                 extra_args: run_command.additional_args.clone().into(),
                 cache_override: run_command.flags.cache_override(),
-                remote_cache: run_command.flags.remote_cache.map(Into::into),
+                remote_cache_mode: run_command.flags.remote_cache.map(Into::into),
                 concurrency_limit: None,
                 parallel: false,
                 // The selector path runs whatever the user picked interactively;

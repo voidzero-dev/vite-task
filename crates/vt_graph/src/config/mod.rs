@@ -82,7 +82,7 @@ impl ResolvedTaskOptions {
                 )?;
 
                 Some(CacheConfig {
-                    remote_cache: enabled_cache_config.remote.unwrap_or(true),
+                    remote_cache_allowed: enabled_cache_config.remote.unwrap_or(true),
                     env_config: EnvConfig {
                         fingerprinted_envs: enabled_cache_config
                             .env
@@ -101,8 +101,9 @@ impl ResolvedTaskOptions {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CacheConfig {
-    /// Whether this task permits remote caching when local caching is enabled.
-    pub remote_cache: bool,
+    /// Whether the task's `cache.remote` allows remote caching. An execution uses
+    /// the remote cache only if its `vp run` level also resolves one.
+    pub remote_cache_allowed: bool,
     pub env_config: EnvConfig,
     pub input_config: ResolvedGlobConfig,
     pub output_config: ResolvedGlobConfig,

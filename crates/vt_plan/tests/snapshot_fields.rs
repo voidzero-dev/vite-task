@@ -25,7 +25,7 @@ fn finds_fields_in_nested_plans_without_leaking_unrelated_fields() {
                 "key": ["workspace", "inner"],
                 "Spawn": {"cache_metadata": {
                     "execution_cache_key": {"task": "inner", "extra_args": []},
-                    "remote_cache": {"mode": "off"}
+                    "remote_cache": {"access": "read"}
                 }},
                 "neighbors": []
             }], "concurrency_limit": 4}}],

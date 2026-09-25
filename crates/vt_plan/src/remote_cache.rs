@@ -1,4 +1,5 @@
-//! Remote cache settings resolved for each invocation during planning.
+//! Remote cache settings: the mode requested with `--remote-cache` or
+//! `VP_REMOTE_CACHE`, and the access resolved from it for each `vp run` level.
 
 use std::{ffi::OsStr, sync::Arc};
 
@@ -11,7 +12,8 @@ use crate::Error;
 pub(crate) const MODE_ENV: &str = "VP_REMOTE_CACHE";
 const URL_ENV: &str = "VP_REMOTE_CACHE_URL";
 
-/// Remote access requested by an invocation. Local cache policy is independent.
+/// Remote cache mode requested with `--remote-cache` or `VP_REMOTE_CACHE`.
+/// `resolve` combines it with the endpoint into a [`ResolvedRemoteCacheConfig`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RemoteCacheMode {
@@ -30,15 +32,16 @@ impl RemoteCacheMode {
     }
 }
 
-/// Remote endpoint and access mode for a cacheable execution.
+/// Remote cache access and endpoint resolved for a `vp run` level from the
+/// requested mode, `VP_REMOTE_CACHE_URL`, and `cache.remote.url`.
 #[derive(Debug, Clone, Serialize)]
-pub struct RemoteCacheConfig {
-    pub mode: RemoteCacheAccess,
+pub struct ResolvedRemoteCacheConfig {
+    pub access: RemoteCacheAccess,
     /// Endpoint as configured. It is validated when the remote cache is used.
     pub url: Arc<str>,
 }
 
-/// Access permitted when remote caching is enabled.
+/// Remote cache access after resolution. `off` resolves to no remote cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RemoteCacheAccess {
@@ -56,11 +59,11 @@ fn env_value<'a>(
 }
 
 /// Resolves remote cache access for one `vp run` level from the envs visible at
-/// that level. See `PlanContext::remote_cache` for what they include.
+/// that level. See `PlanContext::resolved_remote_cache` for what they include.
 pub(crate) fn resolve(
     configured_url: Option<&Arc<str>>,
     envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
-) -> Result<Option<RemoteCacheConfig>, Error> {
+) -> Result<Option<ResolvedRemoteCacheConfig>, Error> {
     let mode = match env_value(envs, MODE_ENV) {
         None => None,
         Some(value) => Some(match value.to_str() {
@@ -80,10 +83,10 @@ pub(crate) fn resolve(
     match (mode, url) {
         (Some(RemoteCacheMode::Off), _) | (None, None) => Ok(None),
         (Some(RemoteCacheMode::Read) | None, Some(url)) => {
-            Ok(Some(RemoteCacheConfig { url, mode: RemoteCacheAccess::Read }))
+            Ok(Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::Read, url }))
         }
         (Some(RemoteCacheMode::ReadWrite), Some(url)) => {
-            Ok(Some(RemoteCacheConfig { url, mode: RemoteCacheAccess::ReadWrite }))
+            Ok(Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::ReadWrite, url }))
         }
         (Some(RemoteCacheMode::Read | RemoteCacheMode::ReadWrite), None) => {
             Err(Error::MissingRemoteCacheEndpoint)
@@ -110,7 +113,7 @@ mod tests {
         let resolved = resolve(None, &envs).unwrap();
         if cfg!(windows) {
             let resolved = resolved.unwrap();
-            assert_eq!(resolved.mode, RemoteCacheAccess::ReadWrite);
+            assert_eq!(resolved.access, RemoteCacheAccess::ReadWrite);
             assert_eq!(&*resolved.url, "https://cache.example");
         } else {
             assert!(resolved.is_none());

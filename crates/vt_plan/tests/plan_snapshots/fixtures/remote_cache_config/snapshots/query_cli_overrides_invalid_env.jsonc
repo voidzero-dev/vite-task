@@ -22,7 +22,7 @@
                       }
                     },
                     "remote_cache": {
-                      "mode": "read-write",
+                      "access": "read-write",
                       "url": "https://cache.example/projects/test"
                     }
                   },

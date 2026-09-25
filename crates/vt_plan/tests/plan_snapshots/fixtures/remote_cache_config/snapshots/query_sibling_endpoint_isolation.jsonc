@@ -33,7 +33,7 @@
                                     }
                                   },
                                   "remote_cache": {
-                                    "mode": "read",
+                                    "access": "read",
                                     "url": "https://other.example/projects/nested"
                                   }
                                 },
@@ -78,7 +78,7 @@
                                     }
                                   },
                                   "remote_cache": {
-                                    "mode": "read",
+                                    "access": "read",
                                     "url": "https://cache.example/projects/test"
                                   }
                                 },

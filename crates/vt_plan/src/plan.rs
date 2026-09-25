@@ -41,7 +41,7 @@ use crate::{
         CacheOverride, PlanOptions, PlanRequest, QueryPlanRequest, ScriptCommand,
         SyntheticPlanRequest,
     },
-    remote_cache::{self, RemoteCacheConfig},
+    remote_cache::{self, ResolvedRemoteCacheConfig},
     resolve_cache_with_override,
 };
 
@@ -306,7 +306,7 @@ async fn plan_task_as_execution_node(
                             &cwd,
                             package_path,
                             parent_cache_config,
-                            context.remote_cache(),
+                            context.resolved_remote_cache(),
                         )?;
                         ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                     }
@@ -337,7 +337,7 @@ async fn plan_task_as_execution_node(
                             Some(task_execution_cache_key),
                             &and_item.envs,
                             &resolved_options,
-                            context.remote_cache(),
+                            context.resolved_remote_cache(),
                             &script_command.envs,
                             program_path,
                             spawn_args,
@@ -405,7 +405,7 @@ async fn plan_task_as_execution_node(
                 }),
                 &BTreeMap::new(),
                 &resolved_options,
-                context.remote_cache(),
+                context.resolved_remote_cache(),
                 context.envs(),
                 Arc::clone(&*SHELL_PROGRAM_PATH),
                 SHELL_ARGS.iter().map(|s| Str::from(*s)).chain(std::iter::once(script)).collect(),
@@ -496,7 +496,7 @@ fn resolve_synthetic_cache_config(
                 Some(enabled_cache_config) => {
                     let EnabledCacheConfig { env, untracked_env, input, output, remote } =
                         enabled_cache_config;
-                    parent_config.remote_cache &= remote.unwrap_or(true);
+                    parent_config.remote_cache_allowed &= remote.unwrap_or(true);
                     parent_config.env_config.fingerprinted_envs.extend(env.unwrap_or_default());
                     parent_config
                         .env_config
@@ -559,7 +559,7 @@ pub fn plan_synthetic_request(
     cwd: &Arc<AbsolutePath>,
     package_dir: &AbsolutePath,
     parent_cache_config: ParentCacheConfig,
-    remote_cache: Option<&RemoteCacheConfig>,
+    resolved_remote_cache: Option<&ResolvedRemoteCacheConfig>,
 ) -> Result<SpawnExecution, Error> {
     let SyntheticPlanRequest { program, args, cache_config, envs } = synthetic_plan_request;
 
@@ -580,7 +580,7 @@ pub fn plan_synthetic_request(
         execution_cache_key,
         prefix_envs,
         &resolved_options,
-        remote_cache,
+        resolved_remote_cache,
         &envs,
         program_path,
         args,
@@ -617,7 +617,7 @@ fn plan_spawn_execution(
     execution_cache_key: Option<ExecutionCacheKey>,
     prefix_envs: &BTreeMap<EnvName<Str>, Str>,
     resolved_task_options: &ResolvedTaskOptions,
-    remote_cache: Option<&RemoteCacheConfig>,
+    resolved_remote_cache: Option<&ResolvedRemoteCacheConfig>,
     envs: &Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
     program_path: Arc<AbsolutePath>,
     args: Arc<[Str]>,
@@ -691,7 +691,11 @@ fn plan_spawn_execution(
                 execution_cache_key,
                 input_config: cache_config.input_config.clone(),
                 output_config: cache_config.output_config.clone(),
-                remote_cache: if cache_config.remote_cache { remote_cache.cloned() } else { None },
+                remote_cache: if cache_config.remote_cache_allowed {
+                    resolved_remote_cache.cloned()
+                } else {
+                    None
+                },
                 unfiltered_envs: Arc::clone(envs),
             });
         }
@@ -760,16 +764,17 @@ pub async fn plan_query_request(
         );
         context.set_resolved_global_cache(final_cache);
     }
-    // Resolve `context.remote_cache` for this level (see its doc for the data
-    // flow). Write this level's `--remote-cache` flag to `VP_REMOTE_CACHE` first,
-    // so it overrides inherited values and nested levels inherit it. Leave the
-    // default unset so each level picks its own from the endpoint it sees.
-    if let Some(mode) = plan_options.remote_cache {
+    // Resolve `context.resolved_remote_cache` for this level (see its doc for
+    // the data flow). Write this level's `--remote-cache` flag to
+    // `VP_REMOTE_CACHE` first, so it overrides inherited values and nested
+    // levels inherit it. Leave the default unset so each level picks its own
+    // from the endpoint it sees.
+    if let Some(mode) = plan_options.remote_cache_mode {
         context.add_envs(std::iter::once((remote_cache::MODE_ENV, mode.as_str())));
     }
-    let remote_cache =
+    let resolved_remote_cache =
         remote_cache::resolve(context.resolved_global_cache().remote_url.as_ref(), context.envs())?;
-    context.set_remote_cache(remote_cache);
+    context.set_resolved_remote_cache(resolved_remote_cache);
 
     // Resolve effective concurrency for this level.
     //
@@ -974,7 +979,7 @@ mod tests {
 
     fn parent_config(includes_auto: bool, positive_globs: &[&str]) -> CacheConfig {
         CacheConfig {
-            remote_cache: true,
+            remote_cache_allowed: true,
             env_config: EnvConfig {
                 fingerprinted_envs: FxHashSet::default(),
                 untracked_env: FxHashSet::default(),
@@ -1175,7 +1180,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert!(!result.remote_cache);
+        assert!(!result.remote_cache_allowed);
     }
 
     #[test]

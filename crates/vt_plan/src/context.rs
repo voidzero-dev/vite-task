@@ -8,7 +8,9 @@ use vt_graph::{
 use vt_path::AbsolutePath;
 use vt_str::Str;
 
-use crate::{PlanRequestParser, path_env::prepend_path_env, remote_cache::RemoteCacheConfig};
+use crate::{
+    PlanRequestParser, path_env::prepend_path_env, remote_cache::ResolvedRemoteCacheConfig,
+};
 
 #[derive(Debug, thiserror::Error)]
 #[error(
@@ -65,7 +67,7 @@ pub struct PlanContext<'a> {
     /// Settings pass between levels only through envs. A nested level gets a
     /// copy of this value through [`duplicate`](Self::duplicate), but replaces
     /// it before any reads.
-    remote_cache: Option<RemoteCacheConfig>,
+    resolved_remote_cache: Option<ResolvedRemoteCacheConfig>,
 
     /// The query that caused the current expansion.
     /// Used by the skip rule to detect and skip duplicate nested expansions.
@@ -91,7 +93,7 @@ impl<'a> PlanContext<'a> {
             indexed_task_graph,
             extra_args: Arc::default(),
             resolved_global_cache,
-            remote_cache: None,
+            resolved_remote_cache: None,
             parent_query,
         }
     }
@@ -166,12 +168,12 @@ impl<'a> PlanContext<'a> {
         self.resolved_global_cache = config;
     }
 
-    pub const fn remote_cache(&self) -> Option<&RemoteCacheConfig> {
-        self.remote_cache.as_ref()
+    pub const fn resolved_remote_cache(&self) -> Option<&ResolvedRemoteCacheConfig> {
+        self.resolved_remote_cache.as_ref()
     }
 
-    pub fn set_remote_cache(&mut self, remote_cache: Option<RemoteCacheConfig>) {
-        self.remote_cache = remote_cache;
+    pub fn set_resolved_remote_cache(&mut self, config: Option<ResolvedRemoteCacheConfig>) {
+        self.resolved_remote_cache = config;
     }
 
     pub fn parent_query(&self) -> &TaskQuery {
@@ -198,7 +200,7 @@ impl<'a> PlanContext<'a> {
             indexed_task_graph: self.indexed_task_graph,
             extra_args: Arc::clone(&self.extra_args),
             resolved_global_cache: self.resolved_global_cache.clone(),
-            remote_cache: self.remote_cache.clone(),
+            resolved_remote_cache: self.resolved_remote_cache.clone(),
             parent_query: Arc::clone(&self.parent_query),
         }
     }

@@ -25,7 +25,7 @@
                               "Spawn": {
                                 "cache_metadata": {
                                   "remote_cache": {
-                                    "mode": "read",
+                                    "access": "read",
                                     "url": "https://cache.example/projects/inner"
                                   }
                                 }

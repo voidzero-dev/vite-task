@@ -377,7 +377,8 @@ pub enum UserGlobalCacheConfig {
 pub struct ResolvedGlobalCacheConfig {
     pub scripts: bool,
     pub tasks: bool,
-    /// Remote cache endpoint from `cache.remote.url`, if configured.
+    /// Remote cache endpoint from `cache.remote.url`, if configured. Planning
+    /// uses `VP_REMOTE_CACHE_URL` instead when it's set.
     pub remote_url: Option<Arc<str>>,
 }
 

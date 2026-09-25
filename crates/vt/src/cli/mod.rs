@@ -19,7 +19,7 @@ pub enum LogMode {
     Grouped,
 }
 
-/// Remote cache access selected on the command line.
+/// Remote cache mode selected with `--remote-cache`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum RemoteCacheMode {
     /// Remote caching is disabled.
@@ -261,7 +261,7 @@ impl ResolvedRunCommand {
                 plan_options: PlanOptions {
                     extra_args: self.additional_args.into(),
                     cache_override,
-                    remote_cache: self.flags.remote_cache.map(Into::into),
+                    remote_cache_mode: self.flags.remote_cache.map(Into::into),
                     concurrency_limit,
                     parallel,
                     fail_if_no_match,
