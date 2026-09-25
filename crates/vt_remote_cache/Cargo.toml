@@ -15,12 +15,13 @@ serde = { workspace = true, features = ["derive"] }
 serde_bytes = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
+url = { workspace = true }
 vt_path = { workspace = true }
+vt_str = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
-vt_str = { workspace = true }
 
 [lints]
 workspace = true

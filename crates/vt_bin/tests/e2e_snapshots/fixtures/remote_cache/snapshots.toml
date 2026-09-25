@@ -77,11 +77,11 @@ steps = [
       "cache.example/projects/test",
     ],
   ], comment = "The failed upload is a warning. The task succeeds." },
-  [
+  { argv = [
     "vt",
     "run",
     "--last-details",
-  ],
+  ], comment = "The details include the underlying error." },
   { argv = [
     "vt",
     "run",
