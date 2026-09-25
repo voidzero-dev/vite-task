@@ -96,6 +96,13 @@ input?: Array<string | GlobWithBase | AutoTracking>,
 output?: Array<string | GlobWithBase | AutoTracking>,
 /**
  * Whether this task can use the remote cache. Defaults to `true`.
+ *
+ * The remote cache is used only when these also hold:
+ * - Caching isn't turned off by `--no-cache` or the workspace root's `cache` setting.
+ * - An endpoint is set with `cache.remote.url` in the workspace root config or with
+ *   `VP_REMOTE_CACHE_URL`.
+ * - Remote access isn't set to `off` with `--remote-cache` or `VP_REMOTE_CACHE`. It
+ *   defaults to `read`, which downloads cached results without uploading new ones.
  */
 remote?: boolean, };
 
