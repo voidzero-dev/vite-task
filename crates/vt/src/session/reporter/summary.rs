@@ -19,6 +19,7 @@ use crate::session::{
     cache::{
         CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind, SpawnFingerprintChange,
         detect_spawn_fingerprint_changes, format_input_change_str, format_spawn_change,
+        remote::RemoteCacheFailure,
     },
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
@@ -122,7 +123,7 @@ pub enum SpawnOutcome {
         tool_disabled_cache: bool,
         /// Why uploading the entry to the remote cache failed, if it did.
         /// The local cache was still updated.
-        upload_error: Option<Str>,
+        upload_error: Option<RemoteCacheFailure>,
     },
 
     /// Process exited with non-zero status.
@@ -231,10 +232,10 @@ impl SummaryStats {
                         }
                         SpawnOutcome::Success { .. } => {}
                     }
-                    if let SpawnOutcome::Success { upload_error: Some(reason), .. } = outcome {
+                    if let SpawnOutcome::Success { upload_error: Some(failure), .. } = outcome {
                         stats.upload_failures.push(UploadFailure {
                             task_name: task.format_task_display(),
-                            reason: reason.clone(),
+                            reason: failure.reason.clone(),
                         });
                     }
                 }
@@ -371,9 +372,7 @@ impl TaskResult {
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete)
         );
         let upload_error = match cache_update_status {
-            CacheUpdateStatus::Updated { upload_error: Some(err) } => {
-                Some(vt_str::format!("{err}"))
-            }
+            CacheUpdateStatus::Updated { upload_error: Some(err) } => Some(err.to_failure()),
             _ => None,
         };
 
@@ -427,7 +426,7 @@ fn spawn_outcome_from_execution(
     ipc_server_error: Option<Str>,
     tool_disabled_cache: bool,
     tracking_incomplete: bool,
-    upload_error: Option<Str>,
+    upload_error: Option<RemoteCacheFailure>,
 ) -> SpawnOutcome {
     match (exit_status, saved_error) {
         // Spawn error — process never ran
@@ -674,7 +673,7 @@ impl TaskResult {
     }
 
     /// Why uploading the entry to the remote cache failed, if it did.
-    const fn upload_error(&self) -> Option<&Str> {
+    const fn upload_error(&self) -> Option<&RemoteCacheFailure> {
         match self {
             Self::Spawned { outcome: SpawnOutcome::Success { upload_error, .. }, .. } => {
                 upload_error.as_ref()
@@ -843,11 +842,11 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
         let cache_detail = task.result.format_cache_detail();
         let _ = writeln!(buf, "      {}", cache_detail.style(task.result.cache_detail_style()));
 
-        if let Some(reason) = task.result.upload_error() {
+        if let Some(failure) = task.result.upload_error() {
             let _ = writeln!(
                 buf,
                 "      {}",
-                vt_str::format!("⚠ Not uploaded to the remote cache: {reason}")
+                vt_str::format!("⚠ Not uploaded to the remote cache: {}", failure.with_details())
                     .style(Style::new().yellow())
             );
         }
@@ -1042,7 +1041,10 @@ mod tests {
                     ipc_server_error: None,
                     tracking_incomplete: false,
                     tool_disabled_cache: false,
-                    upload_error: Some(Str::from(reason)),
+                    upload_error: Some(RemoteCacheFailure {
+                        reason: Str::from(reason),
+                        details: None,
+                    }),
                 },
             },
         }

@@ -4,11 +4,13 @@
 use std::time::Duration;
 
 use reqwest::{
-    StatusCode, Url,
+    Response, StatusCode,
     multipart::{Form, Part},
 };
 use serde::Serialize;
+use url::{ParseError, Url};
 use vt_path::AbsolutePath;
+use vt_str::Str;
 
 /// Time allowed to establish a connection, including the TLS handshake.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -18,13 +20,14 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A failed remote cache operation. The messages name only the kind of
-/// failure, so they are the same on every platform. The underlying error, if
-/// any, is the source.
+/// failure, so they are the same on every platform. The details, if any, are
+/// in the source.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The endpoint isn't an HTTP or HTTPS URL that can have a path.
+    /// The endpoint isn't an HTTP or HTTPS URL that can have a path. The
+    /// source is the parse error if it isn't a URL at all.
     #[error("invalid endpoint")]
-    InvalidEndpoint,
+    InvalidEndpoint(#[source] Option<ParseError>),
     /// The HTTP client couldn't be created, for example because no root
     /// certificates could be loaded.
     #[error("failed to create the HTTP client")]
@@ -36,10 +39,16 @@ pub enum Error {
     /// failed or timed out.
     #[error("network error")]
     Network(#[source] reqwest::Error),
-    /// The server responded with a status other than 200.
+    /// The server responded with a status other than 200. The source is the
+    /// message in the response body, if any.
     #[error("HTTP status {}", .0.as_u16())]
-    Status(StatusCode),
+    Status(StatusCode, #[source] Option<ServerMessage>),
 }
+
+/// The message in the body of an error response.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct ServerMessage(Str);
 
 /// The `metadata` part of a store request.
 #[derive(Serialize)]
@@ -109,9 +118,8 @@ impl Client {
             .send()
             .await
             .map_err(Error::Network)?;
-        let status = response.status();
-        if status != StatusCode::OK {
-            return Err(Error::Status(status));
+        if response.status() != StatusCode::OK {
+            return Err(status_error(response).await);
         }
         // The response's blob ID isn't needed. Read the body anyway, so the
         // connection can be reused.
@@ -121,9 +129,9 @@ impl Client {
 }
 
 fn parse_endpoint(endpoint: &str) -> Result<Url, Error> {
-    let url = Url::parse(endpoint).map_err(|_| Error::InvalidEndpoint)?;
+    let url = Url::parse(endpoint).map_err(|err| Error::InvalidEndpoint(Some(err)))?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err(Error::InvalidEndpoint);
+        return Err(Error::InvalidEndpoint(None));
     }
     Ok(url)
 }
@@ -131,8 +139,19 @@ fn parse_endpoint(endpoint: &str) -> Result<Url, Error> {
 /// Append `route` to the endpoint's path, keeping its namespace path.
 fn route_url(endpoint: &Url, route: &str) -> Result<Url, Error> {
     let mut url = endpoint.clone();
-    url.path_segments_mut().map_err(|()| Error::InvalidEndpoint)?.pop_if_empty().push(route);
+    url.path_segments_mut().map_err(|()| Error::InvalidEndpoint(None))?.pop_if_empty().push(route);
     Ok(url)
+}
+
+/// The error for a response with a status other than 200, with the message in
+/// its body.
+async fn status_error(response: Response) -> Error {
+    let status = response.status();
+    let message = response.text().await.ok().and_then(|text| {
+        let text = text.trim();
+        (!text.is_empty()).then(|| ServerMessage(Str::from(text)))
+    });
+    Error::Status(status, message)
 }
 
 fn encode_metadata(metadata: &StoreMetadata<'_>) -> Vec<u8> {
@@ -185,7 +204,7 @@ mod tests {
     fn rejects_endpoints_that_are_not_http_urls() {
         for endpoint in ["cache.example/projects/test", "ftp://cache.example", "mailto:a@b.example"]
         {
-            assert!(matches!(Client::new(endpoint), Err(Error::InvalidEndpoint)), "{endpoint}");
+            assert!(matches!(Client::new(endpoint), Err(Error::InvalidEndpoint(_))), "{endpoint}");
         }
     }
 
@@ -255,14 +274,15 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
-            serve_once(&listener, "HTTP/1.1 500 Internal Server Error", b"")
+            serve_once(&listener, "HTTP/1.1 500 Internal Server Error", b"storage failed\n")
         });
 
         let client =
             Client::new(&vt_str::format!("http://127.0.0.1:{port}/projects/test")).unwrap();
-        let result = client.store(b"k", b"s", b"v", Some(&blob)).await;
-        assert!(matches!(result, Err(Error::Status(StatusCode::INTERNAL_SERVER_ERROR))));
-        assert_eq!(result.unwrap_err().to_string(), "HTTP status 500");
+        let err = client.store(b"k", b"s", b"v", Some(&blob)).await.unwrap_err();
+        assert!(matches!(err, Error::Status(StatusCode::INTERNAL_SERVER_ERROR, _)));
+        assert_eq!(err.to_string(), "HTTP status 500");
+        assert_eq!(std::error::Error::source(&err).unwrap().to_string(), "storage failed");
 
         let request = server.join().unwrap();
         assert!(request.starts_with(b"POST /projects/test/store HTTP/1.1\r\n"));

@@ -5224,6 +5224,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "url",
  "vt_path",
  "vt_str",
 ]

@@ -12,9 +12,13 @@
 //! target OS and architecture. Platforms share an endpoint's namespace, but
 //! their keys differ.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::{
+    error::Error,
+    sync::{Arc, Mutex, PoisonError},
+};
 
 use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
 use vt_path::AbsolutePath;
 use vt_plan::cache_metadata::ExecutionCacheKey;
 use vt_remote_cache::Client;
@@ -29,13 +33,50 @@ use super::{
 };
 
 /// Why an entry wasn't uploaded. The message names only the kind of failure,
-/// so it's the same on every platform.
+/// so it's the same on every platform. The details are in the source.
 #[derive(Debug, thiserror::Error)]
 pub enum UploadError {
     #[error(transparent)]
     Remote(#[from] vt_remote_cache::Error),
     #[error("failed to encode the cache entry")]
     Encode(#[from] WriteError),
+}
+
+impl UploadError {
+    pub fn to_failure(&self) -> RemoteCacheFailure {
+        RemoteCacheFailure { reason: vt_str::format!("{self}"), details: chain(self.source()) }
+    }
+}
+
+/// A remote cache failure as reported. The reason is the same on every
+/// platform. `--last-details` also shows the details, which come from the
+/// underlying errors.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteCacheFailure {
+    pub reason: Str,
+    pub details: Option<Str>,
+}
+
+impl RemoteCacheFailure {
+    /// The reason followed by the details, if any.
+    pub fn with_details(&self) -> Str {
+        self.details.as_ref().map_or_else(
+            || self.reason.clone(),
+            |details| vt_str::format!("{}: {details}", self.reason),
+        )
+    }
+}
+
+/// The messages of `error` and its sources, joined with `: `.
+fn chain(error: Option<&(dyn Error + 'static)>) -> Option<Str> {
+    std::iter::successors(error, |&err| err.source()).fold(None, |chain, err| {
+        Some(
+            chain.map_or_else(
+                || vt_str::format!("{err}"),
+                |chain| vt_str::format!("{chain}: {err}"),
+            ),
+        )
+    })
 }
 
 /// Remote cache clients, each created when its endpoint is first used.
