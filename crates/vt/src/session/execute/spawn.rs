@@ -45,6 +45,10 @@ pub struct ChildOutcome {
     /// `Err` when a tracked process could not record everything it did.
     #[cfg(fspy)]
     pub path_accesses: Option<Result<PathAccessIterable, fspy::TrackingIncomplete>>,
+    /// `true` when fspy tracking was requested but the tracked spawn failed
+    /// and the child ran untracked (see [`spawn`]). Always `false` on builds
+    /// without `cfg(fspy)`.
+    pub fspy_unavailable: bool,
 }
 
 /// Spawn a command with the requested fspy and stdio configuration.
@@ -58,6 +62,11 @@ pub struct ChildOutcome {
 ///
 /// On builds without `cfg(fspy)`, the `fspy` argument is ignored and the tokio
 /// path is always taken.
+///
+/// When fspy is requested but the tracked spawn itself fails (e.g. the preload
+/// library cannot be materialized), the command falls back to an untracked
+/// spawn with [`ChildOutcome::fspy_unavailable`] set, so the run is not
+/// cached — a task must never fail to run because its tracing did.
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn spawn<E, K, V>(
     cmd: &SpawnCommand,
@@ -71,9 +80,29 @@ where
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
+    let extra_envs: Vec<(K, V)> = extra_envs.into_iter().collect();
+
+    #[cfg(fspy)]
+    let mut fspy_unavailable = false;
+    #[cfg(not(fspy))]
+    let fspy_unavailable = false;
+
     #[cfg(fspy)]
     if fspy {
-        return spawn_fspy(cmd, stdio, cancellation_token, extra_envs).await;
+        match spawn_fspy(
+            cmd,
+            stdio,
+            cancellation_token.clone(),
+            extra_envs.iter().map(|(k, v)| (k, v)),
+        )
+        .await
+        {
+            Ok(handle) => return Ok(handle),
+            Err(err) => {
+                tracing::warn!("fspy spawn failed, falling back to untracked spawn: {err:#}");
+                fspy_unavailable = true;
+            }
+        }
     }
     #[cfg(not(fspy))]
     let _ = fspy;
@@ -82,12 +111,17 @@ where
     tokio_cmd.args(cmd.args.iter().map(vt_str::Str::as_str));
     tokio_cmd.env_clear();
     tokio_cmd.envs(cmd.spawn_envs.iter());
-    tokio_cmd.envs(extra_envs);
+    tokio_cmd.envs(extra_envs.iter().map(|(k, v)| (k, v)));
     tokio_cmd.current_dir(&*cmd.cwd);
     apply_stdio(&mut tokio_cmd, stdio);
-    spawn_tokio(tokio_cmd, cancellation_token)
+    spawn_tokio(tokio_cmd, cancellation_token, fspy_unavailable)
 }
 
+/// Spawn through fspy's tracked [`fspy::Command`].
+///
+/// A failure here must not fail the task: [`spawn`] falls back to an
+/// untracked spawn and marks the outcome [`ChildOutcome::fspy_unavailable`]
+/// so the run is not cached.
 #[cfg(fspy)]
 async fn spawn_fspy<E, K, V>(
     cmd: &SpawnCommand,
@@ -148,6 +182,7 @@ where
         Ok(ChildOutcome {
             exit_status: termination.status,
             path_accesses: Some(termination.path_accesses),
+            fspy_unavailable: false,
         })
     }
     .boxed_local();
@@ -158,6 +193,7 @@ where
 fn spawn_tokio(
     mut cmd: tokio::process::Command,
     cancellation_token: CancellationToken,
+    fspy_unavailable: bool,
 ) -> anyhow::Result<ChildHandle> {
     let mut child = cmd.spawn()?;
 
@@ -192,6 +228,7 @@ fn spawn_tokio(
             exit_status,
             #[cfg(fspy)]
             path_accesses: None,
+            fspy_unavailable,
         })
     }
     .boxed_local();
