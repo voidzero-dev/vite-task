@@ -763,8 +763,10 @@ pub async fn plan_query_request(
         );
         context.set_resolved_global_cache(final_cache);
     }
-    // Inherit explicit choices through the environment. Leave defaults unset so
-    // each invocation can choose its default using the endpoint available to it.
+    // Resolve `context.remote_cache` for this level (see its doc for the data
+    // flow). Write this level's `--remote-cache` flag to `VP_REMOTE_CACHE` first,
+    // so it overrides inherited values and nested levels inherit it. Leave the
+    // default unset so each level picks its own from the endpoint it sees.
     if let Some(mode) = plan_options.remote_cache {
         context.add_envs(std::iter::once((remote_cache::MODE_ENV, mode.as_str())));
     }

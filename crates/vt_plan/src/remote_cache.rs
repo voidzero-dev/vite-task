@@ -62,7 +62,8 @@ fn env_value<'a>(
     envs.get(EnvName::from_ref(OsStr::new(name))).filter(|value| !value.is_empty())
 }
 
-/// Resolve against this invocation's environment, including inherited overrides.
+/// Resolves remote cache access for one `vp run` level from the envs visible at
+/// that level. See `PlanContext::remote_cache` for what they include.
 pub(crate) fn resolve(
     configured_url: Option<&Arc<str>>,
     envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,

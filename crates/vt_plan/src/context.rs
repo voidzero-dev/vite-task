@@ -52,8 +52,19 @@ pub struct PlanContext<'a> {
     /// Final resolved global cache config, combining the graph's config with any CLI override.
     resolved_global_cache: ResolvedGlobalCacheConfig,
 
-    /// Remote cache access for this invocation, resolved by `plan_query_request`
-    /// from the global cache config and the invocation's envs.
+    /// Remote cache access for the commands planned at this `vp run` level.
+    ///
+    /// `plan_query_request` resolves it at the start of each level from
+    /// `cache.remote.url` and the envs visible at that level, after writing the
+    /// level's `--remote-cache` flag to `VP_REMOTE_CACHE`. Those envs include the
+    /// process env, outer levels' flags, and prefixes on the command that
+    /// started the level, like `VP_REMOTE_CACHE=off vp run build`. Prefixes on
+    /// the level's own commands are added afterwards, so they reach the task
+    /// processes but don't change this value.
+    ///
+    /// Settings pass between levels only through envs. A nested level gets a
+    /// copy of this value through [`duplicate`](Self::duplicate), but replaces
+    /// it before any reads.
     remote_cache: Option<RemoteCacheConfig>,
 
     /// The query that caused the current expansion.
