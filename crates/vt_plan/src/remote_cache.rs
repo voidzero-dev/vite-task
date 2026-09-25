@@ -46,13 +46,6 @@ pub enum RemoteCacheAccess {
     ReadWrite,
 }
 
-/// Whether `name` is one of the env vars that select remote cache access.
-/// They pass through to tasks like other `VP_*` variables, but stay out of
-/// fingerprinted envs, so runs with different remote access share entries.
-pub(crate) fn is_control_env<S: AsRef<OsStr> + ?Sized>(name: &EnvName<S>) -> bool {
-    [MODE_ENV, URL_ENV].into_iter().any(|control| name == EnvName::from_ref(OsStr::new(control)))
-}
-
 /// Reads a control env. An empty value counts as unset, like a CI secret that
 /// isn't available to the job.
 fn env_value<'a>(
@@ -103,15 +96,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn controls_match_env_names_by_platform_rules() {
-        for name in ["VP_REMOTE_CACHE", "VP_REMOTE_CACHE_URL"] {
-            assert!(is_control_env(EnvName::from_ref(name)));
-        }
-        for name in ["vp_remote_cache", "Vp_Remote_Cache_Url"] {
-            assert_eq!(is_control_env(EnvName::from_ref(name)), cfg!(windows), "{name}");
-        }
-        assert!(!is_control_env(EnvName::from_ref("VP_REMOTE_CACHE_TOKEN")));
-
+    fn reads_envs_by_platform_name_rules() {
         let envs =
             [("vp_remote_cache", "read-write"), ("vp_remote_cache_url", "https://cache.example")]
                 .into_iter()

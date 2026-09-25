@@ -8,10 +8,7 @@
   "tasks": {
     "build": {
       "command": "vtt print-file package.json",
-      "cache": {
-        "env": ["*", "!PATH"],
-        "remote": true
-      }
+      "cache": { "remote": true }
     },
     "local-only": {
       "command": "vtt print-file package.json",
@@ -24,8 +21,7 @@
     "tracked-controls": {
       "command": "vtt print-file package.json",
       "cache": {
-        "env": ["VP_REMOTE_CACHE", "VP_REMOTE_CACHE_URL"],
-        "untrackedEnv": ["VP_REMOTE_CACHE", "VP_REMOTE_CACHE_URL"]
+        "env": ["VP_REMOTE_CACHE", "VP_REMOTE_CACHE_URL"]
       }
     }
   }

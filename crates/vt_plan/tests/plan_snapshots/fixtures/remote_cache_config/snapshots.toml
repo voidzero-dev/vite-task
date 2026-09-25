@@ -41,12 +41,12 @@ args = ["run", "build"]
 env = { "VP_REMOTE_CACHE_URL" = "" }
 
 [[plan]]
-name = "controls_untracked"
+name = "controls_in_env_fingerprinted"
 args = ["run", "tracked-controls"]
 env = { "VP_REMOTE_CACHE" = "read-write", "VP_REMOTE_CACHE_URL" = "https://other.example/projects/test" }
 
 [[plan]]
-name = "prefix_controls_untracked"
+name = "prefix_controls_fingerprinted"
 args = ["run", "prefix"]
 
 [[plan]]

@@ -134,10 +134,7 @@ impl EnvFingerprints {
                 let Some(name) = name.inner().to_str() else {
                     continue;
                 };
-                // Matching controls still reach the task, just untracked.
-                if !fingerprinted_env_patterns.is_match(name)
-                    || crate::remote_cache::is_control_env(EnvName::from_ref(name))
-                {
+                if !fingerprinted_env_patterns.is_match(name) {
                     continue;
                 }
                 let Some(value) = value.to_str() else {
@@ -283,32 +280,6 @@ mod tests {
             assert_eq!(envs, [("force_color", "0")]);
         } else {
             assert_eq!(envs, [("FORCE_COLOR", "1"), ("force_color", "0")]);
-        }
-    }
-
-    #[test]
-    fn test_remote_cache_controls_are_not_fingerprinted() {
-        // Controls pass through when a pattern matches them, but never enter
-        // the fingerprint. On Windows the lowercase spellings are the same
-        // variables.
-        let mut envs = create_test_envs(vec![
-            ("VP_REMOTE_CACHE", "read-write"),
-            ("vp_remote_cache_url", "https://cache.example"),
-            ("OTHER", "value"),
-        ]);
-        let env_config = create_env_config(&["*"], &[]);
-
-        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
-
-        assert!(envs.contains_key(EnvName::from_ref(OsStr::new("VP_REMOTE_CACHE"))));
-        assert!(envs.contains_key(EnvName::from_ref(OsStr::new("vp_remote_cache_url"))));
-        let mut fingerprinted: Vec<&str> =
-            result.fingerprinted_envs.keys().map(Str::as_str).collect();
-        fingerprinted.sort_unstable();
-        if cfg!(windows) {
-            assert_eq!(fingerprinted, ["FORCE_COLOR", "OTHER"]);
-        } else {
-            assert_eq!(fingerprinted, ["FORCE_COLOR", "OTHER", "vp_remote_cache_url"]);
         }
     }
 

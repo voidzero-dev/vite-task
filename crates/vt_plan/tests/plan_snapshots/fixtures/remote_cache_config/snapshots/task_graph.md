@@ -32,10 +32,7 @@ flowchart TD
       "cache_config": {
         "remote_cache": true,
         "env_config": {
-          "fingerprinted_envs": [
-            "!PATH",
-            "*"
-          ],
+          "fingerprinted_envs": [],
           "untracked_env": [
             "<default untracked envs>"
           ]
@@ -400,8 +397,6 @@ flowchart TD
             "VP_REMOTE_CACHE_URL"
           ],
           "untracked_env": [
-            "VP_REMOTE_CACHE",
-            "VP_REMOTE_CACHE_URL",
             "<default untracked envs>"
           ]
         },

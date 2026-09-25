@@ -1,10 +1,10 @@
-// run tracked-controls
+// run prefix
 {
   "graph": [
     {
       "key": [
         "<workspace>/",
-        "tracked-controls"
+        "prefix"
       ],
       "node": {
         "items": [
@@ -15,23 +15,24 @@
                   "cache_metadata": {
                     "spawn_fingerprint": {
                       "env_fingerprints": {
-                        "fingerprinted_envs": {},
+                        "fingerprinted_envs": {
+                          "VP_REMOTE_CACHE": "sha256:b4dc66dde806261bdda8607d8707aa727d308cd80272381a5583f63899918467",
+                          "VP_REMOTE_CACHE_URL": "sha256:eb8aeaa7d6dcc18abb2804c93fb01cd25864d4d5a62cff2bd38f95232a68928c"
+                        },
                         "untracked_env_config": [
-                          "VP_REMOTE_CACHE",
-                          "VP_REMOTE_CACHE_URL",
                           "<default untracked envs>"
                         ]
                       }
                     },
                     "remote_cache": {
-                      "mode": "read-write",
-                      "url": "https://other.example/projects/test"
+                      "mode": "read",
+                      "url": "https://cache.example/projects/test"
                     }
                   },
                   "spawn_command": {
                     "spawn_envs": {
-                      "VP_REMOTE_CACHE": "read-write",
-                      "VP_REMOTE_CACHE_URL": "https://other.example/projects/test"
+                      "VP_REMOTE_CACHE": "off",
+                      "VP_REMOTE_CACHE_URL": "https://other.example"
                     }
                   }
                 }

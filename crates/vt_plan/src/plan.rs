@@ -640,9 +640,6 @@ fn plan_spawn_execution(
         // differently, like `foo` for `Foo=1` on Windows.
         let fingerprinted_envs = &mut env_fingerprints.fingerprinted_envs;
         for (name, value) in prefix_envs {
-            if remote_cache::is_control_env(name) {
-                continue;
-            }
             fingerprinted_envs.retain(|existing, _| EnvName::from_ref(existing) != name);
             fingerprinted_envs.insert(name.inner().clone(), EnvValueHash::new(value.as_str()));
         }
