@@ -1,13 +1,12 @@
 //! Client for the remote cache server API. Keys, values, and blobs are opaque
 //! bytes; the caller decides what they contain.
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use reqwest::{
     StatusCode, Url,
     multipart::{Form, Part},
 };
-use rustls_platform_verifier::BuilderVerifierExt as _;
 use serde::Serialize;
 use vt_path::AbsolutePath;
 
@@ -29,7 +28,7 @@ pub enum Error {
     /// The HTTP client couldn't be created, for example because no root
     /// certificates could be loaded.
     #[error("failed to create the HTTP client")]
-    HttpClient(#[source] Box<dyn std::error::Error + Send + Sync>),
+    HttpClient(#[source] reqwest::Error),
     /// The blob file couldn't be opened.
     #[error("failed to read the blob")]
     ReadBlob(#[source] std::io::Error),
@@ -71,13 +70,15 @@ impl Client {
     pub fn new(endpoint: &str) -> Result<Self, Error> {
         let endpoint = parse_endpoint(endpoint)?;
         let store_url = route_url(&endpoint, "store")?;
-        let tls = tls_config(endpoint.scheme() == "https")?;
+        // reqwest configures TLS with the process's default crypto provider.
+        // Installing fails if one is already installed; vite-plus installs
+        // ring too.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let http = reqwest::Client::builder()
-            .tls_backend_preconfigured(tls)
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(READ_TIMEOUT)
             .build()
-            .map_err(|err| Error::HttpClient(err.into()))?;
+            .map_err(Error::HttpClient)?;
         Ok(Self { http, store_url })
     }
 
@@ -132,24 +133,6 @@ fn route_url(endpoint: &Url, route: &str) -> Result<Url, Error> {
     let mut url = endpoint.clone();
     url.path_segments_mut().map_err(|()| Error::InvalidEndpoint)?.pop_if_empty().push(route);
     Ok(url)
-}
-
-/// TLS settings using the ring crypto provider. HTTPS endpoints verify
-/// certificates with the operating system's verifier. Plain HTTP endpoints
-/// don't load the system's root certificates, so they work on systems that
-/// have none.
-fn tls_config(https: bool) -> Result<rustls::ClientConfig, Error> {
-    let builder = rustls::ClientConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()
-    .map_err(|err| Error::HttpClient(err.into()))?;
-    let builder = if https {
-        builder.with_platform_verifier().map_err(|err| Error::HttpClient(err.into()))?
-    } else {
-        builder.with_root_certificates(rustls::RootCertStore::empty())
-    };
-    Ok(builder.with_no_client_auth())
 }
 
 fn encode_metadata(metadata: &StoreMetadata<'_>) -> Vec<u8> {

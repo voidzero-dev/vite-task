@@ -10,8 +10,7 @@ rust-version.workspace = true
 [dependencies]
 ciborium = { workspace = true }
 reqwest = { workspace = true, features = ["multipart", "rustls-no-provider", "stream"] }
-rustls = { workspace = true, features = ["ring", "std", "tls12"] }
-rustls-platform-verifier = { workspace = true }
+rustls = { workspace = true, features = ["ring", "std"] }
 serde = { workspace = true, features = ["derive"] }
 serde_bytes = { workspace = true }
 thiserror = { workspace = true }
