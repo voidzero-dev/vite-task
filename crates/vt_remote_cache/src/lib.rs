@@ -42,19 +42,15 @@ pub enum Error {
     Status(StatusCode),
 }
 
-/// An entry to store. The server treats each field as opaque bytes.
-#[derive(Debug, Serialize)]
-pub struct Entry<'a> {
-    /// Identifies the entry.
+/// The `metadata` part of a store request.
+#[derive(Serialize)]
+struct StoreMetadata<'a> {
     #[serde(with = "serde_bytes")]
-    pub key: &'a [u8],
-    /// Associated with `key`, so fetches that match no key can fall back to
-    /// this entry.
+    key: &'a [u8],
     #[serde(with = "serde_bytes")]
-    pub secondary_key: &'a [u8],
-    /// The stored value.
+    secondary_key: &'a [u8],
     #[serde(with = "serde_bytes")]
-    pub value: &'a [u8],
+    value: &'a [u8],
 }
 
 /// A client for one remote cache endpoint.
@@ -85,15 +81,23 @@ impl Client {
         Ok(Self { http, store_url })
     }
 
-    /// Store `entry` with `POST {endpoint}/store`, uploading the file at
-    /// `blob` as its blob.
+    /// Store `value` under `key` with `POST {endpoint}/store`, uploading the
+    /// file at `blob` as its blob. Fetches that match no key fall back to this
+    /// entry through `secondary_key`.
     ///
     /// # Errors
     ///
     /// Returns an error if the blob file can't be opened, the request fails,
     /// or the server responds with a status other than 200.
-    pub async fn store(&self, entry: &Entry<'_>, blob: Option<&AbsolutePath>) -> Result<(), Error> {
-        let mut form = Form::new().part("metadata", metadata_part(entry));
+    pub async fn store(
+        &self,
+        key: &[u8],
+        secondary_key: &[u8],
+        value: &[u8],
+        blob: Option<&AbsolutePath>,
+    ) -> Result<(), Error> {
+        let metadata = StoreMetadata { key, secondary_key, value };
+        let mut form = Form::new().part("metadata", metadata_part(&metadata));
         if let Some(blob) = blob {
             form = form.part("blob", blob_part(blob).await?);
         }
@@ -148,14 +152,15 @@ fn tls_config(https: bool) -> Result<rustls::ClientConfig, Error> {
     Ok(builder.with_no_client_auth())
 }
 
-fn encode_metadata(entry: &Entry<'_>) -> Vec<u8> {
+fn encode_metadata(metadata: &StoreMetadata<'_>) -> Vec<u8> {
     let mut bytes = Vec::new();
-    ciborium::into_writer(entry, &mut bytes).expect("encoding byte strings into a Vec can't fail");
+    ciborium::into_writer(metadata, &mut bytes)
+        .expect("encoding byte strings into a Vec can't fail");
     bytes
 }
 
-fn metadata_part(entry: &Entry<'_>) -> Part {
-    Part::bytes(encode_metadata(entry)).mime_str("application/cbor").expect("valid MIME type")
+fn metadata_part(metadata: &StoreMetadata<'_>) -> Part {
+    Part::bytes(encode_metadata(metadata)).mime_str("application/cbor").expect("valid MIME type")
 }
 
 async fn blob_part(path: &AbsolutePath) -> Result<Part, Error> {
@@ -203,12 +208,12 @@ mod tests {
 
     #[test]
     fn metadata_is_a_cbor_map_of_byte_strings() {
-        let entry = Entry { key: b"k", secondary_key: b"", value: &[0x00, 0xff] };
+        let metadata = StoreMetadata { key: b"k", secondary_key: b"", value: &[0x00, 0xff] };
         let mut expected = vec![0xa3];
         expected.extend(b"\x63key\x41k");
         expected.extend(b"\x6dsecondary_key\x40");
         expected.extend(b"\x65value\x42\x00\xff");
-        assert_eq!(encode_metadata(&entry), expected);
+        assert_eq!(encode_metadata(&metadata), expected);
     }
 
     fn contains(haystack: &[u8], needle: &[u8]) -> bool {
@@ -247,10 +252,13 @@ mod tests {
         request
     }
 
-    fn metadata_part_bytes(entry: &Entry<'_>) -> Vec<u8> {
+    /// The `metadata` part of a store request for key `k`, secondary key `s`,
+    /// and value `v`.
+    fn metadata_part_bytes() -> Vec<u8> {
+        let metadata = StoreMetadata { key: b"k", secondary_key: b"s", value: b"v" };
         [
             b"name=\"metadata\"\r\nContent-Type: application/cbor\r\n\r\n".as_slice(),
-            &encode_metadata(entry),
+            &encode_metadata(&metadata),
             b"\r\n",
         ]
         .concat()
@@ -269,15 +277,14 @@ mod tests {
 
         let client =
             Client::new(&vt_str::format!("http://127.0.0.1:{port}/projects/test")).unwrap();
-        let entry = Entry { key: b"k", secondary_key: b"s", value: b"v" };
-        let result = client.store(&entry, Some(&blob)).await;
+        let result = client.store(b"k", b"s", b"v", Some(&blob)).await;
         assert!(matches!(result, Err(Error::Status(StatusCode::INTERNAL_SERVER_ERROR))));
         assert_eq!(result.unwrap_err().to_string(), "HTTP status 500");
 
         let request = server.join().unwrap();
         assert!(request.starts_with(b"POST /projects/test/store HTTP/1.1\r\n"));
         assert!(contains(&request, b"content-type: multipart/form-data; boundary="));
-        assert!(contains(&request, &metadata_part_bytes(&entry)));
+        assert!(contains(&request, &metadata_part_bytes()));
         let blob =
             b"name=\"blob\"\r\nContent-Type: application/octet-stream\r\n\r\narchive bytes\r\n";
         assert!(contains(&request, blob));
@@ -293,12 +300,11 @@ mod tests {
 
         let client =
             Client::new(&vt_str::format!("http://127.0.0.1:{port}/projects/test")).unwrap();
-        let entry = Entry { key: b"k", secondary_key: b"s", value: b"v" };
-        client.store(&entry, None).await.unwrap();
+        client.store(b"k", b"s", b"v", None).await.unwrap();
 
         let request = server.join().unwrap();
         assert!(request.starts_with(b"POST /projects/test/store HTTP/1.1\r\n"));
-        assert!(contains(&request, &metadata_part_bytes(&entry)));
+        assert!(contains(&request, &metadata_part_bytes()));
         assert!(!contains(&request, b"name=\"blob\""));
     }
 }
