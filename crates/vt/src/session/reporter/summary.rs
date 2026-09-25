@@ -151,6 +151,8 @@ pub enum SavedCacheMissReason {
     /// A runner-aware tool reported a tracked bulk env query whose match-set changed
     /// between runs. Carries the first differing entry.
     TrackedEnvQueryChanged { query: TrackedEnvQuery, mismatch: EnvMismatch },
+    /// Reading the remote cache failed, and the local cache had no entry.
+    RemoteReadFailed(RemoteCacheFailure),
 }
 
 /// An execution error, serializable for persistence.
@@ -330,6 +332,7 @@ impl SavedCacheMissReason {
                     }
                 }
             },
+            CacheMiss::RemoteReadFailed(failure) => Self::RemoteReadFailed(failure.clone()),
         }
     }
 }
@@ -654,6 +657,9 @@ impl TaskResult {
                     SavedCacheMissReason::TrackedEnvChanged(mismatch)
                     | SavedCacheMissReason::TrackedEnvQueryChanged { mismatch, .. } => {
                         vt_str::format!("→ Cache miss: {mismatch}")
+                    }
+                    SavedCacheMissReason::RemoteReadFailed(failure) => {
+                        vt_str::format!("→ Cache miss: {}", failure.with_details())
                     }
                 },
             },
