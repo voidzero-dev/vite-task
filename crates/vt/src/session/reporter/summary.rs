@@ -17,9 +17,9 @@ use vt_str::Str;
 use super::{CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt};
 use crate::session::{
     cache::{
-        CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind, SpawnFingerprintChange,
-        detect_spawn_fingerprint_changes, format_input_change_str, format_spawn_change,
-        remote::RemoteCacheFailure,
+        CacheHitSource, CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind,
+        SpawnFingerprintChange, detect_spawn_fingerprint_changes, format_input_change_str,
+        format_spawn_change, remote::RemoteCacheFailure,
     },
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
@@ -65,7 +65,12 @@ pub struct TaskSummary {
 #[derive(Serialize, Deserialize)]
 pub enum TaskResult {
     /// Cache hit — output was replayed from cache. Always successful.
-    CacheHit { saved_duration_ms: u64 },
+    CacheHit {
+        saved_duration_ms: u64,
+        /// Summaries saved before the source was recorded read as local hits.
+        #[serde(default)]
+        source: CacheHitSource,
+    },
 
     /// In-process execution (built-in command like echo). Always successful.
     InProcess,
@@ -182,7 +187,9 @@ pub enum SavedCacheErrorKind {
 
 struct SummaryStats {
     total: usize,
+    /// Cache hits from either cache, including `remote_cache_hits`.
     cache_hits: usize,
+    remote_cache_hits: usize,
     cache_misses: usize,
     cache_disabled: usize,
     failed: usize,
@@ -203,6 +210,7 @@ impl SummaryStats {
         let mut stats = Self {
             total: tasks.len(),
             cache_hits: 0,
+            remote_cache_hits: 0,
             cache_misses: 0,
             cache_disabled: 0,
             failed: 0,
@@ -213,8 +221,11 @@ impl SummaryStats {
 
         for task in tasks {
             match &task.result {
-                TaskResult::CacheHit { saved_duration_ms } => {
+                TaskResult::CacheHit { saved_duration_ms, source } => {
                     stats.cache_hits += 1;
+                    if *source == CacheHitSource::Remote {
+                        stats.remote_cache_hits += 1;
+                    }
                     stats.total_saved += Duration::from_millis(*saved_duration_ms);
                 }
                 TaskResult::InProcess => {
@@ -380,9 +391,10 @@ impl TaskResult {
         };
 
         match cache_status {
-            CacheStatus::Hit { replayed_duration } => {
-                Self::CacheHit { saved_duration_ms: duration_to_ms(*replayed_duration) }
-            }
+            CacheStatus::Hit { replayed_duration, source } => Self::CacheHit {
+                saved_duration_ms: duration_to_ms(*replayed_duration),
+                source: *source,
+            },
             CacheStatus::Disabled(CacheDisabledReason::InProcessExecution) => Self::InProcess,
             CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Disabled,
@@ -573,6 +585,7 @@ impl TaskResult {
     ///
     /// Examples:
     /// - "→ Cache hit - output replayed - 102.96ms saved"
+    /// - "→ Remote cache hit - output replayed - 102.96ms saved"
     /// - "→ Cache miss: no previous cache entry found"
     /// - "→ Cache disabled in task configuration"
     fn format_cache_detail(&self) -> Str {
@@ -625,10 +638,14 @@ impl TaskResult {
         }
 
         match self {
-            Self::CacheHit { saved_duration_ms } => {
+            Self::CacheHit { saved_duration_ms, source } => {
                 let d = Duration::from_millis(*saved_duration_ms);
                 let formatted_duration = format_summary_duration(d);
-                vt_str::format!("→ Cache hit - output replayed - {formatted_duration} saved")
+                let hit = match source {
+                    CacheHitSource::Local => "Cache hit",
+                    CacheHitSource::Remote => "Remote cache hit",
+                };
+                vt_str::format!("→ {hit} - output replayed - {formatted_duration} saved")
             }
             Self::InProcess => Str::from("→ Cache disabled for built-in command"),
             Self::Spawned { cache_status, .. } => match cache_status {
@@ -756,12 +773,16 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
     let total = stats.total;
     let cache_hits = stats.cache_hits;
     let cache_misses = stats.cache_misses;
+    let cache_hits_str = match stats.remote_cache_hits {
+        0 => vt_str::format!("• {cache_hits} cache hits"),
+        remote => vt_str::format!("• {cache_hits} cache hits ({remote} remote)"),
+    };
     let _ = write!(
         buf,
         "{}  {} {} {}",
         "Statistics:".style(Style::new().bold()),
         vt_str::format!(" {total} tasks").style(Style::new().bright_white()),
-        vt_str::format!("• {cache_hits} cache hits").style(Style::new().green()),
+        cache_hits_str.style(Style::new().green()),
         vt_str::format!("• {cache_misses} cache misses").style(CACHE_MISS_STYLE),
     );
     if !cache_disabled_str.is_empty() {
@@ -897,8 +918,10 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
 /// Rules:
 /// - Single task + not cache hit → empty (no summary at all)
 /// - Single task + cache hit → thin line + "vp run: cache hit, {duration} saved."
+///   ("remote cache hit" for a remote hit)
 /// - Multi-task → thin line + "vp run: {hits}/{total} cache hit ({rate}%), {duration} saved."
-///   with optional failure count and `--verbose` hint.
+///   with an optional remote hit count ("({rate}%, {remote} remote)"), failure count,
+///   and `--verbose` hint.
 pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> Vec<u8> {
     let stats = SummaryStats::compute(&summary.tasks);
 
@@ -923,9 +946,10 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
     if is_single_task && stats.cache_hits > 0 {
         // Single task cache hit — no need for --last-details hint
         let formatted_total_saved = format_summary_duration(stats.total_saved);
+        let hit = if stats.remote_cache_hits > 0 { "remote cache hit" } else { "cache hit" };
         let _ = write!(
             buf,
-            "{} cache hit, {} saved.",
+            "{} {hit}, {} saved.",
             run_label.as_str().style(Style::new().blue().bold()),
             formatted_total_saved.style(Style::new().green().bold()),
         );
@@ -948,9 +972,13 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
 
         let _ = write!(
             buf,
-            "{} {hits}/{total} cache hit ({rate}%)",
+            "{} {hits}/{total} cache hit ({rate}%",
             run_label.as_str().style(Style::new().blue().bold()),
         );
+        if stats.remote_cache_hits > 0 {
+            let _ = write!(buf, ", {} remote", stats.remote_cache_hits);
+        }
+        let _ = write!(buf, ")");
 
         if stats.total_saved > Duration::ZERO {
             let formatted_total_saved = format_summary_duration(stats.total_saved);
@@ -1056,9 +1084,109 @@ mod tests {
         }
     }
 
+    fn cache_hit_task(task_name: &str, source: CacheHitSource) -> TaskSummary {
+        TaskSummary {
+            package_name: Str::from("pkg"),
+            task_name: Str::from(task_name),
+            command: Str::from("build"),
+            cwd: Str::default(),
+            result: TaskResult::CacheHit { saved_duration_ms: 1000, source },
+        }
+    }
+
+    fn cache_miss_task(task_name: &str) -> TaskSummary {
+        TaskSummary {
+            package_name: Str::from("pkg"),
+            task_name: Str::from(task_name),
+            command: Str::from("build"),
+            cwd: Str::default(),
+            result: TaskResult::Spawned {
+                cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::NotFound),
+                outcome: SpawnOutcome::Success {
+                    infra_error: None,
+                    input_modified_path: None,
+                    fspy_unsupported: false,
+                    ipc_server_error: None,
+                    tracking_incomplete: false,
+                    tool_disabled_cache: false,
+                    upload_error: None,
+                },
+            },
+        }
+    }
+
     fn compact_summary(tasks: Vec<TaskSummary>) -> Str {
         let bytes = format_compact_summary(&LastRunSummary { tasks, exit_code: 0 }, "vp");
         vt_str::format!("{}", anstream::adapter::strip_str(std::str::from_utf8(&bytes).unwrap()))
+    }
+
+    fn full_summary(tasks: Vec<TaskSummary>) -> Str {
+        let bytes = format_full_summary(&LastRunSummary { tasks, exit_code: 0 });
+        vt_str::format!("{}", anstream::adapter::strip_str(std::str::from_utf8(&bytes).unwrap()))
+    }
+
+    #[test]
+    fn compact_summary_names_remote_hits() {
+        assert_eq!(
+            compact_summary(vec![cache_hit_task("a", CacheHitSource::Remote)]).as_str(),
+            "---\nvp run: remote cache hit, 1s saved.\n"
+        );
+        assert_eq!(
+            compact_summary(vec![cache_hit_task("a", CacheHitSource::Local)]).as_str(),
+            "---\nvp run: cache hit, 1s saved.\n"
+        );
+        assert_eq!(
+            compact_summary(vec![
+                cache_hit_task("a", CacheHitSource::Local),
+                cache_hit_task("b", CacheHitSource::Remote),
+                cache_miss_task("c"),
+            ])
+            .as_str(),
+            "---\nvp run: 2/3 cache hit (66%, 1 remote), 2s saved. \
+             (Run `vp run --last-details` for full details)\n"
+        );
+        assert_eq!(
+            compact_summary(vec![cache_hit_task("a", CacheHitSource::Local), cache_miss_task("b")])
+                .as_str(),
+            "---\nvp run: 1/2 cache hit (50%), 1s saved. \
+             (Run `vp run --last-details` for full details)\n"
+        );
+    }
+
+    #[test]
+    fn full_summary_names_remote_hits() {
+        let summary = full_summary(vec![
+            cache_hit_task("a", CacheHitSource::Local),
+            cache_hit_task("b", CacheHitSource::Remote),
+            cache_miss_task("c"),
+        ]);
+        let lines: Vec<&str> = summary.as_str().lines().collect();
+        assert!(
+            lines.contains(&"Statistics:   3 tasks • 2 cache hits (1 remote) • 1 cache misses")
+        );
+        assert!(lines.contains(&"      → Cache hit - output replayed - 1s saved"));
+        assert!(lines.contains(&"      → Remote cache hit - output replayed - 1s saved"));
+
+        let summary = full_summary(vec![cache_hit_task("a", CacheHitSource::Local)]);
+        assert!(
+            summary
+                .as_str()
+                .lines()
+                .any(|line| line == "Statistics:   1 tasks • 1 cache hits • 0 cache misses")
+        );
+    }
+
+    #[test]
+    fn saved_cache_hit_without_source_is_local() {
+        let summary: LastRunSummary = serde_json::from_str(
+            r#"{"tasks":[{"package_name":"pkg","task_name":"a","command":"build","cwd":"",
+            "result":{"CacheHit":{"saved_duration_ms":5}}}],"exit_code":0}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            summary.tasks[0].result,
+            TaskResult::CacheHit { saved_duration_ms: 5, source: CacheHitSource::Local }
+        ));
     }
 
     #[test]

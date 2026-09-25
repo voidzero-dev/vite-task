@@ -3,7 +3,7 @@ use std::{process::ExitStatus, time::Duration};
 use vt_path::RelativePathBuf;
 use vt_server::Error as IpcServerError;
 
-use super::cache::{CacheMiss, remote::UploadError};
+use super::cache::{CacheHitSource, CacheMiss, remote::UploadError};
 
 /// The cache operation that failed.
 #[derive(Debug)]
@@ -129,7 +129,7 @@ pub enum CacheUpdateStatus {
 pub enum CacheStatus {
     Disabled(CacheDisabledReason),
     Miss(CacheMiss),
-    Hit { replayed_duration: Duration },
+    Hit { replayed_duration: Duration, source: CacheHitSource },
 }
 
 /// Convert `ExitStatus` to an i32 exit code.
