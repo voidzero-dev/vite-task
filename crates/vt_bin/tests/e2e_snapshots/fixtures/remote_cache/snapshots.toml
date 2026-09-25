@@ -277,11 +277,11 @@ steps = [
       "cache.example/projects/test",
     ],
   ], comment = "The failed fetch is the miss reason. Read failures aren't warnings." },
-  [
+  { argv = [
     "vt",
     "run",
     "--last-details",
-  ],
+  ], comment = "The details include the underlying error." },
 ]
 
 [[e2e]]

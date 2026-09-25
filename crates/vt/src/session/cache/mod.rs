@@ -30,7 +30,7 @@ use wincode::{
     io::{Reader, Writer},
 };
 
-use self::remote::{RemoteClients, Restore, UploadError};
+use self::remote::{RemoteCacheFailure, RemoteClients, Restore, UploadError};
 use super::execute::{
     fingerprint::{PostRunFingerprint, TrackedEnvQuery},
     pipe::StdOutput,
@@ -153,8 +153,8 @@ pub enum CacheMiss {
     NotFound,
     FingerprintMismatch(FingerprintMismatch),
     /// Reading the remote cache failed, and the local cache has no entry for
-    /// the task. The message names the cause.
-    RemoteReadFailed(Str),
+    /// the task.
+    RemoteReadFailed(RemoteCacheFailure),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

@@ -27,7 +27,7 @@ Performance:  0% cache hit rate
 Task Details:
 ────────────────────────────────────────────────
   [1] remote-cache#build: $ vtt write-file dist/output.txt built ✓
-      → Cache miss: remote cache fetch failed (invalid endpoint)
+      → Cache miss: remote cache fetch failed (invalid endpoint): relative URL without a base
       ⚠ Not uploaded to the remote cache: invalid endpoint: relative URL without a base
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```

@@ -83,7 +83,7 @@ fn chain(error: Option<&(dyn Error + 'static)>) -> Option<Str> {
 
 /// Why no entry could be read from the remote cache. It's a cache miss, and
 /// the message is its reason. The message names only the kind of failure, so
-/// it's the same on every platform.
+/// it's the same on every platform. The details are in the source.
 #[derive(Debug, thiserror::Error)]
 pub enum ReadError {
     #[error("remote cache fetch failed ({0})")]
@@ -103,10 +103,19 @@ pub enum ReadError {
 }
 
 impl ReadError {
-    /// The miss for this failure. The full error is only logged.
+    /// The miss for this failure.
     pub(super) fn into_miss(self) -> CacheMiss {
         tracing::debug!(err = ?self, "remote cache read failed");
-        CacheMiss::RemoteReadFailed(vt_str::format!("{self}"))
+        // The reason of a failed fetch or download already names the client
+        // error, so the details start below it.
+        let source = match &self {
+            Self::Fetch(err) | Self::Download(err) => err.source(),
+            _ => self.source(),
+        };
+        CacheMiss::RemoteReadFailed(RemoteCacheFailure {
+            reason: vt_str::format!("{self}"),
+            details: chain(source),
+        })
     }
 }
 
@@ -343,7 +352,7 @@ mod tests {
 
     fn read_failure(miss: CacheMiss) -> Str {
         match miss {
-            CacheMiss::RemoteReadFailed(reason) => reason,
+            CacheMiss::RemoteReadFailed(failure) => failure.reason,
             miss => panic!("expected a read failure, got {miss:?}"),
         }
     }
@@ -423,9 +432,14 @@ mod tests {
     #[test]
     fn failed_fetch_is_a_read_failure() {
         let key = cache_key(ResolvedGlobConfig::default_auto());
-        let fetched = Err(ReadError::Fetch(vt_remote_cache::Error::InvalidEndpoint(None)));
-        let miss = resolve(fetched, &key, not_validated).unwrap_err();
-        assert_eq!(read_failure(miss), "remote cache fetch failed (invalid endpoint)");
+        let err = vt_remote_cache::Client::new("cache.example").unwrap_err();
+        let miss = resolve(Err(ReadError::Fetch(err)), &key, not_validated).unwrap_err();
+        let CacheMiss::RemoteReadFailed(failure) = miss else {
+            panic!("expected a read failure, got {miss:?}");
+        };
+        assert_eq!(failure.reason, "remote cache fetch failed (invalid endpoint)");
+        // The reason names the client error, so the details start below it.
+        assert_eq!(failure.details.as_deref(), Some("relative URL without a base"));
     }
 
     #[test]

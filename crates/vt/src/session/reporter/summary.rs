@@ -152,8 +152,7 @@ pub enum SavedCacheMissReason {
     /// between runs. Carries the first differing entry.
     TrackedEnvQueryChanged { query: TrackedEnvQuery, mismatch: EnvMismatch },
     /// Reading the remote cache failed, and the local cache had no entry.
-    /// Carries the failure's message.
-    RemoteReadFailed(Str),
+    RemoteReadFailed(RemoteCacheFailure),
 }
 
 /// An execution error, serializable for persistence.
@@ -333,7 +332,7 @@ impl SavedCacheMissReason {
                     }
                 }
             },
-            CacheMiss::RemoteReadFailed(reason) => Self::RemoteReadFailed(reason.clone()),
+            CacheMiss::RemoteReadFailed(failure) => Self::RemoteReadFailed(failure.clone()),
         }
     }
 }
@@ -659,8 +658,8 @@ impl TaskResult {
                     | SavedCacheMissReason::TrackedEnvQueryChanged { mismatch, .. } => {
                         vt_str::format!("→ Cache miss: {mismatch}")
                     }
-                    SavedCacheMissReason::RemoteReadFailed(reason) => {
-                        vt_str::format!("→ Cache miss: {reason}")
+                    SavedCacheMissReason::RemoteReadFailed(failure) => {
+                        vt_str::format!("→ Cache miss: {}", failure.with_details())
                     }
                 },
             },
