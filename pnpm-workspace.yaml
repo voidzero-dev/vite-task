@@ -15,7 +15,7 @@ minimumReleaseAgeExclude:
 catalog:
   '@anthropic-ai/sandbox-runtime': 0.0.76
   '@fastify/busboy': 3.2.2
-  '@openai/codex': 0.154.0
+  '@openai/codex': 0.155.0
   '@tsconfig/strictest': ^2.0.8
   '@types/node': 25.0.3
   '@playwright/browser-chromium': 1.63.0
