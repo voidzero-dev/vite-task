@@ -76,6 +76,11 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
         regex::Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").unwrap();
     output = uuid_regex.replace_all(&output, "<uuid>").into_owned();
 
+    // Redact OS error messages like "Connection refused (os error 111)", which
+    // differ by platform, to "<os error>"
+    let os_error_regex = regex::Regex::new(r": [^:\n]* \(os error -?\d+\)").unwrap();
+    output = os_error_regex.replace_all(&output, ": <os error>").into_owned();
+
     // Redact durations like "0ns", "123ms" or "1.23s" to "<duration>"
     let duration_regex = regex::Regex::new(r"\d+(\.\d+)?(ns|ms|s)").unwrap();
     output = duration_regex.replace_all(&output, "<duration>").into_owned();

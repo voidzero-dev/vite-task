@@ -10,3 +10,24 @@ $ vtt write-file dist/output.txt built
 ---
 vt run: remote-cache#build not uploaded to the remote cache: network error. (Run `vt run --last-details` for full details)
 ```
+
+## `vt run --last-details`
+
+The details include the underlying error.
+
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] remote-cache#build: $ vtt write-file dist/output.txt built ✓
+      → Cache miss: no previous cache entry found
+      ⚠ Not uploaded to the remote cache: network error: error sending request for url (http://127.0.0.1:0/projects/test/store): client error (Connect): tcp connect error: <os error>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
