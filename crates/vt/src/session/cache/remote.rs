@@ -58,6 +58,10 @@ pub enum ReadError {
     CorruptValue(#[source] wincode::error::ReadError),
     #[error("remote cache key is corrupt")]
     CorruptKey(#[source] Option<wincode::error::ReadError>),
+    /// The value has an output archive but the entry has no blob, or the
+    /// other way around.
+    #[error("remote cache entry's blob doesn't match its value")]
+    MismatchedBlob,
     #[error("downloaded archive is corrupt")]
     CorruptArchive(#[source] io::Error),
     #[error("failed to write the downloaded archive")]
@@ -85,7 +89,8 @@ pub(super) struct Restore {
 /// Turn the result of a fetch into an entry to restore or a miss. `validate`
 /// checks an exact entry against the current execution. A fallback's miss
 /// reason compares its key with `cache_key`. A failed fetch, an entry that
-/// doesn't decode, or a validation error is a read failure.
+/// doesn't decode or whose blob doesn't match its value, or a validation error
+/// is a read failure.
 #[expect(
     clippy::result_large_err,
     reason = "`CacheMiss` is intentionally large, and a lookup returns it once"
@@ -97,8 +102,11 @@ pub(super) fn resolve(
 ) -> Result<Restore, CacheMiss> {
     let (value, blob_id) = match fetched.map_err(ReadError::into_miss)? {
         Fetched::Exact { value, blob_id } => {
-            let value = deserialize_cache(&value)
+            let value: CacheEntryValue = deserialize_cache(&value)
                 .map_err(|err| ReadError::CorruptValue(err).into_miss())?;
+            if value.output_archive.is_some() != blob_id.is_some() {
+                return Err(ReadError::MismatchedBlob.into_miss());
+            }
             (value, blob_id)
         }
         Fetched::Fallback { key } => {
@@ -377,7 +385,7 @@ mod tests {
     }
 
     fn not_validated(_: &CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>> {
-        panic!("only exact entries that decode are validated")
+        panic!("only exact entries that decode and match their blob are validated")
     }
 
     fn read_failure(miss: CacheMiss) -> Str {
@@ -476,6 +484,17 @@ mod tests {
             let fetched = Ok(Fetched::Exact { value, blob_id: None });
             let miss = resolve(fetched, &key, not_validated).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache value is corrupt");
+        }
+    }
+
+    #[test]
+    fn blob_that_does_not_match_the_value_is_a_read_failure() {
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let without_archive = CacheEntryValue { output_archive: None, ..cache_value() };
+        for (value, blob_id) in [(cache_value(), None), (without_archive, Some(Str::from("1")))] {
+            let fetched = Ok(Fetched::Exact { value: serialize_cache(&value).unwrap(), blob_id });
+            let miss = resolve(fetched, &key, not_validated).unwrap_err();
+            assert_eq!(read_failure(miss), "remote cache entry's blob doesn't match its value");
         }
     }
 
