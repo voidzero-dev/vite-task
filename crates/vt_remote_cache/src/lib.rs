@@ -3,13 +3,13 @@
 
 use std::time::Duration;
 
+use bytes::Bytes;
 use reqwest::{
     Response, StatusCode,
     header::CONTENT_TYPE,
     multipart::{Form, Part},
 };
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt as _;
 use url::{ParseError, Url};
 use vt_path::AbsolutePath;
 use vt_str::Str;
@@ -37,9 +37,6 @@ pub enum Error {
     /// The blob file couldn't be opened.
     #[error("failed to read the blob")]
     ReadBlob(#[source] std::io::Error),
-    /// The downloaded blob couldn't be written to its file.
-    #[error("failed to write the blob")]
-    WriteBlob(#[source] std::io::Error),
     /// No complete response arrived, for example because the connection
     /// failed, timed out, or closed before the whole body arrived.
     #[error("network error")]
@@ -57,6 +54,24 @@ pub enum Error {
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub struct ServerMessage(Str);
+
+/// A blob being downloaded.
+#[derive(Debug)]
+pub struct Download {
+    response: Response,
+}
+
+impl Download {
+    /// The next chunk of the blob, or `None` after the last one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the rest of the blob can't be read, for example
+    /// because the connection closes before it all arrives.
+    pub async fn chunk(&mut self) -> Result<Option<Bytes>, Error> {
+        self.response.chunk().await.map_err(Error::Network)
+    }
+}
 
 /// The `metadata` part of a store request.
 #[derive(Serialize)]
@@ -160,26 +175,19 @@ impl Client {
         decode_fetched(&body)
     }
 
-    /// Download the blob `blob_id` with `GET {endpoint}/blob/{blob_id}`,
-    /// writing it to the file at `path`. The file is created after a 200
-    /// response. If the download fails after that, it may be left incomplete.
+    /// Start downloading the blob `blob_id` with
+    /// `GET {endpoint}/blob/{blob_id}`. Its chunks are read from the returned
+    /// [`Download`] as they arrive.
     ///
     /// # Errors
     ///
-    /// Returns an error if the request fails, the server responds with a
-    /// status other than 200, the body ends early, or the file can't be
-    /// written.
-    pub async fn download(&self, blob_id: &str, path: &AbsolutePath) -> Result<(), Error> {
+    /// Returns an error if the request fails or the server responds with a
+    /// status other than 200.
+    pub async fn download(&self, blob_id: &str) -> Result<Download, Error> {
         let mut url = self.blob_url.clone();
         url.path_segments_mut().map_err(|()| Error::InvalidEndpoint(None))?.push(blob_id);
         let response = self.http.get(url).send().await.map_err(Error::Network)?;
-        let mut response = check_status(response).await?;
-        let mut file = tokio::fs::File::create(path).await.map_err(Error::WriteBlob)?;
-        while let Some(chunk) = response.chunk().await.map_err(Error::Network)? {
-            file.write_all(&chunk).await.map_err(Error::WriteBlob)?;
-        }
-        file.flush().await.map_err(Error::WriteBlob)?;
-        Ok(())
+        Ok(Download { response: check_status(response).await? })
     }
 
     /// Store `value` under `key` with `POST {endpoint}/store`, uploading the
@@ -467,42 +475,43 @@ mod tests {
         server.join().unwrap();
     }
 
+    async fn read_to_end(mut download: Download) -> Result<Vec<u8>, Error> {
+        let mut blob = Vec::new();
+        while let Some(chunk) = download.chunk().await? {
+            blob.extend_from_slice(&chunk);
+        }
+        Ok(blob)
+    }
+
     #[tokio::test]
-    async fn download_writes_the_blob_to_a_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = AbsolutePathBuf::new(dir.path().join("archive.tar.zst")).unwrap();
+    async fn download_streams_the_blob() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let client = client_for(&listener);
         let server =
             std::thread::spawn(move || serve_once(&listener, "HTTP/1.1 200 OK", b"archive bytes"));
 
-        client.download("7", &path).await.unwrap();
+        let download = client.download("7").await.unwrap();
+        assert_eq!(read_to_end(download).await.unwrap(), b"archive bytes");
 
         let request = server.join().unwrap();
         assert!(request.starts_with(b"GET /projects/test/blob/7 HTTP/1.1\r\n"));
-        assert_eq!(std::fs::read(path.as_path()).unwrap(), b"archive bytes");
     }
 
     #[tokio::test]
-    async fn download_of_a_missing_blob_creates_no_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = AbsolutePathBuf::new(dir.path().join("archive.tar.zst")).unwrap();
+    async fn download_of_a_missing_blob_fails() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let client = client_for(&listener);
         let server = std::thread::spawn(move || {
             serve_once(&listener, "HTTP/1.1 404 Not Found", b"Blob not found")
         });
 
-        let error = client.download("7", &path).await.unwrap_err();
+        let error = client.download("7").await.unwrap_err();
         assert_eq!(error.to_string(), "HTTP status 404");
-        assert!(!path.as_path().exists());
         server.join().unwrap();
     }
 
     #[tokio::test]
     async fn incomplete_download_is_a_network_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = AbsolutePathBuf::new(dir.path().join("archive.tar.zst")).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let client = client_for(&listener);
         // The connection closes before the announced length arrives.
@@ -510,7 +519,8 @@ mod tests {
             serve_raw_once(&listener, b"HTTP/1.1 200 OK\r\ncontent-length: 100\r\n\r\npartial")
         });
 
-        let error = client.download("7", &path).await.unwrap_err();
+        let download = client.download("7").await.unwrap();
+        let error = read_to_end(download).await.unwrap_err();
         assert!(matches!(error, Error::Network(_)), "{error:?}");
         server.join().unwrap();
     }

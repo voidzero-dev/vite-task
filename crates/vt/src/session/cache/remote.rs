@@ -13,9 +13,14 @@
 //! target OS and architecture. Platforms share an endpoint's namespace, but
 //! their keys differ.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::{
+    io,
+    sync::{Arc, Mutex, PoisonError},
+};
 
+use bytes::Bytes;
 use rustc_hash::FxHashMap;
+use tokio::{io::AsyncWriteExt as _, sync::mpsc};
 use vt_path::AbsolutePath;
 use vt_plan::cache_metadata::ExecutionCacheKey;
 use vt_remote_cache::{Client, Fetched};
@@ -53,7 +58,9 @@ pub enum ReadError {
     #[error("remote cache key is corrupt")]
     CorruptKey(#[source] Option<wincode::error::ReadError>),
     #[error("downloaded archive is corrupt")]
-    CorruptArchive(#[source] std::io::Error),
+    CorruptArchive(#[source] io::Error),
+    #[error("failed to write the downloaded archive")]
+    WriteArchive(#[source] io::Error),
     #[error("remote cache entry couldn't be validated")]
     Validate(#[source] anyhow::Error),
     #[error("failed to encode the cache key")]
@@ -140,9 +147,9 @@ impl RemoteClients {
         client.fetch(&key, &secondary_key).await.map_err(ReadError::Fetch)
     }
 
-    /// Download the blob `blob_id` into `cache_dir` and check that it decodes
-    /// as an output archive. Returns the archive's file name. If either step
-    /// fails, the file is removed.
+    /// Download the blob `blob_id` into `cache_dir`, checking that it decodes
+    /// as an output archive as it arrives. Returns the archive's file name. If
+    /// the download or the check fails, the file is removed.
     pub(super) async fn download_archive(
         &self,
         endpoint: &Arc<str>,
@@ -152,12 +159,7 @@ impl RemoteClients {
         let client = self.client(endpoint).map_err(ReadError::Download)?;
         let archive_name = vt_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
         let archive_path = cache_dir.join(archive_name.as_str());
-        let result = match client.download(blob_id, &archive_path).await {
-            Ok(()) => {
-                archive::check_output_archive(&archive_path).map_err(ReadError::CorruptArchive)
-            }
-            Err(err) => Err(ReadError::Download(err)),
-        };
+        let result = download_checked(&client, blob_id, &archive_path).await;
         if result.is_err() {
             // Best-effort cleanup: the file may not have been created.
             let _ = std::fs::remove_file(archive_path.as_path());
@@ -182,6 +184,60 @@ impl RemoteClients {
         let archive = cache_value.output_archive.as_ref().map(|name| cache_dir.join(name.as_str()));
         client.store(&key, &secondary_key, &value, archive.as_deref()).await?;
         Ok(())
+    }
+}
+
+/// Chunks buffered between the download and the archive check.
+const CHECK_BUFFER_CHUNKS: usize = 16;
+
+/// Download the blob `blob_id` to the file at `path`. Each chunk is written to
+/// the file and passed to the archive check, which runs on a blocking thread.
+async fn download_checked(
+    client: &Client,
+    blob_id: &str,
+    path: &AbsolutePath,
+) -> Result<(), ReadError> {
+    let mut download = client.download(blob_id).await.map_err(ReadError::Download)?;
+    let mut file =
+        tokio::fs::File::create(path.as_path()).await.map_err(ReadError::WriteArchive)?;
+    let (sender, receiver) = mpsc::channel(CHECK_BUFFER_CHUNKS);
+    let check = tokio::task::spawn_blocking(move || {
+        archive::check_output_archive(ChunkReader { receiver, chunk: Bytes::new() })
+    });
+    while let Some(chunk) = download.chunk().await.map_err(ReadError::Download)? {
+        file.write_all(&chunk).await.map_err(ReadError::WriteArchive)?;
+        // The check stops reading when it fails.
+        if sender.send(chunk).await.is_err() {
+            break;
+        }
+    }
+    drop(sender);
+    check
+        .await
+        .map_err(io::Error::from)
+        .and_then(|checked| checked)
+        .map_err(ReadError::CorruptArchive)?;
+    file.flush().await.map_err(ReadError::WriteArchive)
+}
+
+/// Reads the chunks sent through a channel, in order, until the sender is
+/// dropped. Reading blocks, so it's only for blocking threads.
+struct ChunkReader {
+    receiver: mpsc::Receiver<Bytes>,
+    chunk: Bytes,
+}
+
+impl io::Read for ChunkReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        while self.chunk.is_empty() {
+            match self.receiver.blocking_recv() {
+                Some(chunk) => self.chunk = chunk,
+                None => return Ok(0),
+            }
+        }
+        let len = buf.len().min(self.chunk.len());
+        buf[..len].copy_from_slice(&self.chunk.split_to(len));
+        Ok(len)
     }
 }
 

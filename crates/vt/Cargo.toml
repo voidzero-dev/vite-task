@@ -15,6 +15,7 @@ workspace = true
 anstream = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+bytes = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
 clap = { workspace = true, features = ["derive"] }
 ctrlc = { workspace = true }
@@ -34,6 +35,7 @@ thiserror = { workspace = true }
 tar = { workspace = true }
 tokio = { workspace = true, features = [
   "rt-multi-thread",
+  "fs",
   "io-std",
   "io-util",
   "macros",

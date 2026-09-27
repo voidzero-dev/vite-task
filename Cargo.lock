@@ -4973,6 +4973,7 @@ dependencies = [
  "anstream 1.0.0",
  "anyhow",
  "async-trait",
+ "bytes",
  "clap",
  "ctrlc",
  "derive_more",
@@ -5216,6 +5217,7 @@ dependencies = [
 name = "vt_remote_cache"
 version = "0.0.0"
 dependencies = [
+ "bytes",
  "ciborium",
  "reqwest",
  "rustls",
