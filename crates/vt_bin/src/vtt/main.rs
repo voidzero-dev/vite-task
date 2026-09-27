@@ -25,6 +25,7 @@ mod replace_file_content;
 mod rm;
 #[cfg(target_os = "linux")]
 mod small_dev_shm;
+mod stalled_remote_cache;
 mod stat_file;
 mod stat_many;
 mod touch_file;
@@ -35,7 +36,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stat-file, stat-many, touch-file, write-file"
+            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -71,6 +72,7 @@ fn main() {
         "small_dev_shm" => small_dev_shm::run(&args[2..]).map_err(Into::into),
         #[cfg(not(target_os = "linux"))]
         "small_dev_shm" => Err("vtt small_dev_shm is only supported on Linux".into()),
+        "stalled-remote-cache" => stalled_remote_cache::run(&args[2..]),
         "stat-file" => {
             stat_file::run(&args[2..]);
             Ok(())

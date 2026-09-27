@@ -1,6 +1,6 @@
 # Cancellation
 
-`vp run` handles two kinds of cancellation: **Ctrl-C** (user interrupt) and **fast-fail** (a task exits with non-zero status). Both prevent new tasks from being scheduled and prevent caching of in-flight results, but they differ in how they treat running processes.
+`vp run` handles two kinds of cancellation: **Ctrl-C** (user interrupt) and **fast-fail** (a task exits with non-zero status). Both prevent new tasks from being scheduled, prevent caching of in-flight results, and stop [remote cache requests](#remote-cache-requests), but they differ in how they treat running processes.
 
 ## Ctrl-C
 
@@ -17,6 +17,13 @@ When any task exits with non-zero status:
 1. All other running child processes are killed immediately (`SIGKILL` on Unix, `TerminateJobObject` on Windows).
 2. No new tasks are scheduled.
 3. Results of other in-flight tasks are **not cached** (they were killed mid-execution).
+
+## Remote cache requests
+
+Both kinds of cancellation stop remote cache lookups, downloads, and uploads right away instead of waiting for them to finish or time out.
+
+- A task whose cache lookup was still in progress doesn't start and doesn't restore cached outputs, even if the lookup found them. Like a task that was never scheduled, it isn't shown in the summary.
+- A task whose upload is stopped keeps its local cache entry, and the summary warns that it wasn't uploaded.
 
 ## Why interrupted tasks are not cached
 

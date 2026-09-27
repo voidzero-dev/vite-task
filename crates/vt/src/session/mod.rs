@@ -381,8 +381,10 @@ impl<'a> Session<'a> {
                 ));
                 // Don't let SIGINT/CTRL_C kill the runner. Child tasks receive
                 // the signal directly from the terminal driver and handle it
-                // themselves. Cancelling the interrupt token prevents scheduling
-                // new tasks and caching results of in-flight tasks.
+                // themselves. Cancelling the cancel token prevents scheduling
+                // new tasks and caching results of in-flight tasks, and stops
+                // remote cache requests. It's a child of the fast-fail token,
+                // so fast-fail cancels it too.
                 //
                 // On Windows, an ancestor process (e.g. cargo) may have been
                 // created with CREATE_NEW_PROCESS_GROUP, which sets a per-process
@@ -401,13 +403,14 @@ impl<'a> Session<'a> {
                     }
                     SetConsoleCtrlHandler(None, 0);
                 }
-                let interrupt_token = tokio_util::sync::CancellationToken::new();
-                let ct = interrupt_token.clone();
+                let fast_fail_token = tokio_util::sync::CancellationToken::new();
+                let cancel_token = fast_fail_token.child_token();
+                let ct = cancel_token.clone();
                 ctrlc::set_handler(move || {
                     ct.cancel();
                 })?;
 
-                self.execute_graph(graph, builder, interrupt_token)
+                self.execute_graph(graph, builder, fast_fail_token, cancel_token)
                     .await
                     .map_err(SessionError::EarlyExit)
             }
@@ -719,6 +722,8 @@ impl<'a> Session<'a> {
         );
 
         // Execute the spawn directly using the free function, bypassing the graph pipeline
+        let fast_fail_token = tokio_util::sync::CancellationToken::new();
+        let cancel_token = fast_fail_token.child_token();
         let outcome = execute::execute_spawn(
             Box::new(plain_reporter),
             &spawn_execution,
@@ -726,8 +731,8 @@ impl<'a> Session<'a> {
             &self.workspace_path,
             &self.cache_path,
             self.program_name.as_str(),
-            tokio_util::sync::CancellationToken::new(),
-            tokio_util::sync::CancellationToken::new(),
+            fast_fail_token,
+            cancel_token,
         )
         .await;
         match outcome {
@@ -744,8 +749,11 @@ impl<'a> Session<'a> {
                 )]
                 Ok(ExitStatus(code.clamp(1, 255) as u8))
             }
-            // Infrastructure error — already reported through the reporter's finish()
-            execute::SpawnOutcome::Failed => Ok(ExitStatus::FAILURE),
+            // Infrastructure error — already reported through the reporter's finish().
+            // Nothing cancels the tokens above, and a cancelled command wouldn't have run.
+            execute::SpawnOutcome::Failed | execute::SpawnOutcome::Cancelled => {
+                Ok(ExitStatus::FAILURE)
+            }
         }
     }
 
