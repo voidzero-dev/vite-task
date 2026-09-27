@@ -204,7 +204,7 @@ pub enum PackageFilterParseError {
     #[error("Empty filter selector")]
     EmptySelector,
 
-    #[error("Invalid glob pattern: {0}")]
+    #[error(transparent)]
     InvalidGlob(#[from] wax::BuildError),
 }
 

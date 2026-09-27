@@ -193,6 +193,11 @@ compact = true
 name = "exclude_nonexistent_package"
 args = ["run", "--filter", "!nonexistent", "build"]
 
+# An unclosed brace is not a valid glob; the glob error appears once in the chain
+[[plan]]
+name = "filter_invalid_glob"
+args = ["run", "--filter", "{a", "build"]
+
 # script containing "vt run --filter .... build" — expanded in plan
 [[plan]]
 compact = true

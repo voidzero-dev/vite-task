@@ -295,7 +295,7 @@ pub enum InvalidPathDataError {
 pub enum FromPathError {
     #[error("path is not relative")]
     NonRelative,
-    #[error("{0}")]
+    #[error(transparent)]
     InvalidPathData(#[from] InvalidPathDataError),
 }
 
@@ -348,6 +348,13 @@ mod tests {
             let Err(FromPathError::NonRelative) =
                 RelativePathBuf::new(if cfg!(windows) { "C:\\Users" } else { "/home" })
         );
+    }
+
+    #[test]
+    fn invalid_path_data_error_is_not_repeated_as_its_source() {
+        let error = FromPathError::from(InvalidPathDataError::NonUtf8);
+        assert_eq!(error.to_string(), InvalidPathDataError::NonUtf8.to_string());
+        assert!(std::error::Error::source(&error).is_none());
     }
 
     #[cfg(unix)]
