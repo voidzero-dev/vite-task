@@ -230,13 +230,18 @@ async fn download_checked(
 }
 
 /// Send the blob's chunks through `sender` until the blob ends or the receiver
-/// is dropped.
+/// is dropped. The check drops the receiver when it fails, which stops the
+/// download without waiting for the next chunk.
 async fn send_chunks(
     mut download: Download,
     sender: mpsc::Sender<Bytes>,
 ) -> Result<(), vt_remote_cache::Error> {
-    while let Some(chunk) = download.chunk().await? {
-        // The check drops the receiver when it fails.
+    loop {
+        let chunk = tokio::select! {
+            chunk = download.chunk() => chunk?,
+            () = sender.closed() => break,
+        };
+        let Some(chunk) = chunk else { break };
         if sender.send(chunk).await.is_err() {
             break;
         }
@@ -306,10 +311,10 @@ fn decode_key(bytes: &[u8]) -> Result<CacheEntryKey, ReadError> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, time::Duration};
+    use std::{collections::BTreeMap, io::Read as _, net::TcpListener, time::Duration};
 
     use vt_graph::config::ResolvedGlobConfig;
-    use vt_path::RelativePathBuf;
+    use vt_path::{AbsolutePathBuf, RelativePathBuf};
     use vt_plan::cache_metadata::{EnvValueHash, SpawnFingerprint};
 
     use super::*;
@@ -515,5 +520,40 @@ mod tests {
             let miss = resolve(fetched, &key, not_validated).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache key is corrupt");
         }
+    }
+
+    #[tokio::test]
+    async fn failed_archive_check_stops_the_download() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint: Arc<str> =
+            Arc::from(vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
+        let (done_sender, done_receiver) = std::sync::mpsc::channel::<()>();
+        // The response announces more than it sends and stays open until the
+        // test is done, so only the failed check can end the download.
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut buf = [0; 1024];
+                let n = stream.read(&mut buf).unwrap();
+                assert_ne!(n, 0, "connection closed before the request ended");
+                request.extend_from_slice(&buf[..n]);
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 1000\r\n\r\nnot an archive")
+                .unwrap();
+            let _ = done_receiver.recv();
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = AbsolutePathBuf::new(dir.path().to_path_buf()).unwrap();
+
+        let error = RemoteClients::default()
+            .download_archive(&endpoint, "1", &cache_dir)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ReadError::CorruptArchive(_)), "{error:?}");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        drop(done_sender);
+        server.join().unwrap();
     }
 }
