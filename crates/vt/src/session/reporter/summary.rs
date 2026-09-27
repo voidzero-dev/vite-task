@@ -19,7 +19,7 @@ use crate::session::{
     cache::{
         CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind, SpawnFingerprintChange,
         detect_spawn_fingerprint_changes, format_input_change_str, format_spawn_change,
-        remote::RemoteCacheFailure,
+        remote::UploadError,
     },
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
@@ -123,7 +123,7 @@ pub enum SpawnOutcome {
         tool_disabled_cache: bool,
         /// Why uploading the entry to the remote cache failed, if it did.
         /// The local cache was still updated.
-        upload_error: Option<RemoteCacheFailure>,
+        upload_error: Option<SavedRemoteCacheError>,
     },
 
     /// Process exited with non-zero status.
@@ -172,6 +172,17 @@ pub enum SavedExecutionError {
 pub enum SavedCacheErrorKind {
     Lookup,
     Update,
+}
+
+/// A failed remote cache operation, serializable for persistence.
+///
+/// `reason` names only the kind of failure, so it's the same on every
+/// platform. `details` has the underlying error, which only `--last-details`
+/// shows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedRemoteCacheError {
+    reason: Str,
+    details: Option<Str>,
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -232,10 +243,10 @@ impl SummaryStats {
                         }
                         SpawnOutcome::Success { .. } => {}
                     }
-                    if let SpawnOutcome::Success { upload_error: Some(failure), .. } = outcome {
+                    if let SpawnOutcome::Success { upload_error: Some(error), .. } = outcome {
                         stats.upload_failures.push(UploadFailure {
                             task_name: task.format_task_display(),
-                            reason: failure.reason.clone(),
+                            reason: error.reason.clone(),
                         });
                     }
                 }
@@ -306,6 +317,53 @@ impl SavedExecutionError {
     }
 }
 
+impl SavedRemoteCacheError {
+    /// Convert a live [`UploadError`] into a serializable error.
+    fn from_upload_error(error: &UploadError) -> Self {
+        match error {
+            UploadError::Remote(error) => Self::from_client_error(error),
+            UploadError::Encode(error) => Self {
+                reason: Str::from("failed to encode the cache entry"),
+                details: Some(vt_str::format!("{error}")),
+            },
+        }
+    }
+
+    /// The client's message is the reason. The details come from the
+    /// underlying error, if any.
+    fn from_client_error(error: &vt_remote_cache::Error) -> Self {
+        use vt_remote_cache::Error;
+
+        let details = match error {
+            Error::InvalidEndpoint(parse_error) => {
+                parse_error.as_ref().map(|parse_error| vt_str::format!("{parse_error}"))
+            }
+            // reqwest's own message only says which request failed. The cause,
+            // such as a refused connection, is in its sources.
+            Error::HttpClient(error) | Error::Network(error) => Some(error_chain(error)),
+            Error::ReadBlob(error) => Some(vt_str::format!("{error}")),
+            Error::Status(_, message) => {
+                message.as_ref().map(|message| vt_str::format!("{message}"))
+            }
+        };
+        Self { reason: vt_str::format!("{error}"), details }
+    }
+
+    /// Format the reason and details for display.
+    fn display_message(&self) -> Str {
+        self.details.as_ref().map_or_else(
+            || self.reason.clone(),
+            |details| vt_str::format!("{}: {details}", self.reason),
+        )
+    }
+}
+
+/// The messages of `error` and its sources, joined with `: `.
+fn error_chain(error: &(dyn std::error::Error + 'static)) -> Str {
+    std::iter::successors(error.source(), |&source| source.source())
+        .fold(vt_str::format!("{error}"), |chain, source| vt_str::format!("{chain}: {source}"))
+}
+
 impl SavedCacheMissReason {
     fn from_cache_miss(cache_miss: &CacheMiss) -> Self {
         match cache_miss {
@@ -372,7 +430,9 @@ impl TaskResult {
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete)
         );
         let upload_error = match cache_update_status {
-            CacheUpdateStatus::Updated { upload_error: Some(err) } => Some(err.to_failure()),
+            CacheUpdateStatus::Updated { upload_error: Some(err) } => {
+                Some(SavedRemoteCacheError::from_upload_error(err))
+            }
             _ => None,
         };
 
@@ -426,7 +486,7 @@ fn spawn_outcome_from_execution(
     ipc_server_error: Option<Str>,
     tool_disabled_cache: bool,
     tracking_incomplete: bool,
-    upload_error: Option<RemoteCacheFailure>,
+    upload_error: Option<SavedRemoteCacheError>,
 ) -> SpawnOutcome {
     match (exit_status, saved_error) {
         // Spawn error — process never ran
@@ -673,7 +733,7 @@ impl TaskResult {
     }
 
     /// Why uploading the entry to the remote cache failed, if it did.
-    const fn upload_error(&self) -> Option<&RemoteCacheFailure> {
+    const fn upload_error(&self) -> Option<&SavedRemoteCacheError> {
         match self {
             Self::Spawned { outcome: SpawnOutcome::Success { upload_error, .. }, .. } => {
                 upload_error.as_ref()
@@ -842,11 +902,11 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
         let cache_detail = task.result.format_cache_detail();
         let _ = writeln!(buf, "      {}", cache_detail.style(task.result.cache_detail_style()));
 
-        if let Some(failure) = task.result.upload_error() {
+        if let Some(error) = task.result.upload_error() {
             let _ = writeln!(
                 buf,
                 "      {}",
-                vt_str::format!("⚠ Not uploaded to the remote cache: {}", failure.with_details())
+                vt_str::format!("⚠ Not uploaded to the remote cache: {}", error.display_message())
                     .style(Style::new().yellow())
             );
         }
@@ -1041,7 +1101,7 @@ mod tests {
                     ipc_server_error: None,
                     tracking_incomplete: false,
                     tool_disabled_cache: false,
-                    upload_error: Some(RemoteCacheFailure {
+                    upload_error: Some(SavedRemoteCacheError {
                         reason: Str::from(reason),
                         details: None,
                     }),
