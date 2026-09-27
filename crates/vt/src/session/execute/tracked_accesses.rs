@@ -26,8 +26,9 @@ pub struct TrackedPathAccesses {
 
 impl TrackedPathAccesses {
     /// Build from fspy's raw iterable by stripping the workspace prefix and
-    /// normalizing `..` components. `.git/*` paths are skipped. User-configured
-    /// negatives are applied by the caller (see module docs).
+    /// normalizing `..` components. Paths outside the workspace, including
+    /// ones that climb out of it with `..`, and `.git/*` paths are skipped.
+    /// User-configured negatives are applied by the caller (see module docs).
     pub fn from_raw(raw: &PathAccessIterable, workspace_root: &AbsolutePath) -> Self {
         let mut accesses = Self::default();
         for access in raw.iter() {
@@ -83,6 +84,12 @@ fn normalize_tracked_workspace_path(stripped_path: &std::path::Path) -> Option<R
     // consistent behavior across platforms and clean user-facing messages.
     let relative = relative.clean().ok()?;
 
+    // Skip paths that climb out of the workspace, such as `pkg/../../file`,
+    // like paths that don't start with the workspace root.
+    if relative.has_parent_dir_component() {
+        return None;
+    }
+
     // Skip .git directory accesses (workaround for tools like oxlint)
     if relative.as_path().strip_prefix(".git").is_ok() {
         return None;
@@ -93,8 +100,20 @@ fn normalize_tracked_workspace_path(stripped_path: &std::path::Path) -> Option<R
 
 #[cfg(test)]
 mod tests {
-    #[cfg(windows)]
     use super::*;
+
+    #[test]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "normalize_tracked_workspace_path requires std::path::Path for fspy strip_path_prefix output"
+    )]
+    fn path_that_climbs_out_of_the_workspace_is_ignored() {
+        let outside = normalize_tracked_workspace_path(std::path::Path::new("pkg/../../file.txt"));
+        assert!(outside.is_none());
+        let inside =
+            normalize_tracked_workspace_path(std::path::Path::new("pkg/../shared/file.txt"));
+        assert_eq!(inside.unwrap().as_str(), "shared/file.txt");
+    }
 
     #[cfg(windows)]
     #[test]

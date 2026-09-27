@@ -85,6 +85,15 @@ impl RelativePath {
         RelativePathBuf::new(cleaned)
     }
 
+    /// Returns whether the path has a `..` component. Joined onto a
+    /// directory, such a path can point outside of it, even if it looks
+    /// inside lexically, since a `..` after a symlink leaves the symlink's
+    /// target.
+    #[must_use]
+    pub fn has_parent_dir_component(&self) -> bool {
+        self.as_str().split('/').any(|component| component == "..")
+    }
+
     /// Returns a path that, when joined onto `base`, yields `self`.
     ///
     /// If `base` is not a prefix of `self`, returns [`None`].
@@ -461,6 +470,16 @@ mod tests {
     fn clean_malformed_drive_path() {
         let rel_path = RelativePathBuf::new(r"foo\C:\bar").unwrap();
         assert!(let Err(FromPathError::NonRelative) = rel_path.clean());
+    }
+
+    #[test]
+    fn has_parent_dir_component() {
+        for path in ["..", "../foo", "foo/../bar", "foo/.."] {
+            assert!(RelativePathBuf::new(path).unwrap().has_parent_dir_component());
+        }
+        for path in ["", "foo", "..foo/bar..", "foo/.../bar"] {
+            assert!(!RelativePathBuf::new(path).unwrap().has_parent_dir_component());
+        }
     }
 
     #[test]
