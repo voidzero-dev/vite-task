@@ -32,6 +32,26 @@ $ vtt write-file dist/output.txt built ○ cache miss: downloaded archive is cor
 [remote-cache] GET /blob/1 200
 ```
 
+## `vt run --last-details`
+
+The details include the underlying error.
+
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] remote-cache#build: $ vtt write-file dist/output.txt built ✓
+      → Cache miss: downloaded archive is corrupt
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
 ## `vtt list-dir node_modules/.vite/task-cache --ext .tar.zst --recursive`
 
 Only the rerun's archive is on disk. The corrupt download was removed.

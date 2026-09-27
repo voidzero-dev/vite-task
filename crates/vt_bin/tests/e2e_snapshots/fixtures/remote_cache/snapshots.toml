@@ -198,6 +198,11 @@ steps = [
     "build",
   ], comment = "The downloaded archive doesn't decode, so the task reruns." },
   { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details include the underlying error." },
+  { argv = [
     "vtt",
     "list-dir",
     "node_modules/.vite/task-cache",
@@ -302,4 +307,9 @@ steps = [
       "http://127.0.0.1:0/projects/test",
     ],
   ], comment = "Nothing can listen on port 0. The failed fetch is the miss reason. Read failures aren't warnings." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details include the underlying error." },
 ]

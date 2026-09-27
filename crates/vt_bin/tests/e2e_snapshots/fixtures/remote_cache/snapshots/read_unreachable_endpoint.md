@@ -7,3 +7,23 @@ Nothing can listen on port 0. The failed fetch is the miss reason. Read failures
 ```
 $ vtt write-file dist/output.txt built ○ cache miss: remote cache fetch failed (network error), executing
 ```
+
+## `vt run --last-details`
+
+The details include the underlying error.
+
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Vite+ Task Runner • Execution Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Statistics:   1 tasks • 0 cache hits • 1 cache misses
+Performance:  0% cache hit rate
+
+Task Details:
+────────────────────────────────────────────────
+  [1] remote-cache#build: $ vtt write-file dist/output.txt built ✓
+      → Cache miss: remote cache fetch failed (network error)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
