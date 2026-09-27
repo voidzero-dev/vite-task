@@ -1,7 +1,9 @@
 {
   "tasks": {
     "test": {
-      "command": "vitest run",
+      // "false" silences the browser server's Vite logger, which otherwise prints
+      // timing-dependent "[optimizer] ..." messages on slow machines.
+      "command": "VITEST_BROWSER_DEBUG=false vitest run",
       "cache": {
         "input": [{ "auto": true }],
         // TODO: Add @voidzero-dev/vite-task-client and have Vitest report this path as ignored.

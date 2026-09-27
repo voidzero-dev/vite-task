@@ -7,7 +7,7 @@ Vitest browser mode runs in headless Chromium with explicit automatic input and 
 first browser run: cache miss writes dist/result.json
 
 ```
-$ vitest run
+$ VITEST_BROWSER_DEBUG=false vitest run
 
  RUN  v<version> <workspace>
 
@@ -35,7 +35,7 @@ remove the generated output so restoration is observable
 unchanged inputs: cache hit restores dist/result.json
 
 ```
-$ vitest run ◉ cache hit, replaying
+$ VITEST_BROWSER_DEBUG=false vitest run ◉ cache hit, replaying
 
  RUN  v<version> <workspace>
 
@@ -66,7 +66,7 @@ modify a module loaded by the browser
 automatic input changed: cache miss reruns the browser test
 
 ```
-$ vitest run ○ cache miss: 'src/greeting.js' modified, executing
+$ VITEST_BROWSER_DEBUG=false vitest run ○ cache miss: 'src/greeting.js' modified, executing
 
  RUN  v<version> <workspace>
 
