@@ -3,8 +3,8 @@
 ## `remote-cache-server cbor-http POST /fetch --cbor '{"key": '\''A'\'', "secondary_key": '\''S'\''}'`
 
 ```
-{"status": 200, "content_type": "application/cbor", "body": {"kind": "not_found"}}
-[remote-cache] POST /fetch 200 not_found
+{"status": 404, "content_type": "text/plain; charset=utf-8", "body": "Not found"}
+[remote-cache] POST /fetch 404
 ```
 
 ## `remote-cache-server cbor-http POST /store --form-cbor 'metadata={"key": '\''A'\'', "secondary_key": '\''S'\'', "value": '\''VA'\''}'`

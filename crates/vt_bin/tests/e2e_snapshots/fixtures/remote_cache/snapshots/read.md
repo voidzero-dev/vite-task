@@ -5,7 +5,7 @@
 ```
 $ vtt write-file dist/output.txt built
 
-[remote-cache] POST /fetch 200 not_found
+[remote-cache] POST /fetch 404
 [remote-cache] POST /store 200
 ```
 

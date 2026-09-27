@@ -97,9 +97,10 @@ function cbor(response: ServerResponse, value: unknown): void {
 /**
  * A test backend that keeps its state in `directory`: entries and associations
  * in `state.json`, and each blob in `blobs/` under its ID. Keys, values, and
- * blobs remain opaque bytes. After each response, `logRequest` receives a line
- * with the method, the route below `basePath`, the status, and for fetch
- * responses, the kind.
+ * blobs remain opaque bytes. A fetch that matches neither key gets a plain-text
+ * 404. After each response, `logRequest` receives a line with the method, the
+ * route below `basePath`, the status, and for successful fetch responses, the
+ * kind.
  */
 export function createCacheServer({
   basePath,
@@ -119,7 +120,7 @@ export function createCacheServer({
   const associations = new Map(Object.entries(state.associations));
   let nextBlobId = state.next_blob_id;
 
-  /** Respond to `request`, returning the kind of a fetch response. */
+  /** Respond to `request`, returning the kind of a successful fetch response. */
   async function handle(
     request: IncomingMessage,
     response: ServerResponse,
@@ -159,8 +160,7 @@ export function createCacheServer({
         });
         return 'fallback';
       }
-      cbor(response, { kind: 'not_found' });
-      return 'not_found';
+      throw new RequestError(404, 'Not found');
     }
 
     if (mediaType(contentType) !== 'multipart/form-data') {

@@ -43,11 +43,12 @@ pub enum Error {
     /// credentials, such as a token in its query.
     #[error("network error")]
     Network(#[source] reqwest::Error),
-    /// The server responded with a status other than 200. The source is the
-    /// message in the response body, if any.
+    /// The server responded with a status other than 200, or for a fetch,
+    /// other than 200 or 404. The source is the message in the response body,
+    /// if any.
     #[error("HTTP status {}", .0.as_u16())]
     Status(StatusCode, #[source] Option<ServerMessage>),
-    /// The response body isn't a fetch response.
+    /// The body of a 200 fetch response isn't an exact or fallback match.
     #[error("malformed response")]
     MalformedResponse(#[source] ciborium::de::Error<std::io::Error>),
 }
@@ -95,7 +96,8 @@ struct FetchRequest<'a> {
     secondary_key: &'a [u8],
 }
 
-/// The result of a fetch.
+/// The result of a fetch. The body of a 200 response decodes into an exact or
+/// fallback match. A 404 response is [`Fetched::NotFound`].
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Fetched {
@@ -117,7 +119,9 @@ pub enum Fetched {
         #[serde(with = "serde_bytes")]
         key: Vec<u8>,
     },
-    /// Neither key matched an entry.
+    /// Neither key matched an entry, which the server reports with a 404
+    /// response. No response body decodes into this variant.
+    #[serde(skip_deserializing)]
     NotFound,
 }
 
@@ -160,12 +164,14 @@ impl Client {
     }
 
     /// Fetch the entry stored under `key` with `POST {endpoint}/fetch`,
-    /// falling back to the entry associated with `secondary_key`.
+    /// falling back to the entry associated with `secondary_key`. A 404
+    /// response means neither key matched.
     ///
     /// # Errors
     ///
     /// Returns an error if the request fails, the server responds with a
-    /// status other than 200, or the response isn't a fetch response.
+    /// status other than 200 or 404, or the body of a 200 response isn't an
+    /// exact or fallback match.
     pub async fn fetch(&self, key: &[u8], secondary_key: &[u8]) -> Result<Fetched, Error> {
         let body = encode_cbor(&FetchRequest { key, secondary_key });
         let response = self
@@ -176,6 +182,12 @@ impl Client {
             .send()
             .await
             .map_err(network_error)?;
+        if response.status() == StatusCode::NOT_FOUND {
+            // Read the body so the connection can be reused. It doesn't matter
+            // if that fails, because the status alone is the answer.
+            let _ = response.bytes().await;
+            return Ok(Fetched::NotFound);
+        }
         let body = check_status(response).await?.bytes().await.map_err(network_error)?;
         decode_fetched(&body)
     }
@@ -367,9 +379,6 @@ mod tests {
             decode_fetched(&fallback).unwrap(),
             Fetched::Fallback { key: b"stored key".to_vec() }
         );
-
-        let not_found = cbor_map(vec![("kind", "not_found".into())]);
-        assert_eq!(decode_fetched(&not_found).unwrap(), Fetched::NotFound);
     }
 
     #[test]
@@ -377,6 +386,8 @@ mod tests {
         for body in [
             b"\xffnot cbor".to_vec(),
             cbor_map(vec![("kind", "unknown".into())]),
+            // A miss is a 404 response, not a kind.
+            cbor_map(vec![("kind", "not_found".into())]),
             // The value must be a byte string.
             cbor_map(vec![
                 ("kind", "exact".into()),
@@ -458,16 +469,48 @@ mod tests {
     async fn fetch_posts_the_keys_as_cbor() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let client = client_for(&listener);
-        let body = cbor_map(vec![("kind", "not_found".into())]);
+        let body = cbor_map(vec![
+            ("kind", "exact".into()),
+            ("value", ciborium::Value::Bytes(b"v".to_vec())),
+            ("blob_id", ciborium::Value::Null),
+        ]);
         let server = std::thread::spawn(move || serve_once(&listener, "HTTP/1.1 200 OK", &body));
 
-        assert_eq!(client.fetch(b"k", b"s").await.unwrap(), Fetched::NotFound);
+        assert_eq!(
+            client.fetch(b"k", b"s").await.unwrap(),
+            Fetched::Exact { value: b"v".to_vec(), blob_id: None }
+        );
 
         let request = server.join().unwrap();
         assert!(request.starts_with(b"POST /projects/test/fetch HTTP/1.1\r\n"));
         assert!(contains(&request, b"content-type: application/cbor\r\n"));
         let keys = encode_cbor(&FetchRequest { key: b"k", secondary_key: b"s" });
         assert!(request.ends_with(&[b"\r\n\r\n".as_slice(), &keys].concat()));
+    }
+
+    #[tokio::test]
+    async fn fetch_of_a_missing_entry_is_not_found() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = client_for(&listener);
+        let server = std::thread::spawn(move || {
+            serve_once(&listener, "HTTP/1.1 404 Not Found", b"Not found")
+        });
+
+        assert_eq!(client.fetch(b"k", b"s").await.unwrap(), Fetched::NotFound);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn fetch_ignores_an_incomplete_404_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = client_for(&listener);
+        // The connection closes before the announced length arrives.
+        let server = std::thread::spawn(move || {
+            serve_raw_once(&listener, b"HTTP/1.1 404 Not Found\r\ncontent-length: 100\r\n\r\nNot")
+        });
+
+        assert_eq!(client.fetch(b"k", b"s").await.unwrap(), Fetched::NotFound);
+        server.join().unwrap();
     }
 
     #[tokio::test]
