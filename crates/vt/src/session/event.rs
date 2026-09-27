@@ -10,6 +10,8 @@ use super::cache::{CacheHitSource, CacheMiss, remote::UploadError};
 pub enum CacheErrorKind {
     /// Cache lookup (`try_hit`) failed.
     Lookup,
+    /// Restoring the output files of a cache hit failed.
+    Restore,
     /// Writing the cache entry failed after successful execution.
     Update,
 }
@@ -18,6 +20,7 @@ impl std::fmt::Display for CacheErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Lookup => f.write_str("lookup"),
+            Self::Restore => f.write_str("restore"),
             Self::Update => f.write_str("update"),
         }
     }

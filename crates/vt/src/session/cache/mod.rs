@@ -394,12 +394,12 @@ impl ExecutionCache {
         }
 
         // No cache found with the current cache entry key,
-        // check if execution key maps to a different cache entry key
+        // check if execution key maps to a different cache entry key. It
+        // still maps to the current key if that entry was removed.
         if let Some(old_cache_key) =
             self.get_cache_key_by_execution_key(execution_cache_key).await?
+            && old_cache_key != *cache_key
         {
-            // `get_by_cache_key` above returned None for the *current* cache key,
-            // so the associated key must differ.
             let mismatch = old_cache_key.into_mismatch(cache_key);
             return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
         }
@@ -519,6 +519,18 @@ impl ExecutionCache {
         }
         Ok(upload)
     }
+
+    /// Remove the local entry for `cache_metadata` and its output archive at
+    /// `archive_path`, so later runs miss instead of hitting it.
+    pub async fn remove(
+        &self,
+        cache_metadata: &CacheMetadata,
+        archive_path: &AbsolutePath,
+    ) -> anyhow::Result<()> {
+        // Best-effort: the archive may already be missing.
+        let _ = std::fs::remove_file(archive_path.as_path());
+        self.delete_cache_entry(&CacheEntryKey::from_metadata(cache_metadata)).await
+    }
 }
 
 // Basic database operations
@@ -599,6 +611,18 @@ impl ExecutionCache {
         cache_value: &CacheEntryValue,
     ) -> anyhow::Result<()> {
         self.upsert("cache_entries", cache_key, cache_value).await
+    }
+
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "lock guard must be held while executing the prepared statement"
+    )]
+    async fn delete_cache_entry(&self, cache_key: &CacheEntryKey) -> anyhow::Result<()> {
+        let key_blob = serialize_cache(cache_key)?;
+        let conn = self.conn.lock().await;
+        let mut delete_stmt = conn.prepare_cached("DELETE FROM cache_entries WHERE key=?")?;
+        delete_stmt.execute([key_blob])?;
+        Ok(())
     }
 
     async fn upsert_task_fingerprint(

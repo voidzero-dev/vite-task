@@ -252,6 +252,71 @@ steps = [
 ]
 
 [[e2e]]
+name = "restore_failure"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ] },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  [
+    "vtt",
+    "rm",
+    "-rf",
+    "dist",
+  ],
+  { argv = [
+    "vtt",
+    "write-file",
+    "dist",
+    "file",
+  ], comment = "A file where the output directory goes makes restoring fail." },
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The remote hit can't be restored, so the task fails." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details include the underlying error." },
+  { argv = [
+    "vtt",
+    "list-dir",
+    "node_modules/.vite/task-cache",
+    "--ext",
+    ".tar.zst",
+    "--recursive",
+  ], comment = "The downloaded archive was removed along with the entry." },
+  [
+    "vtt",
+    "rm",
+    "dist",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The local entry was removed, so the remote entry is fetched and restored again." },
+]
+
+[[e2e]]
 name = "invalid_endpoint"
 steps = [
   { argv = [

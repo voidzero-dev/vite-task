@@ -730,7 +730,6 @@ impl<'a> Session<'a> {
             cache,
             &self.workspace_path,
             &self.cache_path,
-            self.program_name.as_str(),
             fast_fail_token,
             cancel_token,
         )

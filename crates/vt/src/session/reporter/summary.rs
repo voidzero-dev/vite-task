@@ -73,6 +73,9 @@ pub enum TaskResult {
         source: CacheHitSource,
     },
 
+    /// Cache hit whose output files couldn't be restored. Always a failure.
+    RestoreFailed { source: CacheHitSource, error: SavedError },
+
     /// In-process execution (built-in command like echo). Always successful.
     InProcess,
 
@@ -90,8 +93,8 @@ pub enum TaskResult {
 /// - `Miss`: cache lookup found no match or a mismatch.
 /// - `Disabled`: no cache configuration for this task.
 ///
-/// `Hit` and `InProcessExecution` are handled by [`TaskResult::CacheHit`]
-/// and [`TaskResult::InProcess`] respectively.
+/// `Hit` is handled by [`TaskResult::CacheHit`] or [`TaskResult::RestoreFailed`],
+/// and `InProcessExecution` by [`TaskResult::InProcess`].
 #[derive(Serialize, Deserialize)]
 pub enum SpawnedCacheStatus {
     Miss(SavedCacheMissReason),
@@ -227,6 +230,7 @@ impl SummaryStats {
                     }
                     stats.total_saved += Duration::from_millis(*saved_duration_ms);
                 }
+                TaskResult::RestoreFailed { .. } => stats.failed += 1,
                 TaskResult::InProcess => {
                     stats.cache_disabled += 1;
                 }
@@ -351,10 +355,14 @@ impl TaskResult {
         };
 
         match cache_status {
-            CacheStatus::Hit { replayed_duration, source } => Self::CacheHit {
-                saved_duration_ms: duration_to_ms(*replayed_duration),
-                source: *source,
-            },
+            // The only error a cache hit can have is a failed restore.
+            CacheStatus::Hit { replayed_duration, source } => saved_error.map_or_else(
+                || Self::CacheHit {
+                    saved_duration_ms: duration_to_ms(*replayed_duration),
+                    source: *source,
+                },
+                |error| Self::RestoreFailed { source: *source, error: error.clone() },
+            ),
             CacheStatus::Disabled(CacheDisabledReason::InProcessExecution) => Self::InProcess,
             CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Disabled,
@@ -537,6 +545,7 @@ impl TaskResult {
     const fn is_success(&self) -> bool {
         match self {
             Self::CacheHit { .. } | Self::InProcess => true,
+            Self::RestoreFailed { .. } => false,
             Self::Spawned { outcome, .. } => matches!(outcome, SpawnOutcome::Success { .. }),
         }
     }
@@ -548,6 +557,7 @@ impl TaskResult {
     /// Examples:
     /// - "→ Cache hit - output replayed - 102.96ms saved"
     /// - "→ Remote cache hit - output replayed - 102.96ms saved"
+    /// - "→ Cache hit, but the outputs couldn't be restored"
     /// - "→ Cache miss: no previous cache entry found"
     /// - "→ Cache disabled in task configuration"
     fn format_cache_detail(&self) -> (Str, &[Str]) {
@@ -596,11 +606,11 @@ impl TaskResult {
             Self::CacheHit { saved_duration_ms, source } => {
                 let d = Duration::from_millis(*saved_duration_ms);
                 let formatted_duration = format_summary_duration(d);
-                let hit = match source {
-                    CacheHitSource::Local => "Cache hit",
-                    CacheHitSource::Remote => "Remote cache hit",
-                };
+                let hit = format_hit(*source);
                 vt_str::format!("→ {hit} - output replayed - {formatted_duration} saved")
+            }
+            Self::RestoreFailed { source, .. } => {
+                vt_str::format!("→ {}, but the outputs couldn't be restored", format_hit(*source))
             }
             Self::InProcess => Str::from("→ Cache disabled for built-in command"),
             Self::Spawned { cache_status, .. } => match cache_status {
@@ -643,6 +653,7 @@ impl TaskResult {
     const fn cache_detail_style(&self) -> Style {
         match self {
             Self::CacheHit { .. } => Style::new().green(),
+            Self::RestoreFailed { .. } => Style::new().red(),
             Self::InProcess => Style::new().bright_black(),
             Self::Spawned { cache_status: SpawnedCacheStatus::Disabled, .. } => {
                 Style::new().bright_black()
@@ -685,12 +696,21 @@ impl TaskResult {
     pub const fn error(&self) -> Option<&SavedError> {
         match self {
             Self::CacheHit { .. } | Self::InProcess => None,
+            Self::RestoreFailed { error, .. } => Some(error),
             Self::Spawned { outcome, .. } => match outcome {
                 SpawnOutcome::Success { infra_error, .. } => infra_error.as_ref(),
                 SpawnOutcome::Failed { .. } => None,
                 SpawnOutcome::SpawnError(err) => Some(err),
             },
         }
+    }
+}
+
+/// "Cache hit" or "Remote cache hit", for the full summary's detail line.
+const fn format_hit(source: CacheHitSource) -> &'static str {
+    match source {
+        CacheHitSource::Local => "Cache hit",
+        CacheHitSource::Remote => "Remote cache hit",
     }
 }
 

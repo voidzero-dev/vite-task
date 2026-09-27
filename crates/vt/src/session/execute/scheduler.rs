@@ -44,9 +44,6 @@ struct ExecutionContext<'a> {
     workspace_root: &'a Arc<AbsolutePath>,
     /// Directory where cache files (db, archives) are stored.
     cache_dir: &'a AbsolutePath,
-    /// Public-facing program name (e.g. `vp`), used in user-facing error
-    /// messages that suggest a CLI command (e.g. `cache clean`).
-    program_name: &'a str,
     /// Token cancelled when a task fails. Kills in-flight child processes
     /// (via `start_kill` in spawn.rs).
     fast_fail_token: CancellationToken,
@@ -206,7 +203,6 @@ impl ExecutionContext<'_> {
                     self.cache,
                     self.workspace_root,
                     self.cache_dir,
-                    self.program_name,
                     self.fast_fail_token.clone(),
                     self.cancel_token.clone(),
                 )
@@ -262,7 +258,6 @@ impl Session<'_> {
             cache,
             workspace_root: &self.workspace_path,
             cache_dir: &self.cache_path,
-            program_name: self.program_name.as_str(),
             fast_fail_token,
             cancel_token,
         };
