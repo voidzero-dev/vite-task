@@ -17,8 +17,8 @@ use super::{
 use crate::session::{
     event::{CacheStatus, CacheUpdateStatus, ExecutionError},
     reporter::summary::{
-        LastRunSummary, SavedExecutionError, SpawnOutcome, TaskResult, TaskSummary,
-        format_compact_summary, format_full_summary,
+        LastRunSummary, SavedError, SpawnOutcome, TaskResult, TaskSummary, format_compact_summary,
+        format_full_summary,
     },
 };
 
@@ -178,7 +178,7 @@ impl LeafExecutionReporter for SummaryLeafReporter {
         error: Option<ExecutionError>,
     ) {
         // Record task summary before forwarding to inner.
-        let saved_error = error.as_ref().map(SavedExecutionError::from_execution_error);
+        let saved_error = error.as_ref().map(|error| SavedError::new(error));
 
         if let Some(ref cache_status) = self.cache_status {
             let cwd_relative =

@@ -28,7 +28,8 @@ Task Details:
 ────────────────────────────────────────────────
   [1] remote-cache#build: $ vtt write-file dist/output.txt built ✓
       → Cache miss: no previous cache entry found
-      ⚠ Not uploaded to the remote cache: invalid endpoint: relative URL without a base
+      ⚠ Not uploaded to the remote cache: invalid endpoint
+        ↳ relative URL without a base
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 

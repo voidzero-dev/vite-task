@@ -28,23 +28,13 @@ use super::{
     CACHE_SCHEMA_VERSION, CacheEntryKey, CacheEntryValue, TaskCacheConfig, serialize_cache,
 };
 
-/// Why an entry wasn't uploaded. The reporter turns it into messages.
-#[derive(Debug)]
+/// Why an entry wasn't uploaded.
+#[derive(Debug, thiserror::Error)]
 pub enum UploadError {
-    Remote(vt_remote_cache::Error),
-    Encode(WriteError),
-}
-
-impl From<vt_remote_cache::Error> for UploadError {
-    fn from(err: vt_remote_cache::Error) -> Self {
-        Self::Remote(err)
-    }
-}
-
-impl From<WriteError> for UploadError {
-    fn from(err: WriteError) -> Self {
-        Self::Encode(err)
-    }
+    #[error(transparent)]
+    Remote(#[from] vt_remote_cache::Error),
+    #[error("failed to encode the cache entry")]
+    Encode(#[from] WriteError),
 }
 
 /// Remote cache clients, each created when its endpoint is first used.
