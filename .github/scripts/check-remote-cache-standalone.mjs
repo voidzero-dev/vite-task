@@ -5,6 +5,8 @@ import { basename, join } from 'node:path';
 
 const pnpm = process.env.npm_execpath;
 if (!pnpm) throw new Error('Run this check through pnpm check-remote-cache-standalone');
+// pnpm can be a JavaScript entry point or a standalone executable.
+const [command, prefix] = /\.[cm]?js$/.test(pnpm) ? [process.execPath, [pnpm]] : [pnpm, []];
 const directory = await mkdtemp(join(tmpdir(), 'remote-cache-standalone-'));
 const excluded = new Set([
   'node_modules',
@@ -25,7 +27,7 @@ try {
   });
   for (const args of [['install', '--frozen-lockfile'], ['check'], ['build']]) {
     await new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [pnpm, ...args], {
+      const child = spawn(command, [...prefix, ...args], {
         cwd: directory,
         stdio: 'inherit',
         shell: false,

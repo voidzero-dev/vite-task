@@ -8,6 +8,8 @@ allowBuilds:
   '@playwright/browser-chromium': true
   bun: true
   deno: true
+  esbuild: true
+  workerd: true
 
 minimumReleaseAgeExclude:
   - vite-plus
