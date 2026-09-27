@@ -151,8 +151,7 @@ pub enum SavedCacheMissReason {
     /// between runs. Carries the first differing entry.
     TrackedEnvQueryChanged { query: TrackedEnvQuery, mismatch: EnvMismatch },
     /// Reading the remote cache failed, and the local cache had no entry.
-    /// Carries the failure's message.
-    RemoteReadFailed(Str),
+    RemoteReadFailed(SavedError),
 }
 
 /// An error's message and the messages of its causes, outermost first.
@@ -277,7 +276,9 @@ impl SavedCacheMissReason {
                     }
                 }
             },
-            CacheMiss::RemoteReadFailed(reason) => Self::RemoteReadFailed(reason.clone()),
+            CacheMiss::RemoteReadFailed(error) => {
+                Self::RemoteReadFailed(SavedError::new(error.as_ref()))
+            }
         }
     }
 }
@@ -514,21 +515,22 @@ impl TaskResult {
         }
     }
 
-    /// Format the cache status detail line for the full summary. The caller
-    /// shows [`Self::ipc_server_error`] instead, if there is one.
+    /// Format the cache status detail line for the full summary, with the
+    /// causes to show below it. Only a remote read failure has causes. The
+    /// caller shows [`Self::ipc_server_error`] instead, if there is one.
     ///
     /// Examples:
     /// - "→ Cache hit - output replayed - 102.96ms saved"
     /// - "→ Cache miss: no previous cache entry found"
     /// - "→ Cache disabled in task configuration"
-    fn format_cache_detail(&self) -> Str {
+    fn format_cache_detail(&self) -> (Str, &[Str]) {
         // Tool-reported cache disable — the tool said it shouldn't be cached.
         if let Self::Spawned {
             outcome: SpawnOutcome::Success { tool_disabled_cache: true, .. },
             ..
         } = self
         {
-            return Str::from("→ Not cached: the task opted out of caching");
+            return (Str::from("→ Not cached: the task opted out of caching"), &[]);
         }
 
         // Check for input modification next — it overrides the cache miss reason
@@ -537,7 +539,7 @@ impl TaskResult {
             ..
         } = self
         {
-            return vt_str::format!("→ Not cached: read and wrote '{path}'");
+            return (vt_str::format!("→ Not cached: read and wrote '{path}'"), &[]);
         }
         // Tracking came up short, so the inferred inputs and outputs would
         // have been a subset of what the task touched.
@@ -546,8 +548,11 @@ impl TaskResult {
             ..
         } = self
         {
-            return Str::from(
-                "→ Not cached: this task used more files than automatic tracking can record. Configure `input` and `output` manually to enable caching.",
+            return (
+                Str::from(
+                    "→ Not cached: this task used more files than automatic tracking can record. Configure `input` and `output` manually to enable caching.",
+                ),
+                &[],
             );
         }
         // fspy-unsupported-on-this-OS message — same overrides precedence as above
@@ -555,12 +560,15 @@ impl TaskResult {
             outcome: SpawnOutcome::Success { fspy_unsupported: true, .. }, ..
         } = self
         {
-            return Str::from(
-                "→ Not cached: `input` auto-inference isn't supported on this OS. Configure `input` manually to enable caching.",
+            return (
+                Str::from(
+                    "→ Not cached: `input` auto-inference isn't supported on this OS. Configure `input` manually to enable caching.",
+                ),
+                &[],
             );
         }
 
-        match self {
+        let detail = match self {
             Self::CacheHit { saved_duration_ms } => {
                 let d = Duration::from_millis(*saved_duration_ms);
                 let formatted_duration = format_summary_duration(d);
@@ -594,12 +602,13 @@ impl TaskResult {
                     | SavedCacheMissReason::TrackedEnvQueryChanged { mismatch, .. } => {
                         vt_str::format!("→ Cache miss: {mismatch}")
                     }
-                    SavedCacheMissReason::RemoteReadFailed(reason) => {
-                        vt_str::format!("→ Cache miss: {reason}")
+                    SavedCacheMissReason::RemoteReadFailed(error) => {
+                        return (vt_str::format!("→ Cache miss: {}", error.message), &error.causes);
                     }
                 },
             },
-        }
+        };
+        (detail, &[])
     }
 
     /// The [`Style`] for the cache detail line.
@@ -801,8 +810,9 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
                 detail_style,
             );
         } else {
-            let cache_detail = task.result.format_cache_detail();
+            let (cache_detail, causes) = task.result.format_cache_detail();
             let _ = writeln!(buf, "      {}", cache_detail.style(detail_style));
+            write_causes(&mut buf, causes, detail_style);
         }
 
         if let Some(error) = task.result.upload_error() {
@@ -848,7 +858,12 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
 /// its causes on its own line below.
 fn write_error_lines(buf: &mut Vec<u8>, label: impl Display, error: &SavedError, style: Style) {
     let _ = writeln!(buf, "      {label} {}", error.message.style(style));
-    for cause in &error.causes {
+    write_causes(buf, &error.causes, style);
+}
+
+/// Write each cause on its own line, below a task detail line.
+fn write_causes(buf: &mut Vec<u8>, causes: &[Str], style: Style) {
+    for cause in causes {
         let _ = writeln!(buf, "        {}", vt_str::format!("↳ {cause}").style(style));
     }
 }

@@ -49,6 +49,7 @@ Task Details:
 ────────────────────────────────────────────────
   [1] remote-cache#build: $ vtt write-file dist/output.txt built ✓
       → Cache miss: downloaded archive is corrupt
+        ↳ Unknown frame descriptor
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 

@@ -5,7 +5,7 @@
 Nothing can listen on port 0. The failed fetch is the miss reason, and the failed upload is a warning. The task succeeds.
 
 ```
-$ vtt write-file dist/output.txt built ○ cache miss: remote cache fetch failed (network error), executing
+$ vtt write-file dist/output.txt built ○ cache miss: remote cache fetch failed, executing
 
 ---
 vt run: remote-cache#build not uploaded to the remote cache: network error. (Run `vt run --last-details` for full details)
@@ -27,7 +27,12 @@ Performance:  0% cache hit rate
 Task Details:
 ────────────────────────────────────────────────
   [1] remote-cache#build: $ vtt write-file dist/output.txt built ✓
-      → Cache miss: remote cache fetch failed (network error)
+      → Cache miss: remote cache fetch failed
+        ↳ network error
+        ↳ error sending request for url (http://127.0.0.1:0/projects/test/fetch)
+        ↳ client error (Connect)
+        ↳ tcp connect error
+        ↳ <os error>
       ⚠ Not uploaded to the remote cache: network error
         ↳ error sending request for url (http://127.0.0.1:0/projects/test/store)
         ↳ client error (Connect)

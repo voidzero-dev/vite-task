@@ -193,8 +193,8 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
             };
             Some(vt_str::format!("○ cache miss: {reason}, executing"))
         }
-        CacheStatus::Miss(CacheMiss::RemoteReadFailed(reason)) => {
-            Some(vt_str::format!("○ cache miss: {reason}, executing"))
+        CacheStatus::Miss(CacheMiss::RemoteReadFailed(error)) => {
+            Some(vt_str::format!("○ cache miss: {error}, executing"))
         }
         CacheStatus::Disabled(_) => Some(Str::from("⊘ cache disabled")),
     }

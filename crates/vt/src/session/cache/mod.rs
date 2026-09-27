@@ -30,7 +30,7 @@ use wincode::{
     io::{Reader, Writer},
 };
 
-use self::remote::{RemoteClients, Restore, UploadError};
+use self::remote::{ReadError, RemoteClients, Restore, UploadError};
 use super::execute::{
     fingerprint::{PostRunFingerprint, TrackedEnvQuery},
     pipe::StdOutput,
@@ -148,13 +148,17 @@ pub struct ExecutionCache {
     remote_clients: RemoteClients,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "FingerprintMismatch contains SpawnFingerprint which is intentionally large; boxing would add unnecessary indirection for a short-lived enum"
+)]
 pub enum CacheMiss {
     NotFound,
     FingerprintMismatch(FingerprintMismatch),
     /// Reading the remote cache failed, and the local cache has no entry for
-    /// the task. The message names the cause.
-    RemoteReadFailed(Str),
+    /// the task.
+    RemoteReadFailed(Arc<ReadError>),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

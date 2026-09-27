@@ -49,9 +49,9 @@ pub enum UploadError {
 /// it's the same on every platform.
 #[derive(Debug, thiserror::Error)]
 pub enum ReadError {
-    #[error("remote cache fetch failed ({0})")]
+    #[error("remote cache fetch failed")]
     Fetch(#[source] vt_remote_cache::Error),
-    #[error("remote cache download failed ({0})")]
+    #[error("remote cache download failed")]
     Download(#[source] vt_remote_cache::Error),
     #[error("remote cache value is corrupt")]
     CorruptValue(#[source] wincode::error::ReadError),
@@ -68,10 +68,8 @@ pub enum ReadError {
 }
 
 impl ReadError {
-    /// The miss for this failure. The full error is only logged.
     pub(super) fn into_miss(self) -> CacheMiss {
-        tracing::debug!(err = ?self, "remote cache read failed");
-        CacheMiss::RemoteReadFailed(vt_str::format!("{self}"))
+        CacheMiss::RemoteReadFailed(Arc::new(self))
     }
 }
 
@@ -357,7 +355,7 @@ mod tests {
 
     fn read_failure(miss: CacheMiss) -> Str {
         match miss {
-            CacheMiss::RemoteReadFailed(reason) => reason,
+            CacheMiss::RemoteReadFailed(error) => vt_str::format!("{error}"),
             miss => panic!("expected a read failure, got {miss:?}"),
         }
     }
@@ -439,7 +437,7 @@ mod tests {
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let fetched = Err(ReadError::Fetch(vt_remote_cache::Error::InvalidEndpoint(None)));
         let miss = resolve(fetched, &key, not_validated).unwrap_err();
-        assert_eq!(read_failure(miss), "remote cache fetch failed (invalid endpoint)");
+        assert_eq!(read_failure(miss), "remote cache fetch failed");
     }
 
     #[test]
