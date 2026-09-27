@@ -38,7 +38,9 @@ pub enum Error {
     #[error("failed to read the blob")]
     ReadBlob(#[source] std::io::Error),
     /// No complete response arrived, for example because the connection
-    /// failed, timed out, or closed before the whole body arrived.
+    /// failed, timed out, or closed before the whole body arrived. The source
+    /// leaves out the request URL, because the endpoint may contain
+    /// credentials, such as a token in its query.
     #[error("network error")]
     Network(#[source] reqwest::Error),
     /// The server responded with a status other than 200. The source is the
@@ -69,7 +71,7 @@ impl Download {
     /// Returns an error if the rest of the blob can't be read, for example
     /// because the connection closes before it all arrives.
     pub async fn chunk(&mut self) -> Result<Option<Bytes>, Error> {
-        self.response.chunk().await.map_err(Error::Network)
+        self.response.chunk().await.map_err(network_error)
     }
 }
 
@@ -146,9 +148,12 @@ impl Client {
         // Installing fails if one is already installed; vite-plus installs
         // ring too.
         let _ = rustls::crypto::ring::default_provider().install_default();
+        // A redirect fails like any other status. Following one could turn a
+        // store into a GET of a login page that responds with 200.
         let http = reqwest::Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(READ_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(Error::HttpClient)?;
         Ok(Self { http, fetch_url, store_url, blob_url })
@@ -170,8 +175,8 @@ impl Client {
             .body(body)
             .send()
             .await
-            .map_err(Error::Network)?;
-        let body = check_status(response).await?.bytes().await.map_err(Error::Network)?;
+            .map_err(network_error)?;
+        let body = check_status(response).await?.bytes().await.map_err(network_error)?;
         decode_fetched(&body)
     }
 
@@ -186,7 +191,7 @@ impl Client {
     pub async fn download(&self, blob_id: &str) -> Result<Download, Error> {
         let mut url = self.blob_url.clone();
         url.path_segments_mut().map_err(|()| Error::InvalidEndpoint(None))?.push(blob_id);
-        let response = self.http.get(url).send().await.map_err(Error::Network)?;
+        let response = self.http.get(url).send().await.map_err(network_error)?;
         Ok(Download { response: check_status(response).await? })
     }
 
@@ -216,10 +221,10 @@ impl Client {
             .multipart(form)
             .send()
             .await
-            .map_err(Error::Network)?;
+            .map_err(network_error)?;
         // The response's blob ID isn't needed. Read the body anyway, so the
         // connection can be reused.
-        check_status(response).await?.bytes().await.map_err(Error::Network)?;
+        check_status(response).await?.bytes().await.map_err(network_error)?;
         Ok(())
     }
 }
@@ -236,6 +241,10 @@ async fn check_status(response: Response) -> Result<Response, Error> {
         (!text.is_empty()).then(|| ServerMessage(Str::from(text)))
     });
     Err(Error::Status(status, message))
+}
+
+fn network_error(err: reqwest::Error) -> Error {
+    Error::Network(err.without_url())
 }
 
 fn decode_fetched(body: &[u8]) -> Result<Fetched, Error> {
@@ -564,5 +573,36 @@ mod tests {
         assert!(request.starts_with(b"POST /projects/test/store HTTP/1.1\r\n"));
         assert!(contains(&request, &metadata_part_bytes()));
         assert!(!contains(&request, b"name=\"blob\""));
+    }
+
+    #[tokio::test]
+    async fn store_does_not_follow_redirects() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = client_for(&listener);
+        let server = std::thread::spawn(move || {
+            serve_raw_once(
+                &listener,
+                b"HTTP/1.1 302 Found\r\nlocation: /login\r\ncontent-length: 0\r\n\r\n",
+            )
+        });
+
+        let error = client.store(b"k", b"s", b"v", None).await.unwrap_err();
+        assert!(matches!(error, Error::Status(StatusCode::FOUND, None)), "{error:?}");
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn network_errors_leave_out_the_url() {
+        let client =
+            Client::new("http://user:password@127.0.0.1:0/projects/test?token=secret").unwrap();
+
+        let error = client.fetch(b"k", b"s").await.unwrap_err();
+        assert!(matches!(error, Error::Network(_)), "{error:?}");
+        let messages =
+            std::iter::successors(Some(&error as &dyn std::error::Error), |err| err.source())
+                .map(|err| vt_str::format!("{err}"));
+        for text in messages.chain([vt_str::format!("{error:?}")]) {
+            assert!(!text.contains("password") && !text.contains("secret"), "{text}");
+        }
     }
 }

@@ -26,7 +26,7 @@ Task Details:
   [1] remote-cache#build: $ vtt write-file dist/output.txt built ✓
       → Cache miss: remote cache fetch failed
         ↳ network error
-        ↳ error sending request for url (http://127.0.0.1:0/projects/test/fetch)
+        ↳ error sending request
         ↳ client error (Connect)
         ↳ tcp connect error
         ↳ <os error>

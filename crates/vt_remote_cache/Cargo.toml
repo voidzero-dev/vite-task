@@ -10,7 +10,12 @@ rust-version.workspace = true
 [dependencies]
 bytes = { workspace = true }
 ciborium = { workspace = true }
-reqwest = { workspace = true, features = ["multipart", "rustls-no-provider", "stream"] }
+reqwest = { workspace = true, features = [
+  "multipart",
+  "rustls-no-provider",
+  "stream",
+  "system-proxy",
+] }
 rustls = { workspace = true, features = ["ring", "std"] }
 serde = { workspace = true, features = ["derive"] }
 serde_bytes = { workspace = true }
