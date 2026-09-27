@@ -207,9 +207,9 @@ steps = [
     "list-dir",
     "node_modules/.vite/task-cache",
     "--ext",
-    ".tar.zst",
+    ".tmp",
     "--recursive",
-  ], comment = "Only the rerun's archive is on disk. The corrupt download was removed." },
+  ], comment = "The corrupt download was removed." },
 ]
 
 [[e2e]]

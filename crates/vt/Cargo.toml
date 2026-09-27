@@ -35,7 +35,6 @@ thiserror = { workspace = true }
 tar = { workspace = true }
 tokio = { workspace = true, features = [
   "rt-multi-thread",
-  "fs",
   "io-std",
   "io-util",
   "macros",

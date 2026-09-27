@@ -53,10 +53,9 @@ Task Details:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-## `vtt list-dir node_modules/.vite/task-cache --ext .tar.zst --recursive`
+## `vtt list-dir node_modules/.vite/task-cache --ext .tmp --recursive`
 
-Only the rerun's archive is on disk. The corrupt download was removed.
+The corrupt download was removed.
 
 ```
-<uuid>.tar.zst
 ```
