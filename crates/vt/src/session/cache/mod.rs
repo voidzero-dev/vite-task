@@ -353,8 +353,16 @@ impl ExecutionCache {
             Ok(cache_value) => return Ok(Ok(cache_value)),
             Err(miss) => miss,
         };
-        let Some(ResolvedRemoteCacheConfig { url, .. }) = &cache_metadata.remote_cache else {
-            return Ok(Err(local_miss));
+        #[expect(
+            clippy::manual_let_else,
+            reason = "naming every access mode makes adding one a compile error here"
+        )]
+        let url = match &cache_metadata.remote_cache {
+            Some(ResolvedRemoteCacheConfig {
+                access: RemoteCacheAccess::Read | RemoteCacheAccess::ReadWrite,
+                url,
+            }) => url,
+            None => return Ok(Err(local_miss)),
         };
         let remote_miss = match self
             .try_hit_remote(
@@ -504,10 +512,11 @@ impl ExecutionCache {
 
         self.record(&cache_key, execution_cache_key, &cache_value, cache_dir).await?;
 
-        let Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::ReadWrite, url }) =
-            &cache_metadata.remote_cache
-        else {
-            return Ok(Ok(()));
+        let url = match &cache_metadata.remote_cache {
+            Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::ReadWrite, url }) => url,
+            Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::Read, .. }) | None => {
+                return Ok(Ok(()));
+            }
         };
         let upload = self
             .remote_clients
