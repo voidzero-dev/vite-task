@@ -95,12 +95,10 @@ pub struct ServerMessage(Str);
 /// the response body.
 #[derive(Debug, thiserror::Error)]
 pub enum OidcTokenError {
-    /// The token request URL isn't a URL.
-    #[error("invalid token request URL")]
-    InvalidRequestUrl(#[source] ParseError),
-    /// The request token can't be sent in a header.
-    #[error("invalid request token")]
-    InvalidRequestToken,
+    /// The request URL isn't a URL, or the request token can't be sent in a
+    /// header.
+    #[error("invalid token request")]
+    InvalidRequest,
     /// No complete response arrived.
     #[error("network error")]
     Network(#[source] reqwest::Error),
@@ -108,13 +106,10 @@ pub enum OidcTokenError {
     /// aren't followed, so a redirect is a status like any other.
     #[error("HTTP status {}", .0.as_u16())]
     Status(StatusCode),
-    /// The body of the 200 response isn't a JSON object with the token as
-    /// its `value`.
+    /// The body of the 200 response isn't a JSON object whose `value` is a
+    /// JWT with an integer `exp` claim.
     #[error("malformed response")]
     MalformedResponse,
-    /// The token isn't a JWT whose payload has an integer `exp` claim.
-    #[error("malformed token")]
-    MalformedToken,
 }
 
 /// The cause of a 401 response to a store sent without a token from a GitHub
@@ -162,24 +157,8 @@ impl fmt::Debug for GithubOidc {
     }
 }
 
-/// How a client authenticates stores. See [`StoreAuth`].
-enum Auth {
-    Anonymous,
-    GithubOidc(OidcTokens),
-    GithubActionsWithoutOidc,
-}
-
-/// GitHub Actions OIDC tokens for one endpoint. Stores share a token until
-/// it's about to expire, and stores that need a new one at the same time
-/// wait for a single request. After a failed request, stores get its error
-/// without another request.
-struct OidcTokens {
-    settings: GithubOidc,
-    /// The audience tokens are requested for. See [`audience`].
-    audience: Str,
-    state: tokio::sync::Mutex<TokenState>,
-}
-
+/// The OIDC token that stores share. A failed request is kept, so later
+/// stores get its error without another request.
 enum TokenState {
     Empty,
     /// `authorization` is `Bearer <token>`, and `expires_at` is the token's
@@ -203,67 +182,6 @@ struct TokenClaims {
     exp: u64,
 }
 
-impl OidcTokens {
-    /// The `Authorization` header value for a store: the cached token, or a
-    /// new one if it's missing or about to expire. A new token is used even
-    /// if it's about to expire itself; the server decides whether it's valid.
-    #[expect(
-        clippy::significant_drop_tightening,
-        reason = "the lock is held during the request, so concurrent stores wait for its token"
-    )]
-    async fn authorization(
-        &self,
-        http: &reqwest::Client,
-    ) -> Result<HeaderValue, Arc<OidcTokenError>> {
-        let mut state = self.state.lock().await;
-        match &*state {
-            TokenState::Valid { authorization, expires_at } if !expires_soon(*expires_at) => {
-                return Ok(authorization.clone());
-            }
-            TokenState::Failed(err) => return Err(Arc::clone(err)),
-            TokenState::Valid { .. } | TokenState::Empty => {}
-        }
-        match self.request(http).await {
-            Ok((authorization, expires_at)) => {
-                *state = TokenState::Valid { authorization: authorization.clone(), expires_at };
-                Ok(authorization)
-            }
-            Err(err) => {
-                let err = Arc::new(err);
-                *state = TokenState::Failed(Arc::clone(&err));
-                Err(err)
-            }
-        }
-    }
-
-    /// Request a token with `GET <request URL>&audience=<audience>`. Returns
-    /// its `Authorization` header value and its expiry.
-    async fn request(&self, http: &reqwest::Client) -> Result<(HeaderValue, u64), OidcTokenError> {
-        let mut url =
-            Url::parse(&self.settings.request_url).map_err(OidcTokenError::InvalidRequestUrl)?;
-        url.query_pairs_mut().append_pair("audience", &self.audience);
-        let request_authorization =
-            bearer(&self.settings.request_token).ok_or(OidcTokenError::InvalidRequestToken)?;
-        let response = http
-            .get(url)
-            .header(AUTHORIZATION, request_authorization)
-            .send()
-            .await
-            .map_err(|err| OidcTokenError::Network(err.without_url()))?;
-        if response.status() != StatusCode::OK {
-            return Err(OidcTokenError::Status(response.status()));
-        }
-        let body =
-            response.bytes().await.map_err(|err| OidcTokenError::Network(err.without_url()))?;
-        // The parse error isn't kept, because it can quote the body.
-        let TokenResponse { value } =
-            serde_json::from_slice(&body).map_err(|_| OidcTokenError::MalformedResponse)?;
-        let expires_at = jwt_expiry(&value).ok_or(OidcTokenError::MalformedToken)?;
-        let authorization = bearer(&value).ok_or(OidcTokenError::MalformedToken)?;
-        Ok((authorization, expires_at))
-    }
-}
-
 /// The audience of tokens for `endpoint`: the endpoint without its query,
 /// fragment, userinfo, or trailing slash.
 fn audience(endpoint: &Url) -> Str {
@@ -277,24 +195,10 @@ fn audience(endpoint: &Url) -> Str {
     Str::from(url.strip_suffix('/').unwrap_or(url))
 }
 
-/// The `exp` claim of `jwt`, read without verifying its signature. `None`
-/// unless `jwt` is three non-empty base64url parts separated by dots, and the
-/// payload is a JSON object with an integer `exp`.
+/// The `exp` claim in the payload of `jwt`, read without verifying the
+/// signature.
 fn jwt_expiry(jwt: &str) -> Option<u64> {
-    let is_base64url = |part: &str| {
-        !part.is_empty()
-            && part.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    };
-    let mut parts = jwt.split('.');
-    let (Some(header), Some(payload), Some(signature), None) =
-        (parts.next(), parts.next(), parts.next(), parts.next())
-    else {
-        return None;
-    };
-    if ![header, payload, signature].into_iter().all(is_base64url) {
-        return None;
-    }
-    let payload = URL_SAFE_NO_PAD.decode(payload).ok()?;
+    let payload = URL_SAFE_NO_PAD.decode(jwt.split('.').nth(1)?).ok()?;
     let TokenClaims { exp } = serde_json::from_slice(&payload).ok()?;
     Some(exp)
 }
@@ -385,7 +289,10 @@ pub struct Client {
     store_url: Url,
     /// `{endpoint}/blob`, to which each download appends a blob ID.
     blob_url: Url,
-    auth: Auth,
+    store_auth: StoreAuth,
+    /// The audience OIDC tokens are requested for. See [`audience`].
+    audience: Str,
+    oidc_token: tokio::sync::Mutex<TokenState>,
 }
 
 impl fmt::Debug for Client {
@@ -410,15 +317,6 @@ impl Client {
         let fetch_url = route_url(&endpoint, "fetch")?;
         let store_url = route_url(&endpoint, "store")?;
         let blob_url = route_url(&endpoint, "blob")?;
-        let auth = match store_auth {
-            StoreAuth::Anonymous => Auth::Anonymous,
-            StoreAuth::GithubOidc(settings) => Auth::GithubOidc(OidcTokens {
-                settings,
-                audience: audience(&endpoint),
-                state: tokio::sync::Mutex::new(TokenState::Empty),
-            }),
-            StoreAuth::GithubActionsWithoutOidc => Auth::GithubActionsWithoutOidc,
-        };
         // reqwest configures TLS with the process's default crypto provider.
         // Installing fails if one is already installed; vite-plus installs
         // ring too.
@@ -431,7 +329,15 @@ impl Client {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(Error::HttpClient)?;
-        Ok(Self { http, fetch_url, store_url, blob_url, auth })
+        Ok(Self {
+            http,
+            fetch_url,
+            store_url,
+            blob_url,
+            store_auth,
+            audience: audience(&endpoint),
+            oidc_token: tokio::sync::Mutex::new(TokenState::Empty),
+        })
     }
 
     /// Fetch the entry stored under `key` with `POST {endpoint}/fetch`,
@@ -495,11 +401,11 @@ impl Client {
         value: &[u8],
         blob: Option<&AbsolutePath>,
     ) -> Result<(), Error> {
-        let authorization = match &self.auth {
-            Auth::GithubOidc(tokens) => {
-                Some(tokens.authorization(&self.http).await.map_err(Error::OidcToken)?)
+        let authorization = match &self.store_auth {
+            StoreAuth::GithubOidc(oidc) => {
+                Some(self.oidc_authorization(oidc).await.map_err(Error::OidcToken)?)
             }
-            Auth::Anonymous | Auth::GithubActionsWithoutOidc => None,
+            StoreAuth::Anonymous | StoreAuth::GithubActionsWithoutOidc => None,
         };
         let metadata = StoreMetadata { key, secondary_key, value };
         let mut form = Form::new().part("metadata", metadata_part(&metadata));
@@ -515,7 +421,7 @@ impl Client {
         let response = request.send().await.map_err(network_error)?;
         let response = match check_status(response).await {
             Err(Error::Status(StatusCode::UNAUTHORIZED, message))
-                if matches!(self.auth, Auth::GithubActionsWithoutOidc) =>
+                if matches!(self.store_auth, StoreAuth::GithubActionsWithoutOidc) =>
             {
                 return Err(Error::MissingIdTokenPermission(IdTokenPermissionHint(message)));
             }
@@ -525,6 +431,63 @@ impl Client {
         // connection can be reused.
         response.bytes().await.map_err(network_error)?;
         Ok(())
+    }
+
+    /// The `Authorization` header value for a store: the cached token, or a
+    /// new one if it's missing or about to expire. The lock is held during
+    /// the request, so stores that need a token at the same time share it. A
+    /// new token is used even if it's about to expire itself; the server
+    /// decides whether it's valid.
+    async fn oidc_authorization(
+        &self,
+        oidc: &GithubOidc,
+    ) -> Result<HeaderValue, Arc<OidcTokenError>> {
+        let mut state = self.oidc_token.lock().await;
+        match &*state {
+            TokenState::Valid { authorization, expires_at } if !expires_soon(*expires_at) => {
+                return Ok(authorization.clone());
+            }
+            TokenState::Failed(err) => return Err(Arc::clone(err)),
+            TokenState::Valid { .. } | TokenState::Empty => {}
+        }
+        let requested = self.request_oidc_token(oidc).await.map_err(Arc::new);
+        *state = match &requested {
+            Ok((authorization, expires_at)) => {
+                TokenState::Valid { authorization: authorization.clone(), expires_at: *expires_at }
+            }
+            Err(err) => TokenState::Failed(Arc::clone(err)),
+        };
+        requested.map(|(authorization, _)| authorization)
+    }
+
+    /// Request a token with `GET <request URL>&audience=<audience>`. Returns
+    /// its `Authorization` header value and its `exp` claim.
+    async fn request_oidc_token(
+        &self,
+        oidc: &GithubOidc,
+    ) -> Result<(HeaderValue, u64), OidcTokenError> {
+        let mut url = Url::parse(&oidc.request_url).map_err(|_| OidcTokenError::InvalidRequest)?;
+        url.query_pairs_mut().append_pair("audience", &self.audience);
+        let request_authorization =
+            bearer(&oidc.request_token).ok_or(OidcTokenError::InvalidRequest)?;
+        let response = self
+            .http
+            .get(url)
+            .header(AUTHORIZATION, request_authorization)
+            .send()
+            .await
+            .map_err(|err| OidcTokenError::Network(err.without_url()))?;
+        if response.status() != StatusCode::OK {
+            return Err(OidcTokenError::Status(response.status()));
+        }
+        let body =
+            response.bytes().await.map_err(|err| OidcTokenError::Network(err.without_url()))?;
+        // The parse error isn't kept, because it can quote the body.
+        let TokenResponse { value } =
+            serde_json::from_slice(&body).map_err(|_| OidcTokenError::MalformedResponse)?;
+        let expires_at = jwt_expiry(&value).ok_or(OidcTokenError::MalformedResponse)?;
+        let authorization = bearer(&value).ok_or(OidcTokenError::MalformedResponse)?;
+        Ok((authorization, expires_at))
     }
 }
 
@@ -639,24 +602,6 @@ mod tests {
                 expected,
                 "{endpoint}"
             );
-        }
-    }
-
-    #[test]
-    fn jwt_expiry_reads_exp_from_the_payload() {
-        assert_eq!(jwt_expiry(&jwt(1_700_000_000)), Some(1_700_000_000));
-        let payload = |json: &str| URL_SAFE_NO_PAD.encode(json);
-        for token in [
-            Str::from("not a jwt"),
-            Str::from("a.b"),
-            Str::from("a.b.c.d"),
-            vt_str::format!("h.{}.", payload(r#"{"exp":1}"#)),
-            vt_str::format!("h.{}.s", payload(r#"{"iat":1}"#)),
-            vt_str::format!("h.{}.s", payload(r#"{"exp":"1"}"#)),
-            vt_str::format!("h.{}=.s", payload(r#"{"exp":1}"#)),
-            vt_str::format!("h.{}.s\r\nx: y", payload(r#"{"exp":1}"#)),
-        ] {
-            assert_eq!(jwt_expiry(&token), None, "{token}");
         }
     }
 
@@ -1056,7 +1001,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn store_sends_an_oidc_token_for_the_endpoint() {
+    async fn only_stores_send_an_oidc_token() {
         let dir = tempfile::tempdir().unwrap();
         let blob = AbsolutePathBuf::new(dir.path().join("archive.tar.zst")).unwrap();
         std::fs::write(blob.as_path(), b"archive bytes").unwrap();
@@ -1064,11 +1009,24 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let client = oidc_client_for(&listener);
         let token = jwt(unix_now() + 3600);
-        let server = serve_each(listener, vec![token_response(&token), stored()]);
+        let server = serve_each(
+            listener,
+            vec![
+                http_response("HTTP/1.1 404 Not Found", b""),
+                stored(),
+                token_response(&token),
+                stored(),
+            ],
+        );
 
+        assert_eq!(client.fetch(b"k", b"s").await.unwrap(), None);
+        read_to_end(client.download("7").await.unwrap()).await.unwrap();
         client.store(b"k", b"s", b"v", Some(&blob)).await.unwrap();
 
-        let [token_request, store_request] = server.join().unwrap().try_into().unwrap();
+        let [fetch_request, download_request, token_request, store_request] =
+            server.join().unwrap().try_into().unwrap();
+        assert!(!contains(&fetch_request, b"authorization:"));
+        assert!(!contains(&download_request, b"authorization:"));
         let token_request_line = vt_str::format!(
             "GET /token?api-version=2.0&audience=http%3A%2F%2F127.0.0.1%3A{port}%2Fprojects%2Ftest HTTP/1.1\r\n"
         );
@@ -1078,21 +1036,12 @@ mod tests {
         assert!(contains(&store_request, &authorization_line(&token)));
         assert!(!contains(&store_request, REQUEST_TOKEN.as_bytes()));
         assert!(contains(&store_request, b"archive bytes"));
-    }
 
-    #[tokio::test]
-    async fn fetch_and_download_send_no_oidc_token() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let client = oidc_client_for(&listener);
-        let server =
-            serve_each(listener, vec![http_response("HTTP/1.1 404 Not Found", b""), stored()]);
-
-        assert_eq!(client.fetch(b"k", b"s").await.unwrap(), None);
-        read_to_end(client.download("7").await.unwrap()).await.unwrap();
-
-        for request in server.join().unwrap() {
-            assert!(!is_token_request(&request));
-            assert!(!contains(&request, b"authorization:"));
+        let store_auth = StoreAuth::GithubOidc(GithubOidc::new("https://token.example/", "secret"));
+        for text in [vt_str::format!("{client:?}"), vt_str::format!("{store_auth:?}")] {
+            for secret in [token.as_str(), REQUEST_TOKEN, "secret", "token.example", "127.0.0.1"] {
+                assert!(!text.contains(secret), "{text}");
+            }
         }
     }
 
@@ -1146,6 +1095,11 @@ mod tests {
     #[tokio::test]
     async fn failed_token_request_sends_no_store() {
         let token_in_a_string = vt_str::format!(r#""{}""#, jwt(unix_now() + 3600));
+        let payload = |json: &str| URL_SAFE_NO_PAD.encode(json);
+        let without_exp = vt_str::format!(r#"{{"value":"h.{}.s"}}"#, payload(r#"{"iat":1}"#));
+        // The JSON escapes decode to a line break, which can't be in a header.
+        let with_line_break =
+            vt_str::format!(r#"{{"value":"h.{}.s\r\nx: y"}}"#, payload(r#"{"exp":4102444800}"#));
         for (response, expected) in [
             (
                 http_response("HTTP/1.1 500 Internal Server Error", b"secret body"),
@@ -1159,7 +1113,9 @@ mod tests {
             (http_response("HTTP/1.1 200 OK", b"secret body"), "malformed response"),
             (http_response("HTTP/1.1 200 OK", token_in_a_string.as_bytes()), "malformed response"),
             (http_response("HTTP/1.1 200 OK", br#"{"token":"secret"}"#), "malformed response"),
-            (http_response("HTTP/1.1 200 OK", br#"{"value":"secret"}"#), "malformed token"),
+            (http_response("HTTP/1.1 200 OK", br#"{"value":"secret"}"#), "malformed response"),
+            (http_response("HTTP/1.1 200 OK", without_exp.as_bytes()), "malformed response"),
+            (http_response("HTTP/1.1 200 OK", with_line_break.as_bytes()), "malformed response"),
         ] {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let client = oidc_client_for(&listener);
@@ -1187,12 +1143,9 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_token_request_settings_send_no_request() {
-        for (oidc, expected) in [
-            (GithubOidc::new("not a url", REQUEST_TOKEN), "invalid token request URL"),
-            (
-                GithubOidc::new("http://127.0.0.1:0/token", "secret\r\nx-injected: 1"),
-                "invalid request token",
-            ),
+        for oidc in [
+            GithubOidc::new("not a url", REQUEST_TOKEN),
+            GithubOidc::new("http://127.0.0.1:0/token", "secret\r\nx-injected: 1"),
         ] {
             // Nothing can listen on port 0, so a request would be a network
             // error.
@@ -1200,71 +1153,36 @@ mod tests {
                 Client::new("http://127.0.0.1:0/projects/test", StoreAuth::GithubOidc(oidc))
                     .unwrap();
             let error = client.store(b"k", b"s", b"v", None).await.unwrap_err();
-            assert!(matches!(error, Error::OidcToken(_)), "{error:?}");
-            assert_eq!(std::error::Error::source(&error).unwrap().to_string(), expected);
-            for text in error_texts(&error) {
-                assert!(!text.contains("secret") && !text.contains("not a url"), "{text}");
-            }
+            assert_eq!(
+                error_texts(&error)[..2],
+                ["failed to get a GitHub Actions OIDC token", "invalid token request"]
+            );
         }
     }
 
     #[tokio::test]
-    async fn debug_output_leaves_out_oidc_settings_and_tokens() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let client = oidc_client_for(&listener);
-        let token = jwt(unix_now() + 3600);
-        let server = serve_each(listener, vec![token_response(&token), stored()]);
-        client.store(b"k", b"s", b"v", None).await.unwrap();
-        server.join().unwrap();
+    async fn only_a_401_from_github_actions_without_oidc_has_a_hint() {
+        for (store_auth, status_line, expected) in [
+            (
+                StoreAuth::GithubActionsWithoutOidc,
+                "HTTP/1.1 401 Unauthorized",
+                ["HTTP status 401", "grant `id-token: write` to this job", "denied"].as_slice(),
+            ),
+            (
+                StoreAuth::GithubActionsWithoutOidc,
+                "HTTP/1.1 403 Forbidden",
+                &["HTTP status 403", "denied"],
+            ),
+            (StoreAuth::Anonymous, "HTTP/1.1 401 Unauthorized", &["HTTP status 401", "denied"]),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let client = client_with_auth(&listener, store_auth);
+            let server = std::thread::spawn(move || serve_once(&listener, status_line, b"denied"));
 
-        let oidc = StoreAuth::GithubOidc(GithubOidc::new("https://token.example/", REQUEST_TOKEN));
-        for text in [vt_str::format!("{client:?}"), vt_str::format!("{oidc:?}")] {
-            for secret in [token.as_str(), REQUEST_TOKEN, "token.example", "/token", "127.0.0.1"] {
-                assert!(!text.contains(secret), "{text}");
-            }
+            let error = client.store(b"k", b"s", b"v", None).await.unwrap_err();
+            assert!(error.is_unauthorized());
+            assert_eq!(error_texts(&error)[..expected.len()], *expected);
+            assert!(!contains(&server.join().unwrap(), b"authorization:"));
         }
-    }
-
-    #[tokio::test]
-    async fn unauthorized_store_from_github_actions_without_oidc_has_a_hint() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let client = client_with_auth(&listener, StoreAuth::GithubActionsWithoutOidc);
-        let server = serve_each(
-            listener,
-            vec![
-                http_response("HTTP/1.1 401 Unauthorized", b"missing token"),
-                http_response("HTTP/1.1 403 Forbidden", b"write policy"),
-            ],
-        );
-
-        let error = client.store(b"k", b"s", b"v", None).await.unwrap_err();
-        assert!(matches!(error, Error::MissingIdTokenPermission(_)), "{error:?}");
-        assert!(error.is_unauthorized());
-        assert_eq!(
-            &error_texts(&error)[..3],
-            ["HTTP status 401", "grant `id-token: write` to this job", "missing token"]
-        );
-        // Only a 401 gets the hint.
-        let error = client.store(b"k", b"s", b"v", None).await.unwrap_err();
-        assert!(matches!(error, Error::Status(StatusCode::FORBIDDEN, _)), "{error:?}");
-        assert!(error.is_unauthorized());
-
-        for request in server.join().unwrap() {
-            assert!(!contains(&request, b"authorization:"));
-        }
-    }
-
-    #[tokio::test]
-    async fn unauthorized_anonymous_store_has_no_hint() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let client = client_for(&listener);
-        let server = std::thread::spawn(move || {
-            serve_once(&listener, "HTTP/1.1 401 Unauthorized", b"missing token")
-        });
-
-        let error = client.store(b"k", b"s", b"v", None).await.unwrap_err();
-        assert!(matches!(error, Error::Status(StatusCode::UNAUTHORIZED, Some(_))), "{error:?}");
-        assert!(error.is_unauthorized());
-        server.join().unwrap();
     }
 }
