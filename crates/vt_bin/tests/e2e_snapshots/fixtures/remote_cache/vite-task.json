@@ -16,6 +16,15 @@
     },
     "all": {
       "command": "vt run build && vt run check"
+    },
+    "fail": {
+      "command": "vtt exit 1",
+      "cache": false
+    },
+    "fail-during-build": {
+      "command": "vtt print done",
+      "dependsOn": ["build", "fail"],
+      "cache": false
     }
   }
 }

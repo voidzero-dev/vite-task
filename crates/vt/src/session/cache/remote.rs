@@ -22,6 +22,7 @@ use std::{
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use vt_path::AbsolutePath;
 use vt_plan::cache_metadata::ExecutionCacheKey;
 use vt_remote_cache::{Client, Download, Fetched};
@@ -43,6 +44,10 @@ pub enum UploadError {
     Remote(#[from] vt_remote_cache::Error),
     #[error("failed to encode the cache entry")]
     Encode(#[from] WriteError),
+    /// The run was cancelled, by Ctrl-C or fast-fail, before the upload
+    /// finished.
+    #[error("cancelled")]
+    Cancelled,
 }
 
 /// Why no entry could be read from the remote cache. It's a cache miss, and
@@ -70,6 +75,10 @@ pub enum ReadError {
     Validate(#[source] anyhow::Error),
     #[error("failed to encode the cache key")]
     Encode(#[from] WriteError),
+    /// The run was cancelled, by Ctrl-C or fast-fail, before the read
+    /// finished. The task doesn't start then, so this miss isn't reported.
+    #[error("cancelled")]
+    Cancelled,
 }
 
 impl ReadError {
@@ -142,37 +151,44 @@ impl RemoteClients {
 
     /// Fetch the entry stored under `cache_key`, falling back to the entry
     /// last stored for `execution_cache_key`. Returns `None` if neither key
-    /// matched.
+    /// matched. Stops when `cancel_token` is cancelled.
     pub(super) async fn fetch(
         &self,
         endpoint: &Arc<str>,
         cache_key: &CacheEntryKey,
         execution_cache_key: &ExecutionCacheKey,
+        cancel_token: &CancellationToken,
     ) -> Result<Option<Fetched>, ReadError> {
         let client = self.client(endpoint).map_err(ReadError::Fetch)?;
         let key = encode_key(cache_key)?;
         let secondary_key = encode_key(execution_cache_key)?;
-        client.fetch(&key, &secondary_key).await.map_err(ReadError::Fetch)
+        cancel_token
+            .run_until_cancelled(client.fetch(&key, &secondary_key))
+            .await
+            .ok_or(ReadError::Cancelled)?
+            .map_err(ReadError::Fetch)
     }
 
     /// Download the blob `blob_id` into `cache_dir`, checking that it decodes
     /// as an output archive as it arrives. It's downloaded to a `.tmp` file,
-    /// which is renamed once the check passes and removed otherwise. Returns
-    /// the archive's file name.
+    /// which is renamed once the check passes and removed otherwise, such as
+    /// when `cancel_token` is cancelled. Returns the archive's file name.
     pub(super) async fn download_archive(
         &self,
         endpoint: &Arc<str>,
         blob_id: &str,
         cache_dir: &AbsolutePath,
+        cancel_token: &CancellationToken,
     ) -> Result<Str, ReadError> {
         let client = self.client(endpoint).map_err(ReadError::Download)?;
         let archive_name = vt_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
         let archive_path = cache_dir.join(archive_name.as_str());
         let temp_path = cache_dir.join(vt_str::format!("{archive_name}.tmp").as_str());
-        let result = download_checked(&client, blob_id, &temp_path).await.and_then(|()| {
-            std::fs::rename(temp_path.as_path(), archive_path.as_path())
-                .map_err(ReadError::WriteArchive)
-        });
+        let result =
+            download_checked(&client, blob_id, &temp_path, cancel_token).await.and_then(|()| {
+                std::fs::rename(temp_path.as_path(), archive_path.as_path())
+                    .map_err(ReadError::WriteArchive)
+            });
         if result.is_err() {
             // Best-effort cleanup: the file may not have been created.
             let _ = std::fs::remove_file(temp_path.as_path());
@@ -181,7 +197,7 @@ impl RemoteClients {
     }
 
     /// Upload an entry that was just recorded locally, along with its output
-    /// archive in `cache_dir`.
+    /// archive in `cache_dir`. Stops when `cancel_token` is cancelled.
     pub(super) async fn upload(
         &self,
         endpoint: &Arc<str>,
@@ -189,13 +205,15 @@ impl RemoteClients {
         execution_cache_key: &ExecutionCacheKey,
         cache_value: &CacheEntryValue,
         cache_dir: &AbsolutePath,
+        cancel_token: &CancellationToken,
     ) -> Result<(), UploadError> {
         let client = self.client(endpoint)?;
         let key = encode_key(cache_key)?;
         let secondary_key = encode_key(execution_cache_key)?;
         let value = serialize_cache(cache_value)?;
         let archive = cache_value.output_archive.as_ref().map(|name| cache_dir.join(name.as_str()));
-        client.store(&key, &secondary_key, &value, archive.as_deref()).await?;
+        let store = client.store(&key, &secondary_key, &value, archive.as_deref());
+        cancel_token.run_until_cancelled(store).await.ok_or(UploadError::Cancelled)??;
         Ok(())
     }
 }
@@ -203,15 +221,20 @@ impl RemoteClients {
 /// Chunks buffered between the download and the archive check.
 const CHECK_BUFFER_CHUNKS: usize = 16;
 
-/// Download the blob `blob_id` to the file at `path`. The chunks flow one way:
-/// from the network to the archive check on a blocking thread, which writes
-/// each one to the file as it takes it.
+/// Download the blob `blob_id` to the file at `path`, until `cancel_token` is
+/// cancelled. The chunks flow one way: from the network to the archive check
+/// on a blocking thread, which writes each one to the file as it takes it.
 async fn download_checked(
     client: &Client,
     blob_id: &str,
     path: &AbsolutePath,
+    cancel_token: &CancellationToken,
 ) -> Result<(), ReadError> {
-    let download = client.download(blob_id).await.map_err(ReadError::Download)?;
+    let download = cancel_token
+        .run_until_cancelled(client.download(blob_id))
+        .await
+        .ok_or(ReadError::Cancelled)?
+        .map_err(ReadError::Download)?;
     let file = File::create(path.as_path()).map_err(ReadError::WriteArchive)?;
     let (sender, receiver) = mpsc::channel(CHECK_BUFFER_CHUNKS);
     let check = tokio::task::spawn_blocking(move || {
@@ -222,11 +245,12 @@ async fn download_checked(
         }
         checked.map_err(ReadError::CorruptArchive)
     });
-    let sent = send_chunks(download, sender).await;
-    // Wait for the check even after a network error, so the file is closed
-    // before the caller removes it.
+    // Cancelling drops the sender, which ends the check.
+    let sent = cancel_token.run_until_cancelled(send_chunks(download, sender)).await;
+    // Wait for the check even after a network error or cancellation, so the
+    // file is closed before the caller removes it.
     let checked = check.await.unwrap_or_else(|err| Err(ReadError::CorruptArchive(err.into())));
-    sent.map_err(ReadError::Download)?;
+    sent.ok_or(ReadError::Cancelled)?.map_err(ReadError::Download)?;
     checked
 }
 
@@ -314,6 +338,7 @@ fn decode_key(bytes: &[u8]) -> Result<CacheEntryKey, ReadError> {
 mod tests {
     use std::{collections::BTreeMap, io::Read as _, net::TcpListener, time::Duration};
 
+    use tokio::sync::oneshot;
     use vt_graph::config::ResolvedGlobConfig;
     use vt_path::{AbsolutePathBuf, RelativePathBuf};
     use vt_plan::cache_metadata::{EnvValueHash, SpawnFingerprint};
@@ -525,38 +550,105 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn failed_archive_check_stops_the_download() {
+    /// Serve one request on a loopback endpoint: once the request head
+    /// arrives, write `response`, then send nothing more and keep the
+    /// connection open until the client closes it. Returns the endpoint and a
+    /// receiver that resolves once `response` is written.
+    fn serve_stalled(response: &'static [u8]) -> (Arc<str>, oneshot::Receiver<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let endpoint: Arc<str> =
+        let endpoint =
             Arc::from(vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
-        let (done_sender, done_receiver) = std::sync::mpsc::channel::<()>();
-        // The response announces more than it sends and stays open until the
-        // test is done, so only the failed check can end the download.
-        let server = std::thread::spawn(move || {
+        let (responded_sender, responded) = oneshot::channel();
+        std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = Vec::new();
-            while !request.ends_with(b"\r\n\r\n") {
-                let mut buf = [0; 1024];
+            let mut buf = [0; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
                 let n = stream.read(&mut buf).unwrap();
-                assert_ne!(n, 0, "connection closed before the request ended");
+                assert_ne!(n, 0, "connection closed before the request head ended");
                 request.extend_from_slice(&buf[..n]);
             }
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 1000\r\n\r\nnot an archive")
-                .unwrap();
-            let _ = done_receiver.recv();
+            stream.write_all(response).unwrap();
+            let _ = responded_sender.send(());
+            while stream.read(&mut buf).is_ok_and(|n| n > 0) {}
         });
+        (endpoint, responded)
+    }
+
+    #[tokio::test]
+    async fn failed_archive_check_stops_the_download() {
+        // The response announces more than it sends, so only the failed check
+        // can end the download.
+        let (endpoint, _) =
+            serve_stalled(b"HTTP/1.1 200 OK\r\ncontent-length: 1000\r\n\r\nnot an archive");
         let dir = tempfile::tempdir().unwrap();
         let cache_dir = AbsolutePathBuf::new(dir.path().to_path_buf()).unwrap();
 
         let error = RemoteClients::default()
-            .download_archive(&endpoint, "1", &cache_dir)
+            .download_archive(&endpoint, "1", &cache_dir, &CancellationToken::new())
             .await
             .unwrap_err();
         assert!(matches!(error, ReadError::CorruptArchive(_)), "{error:?}");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
-        drop(done_sender);
-        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelling_stops_a_fetch() {
+        let (endpoint, requested) = serve_stalled(b"");
+        let cancel_token = CancellationToken::new();
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
+
+        let clients = RemoteClients::default();
+        let fetch = clients.fetch(&endpoint, &key, &execution_key, &cancel_token);
+        let (fetched, ()) = tokio::join!(fetch, async {
+            requested.await.unwrap();
+            cancel_token.cancel();
+        });
+        assert!(matches!(fetched, Err(ReadError::Cancelled)), "{fetched:?}");
+    }
+
+    #[tokio::test]
+    async fn cancelling_stops_a_download_and_removes_it() {
+        // The response announces a body that never arrives, so only
+        // cancelling can end the download.
+        let (endpoint, responded) =
+            serve_stalled(b"HTTP/1.1 200 OK\r\ncontent-length: 1000\r\n\r\n");
+        let cancel_token = CancellationToken::new();
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = AbsolutePathBuf::new(dir.path().to_path_buf()).unwrap();
+
+        let clients = RemoteClients::default();
+        let download = clients.download_archive(&endpoint, "1", &cache_dir, &cancel_token);
+        let (downloaded, ()) = tokio::join!(download, async {
+            responded.await.unwrap();
+            // Cancel once the `.tmp` file exists, so the download has started
+            // writing it.
+            while std::fs::read_dir(dir.path()).unwrap().next().is_none() {
+                tokio::task::yield_now().await;
+            }
+            cancel_token.cancel();
+        });
+        assert!(matches!(downloaded, Err(ReadError::Cancelled)), "{downloaded:?}");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn cancelling_stops_an_upload() {
+        let (endpoint, requested) = serve_stalled(b"");
+        let cancel_token = CancellationToken::new();
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
+        let value = CacheEntryValue { output_archive: None, ..cache_value() };
+        let cache_dir = vt_path::current_dir().unwrap();
+
+        let clients = RemoteClients::default();
+        let upload =
+            clients.upload(&endpoint, &key, &execution_key, &value, &cache_dir, &cancel_token);
+        let (uploaded, ()) = tokio::join!(upload, async {
+            requested.await.unwrap();
+            cancel_token.cancel();
+        });
+        assert!(matches!(uploaded, Err(UploadError::Cancelled)), "{uploaded:?}");
     }
 }

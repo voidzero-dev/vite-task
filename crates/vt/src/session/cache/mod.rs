@@ -16,6 +16,7 @@ pub use display::{
 use rusqlite::{Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use vt_graph::config::ResolvedGlobConfig;
 use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::{
@@ -352,7 +353,7 @@ impl ExecutionCache {
     /// remote hit is recorded locally, with its output archive downloaded into
     /// `cache_dir`, and is never uploaded. If the local cache has an entry for
     /// the task, its miss reason is kept. Otherwise the reason comes from the
-    /// remote cache.
+    /// remote cache. Remote requests stop when `cancel_token` is cancelled.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn try_hit(
         &self,
@@ -360,6 +361,7 @@ impl ExecutionCache {
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
+        cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheHit, CacheMiss>> {
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
 
@@ -389,6 +391,7 @@ impl ExecutionCache {
                 globbed_inputs,
                 workspace_root,
                 cache_dir,
+                cancel_token,
             )
             .await?
         {
@@ -444,6 +447,7 @@ impl ExecutionCache {
     /// and the entry is recorded locally. A fallback entry, a failed
     /// validation, or a failed read is a miss. An error while validating
     /// counts as a failed read, so the remote entry never fails the task.
+    #[expect(clippy::too_many_arguments, reason = "forwarded from `try_hit`")]
     async fn try_hit_remote(
         &self,
         endpoint: &Arc<str>,
@@ -452,10 +456,11 @@ impl ExecutionCache {
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
+        cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
         let fetched = self
             .remote_clients
-            .fetch(endpoint, cache_key, &cache_metadata.execution_cache_key)
+            .fetch(endpoint, cache_key, &cache_metadata.execution_cache_key, cancel_token)
             .await;
         let validate = |cache_value: &CacheEntryValue| {
             cache_value.validate(&cache_metadata.unfiltered_envs, globbed_inputs, workspace_root)
@@ -468,7 +473,11 @@ impl ExecutionCache {
 
         let output_archive = match blob_id {
             Some(blob_id) => {
-                match self.remote_clients.download_archive(endpoint, &blob_id, cache_dir).await {
+                match self
+                    .remote_clients
+                    .download_archive(endpoint, &blob_id, cache_dir, cancel_token)
+                    .await
+                {
                     Ok(archive_name) => Some(archive_name),
                     Err(err) => return Ok(Err(err.into_miss())),
                 }
@@ -514,14 +523,15 @@ impl ExecutionCache {
     /// as [`Self::record`] does.
     ///
     /// In `read-write` remote mode, the entry is then uploaded to the remote
-    /// cache. Returns `Ok(Err(_))` if the local update succeeded but the
-    /// upload failed.
+    /// cache, until `cancel_token` is cancelled. Returns `Ok(Err(_))` if the
+    /// local update succeeded but the upload failed.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn update(
         &self,
         cache_metadata: &CacheMetadata,
         cache_value: CacheEntryValue,
         cache_dir: &AbsolutePath,
+        cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<(), UploadError>> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
@@ -537,7 +547,7 @@ impl ExecutionCache {
         };
         let upload = self
             .remote_clients
-            .upload(url, &cache_key, execution_cache_key, &cache_value, cache_dir)
+            .upload(url, &cache_key, execution_cache_key, &cache_value, cache_dir, cancel_token)
             .await;
         if let Err(err) = &upload {
             tracing::debug!(?err, "remote cache upload failed");

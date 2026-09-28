@@ -53,6 +53,10 @@ pub enum SpawnOutcome {
     /// (cache lookup failure or spawn failure).
     /// Already reported through the leaf reporter.
     Failed,
+    /// The run was cancelled during the cache lookup, so the process didn't
+    /// start and no cached outputs were restored. Like a task that was never
+    /// scheduled, it isn't reported.
+    Cancelled,
 }
 
 /// All valid runtime configurations for a leaf execution, after the cache-hit
@@ -273,6 +277,8 @@ enum Report {
         cache_update: CacheUpdateStatus,
         error: Option<ExecutionError>,
     },
+    /// The run was cancelled before the process started.
+    Cancelled,
 }
 
 impl Report {
@@ -304,6 +310,15 @@ impl Report {
                 reporter.finish(Some(exit_status), cache_update, error);
                 SpawnOutcome::Spawned(exit_status)
             }
+            // `start()` wasn't called, so the reporter shows and saves nothing.
+            Self::Cancelled => {
+                reporter.finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled),
+                    None,
+                );
+                SpawnOutcome::Cancelled
+            }
         }
     }
 }
@@ -314,12 +329,17 @@ impl Report {
 /// reused from both graph-based execution and standalone synthetic execution.
 ///
 /// The full lifecycle is:
-/// 1. Cache lookup (determines cache status)
+/// 1. Cache lookup (determines cache status). If the run was cancelled by
+///    the time it ends, nothing else happens.
 /// 2. `leaf_reporter.start(cache_status)` → `StdioConfig`
 /// 3. If cache hit: replay cached outputs via `StdioConfig` writers
 /// 4. Otherwise: `spawn()` with the chosen stdio mode, drain pipes and wait
 ///    via [`run_child`], then decide the cache update
 ///    ([`cache_update::update_cache`])
+///
+/// Cancelling `fast_fail_token` kills the process. `cancel_token` must be a
+/// child of `fast_fail_token` that Ctrl-C also cancels: cancelling it stops
+/// remote cache requests and prevents caching.
 ///
 /// Every path reports through the single `finish()` below — errors (cache
 /// lookup failure, spawn failure, cache update failure) do not abort the
@@ -337,7 +357,7 @@ pub async fn execute_spawn(
     cache_dir: &AbsolutePath,
     program_name: &str,
     fast_fail_token: CancellationToken,
-    interrupt_token: CancellationToken,
+    cancel_token: CancellationToken,
 ) -> SpawnOutcome {
     let pipeline = run(
         leaf_reporter.as_mut(),
@@ -347,7 +367,7 @@ pub async fn execute_spawn(
         cache_dir,
         program_name,
         fast_fail_token,
-        interrupt_token,
+        cancel_token,
     );
     let report = match pipeline.await {
         Ok(report) | Err(report) => report,
@@ -371,14 +391,20 @@ async fn run(
     cache_dir: &AbsolutePath,
     program_name: &str,
     fast_fail_token: CancellationToken,
-    interrupt_token: CancellationToken,
+    cancel_token: CancellationToken,
 ) -> Result<Report, Report> {
     let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
     // 1. Determine cache status FIRST by trying cache hit, so the reporter can
     //    display cache status immediately when execution begins. On a lookup
     //    error, `start()` is never called — there is no valid status to show.
-    let lookup = lookup_cache(cache_metadata, cache, workspace_root, cache_dir).await?;
+    //    A lookup can take a while, especially a remote one. If the run was
+    //    cancelled meanwhile, neither start the process nor restore outputs.
+    let lookup =
+        lookup_cache(cache_metadata, cache, workspace_root, cache_dir, &cancel_token).await?;
+    if cancel_token.is_cancelled() {
+        return Err(Report::Cancelled);
+    }
 
     // 2. Report execution start with the looked-up cache status (`start()`
     //    runs exactly once on every arm) and either replay the hit — no need
@@ -472,7 +498,6 @@ async fn run(
     // 7. Decide the cache update (only when we were in `Cached` mode). Cache
     //    update errors are reported but do not affect the exit status we
     //    return — the process ran, so we return its actual status.
-    let cancelled = fast_fail_token.is_cancelled() || interrupt_token.is_cancelled();
     let (cache_update, error) = match mode {
         ExecutionMode::Cached { state, .. } => {
             cache_update::update_cache(
@@ -483,7 +508,7 @@ async fn run(
                 &outcome,
                 reports.as_ref(),
                 duration,
-                cancelled,
+                &cancel_token,
             )
             .await
         }
@@ -510,12 +535,14 @@ enum CacheLookup {
 }
 
 /// Phase 1: compute the globbed inputs and try to hit the cache. A remote hit
-/// downloads its output archive into `cache_dir`.
+/// downloads its output archive into `cache_dir`. Remote requests stop when
+/// `cancel_token` is cancelled.
 async fn lookup_cache(
     cache_metadata: Option<&CacheMetadata>,
     cache: &ExecutionCache,
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
+    cancel_token: &CancellationToken,
 ) -> Result<CacheLookup, Report> {
     let Some(cache_metadata) = cache_metadata else {
         return Ok(CacheLookup::Disabled);
@@ -532,7 +559,10 @@ async fn lookup_cache(
         Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err })
     })?;
 
-    match cache.try_hit(cache_metadata, &globbed_inputs, workspace_root, cache_dir).await {
+    match cache
+        .try_hit(cache_metadata, &globbed_inputs, workspace_root, cache_dir, cancel_token)
+        .await
+    {
         Ok(Ok(cached)) => Ok(CacheLookup::Hit(cached)),
         Ok(Err(miss)) => Ok(CacheLookup::Miss { miss, globbed_inputs }),
         Err(err) => {

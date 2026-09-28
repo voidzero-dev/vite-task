@@ -48,20 +48,20 @@ struct ExecutionContext<'a> {
     /// messages that suggest a CLI command (e.g. `cache clean`).
     program_name: &'a str,
     /// Token cancelled when a task fails. Kills in-flight child processes
-    /// (via `start_kill` in spawn.rs), prevents scheduling new tasks, and
-    /// prevents caching results of concurrently-running tasks.
+    /// (via `start_kill` in spawn.rs).
     fast_fail_token: CancellationToken,
-    /// Token cancelled by Ctrl-C. Unlike `fast_fail_token` (which kills
-    /// children), this only prevents scheduling new tasks and caching
-    /// results — running processes are left to handle SIGINT naturally.
-    interrupt_token: CancellationToken,
+    /// Token cancelled by Ctrl-C, and by fast-fail as a child of
+    /// `fast_fail_token`. Prevents scheduling new tasks and caching results,
+    /// and stops remote cache requests. On Ctrl-C, running processes are
+    /// left to handle SIGINT naturally.
+    cancel_token: CancellationToken,
 }
 
 impl ExecutionContext<'_> {
     /// Returns true if execution has been cancelled, either by a task
     /// failure (fast-fail) or by Ctrl-C (interrupt).
     fn cancelled(&self) -> bool {
-        self.fast_fail_token.is_cancelled() || self.interrupt_token.is_cancelled()
+        self.cancel_token.is_cancelled()
     }
 
     /// Execute all tasks in an execution graph concurrently, respecting dependencies.
@@ -72,7 +72,7 @@ impl ExecutionContext<'_> {
     /// semaphore, so nested graphs have independent concurrency limits.
     ///
     /// Fast-fail: if any task fails, `execute_leaf` cancels the `fast_fail_token`
-    /// (killing in-flight child processes). Ctrl-C cancels the `interrupt_token`.
+    /// (killing in-flight child processes). Ctrl-C cancels the `cancel_token`.
     /// Either cancellation causes this method to close the semaphore, drain
     /// remaining futures, and return.
     #[tracing::instrument(level = "debug", skip_all)]
@@ -208,11 +208,11 @@ impl ExecutionContext<'_> {
                     self.cache_dir,
                     self.program_name,
                     self.fast_fail_token.clone(),
-                    self.interrupt_token.clone(),
+                    self.cancel_token.clone(),
                 )
                 .await;
                 match outcome {
-                    SpawnOutcome::CacheHit => false,
+                    SpawnOutcome::CacheHit | SpawnOutcome::Cancelled => false,
                     SpawnOutcome::Spawned(status) => !status.success(),
                     SpawnOutcome::Failed => true,
                 }
@@ -231,6 +231,8 @@ impl Session<'_> {
     /// after cache initialization, so cache errors are reported directly to stderr
     /// without involving the reporter at all.
     ///
+    /// `fast_fail_token` and `cancel_token` are described on [`ExecutionContext`].
+    ///
     /// Returns `Err(ExitStatus)` to indicate the caller should exit with the given status code.
     /// Returns `Ok(())` when all tasks succeeded.
     #[tracing::instrument(level = "debug", skip_all)]
@@ -238,7 +240,8 @@ impl Session<'_> {
         &self,
         execution_graph: ExecutionGraph,
         builder: Box<dyn GraphExecutionReporterBuilder>,
-        interrupt_token: CancellationToken,
+        fast_fail_token: CancellationToken,
+        cancel_token: CancellationToken,
     ) -> Result<(), ExitStatus> {
         // Initialize cache before building the reporter. Cache errors are reported
         // directly to stderr and cause an early exit, keeping the reporter flow clean
@@ -260,8 +263,8 @@ impl Session<'_> {
             workspace_root: &self.workspace_path,
             cache_dir: &self.cache_path,
             program_name: self.program_name.as_str(),
-            fast_fail_token: CancellationToken::new(),
-            interrupt_token,
+            fast_fail_token,
+            cancel_token,
         };
 
         // Execute the graph with fast-fail: if any task fails, remaining tasks

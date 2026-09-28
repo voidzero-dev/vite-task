@@ -352,3 +352,30 @@ steps = [
     "--last-details",
   ], comment = "The details include the underlying error." },
 ]
+
+[[e2e]]
+name = "ctrl_c_during_fetch"
+steps = [
+  { argv = [
+    "vtt",
+    "stalled-remote-cache",
+    "vt",
+    "run",
+    "build",
+  ], interactions = [
+    { "expect-milestone" = "request" },
+    { "write-key" = "ctrl-c" },
+  ], comment = "The endpoint never responds. Ctrl-C stops the fetch, and the task doesn't start." },
+]
+
+[[e2e]]
+name = "fast_fail_during_fetch"
+steps = [
+  { argv = [
+    "vtt",
+    "stalled-remote-cache",
+    "vt",
+    "run",
+    "fail-during-build",
+  ], comment = "The endpoint never responds. fail exits while build's fetch is in flight, which stops the fetch, and build doesn't start." },
+]
