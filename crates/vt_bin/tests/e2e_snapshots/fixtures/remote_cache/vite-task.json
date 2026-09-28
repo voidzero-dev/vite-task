@@ -17,6 +17,14 @@
     "all": {
       "command": "vt run build && vt run check"
     },
+    "verify": {
+      "command": "vtt print verified",
+      "dependsOn": ["build"],
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
     "fail": {
       "command": "vtt exit 1",
       "cache": false

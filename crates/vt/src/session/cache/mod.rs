@@ -23,6 +23,7 @@ use vt_plan::{
     cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint},
     remote_cache::{RemoteCacheAccess, ResolvedRemoteCacheConfig},
 };
+use vt_remote_cache::StoreAuth;
 use vt_str::Str;
 use wincode::{
     SchemaRead, SchemaReadOwned, SchemaWrite,
@@ -312,8 +313,10 @@ pub fn cache_schema_dir_name() -> Str {
 }
 
 impl ExecutionCache {
+    /// Open the cache in `path`. Uploads to the remote cache authenticate with
+    /// `store_auth`.
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
+    pub fn load_from_path(path: &AbsolutePath, store_auth: StoreAuth) -> anyhow::Result<Self> {
         tracing::info!("Creating task cache directory at {}", path.as_path().display());
         std::fs::create_dir_all(path)?;
 
@@ -337,7 +340,7 @@ impl ExecutionCache {
              CREATE TABLE IF NOT EXISTS task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
         )?;
         // Lock is released when lock_file is dropped
-        Ok(Self { conn: Mutex::new(conn), remote_clients: RemoteClients::default() })
+        Ok(Self { conn: Mutex::new(conn), remote_clients: RemoteClients::new(store_auth) })
     }
 
     #[tracing::instrument]
@@ -711,7 +714,7 @@ mod tests {
     fn reopening_preserves_existing_entries() {
         let (_tmp, dir) = temp_dir();
 
-        drop(ExecutionCache::load_from_path(&dir).unwrap());
+        drop(ExecutionCache::load_from_path(&dir, StoreAuth::Anonymous).unwrap());
         {
             let conn = open_raw(&dir.join("cache.db"));
             conn.execute("INSERT INTO cache_entries (key, value) VALUES (X'01', X'02')", ())
@@ -719,7 +722,7 @@ mod tests {
         }
 
         // Reopening must not recreate or clear the tables.
-        drop(ExecutionCache::load_from_path(&dir).unwrap());
+        drop(ExecutionCache::load_from_path(&dir, StoreAuth::Anonymous).unwrap());
 
         let count: u32 = open_raw(&dir.join("cache.db"))
             .query_one("SELECT COUNT(*) FROM cache_entries", (), |r| r.get(0))
@@ -738,8 +741,8 @@ mod tests {
         let dir_a = base.join("v13");
         let dir_b = base.join("v14");
 
-        drop(ExecutionCache::load_from_path(&dir_a).unwrap());
-        drop(ExecutionCache::load_from_path(&dir_b).unwrap());
+        drop(ExecutionCache::load_from_path(&dir_a, StoreAuth::Anonymous).unwrap());
+        drop(ExecutionCache::load_from_path(&dir_b, StoreAuth::Anonymous).unwrap());
 
         assert!(dir_a.join("cache.db").as_path().exists());
         assert!(dir_b.join("cache.db").as_path().exists());

@@ -29,6 +29,9 @@ export type InputBase = "package" | "workspace";
 export type RemoteCacheConfig = {
 /**
  * HTTP or HTTPS namespace endpoint. Overridden by `VP_REMOTE_CACHE_URL`.
+ *
+ * OIDC tokens for uploads are requested with this endpoint as their
+ * audience, without its query, userinfo, or trailing slash.
  */
 url: string, };
 
@@ -131,6 +134,10 @@ scripts?: boolean,
 tasks?: boolean,
 /**
  * Remote cache shared by tasks in the workspace.
+ *
+ * In `read-write` mode, uploads from a GitHub Actions job granted
+ * `id-token: write` authenticate with an OIDC token for the endpoint.
+ * Other uploads send no credentials.
  */
 remote?: RemoteCacheConfig, };
 

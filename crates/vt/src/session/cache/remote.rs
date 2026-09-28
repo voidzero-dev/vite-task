@@ -14,18 +14,20 @@
 //! their keys differ.
 
 use std::{
+    ffi::OsStr,
     fs::File,
     io::{self, Write as _},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, OnceLock, PoisonError},
 };
 
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use vt_casefold::EnvName;
 use vt_path::AbsolutePath;
 use vt_plan::cache_metadata::ExecutionCacheKey;
-use vt_remote_cache::{Client, Download, Fetched};
+use vt_remote_cache::{Client, Download, Fetched, GithubOidc, StoreAuth};
 use vt_str::Str;
 use wincode::{
     SchemaWrite,
@@ -42,6 +44,12 @@ use super::{
 pub enum UploadError {
     #[error(transparent)]
     Remote(#[from] vt_remote_cache::Error),
+    /// Uploads to the endpoint aren't authorized: no GitHub Actions OIDC token
+    /// could be obtained, or the server responded with 401 or 403. Uploads to
+    /// the endpoint stop, and each later one returns the error that stopped
+    /// them without a request, so they all report the same reason.
+    #[error(transparent)]
+    Unauthorized(Arc<vt_remote_cache::Error>),
     #[error("failed to encode the cache entry")]
     Encode(#[from] WriteError),
     /// The run was cancelled, by Ctrl-C or fast-fail, before the upload
@@ -131,22 +139,58 @@ pub(super) fn resolve(
     }
 }
 
+/// How uploads authenticate, from the session envs. A GitHub Actions job
+/// granted `id-token: write` has both OIDC token request variables, and its
+/// uploads send a token. These variables are also passed through to tasks,
+/// so tools such as npm can use them too.
+pub fn store_auth(envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>) -> StoreAuth {
+    let env = |name: &str| {
+        envs.get(EnvName::from_ref(OsStr::new(name)))
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+    };
+    match (env("ACTIONS_ID_TOKEN_REQUEST_URL"), env("ACTIONS_ID_TOKEN_REQUEST_TOKEN")) {
+        (Some(request_url), Some(request_token)) => {
+            StoreAuth::GithubOidc(GithubOidc::new(request_url, request_token))
+        }
+        _ if env("GITHUB_ACTIONS") == Some("true") => StoreAuth::GithubActionsWithoutOidc,
+        _ => StoreAuth::Anonymous,
+    }
+}
+
 /// Remote cache clients, each created when its endpoint is first used.
 #[derive(Debug, Default)]
 pub struct RemoteClients {
-    clients: Mutex<FxHashMap<Arc<str>, Arc<Client>>>,
+    store_auth: StoreAuth,
+    endpoints: Mutex<FxHashMap<Arc<str>, Arc<Endpoint>>>,
+}
+
+#[derive(Debug)]
+struct Endpoint {
+    client: Client,
+    /// The error that stopped uploads to the endpoint. See
+    /// [`UploadError::Unauthorized`].
+    uploads_stopped: OnceLock<Arc<vt_remote_cache::Error>>,
 }
 
 impl RemoteClients {
-    fn client(&self, endpoint: &Arc<str>) -> Result<Arc<Client>, vt_remote_cache::Error> {
-        let mut clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(client) = clients.get(endpoint) {
-            return Ok(Arc::clone(client));
+    /// Clients whose uploads authenticate with `store_auth`.
+    pub fn new(store_auth: StoreAuth) -> Self {
+        Self { store_auth, endpoints: Mutex::default() }
+    }
+
+    fn endpoint(&self, endpoint: &Arc<str>) -> Result<Arc<Endpoint>, vt_remote_cache::Error> {
+        let mut endpoints = self.endpoints.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(existing) = endpoints.get(endpoint) {
+            return Ok(Arc::clone(existing));
         }
-        let client = Arc::new(Client::new(endpoint)?);
-        clients.insert(Arc::clone(endpoint), Arc::clone(&client));
-        drop(clients);
-        Ok(client)
+        let created = Arc::new(Endpoint {
+            client: Client::new(endpoint, self.store_auth.clone())?,
+            uploads_stopped: OnceLock::new(),
+        });
+        endpoints.insert(Arc::clone(endpoint), Arc::clone(&created));
+        drop(endpoints);
+        Ok(created)
     }
 
     /// Fetch the entry stored under `cache_key`, falling back to the entry
@@ -159,11 +203,11 @@ impl RemoteClients {
         execution_cache_key: &ExecutionCacheKey,
         cancel_token: &CancellationToken,
     ) -> Result<Option<Fetched>, ReadError> {
-        let client = self.client(endpoint).map_err(ReadError::Fetch)?;
+        let endpoint = self.endpoint(endpoint).map_err(ReadError::Fetch)?;
         let key = encode_key(cache_key)?;
         let secondary_key = encode_key(execution_cache_key)?;
         cancel_token
-            .run_until_cancelled(client.fetch(&key, &secondary_key))
+            .run_until_cancelled(endpoint.client.fetch(&key, &secondary_key))
             .await
             .ok_or(ReadError::Cancelled)?
             .map_err(ReadError::Fetch)
@@ -180,12 +224,13 @@ impl RemoteClients {
         cache_dir: &AbsolutePath,
         cancel_token: &CancellationToken,
     ) -> Result<Str, ReadError> {
-        let client = self.client(endpoint).map_err(ReadError::Download)?;
+        let endpoint = self.endpoint(endpoint).map_err(ReadError::Download)?;
         let archive_name = vt_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
         let archive_path = cache_dir.join(archive_name.as_str());
         let temp_path = cache_dir.join(vt_str::format!("{archive_name}.tmp").as_str());
-        let result =
-            download_checked(&client, blob_id, &temp_path, cancel_token).await.and_then(|()| {
+        let result = download_checked(&endpoint.client, blob_id, &temp_path, cancel_token)
+            .await
+            .and_then(|()| {
                 std::fs::rename(temp_path.as_path(), archive_path.as_path())
                     .map_err(ReadError::WriteArchive)
             });
@@ -197,7 +242,9 @@ impl RemoteClients {
     }
 
     /// Upload an entry that was just recorded locally, along with its output
-    /// archive in `cache_dir`. Stops when `cancel_token` is cancelled.
+    /// archive in `cache_dir`. Stops when `cancel_token` is cancelled. Once an
+    /// upload to the endpoint is unauthorized, later ones return its error
+    /// without a request.
     pub(super) async fn upload(
         &self,
         endpoint: &Arc<str>,
@@ -207,14 +254,26 @@ impl RemoteClients {
         cache_dir: &AbsolutePath,
         cancel_token: &CancellationToken,
     ) -> Result<(), UploadError> {
-        let client = self.client(endpoint)?;
+        let endpoint = self.endpoint(endpoint)?;
+        if let Some(err) = endpoint.uploads_stopped.get() {
+            return Err(UploadError::Unauthorized(Arc::clone(err)));
+        }
         let key = encode_key(cache_key)?;
         let secondary_key = encode_key(execution_cache_key)?;
         let value = serialize_cache(cache_value)?;
         let archive = cache_value.output_archive.as_ref().map(|name| cache_dir.join(name.as_str()));
-        let store = client.store(&key, &secondary_key, &value, archive.as_deref());
-        cancel_token.run_until_cancelled(store).await.ok_or(UploadError::Cancelled)??;
-        Ok(())
+        let store = endpoint.client.store(&key, &secondary_key, &value, archive.as_deref());
+        match cancel_token.run_until_cancelled(store).await.ok_or(UploadError::Cancelled)? {
+            Ok(()) => Ok(()),
+            Err(err) if err.is_unauthorized() => {
+                let err = Arc::new(err);
+                // Concurrent uploads may fail the same way. The first to
+                // finish stops the rest.
+                let _ = endpoint.uploads_stopped.set(Arc::clone(&err));
+                Err(UploadError::Unauthorized(err))
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 }
 
@@ -631,6 +690,174 @@ mod tests {
         });
         assert!(matches!(downloaded, Err(ReadError::Cancelled)), "{downloaded:?}");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    fn envs(pairs: &[(&str, &str)]) -> FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>> {
+        pairs
+            .iter()
+            .map(|(name, value)| {
+                (EnvName::new(Arc::<OsStr>::from(OsStr::new(name))), Arc::from(OsStr::new(value)))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn store_auth_uses_oidc_when_both_variables_are_set() {
+        let url = ("ACTIONS_ID_TOKEN_REQUEST_URL", "https://token.example/?api-version=2.0");
+        let token = ("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "request-token");
+        let github_actions = ("GITHUB_ACTIONS", "true");
+        for (pairs, expected) in [
+            (vec![url, token], "GithubOidc"),
+            (vec![url, token, github_actions], "GithubOidc"),
+            (
+                vec![url, ("ACTIONS_ID_TOKEN_REQUEST_TOKEN", ""), github_actions],
+                "GithubActionsWithoutOidc",
+            ),
+            (vec![token, github_actions], "GithubActionsWithoutOidc"),
+            (vec![github_actions], "GithubActionsWithoutOidc"),
+            (vec![url], "Anonymous"),
+            (vec![("GITHUB_ACTIONS", "false")], "Anonymous"),
+            (vec![], "Anonymous"),
+        ] {
+            let auth = store_auth(&envs(&pairs));
+            let kind = match auth {
+                StoreAuth::Anonymous => "Anonymous",
+                StoreAuth::GithubOidc(_) => "GithubOidc",
+                StoreAuth::GithubActionsWithoutOidc => "GithubActionsWithoutOidc",
+            };
+            assert_eq!(kind, expected, "{pairs:?}");
+        }
+    }
+
+    /// Serve one request for each of `responses` on a loopback server, write
+    /// them in order, and close each connection. Returns the server's address
+    /// and the raw requests.
+    fn serve_each(responses: Vec<&'static [u8]>) -> (Str, std::thread::JoinHandle<Vec<Vec<u8>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = vt_str::format!("{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            responses
+                .into_iter()
+                .map(|response| {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let request = read_request(&mut stream);
+                    stream.write_all(response).unwrap();
+                    request
+                })
+                .collect()
+        });
+        (address, server)
+    }
+
+    /// Read a request with a `content-length` body.
+    fn read_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+        let mut request = Vec::new();
+        let mut buf = [0; 4096];
+        let head_end = loop {
+            let n = stream.read(&mut buf).unwrap();
+            assert_ne!(n, 0, "connection closed before the request head ended");
+            request.extend_from_slice(&buf[..n]);
+            if let Some(pos) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break pos + 4;
+            }
+        };
+        let content_length: usize = std::str::from_utf8(&request[..head_end])
+            .unwrap()
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse().unwrap())
+            })
+            .unwrap_or(0);
+        while request.len() < head_end + content_length {
+            let n = stream.read(&mut buf).unwrap();
+            assert_ne!(n, 0, "connection closed before the request body ended");
+            request.extend_from_slice(&buf[..n]);
+        }
+        request
+    }
+
+    async fn upload_to(clients: &RemoteClients, endpoint: &Arc<str>) -> Result<(), UploadError> {
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
+        let value = CacheEntryValue { output_archive: None, ..cache_value() };
+        let cache_dir = vt_path::current_dir().unwrap();
+        clients
+            .upload(endpoint, &key, &execution_key, &value, &cache_dir, &CancellationToken::new())
+            .await
+    }
+
+    /// The message of `error` and each of its sources.
+    fn messages(error: &UploadError) -> Vec<Str> {
+        std::iter::successors(Some(error as &dyn std::error::Error), |err| err.source())
+            .map(|err| vt_str::format!("{err}"))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn uploads_stop_once_one_is_unauthorized() {
+        const TOKEN_FAILED: &[u8] =
+            b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+        const UNAUTHORIZED: &[u8] =
+            b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 7\r\nconnection: close\r\n\r\nno auth";
+        const FORBIDDEN: &[u8] =
+            b"HTTP/1.1 403 Forbidden\r\ncontent-length: 6\r\nconnection: close\r\n\r\ndenied";
+        for (github_actions, oidc, response, expected) in [
+            (
+                true,
+                true,
+                TOKEN_FAILED,
+                ["failed to get a GitHub Actions OIDC token", "HTTP status 500"].as_slice(),
+            ),
+            (false, false, UNAUTHORIZED, &["HTTP status 401", "no auth"]),
+            (false, false, FORBIDDEN, &["HTTP status 403", "denied"]),
+            (
+                true,
+                false,
+                UNAUTHORIZED,
+                &["HTTP status 401", "grant `id-token: write` to this job", "no auth"],
+            ),
+        ] {
+            let (address, server) = serve_each(vec![response]);
+            let token_url = vt_str::format!("http://{address}/token?api-version=2.0");
+            let mut pairs = vec![];
+            if github_actions {
+                pairs.push(("GITHUB_ACTIONS", "true"));
+            }
+            if oidc {
+                pairs.push(("ACTIONS_ID_TOKEN_REQUEST_URL", token_url.as_str()));
+                pairs.push(("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "request-token"));
+            }
+            let clients = RemoteClients::new(store_auth(&envs(&pairs)));
+            let endpoint = Arc::from(vt_str::format!("http://{address}/projects/test").as_str());
+
+            let first = upload_to(&clients, &endpoint).await.unwrap_err();
+            assert!(matches!(first, UploadError::Unauthorized(_)), "{first:?}");
+            assert_eq!(messages(&first), expected);
+            assert_eq!(server.join().unwrap().len(), 1);
+
+            // The server is gone, so a request would be a network error.
+            for _ in 0..2 {
+                let skipped = upload_to(&clients, &endpoint).await.unwrap_err();
+                assert!(matches!(skipped, UploadError::Unauthorized(_)), "{skipped:?}");
+                assert_eq!(messages(&skipped), messages(&first));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn other_upload_failures_do_not_stop_uploads() {
+        let (address, server) = serve_each(vec![
+            b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+        ]);
+        let clients = RemoteClients::new(StoreAuth::GithubActionsWithoutOidc);
+        let endpoint = Arc::from(vt_str::format!("http://{address}/projects/test").as_str());
+
+        let failed = upload_to(&clients, &endpoint).await.unwrap_err();
+        assert!(matches!(failed, UploadError::Remote(_)), "{failed:?}");
+        upload_to(&clients, &endpoint).await.unwrap();
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 
     #[tokio::test]

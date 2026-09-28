@@ -379,3 +379,47 @@ steps = [
     "fail-during-build",
   ], comment = "The endpoint never responds. fail exits while build's fetch is in flight, which stops the fetch, and build doesn't start." },
 ]
+
+[[e2e]]
+name = "github_oidc_upload"
+steps = [
+  { argv = [
+    "vtt",
+    "oidc-remote-cache",
+    "vt",
+    "run",
+    "verify",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ], comment = "The first upload requests an OIDC token for the endpoint, and the second reuses it. Fetches send no token." },
+]
+
+[[e2e]]
+name = "github_oidc_missing_permission"
+steps = [
+  { argv = [
+    "vtt",
+    "oidc-remote-cache",
+    "--without-oidc",
+    "vt",
+    "run",
+    "verify",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "GITHUB_ACTIONS",
+      "true",
+    ],
+  ], comment = "Without the OIDC variables, the first upload has no token and is rejected. The second upload is skipped without a request, with the same reason. The tasks succeed." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details suggest granting `id-token: write`." },
+]
