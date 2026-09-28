@@ -96,8 +96,7 @@ struct FetchRequest<'a> {
     secondary_key: &'a [u8],
 }
 
-/// The result of a fetch. The body of a 200 response decodes into an exact or
-/// fallback match. A 404 response is [`Fetched::NotFound`].
+/// The body of a 200 fetch response: an exact or fallback match.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Fetched {
@@ -119,10 +118,6 @@ pub enum Fetched {
         #[serde(with = "serde_bytes")]
         key: Vec<u8>,
     },
-    /// Neither key matched an entry, which the server reports with a 404
-    /// response. No response body decodes into this variant.
-    #[serde(skip_deserializing)]
-    NotFound,
 }
 
 /// A client for one remote cache endpoint.
@@ -164,15 +159,15 @@ impl Client {
     }
 
     /// Fetch the entry stored under `key` with `POST {endpoint}/fetch`,
-    /// falling back to the entry associated with `secondary_key`. A 404
-    /// response means neither key matched.
+    /// falling back to the entry associated with `secondary_key`. Returns
+    /// `None` for a 404 response, which means neither key matched.
     ///
     /// # Errors
     ///
     /// Returns an error if the request fails, the server responds with a
     /// status other than 200 or 404, or the body of a 200 response isn't an
     /// exact or fallback match.
-    pub async fn fetch(&self, key: &[u8], secondary_key: &[u8]) -> Result<Fetched, Error> {
+    pub async fn fetch(&self, key: &[u8], secondary_key: &[u8]) -> Result<Option<Fetched>, Error> {
         let body = encode_cbor(&FetchRequest { key, secondary_key });
         let response = self
             .http
@@ -186,10 +181,10 @@ impl Client {
             // Read the body so the connection can be reused. It doesn't matter
             // if that fails, because the status alone is the answer.
             let _ = response.bytes().await;
-            return Ok(Fetched::NotFound);
+            return Ok(None);
         }
         let body = check_status(response).await?.bytes().await.map_err(network_error)?;
-        decode_fetched(&body)
+        decode_fetched(&body).map(Some)
     }
 
     /// Start downloading the blob `blob_id` with
@@ -478,7 +473,7 @@ mod tests {
 
         assert_eq!(
             client.fetch(b"k", b"s").await.unwrap(),
-            Fetched::Exact { value: b"v".to_vec(), blob_id: None }
+            Some(Fetched::Exact { value: b"v".to_vec(), blob_id: None })
         );
 
         let request = server.join().unwrap();
@@ -489,14 +484,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_of_a_missing_entry_is_not_found() {
+    async fn fetch_of_a_missing_entry_is_none() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let client = client_for(&listener);
         let server = std::thread::spawn(move || {
             serve_once(&listener, "HTTP/1.1 404 Not Found", b"Not found")
         });
 
-        assert_eq!(client.fetch(b"k", b"s").await.unwrap(), Fetched::NotFound);
+        assert_eq!(client.fetch(b"k", b"s").await.unwrap(), None);
         server.join().unwrap();
     }
 
@@ -509,7 +504,7 @@ mod tests {
             serve_raw_once(&listener, b"HTTP/1.1 404 Not Found\r\ncontent-length: 100\r\n\r\nNot")
         });
 
-        assert_eq!(client.fetch(b"k", b"s").await.unwrap(), Fetched::NotFound);
+        assert_eq!(client.fetch(b"k", b"s").await.unwrap(), None);
         server.join().unwrap();
     }
 
