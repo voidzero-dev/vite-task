@@ -147,12 +147,21 @@ impl PostRunFingerprint {
     /// Returns an error if a tracked env is currently present but cannot be
     /// represented as UTF-8; treating that value as unset would make cache
     /// validation unsound.
+    ///
+    /// Returns an error without reading any input if an inferred input has a
+    /// `..` component, so an entry from an untrusted cache can't lead
+    /// validation outside `base_dir`. Recorded inputs never have one.
     #[tracing::instrument(level = "debug", skip_all, name = "validate_post_run_fingerprint")]
     pub fn validate(
         &self,
         base_dir: &AbsolutePath,
         unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     ) -> anyhow::Result<Option<PostRunMismatch>> {
+        if let Some(path) = self.inferred_inputs.keys().find(|path| path.has_parent_dir_component())
+        {
+            anyhow::bail!("input '{path}' can point outside the workspace");
+        }
+
         let input_mismatch = self.inferred_inputs.par_iter().find_map_any(
             |(input_relative_path, path_fingerprint)| {
                 let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));

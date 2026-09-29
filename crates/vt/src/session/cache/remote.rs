@@ -347,7 +347,7 @@ mod tests {
     use crate::session::{
         cache::InputChangeKind,
         execute::{
-            fingerprint::{PostRunFingerprint, TrackedEnvQuery},
+            fingerprint::{PathFingerprint, PostRunFingerprint, TrackedEnvQuery},
             pipe::{OutputKind, StdOutput},
         },
     };
@@ -473,6 +473,31 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(read_failure(miss), "remote cache entry couldn't be validated");
+    }
+
+    #[test]
+    fn exact_entry_with_an_input_outside_the_workspace_is_a_read_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace_root = AbsolutePathBuf::new(dir.path().join("workspace")).unwrap();
+        // The file doesn't exist, as recorded, so reading it would find the
+        // entry valid.
+        let mut value = cache_value();
+        value
+            .post_run_fingerprint
+            .inferred_inputs
+            .insert(RelativePathBuf::new("../outside.txt").unwrap(), PathFingerprint::NotFound);
+        let miss =
+            resolve(Ok(exact(&value)), &cache_key(ResolvedGlobConfig::default_auto()), |value| {
+                value.validate(&FxHashMap::default(), &BTreeMap::new(), &workspace_root)
+            })
+            .unwrap_err();
+        let CacheMiss::RemoteReadFailed(error) = miss else {
+            panic!("expected a read failure, got {miss:?}");
+        };
+        let ReadError::Validate(cause) = &*error else {
+            panic!("expected a validation error, got {error:?}");
+        };
+        assert_eq!(cause.to_string(), "input '../outside.txt' can point outside the workspace");
     }
 
     #[test]
