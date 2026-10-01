@@ -11,7 +11,7 @@ use std::{fmt::Display, io::Write, num::NonZeroI32, time::Duration};
 
 use owo_colors::Style;
 use serde::{Deserialize, Serialize};
-use vt_path::AbsolutePath;
+use vt_path::{AbsolutePath, RelativePath};
 use vt_str::Str;
 
 use super::{CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt};
@@ -323,13 +323,7 @@ impl TaskResult {
     ) -> Self {
         let input_modified = match cache_update_status {
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified { path }) => {
-                let path_in_package =
-                    package_path.strip_prefix(workspace_path).ok().flatten().and_then(
-                        |package_dir| {
-                            path.strip_prefix(&package_dir).map(|p| Str::from(p.as_str()))
-                        },
-                    );
-                Some(InputModified { path: Str::from(path.as_str()), path_in_package })
+                Some(InputModified::new(path, package_path, workspace_path))
             }
             _ => None,
         };
@@ -863,8 +857,9 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
             let (cache_detail, causes) = task.result.format_cache_detail();
             let _ = writeln!(buf, "      {}", cache_detail.style(detail_style));
             write_causes(&mut buf, causes, detail_style);
-            if let Some(input_modified) = task.result.input_modified() {
-                write_input_modified_hint(&mut buf, input_modified);
+            if let Some(entry) = task.result.input_modified().and_then(InputModified::exclude_entry)
+            {
+                write_input_modified_hint(&mut buf, &entry);
             }
         }
 
@@ -927,16 +922,16 @@ fn write_causes(buf: &mut Vec<u8>, causes: &[Str], style: Style) {
 }
 
 /// Write the `cache` settings that exclude a path the task read and wrote,
-/// below a task detail line. Both lists need `{ auto: true }`: without it, a
-/// list of exclusions alone would turn off automatic tracking.
-fn write_input_modified_hint(buf: &mut Vec<u8>, input_modified: &InputModified) {
+/// below a task detail line. `entry` is from [`InputModified::exclude_entry`].
+/// Both lists need `{ auto: true }`: without it, a list of exclusions alone
+/// would turn off automatic tracking.
+fn write_input_modified_hint(buf: &mut Vec<u8>, entry: &str) {
     let _ = writeln!(
         buf,
         "        {}",
         "If this file is temporary or shouldn't affect caching, exclude it (or a glob matching it) in the task's `cache` config:"
             .style(Style::new().bright_black())
     );
-    let entry = input_modified.exclude_entry();
     for field in ["input", "output"] {
         let _ = writeln!(
             buf,
@@ -947,18 +942,37 @@ fn write_input_modified_hint(buf: &mut Vec<u8>, input_modified: &InputModified) 
 }
 
 impl InputModified {
+    /// `path` is relative to `workspace_path`.
+    fn new(
+        path: &RelativePath,
+        package_path: &AbsolutePath,
+        workspace_path: &AbsolutePath,
+    ) -> Self {
+        let path_in_package =
+            package_path.strip_prefix(workspace_path).ok().flatten().and_then(|package_dir| {
+                path.strip_prefix(&package_dir).map(|p| Str::from(p.as_str()))
+            });
+        Self { path: Str::from(path.as_str()), path_in_package }
+    }
+
     /// The `input`/`output` entry that excludes this path, written as a JS
-    /// value. Paths outside the package need the workspace as their base.
-    fn exclude_entry(&self) -> Str {
+    /// value. Paths outside the package, and the package directory itself,
+    /// need the workspace as their base.
+    ///
+    /// `None` for the workspace root, which a task reads and writes when it
+    /// opens the root directory for both. The empty pattern for it would
+    /// resolve to `**` and exclude every file.
+    fn exclude_entry(&self) -> Option<Str> {
         // `serde_json` quotes the pattern as a string literal that is also valid JS.
         let quote = |path: &str| {
             let pattern = vt_str::format!("!{}", wax::escape(path));
             vt_str::format!("{}", serde_json::Value::from(pattern.as_str()))
         };
-        self.path_in_package.as_deref().map_or_else(
-            || vt_str::format!("{{ pattern: {}, base: \"workspace\" }}", quote(&self.path)),
-            quote,
-        )
+        match self.path_in_package.as_deref() {
+            Some(path) if !path.is_empty() => Some(quote(path)),
+            _ if self.path.is_empty() => None,
+            _ => Some(vt_str::format!("{{ pattern: {}, base: \"workspace\" }}", quote(&self.path))),
+        }
     }
 }
 
@@ -1111,6 +1125,8 @@ fn format_upload_failed_notice(buf: &mut Vec<u8>, failures: &[UploadFailure]) {
 
 #[cfg(test)]
 mod tests {
+    use vt_path::RelativePathBuf;
+
     use super::*;
     use crate::session::event::ExecutionError;
 
@@ -1177,16 +1193,25 @@ mod tests {
         }
     }
 
-    fn input_modified_task(path: &str, path_in_package: Option<&str>) -> TaskSummary {
+    /// A task in the package at `package_dir` that read and wrote `path`, both
+    /// relative to the workspace root.
+    fn input_modified_task(path: &str, package_dir: &str) -> TaskSummary {
+        #[cfg(unix)]
+        let workspace = AbsolutePath::new("/ws").unwrap();
+        #[cfg(windows)]
+        let workspace = AbsolutePath::new(r"C:\ws").unwrap();
+        let package = if package_dir.is_empty() {
+            workspace.to_absolute_path_buf()
+        } else {
+            workspace.join(package_dir)
+        };
         let mut task = cache_miss_task("a");
         if let TaskResult::Spawned {
             outcome: SpawnOutcome::Success { input_modified, .. }, ..
         } = &mut task.result
         {
-            *input_modified = Some(InputModified {
-                path: Str::from(path),
-                path_in_package: path_in_package.map(Str::from),
-            });
+            *input_modified =
+                Some(InputModified::new(&RelativePathBuf::new(path).unwrap(), &package, workspace));
         }
         task
     }
@@ -1202,8 +1227,7 @@ mod tests {
     #[test]
     fn compact_summary_says_a_task_modified_its_inputs() {
         assert_eq!(
-            compact_summary(vec![input_modified_task("src/data.txt", Some("src/data.txt"))])
-                .as_str(),
+            compact_summary(vec![input_modified_task("src/data.txt", "")]).as_str(),
             "---\nvp run: pkg#a not cached because it modified its inputs. \
              (Run `vp run --last-details` for full details)\n"
         );
@@ -1211,10 +1235,8 @@ mod tests {
 
     #[test]
     fn full_summary_shows_how_to_exclude_a_modified_input() {
-        let summary = full_summary(vec![input_modified_task(
-            "packages/a/src/data.txt",
-            Some("src/data.txt"),
-        )]);
+        let summary =
+            full_summary(vec![input_modified_task("packages/a/src/data.txt", "packages/a")]);
         assert!(
             summary.as_str().contains(
                 "\n      → Not cached: the task read and wrote 'packages/a/src/data.txt'\n        \
@@ -1229,7 +1251,8 @@ mod tests {
 
     #[test]
     fn modified_input_outside_the_package_is_excluded_from_the_workspace() {
-        let summary = full_summary(vec![input_modified_task("node_modules/.cache/x", None)]);
+        let summary =
+            full_summary(vec![input_modified_task("node_modules/.cache/x", "packages/a")]);
         assert!(
             summary.as_str().contains(
                 "\n          input: [{ auto: true }, \
@@ -1240,9 +1263,31 @@ mod tests {
     }
 
     #[test]
+    fn modified_package_directory_is_excluded_from_the_workspace() {
+        let summary = full_summary(vec![input_modified_task("packages/a", "packages/a")]);
+        assert!(
+            summary.as_str().contains(
+                "\n          input: [{ auto: true }, \
+                 { pattern: \"!packages/a\", base: \"workspace\" }],\n"
+            ),
+            "{summary}"
+        );
+    }
+
+    /// An empty pattern would resolve to `**` and exclude every file.
+    #[test]
+    fn modified_workspace_root_has_no_exclusion() {
+        for package_dir in ["", "packages/a"] {
+            let summary = full_summary(vec![input_modified_task("", package_dir)]);
+            assert!(summary.as_str().contains("→ Not cached: the task read and wrote ''\n"));
+            assert!(!summary.as_str().contains("exclude it"), "{summary}");
+            assert!(!summary.as_str().contains("auto: true"), "{summary}");
+        }
+    }
+
+    #[test]
     fn modified_input_exclusion_is_escaped_and_quoted() {
-        let summary =
-            full_summary(vec![input_modified_task("app/[id]/\"x\".ts", Some("app/[id]/\"x\".ts"))]);
+        let summary = full_summary(vec![input_modified_task("app/[id]/\"x\".ts", "")]);
         assert!(
             summary.as_str().contains(r#"input: [{ auto: true }, "!app/\\[id\\]/\"x\".ts"],"#),
             "{summary}"
