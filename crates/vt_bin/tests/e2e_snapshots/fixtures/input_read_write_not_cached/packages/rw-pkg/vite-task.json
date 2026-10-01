@@ -2,6 +2,23 @@
   "tasks": {
     "task": {
       "command": "vtt replace-file-content src/data.txt i !"
+    },
+    "task-outside": {
+      "command": "vtt replace-file-content ../../shared.txt i !"
+    },
+    "task-excluded": {
+      "command": "vtt replace-file-content src/data.txt i !",
+      "cache": {
+        "input": [{ "auto": true }, "!src/data.txt"],
+        "output": [{ "auto": true }, "!src/data.txt"]
+      }
+    },
+    "task-outside-excluded": {
+      "command": "vtt replace-file-content ../../shared.txt i !",
+      "cache": {
+        "input": [{ "auto": true }, { "pattern": "!shared.txt", "base": "workspace" }],
+        "output": [{ "auto": true }, { "pattern": "!shared.txt", "base": "workspace" }]
+      }
     }
   }
 }

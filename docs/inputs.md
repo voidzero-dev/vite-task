@@ -231,6 +231,23 @@ If you encounter a case where fspy fails to detect a file read, please [report t
 2. The file(s) that weren't detected
 3. Steps to reproduce
 
+### Tasks That Modify Files They Read
+
+A task is not cached when it writes to a file that it also read, because the file no longer matches what the task read. The run summary says the task was `not cached because it modified its inputs`, and `vp run --last-details` names the file and shows the settings that exclude it.
+
+If the file is temporary or shouldn't affect caching, exclude it from both `input` and `output`. Keep `{ "auto": true }` in each list, since a list without it turns off automatic tracking:
+
+```json
+{
+  "cache": {
+    "input": [{ "auto": true }, "!node_modules/.tmp-*/**"],
+    "output": [{ "auto": true }, "!node_modules/.tmp-*/**"]
+  }
+}
+```
+
+For a file outside the package directory, use the object form with `"base": "workspace"`.
+
 ### Cache Disabled
 
 `input` is part of the `cache` object, so it cannot be used when caching is disabled with `cache: false`.

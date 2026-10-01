@@ -1,10 +1,10 @@
 [[e2e]]
 name = "single_read_write_task_shows_not_cached_message"
 comment = """
-A single task that reads and writes the same file (fspy sees both ops) should be flagged as "not cached because it modified its inputs" in the compact summary.
+A single task that reads and writes the same file (fspy sees both ops) should be flagged as "not cached because it modified its inputs" in the compact summary. `--last-details` then names the file and shows the `cache` settings that exclude it, relative to the package.
 """
 cwd = "packages/rw-pkg"
-steps = [["vt", "run", "task"], ["vt", "run", "task"]]
+steps = [["vt", "run", "task"], ["vt", "run", "task"], ["vt", "run", "--last-details"]]
 
 [[e2e]]
 name = "multi_task_with_read_write_shows_not_cached_in_summary"
@@ -20,6 +20,43 @@ Under `-v`, the full summary should list the exact overlapping path that caused 
 """
 cwd = "packages/rw-pkg"
 steps = [["vt", "run", "-v", "task"]]
+
+[[e2e]]
+name = "read_write_outside_package_suggests_workspace_base"
+comment = """
+When the overlapping file is outside the task's package, the suggested exclusion uses the workspace as its base, because a plain pattern is relative to the package.
+"""
+cwd = "packages/rw-pkg"
+steps = [["vt", "run", "task-outside"], ["vt", "run", "--last-details"]]
+
+[[e2e]]
+name = "suggested_exclusions_make_read_write_task_cacheable"
+comment = """
+Applying the suggested `cache` settings, in both the package-relative and the workspace-based form, lets the task be cached: each second run is a cache hit.
+"""
+cwd = "packages/rw-pkg"
+steps = [
+  [
+    "vt",
+    "run",
+    "task-excluded",
+  ],
+  [
+    "vt",
+    "run",
+    "task-excluded",
+  ],
+  [
+    "vt",
+    "run",
+    "task-outside-excluded",
+  ],
+  [
+    "vt",
+    "run",
+    "task-outside-excluded",
+  ],
+]
 
 [[e2e]]
 name = "single_O_RDWR_open_is_not_cached"

@@ -109,7 +109,7 @@ pub enum SpawnOutcome {
         infra_error: Option<SavedError>,
         /// First path that was both read and written, causing cache to be skipped.
         /// Only set when fspy detected a read-write overlap.
-        input_modified_path: Option<Str>,
+        input_modified: Option<InputModified>,
         /// `true` when the task required fspy auto-inference but the binary was
         /// built without `cfg(fspy)` (e.g., cross-compiled to an unsupported OS).
         /// Task ran successfully but cache was not updated.
@@ -138,6 +138,16 @@ pub enum SpawnOutcome {
 
     /// Execution failed without a usable process exit status.
     SpawnError(SavedError),
+}
+
+/// A path that a task both read and wrote.
+#[derive(Serialize, Deserialize)]
+pub struct InputModified {
+    /// Relative to the workspace root.
+    path: Str,
+    /// Relative to the task's package directory, or `None` if the path is
+    /// outside it.
+    path_in_package: Option<Str>,
 }
 
 /// Why a cache miss occurred.
@@ -229,7 +239,7 @@ impl SummaryStats {
                         SpawnOutcome::Success { infra_error: Some(_), .. }
                         | SpawnOutcome::Failed { .. }
                         | SpawnOutcome::SpawnError(_) => stats.failed += 1,
-                        SpawnOutcome::Success { input_modified_path: Some(_), .. } => {
+                        SpawnOutcome::Success { input_modified: Some(_), .. } => {
                             stats.input_modified_task_names.push(task.format_task_display());
                         }
                         SpawnOutcome::Success { .. } => {}
@@ -302,15 +312,24 @@ impl TaskResult {
     /// `exit_status`: the process exit status, or `None` for cache hit / in-process.
     /// `saved_error`: an optional pre-converted execution error.
     /// `cache_update_status`: the post-execution cache update result.
+    /// `package_path`, `workspace_path`: locate a modified input in the task's package.
     pub fn from_execution(
         cache_status: &CacheStatus,
         exit_status: Option<std::process::ExitStatus>,
         saved_error: Option<&SavedError>,
         cache_update_status: &CacheUpdateStatus,
+        package_path: &AbsolutePath,
+        workspace_path: &AbsolutePath,
     ) -> Self {
-        let input_modified_path = match cache_update_status {
+        let input_modified = match cache_update_status {
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified { path }) => {
-                Some(Str::from(path.as_str()))
+                let path_in_package =
+                    package_path.strip_prefix(workspace_path).ok().flatten().and_then(
+                        |package_dir| {
+                            path.strip_prefix(&package_dir).map(|p| Str::from(p.as_str()))
+                        },
+                    );
+                Some(InputModified { path: Str::from(path.as_str()), path_in_package })
             }
             _ => None,
         };
@@ -348,7 +367,7 @@ impl TaskResult {
                 outcome: spawn_outcome_from_execution(
                     exit_status,
                     saved_error,
-                    input_modified_path,
+                    input_modified,
                     fspy_unsupported,
                     ipc_server_error,
                     tool_disabled_cache,
@@ -363,7 +382,7 @@ impl TaskResult {
                 outcome: spawn_outcome_from_execution(
                     exit_status,
                     saved_error,
-                    input_modified_path,
+                    input_modified,
                     fspy_unsupported,
                     ipc_server_error,
                     tool_disabled_cache,
@@ -383,7 +402,7 @@ impl TaskResult {
 fn spawn_outcome_from_execution(
     exit_status: Option<std::process::ExitStatus>,
     saved_error: Option<&SavedError>,
-    input_modified_path: Option<Str>,
+    input_modified: Option<InputModified>,
     fspy_unsupported: bool,
     ipc_server_error: Option<SavedError>,
     tool_disabled_cache: bool,
@@ -396,7 +415,7 @@ fn spawn_outcome_from_execution(
         // Process exited successfully, possible infra error
         (Some(status), _) if status.success() => SpawnOutcome::Success {
             infra_error: saved_error.cloned(),
-            input_modified_path,
+            input_modified,
             fspy_unsupported,
             ipc_server_error,
             tool_disabled_cache,
@@ -418,7 +437,7 @@ fn spawn_outcome_from_execution(
         // If we somehow get here, treat as success.
         (None, None) => SpawnOutcome::Success {
             infra_error: None,
-            input_modified_path: None,
+            input_modified: None,
             fspy_unsupported: false,
             ipc_server_error: None,
             tool_disabled_cache: false,
@@ -547,13 +566,10 @@ impl TaskResult {
             return (Str::from("→ Not cached: the task opted out of caching"), &[]);
         }
 
-        // Check for input modification next — it overrides the cache miss reason
-        if let Self::Spawned {
-            outcome: SpawnOutcome::Success { input_modified_path: Some(path), .. },
-            ..
-        } = self
-        {
-            return (vt_str::format!("→ Not cached: read and wrote '{path}'"), &[]);
+        // Check for input modification next — it overrides the cache miss reason.
+        // The caller shows how to exclude the path below this line.
+        if let Some(InputModified { path, .. }) = self.input_modified() {
+            return (vt_str::format!("→ Not cached: the task read and wrote '{path}'"), &[]);
         }
         // Tracking came up short, so the inferred inputs and outputs would
         // have been a subset of what the task touched.
@@ -638,6 +654,16 @@ impl TaskResult {
                 Style::new().bright_black()
             }
             Self::Spawned { cache_status: SpawnedCacheStatus::Miss(_), .. } => CACHE_MISS_STYLE,
+        }
+    }
+
+    /// The path the task both read and wrote, which kept it from being cached.
+    const fn input_modified(&self) -> Option<&InputModified> {
+        match self {
+            Self::Spawned { outcome: SpawnOutcome::Success { input_modified, .. }, .. } => {
+                input_modified.as_ref()
+            }
+            _ => None,
         }
     }
 
@@ -837,6 +863,9 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
             let (cache_detail, causes) = task.result.format_cache_detail();
             let _ = writeln!(buf, "      {}", cache_detail.style(detail_style));
             write_causes(&mut buf, causes, detail_style);
+            if let Some(input_modified) = task.result.input_modified() {
+                write_input_modified_hint(&mut buf, input_modified);
+            }
         }
 
         if let Some(error) = task.result.upload_error() {
@@ -894,6 +923,42 @@ fn count_noun(count: usize, singular: &str, plural: &str) -> Str {
 fn write_causes(buf: &mut Vec<u8>, causes: &[Str], style: Style) {
     for cause in causes {
         let _ = writeln!(buf, "        {}", vt_str::format!("↳ {cause}").style(style));
+    }
+}
+
+/// Write the `cache` settings that exclude a path the task read and wrote,
+/// below a task detail line. Both lists need `{ auto: true }`: without it, a
+/// list of exclusions alone would turn off automatic tracking.
+fn write_input_modified_hint(buf: &mut Vec<u8>, input_modified: &InputModified) {
+    let _ = writeln!(
+        buf,
+        "        {}",
+        "If this file is temporary or shouldn't affect caching, exclude it (or a glob matching it) in the task's `cache` config:"
+            .style(Style::new().bright_black())
+    );
+    let entry = input_modified.exclude_entry();
+    for field in ["input", "output"] {
+        let _ = writeln!(
+            buf,
+            "          {}",
+            vt_str::format!("{field}: [{{ auto: true }}, {entry}],").style(COMMAND_STYLE)
+        );
+    }
+}
+
+impl InputModified {
+    /// The `input`/`output` entry that excludes this path, written as a JS
+    /// value. Paths outside the package need the workspace as their base.
+    fn exclude_entry(&self) -> Str {
+        // `serde_json` quotes the pattern as a string literal that is also valid JS.
+        let quote = |path: &str| {
+            let pattern = vt_str::format!("!{}", wax::escape(path));
+            vt_str::format!("{}", serde_json::Value::from(pattern.as_str()))
+        };
+        self.path_in_package.as_deref().map_or_else(
+            || vt_str::format!("{{ pattern: {}, base: \"workspace\" }}", quote(&self.path)),
+            quote,
+        )
     }
 }
 
@@ -1066,7 +1131,7 @@ mod tests {
                 cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::NotFound),
                 outcome: SpawnOutcome::Success {
                     infra_error: None,
-                    input_modified_path: None,
+                    input_modified: None,
                     fspy_unsupported: false,
                     ipc_server_error: None,
                     tracking_incomplete: false,
@@ -1101,7 +1166,7 @@ mod tests {
                 cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::NotFound),
                 outcome: SpawnOutcome::Success {
                     infra_error: None,
-                    input_modified_path: None,
+                    input_modified: None,
                     fspy_unsupported: false,
                     ipc_server_error: None,
                     tracking_incomplete: false,
@@ -1112,12 +1177,76 @@ mod tests {
         }
     }
 
+    fn input_modified_task(path: &str, path_in_package: Option<&str>) -> TaskSummary {
+        let mut task = cache_miss_task("a");
+        if let TaskResult::Spawned {
+            outcome: SpawnOutcome::Success { input_modified, .. }, ..
+        } = &mut task.result
+        {
+            *input_modified = Some(InputModified {
+                path: Str::from(path),
+                path_in_package: path_in_package.map(Str::from),
+            });
+        }
+        task
+    }
+
     fn compact_summary(tasks: Vec<TaskSummary>) -> Str {
         strip(&format_compact_summary(&LastRunSummary { tasks, exit_code: 0 }, "vp"))
     }
 
     fn full_summary(tasks: Vec<TaskSummary>) -> Str {
         strip(&format_full_summary(&LastRunSummary { tasks, exit_code: 0 }))
+    }
+
+    #[test]
+    fn compact_summary_says_a_task_modified_its_inputs() {
+        assert_eq!(
+            compact_summary(vec![input_modified_task("src/data.txt", Some("src/data.txt"))])
+                .as_str(),
+            "---\nvp run: pkg#a not cached because it modified its inputs. \
+             (Run `vp run --last-details` for full details)\n"
+        );
+    }
+
+    #[test]
+    fn full_summary_shows_how_to_exclude_a_modified_input() {
+        let summary = full_summary(vec![input_modified_task(
+            "packages/a/src/data.txt",
+            Some("src/data.txt"),
+        )]);
+        assert!(
+            summary.as_str().contains(
+                "\n      → Not cached: the task read and wrote 'packages/a/src/data.txt'\n        \
+                 If this file is temporary or shouldn't affect caching, exclude it (or a glob \
+                 matching it) in the task's `cache` config:\n          \
+                 input: [{ auto: true }, \"!src/data.txt\"],\n          \
+                 output: [{ auto: true }, \"!src/data.txt\"],\n"
+            ),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn modified_input_outside_the_package_is_excluded_from_the_workspace() {
+        let summary = full_summary(vec![input_modified_task("node_modules/.cache/x", None)]);
+        assert!(
+            summary.as_str().contains(
+                "\n          input: [{ auto: true }, \
+                 { pattern: \"!node_modules/.cache/x\", base: \"workspace\" }],\n"
+            ),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn modified_input_exclusion_is_escaped_and_quoted() {
+        let summary =
+            full_summary(vec![input_modified_task("app/[id]/\"x\".ts", Some("app/[id]/\"x\".ts"))]);
+        assert!(
+            summary.as_str().contains(r#"input: [{ auto: true }, "!app/\\[id\\]/\"x\".ts"],"#),
+            "{summary}"
+        );
     }
 
     #[test]
