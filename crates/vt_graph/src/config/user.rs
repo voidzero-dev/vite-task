@@ -368,6 +368,10 @@ pub enum UserGlobalCacheConfig {
         tasks: Option<bool>,
 
         /// Remote cache shared by tasks in the workspace.
+        ///
+        /// In `read-write` mode, uploads from a GitHub Actions job granted
+        /// `id-token: write` authenticate with an OIDC token for the endpoint.
+        /// Other uploads send no credentials.
         remote: Option<UserRemoteCacheConfig>,
     },
 }
@@ -412,6 +416,9 @@ impl ResolvedGlobalCacheConfig {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct UserRemoteCacheConfig {
     /// HTTP or HTTPS namespace endpoint. Overridden by `VP_REMOTE_CACHE_URL`.
+    ///
+    /// OIDC tokens for uploads are requested with this endpoint as their
+    /// audience, without its query, userinfo, or trailing slash.
     pub url: Arc<str>,
 }
 

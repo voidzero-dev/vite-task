@@ -597,13 +597,16 @@ impl<'a> Session<'a> {
 
     /// Lazily initializes and returns the execution cache.
     /// The cache is only created when first accessed to avoid `SQLite` race conditions
-    /// when multiple processes start simultaneously.
+    /// when multiple processes start simultaneously. Remote cache uploads
+    /// authenticate as the session envs allow.
     ///
     /// # Errors
     ///
     /// Returns an error if the cache database cannot be loaded or created.
     pub fn cache(&self) -> anyhow::Result<&ExecutionCache> {
-        self.cache.get_or_try_init(|| ExecutionCache::load_from_path(&self.cache_path))
+        self.cache.get_or_try_init(|| {
+            ExecutionCache::load_from_path(&self.cache_path, cache::remote::store_auth(&self.envs))
+        })
     }
 
     pub fn workspace_path(&self) -> Arc<AbsolutePath> {
