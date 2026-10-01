@@ -1,56 +1,50 @@
-import { Busboy } from '@fastify/busboy';
 import { decode } from 'cbor2/decoder';
-import { encode } from 'cbor2/encoder';
+import { build } from 'esbuild';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
+import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-interface Entry {
-  value: string;
-  blob_id: string | null;
-}
+const serviceDirectory = new URL(
+  './',
+  import.meta.resolve('@voidzero-dev/remote-cache/package.json'),
+);
 
-/** The contents of `state.json`. Keys and values are hex-encoded. */
-interface State {
-  next_blob_id: number;
-  entries: Record<string, Entry>;
-  associations: Record<string, string>;
-}
+/** The token issuer the service trusts for uploads: GitHub Actions. */
+const issuer = 'https://token.actions.githubusercontent.com';
 
-class RequestError extends Error {
-  status: number;
+/**
+ * Requests reach the service at this origin, whatever address the proxy
+ * listens on. `endpoint` is also the audience of upload tokens.
+ */
+const origin = 'https://cache.example';
+const namespace = 'test';
+const basePath = `/projects/${namespace}`;
+const endpoint = `${origin}${basePath}`;
 
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
+/** Upload token claims that satisfy the namespace's write policy. */
+const writerClaims = {
+  repository_id: '1',
+  repository_owner_id: '1',
+  repository_visibility: 'public',
+  ref: 'refs/heads/main',
+  ref_type: 'branch',
+  event_name: 'push',
+};
 
-function mediaType(value: string | undefined): string {
-  return value?.split(';')[0]?.trim().toLowerCase() ?? '';
-}
+/** Request headers that describe the connection to the proxy. */
+const connectionHeaders = new Set(['connection', 'content-length', 'host', 'transfer-encoding']);
 
-function toHex(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('hex');
-}
+type Database = Awaited<ReturnType<Miniflare['getD1Database']>>;
+type Bucket = Awaited<ReturnType<Miniflare['getR2Bucket']>>;
 
-function fromHex(hex: string): Uint8Array {
-  // Encode Uint8Array, not a Node Buffer, whose toJSON method would otherwise
-  // turn it into a map.
-  return new Uint8Array(Buffer.from(hex, 'hex'));
-}
-
-function byteFields(body: Uint8Array, names: string[]): Map<string, Uint8Array> {
-  let value: unknown;
-  try {
-    value = decode(body, { preferMap: true, rejectDuplicateKeys: true });
-  } catch {
-    throw new RequestError(400, 'Invalid CBOR');
-  }
-  if (!(value instanceof Map) || names.some((name) => !(value.get(name) instanceof Uint8Array))) {
-    throw new RequestError(400, `Expected byte strings: ${names.join(', ')}`);
-  }
-  return value;
+interface ResponseFields {
+  kind?: unknown;
+  blob_id?: unknown;
 }
 
 function readBody(request: IncomingMessage): Promise<Buffer> {
@@ -59,154 +53,259 @@ function readBody(request: IncomingMessage): Promise<Buffer> {
     request.on('data', (chunk: Buffer) => chunks.push(chunk));
     request.on('end', () => resolve(Buffer.concat(chunks)));
     request.on('error', reject);
-    request.on('aborted', () => reject(new RequestError(400, 'Incomplete request')));
   });
 }
 
-async function readParts(body: Buffer, contentType: string): Promise<Map<string, Buffer>> {
-  return new Promise((resolve, reject) => {
-    const parts = new Map<string, Buffer>();
-    const names = new Set<string>();
-    // Both parts are binary, including metadata without a filename.
-    const parser = new Busboy({
-      headers: { 'content-type': contentType },
-      isPartAFile: () => true,
-    });
-    parser.on('file', (name, stream, _filename, _encoding, type) => {
-      const expected = name === 'metadata' ? 'application/cbor' : 'application/octet-stream';
-      if (!['metadata', 'blob'].includes(name) || names.has(name) || type !== expected) {
-        reject(new Error('Invalid multipart part'));
-      }
-      names.add(name);
-      const chunks: Buffer[] = [];
-      stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-      stream.on('end', () => parts.set(name, Buffer.concat(chunks)));
-      stream.on('error', reject);
-    });
-    parser.on('error', reject);
-    parser.on('finish', () => resolve(parts));
-    parser.end(body);
-  });
+/** The fields of a CBOR response, or none if it isn't a CBOR map. */
+function cborFields(contentType: string | null, body: Uint8Array): ResponseFields {
+  if (contentType !== 'application/cbor') return {};
+  try {
+    const value = decode(body);
+    return typeof value === 'object' && value !== null ? value : {};
+  } catch {
+    return {};
+  }
 }
 
-function cbor(response: ServerResponse, value: unknown): void {
-  response.writeHead(200, { 'content-type': 'application/cbor' });
-  response.end(encode(value));
+async function bundleService(): Promise<string> {
+  const bundle = await build({
+    entryPoints: [fileURLToPath(new URL('src/index.ts', serviceDirectory))],
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'neutral',
+    target: 'es2022',
+    external: ['node:*', 'cloudflare:*'],
+  });
+  return bundle.outputFiles[0]!.text;
+}
+
+/** Apply the service's schema and register the namespace, unless done before. */
+async function initializeDatabase(database: Database): Promise<void> {
+  const initialized = await database
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'scopes'")
+    .first();
+  if (initialized) return;
+  const migration = readFileSync(new URL('migrations/0001_cache.sql', serviceDirectory), 'utf8');
+  // Keep each trigger body in one statement.
+  const statements = migration.match(
+    /CREATE TRIGGER[\s\S]*?\nEND;|(?:CREATE TABLE|CREATE (?:UNIQUE )?INDEX|INSERT INTO)[\s\S]*?;/g,
+  )!;
+  await database.batch(statements.map((sql) => database.prepare(sql)));
+  await database
+    .prepare(
+      `INSERT INTO scopes (scope_id, endpoint, repository, repository_id, repository_owner_id, branch)
+      VALUES (?, ?, 'owner/repository', ?, ?, ?)`,
+    )
+    .bind(
+      namespace,
+      endpoint,
+      writerClaims.repository_id,
+      writerClaims.repository_owner_id,
+      writerClaims.ref,
+    )
+    .run();
+}
+
+/** An upload token signed with `privateKey`, whose public key is `kid`. */
+function uploadToken(privateKey: KeyObject, kid: string): string {
+  const now = Math.floor(Date.now() / 1000);
+  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const header = encode({ alg: 'RS256', kid, typ: 'JWT' });
+  const claims = encode({
+    ...writerClaims,
+    iss: issuer,
+    aud: endpoint,
+    iat: now,
+    nbf: now,
+    exp: now + 300,
+  });
+  const signature = sign('sha256', Buffer.from(`${header}.${claims}`), privateKey);
+  return `${header}.${claims}.${signature.toString('base64url')}`;
 }
 
 /**
- * A test backend that keeps its state in `directory`: entries and associations
- * in `state.json`, and each blob in `blobs/` under its ID. Keys, values, and
- * blobs remain opaque bytes. A fetch that matches neither key gets a plain-text
- * 404. After each response, `logRequest` receives a line with the method, the
- * route below `basePath`, the status, and for successful fetch responses, the
- * kind.
+ * Blob IDs are random, so blobs are numbered in upload order. The numbers are
+ * saved in `blobs.json`, and each blob has a copy in `blobs/{number}`.
  */
-export function createCacheServer({
-  basePath,
+class Blobs {
+  readonly #file: string;
+  readonly #directory: string;
+  readonly #ids: string[];
+  readonly #database: Database;
+  readonly #bucket: Bucket;
+
+  constructor(directory: string, database: Database, bucket: Bucket) {
+    this.#file = join(directory, 'blobs.json');
+    this.#directory = join(directory, 'blobs');
+    this.#ids = existsSync(this.#file) ? JSON.parse(readFileSync(this.#file, 'utf8')) : [];
+    this.#database = database;
+    this.#bucket = bucket;
+  }
+
+  /** Number the blob `id` if it's new. */
+  add(id: string): void {
+    if (!this.#ids.includes(id)) this.#ids.push(id);
+  }
+
+  /** The number of the blob `id`, or `undefined` if it has none. */
+  find(id: string): number | undefined {
+    const index = this.#ids.indexOf(id);
+    return index === -1 ? undefined : index + 1;
+  }
+
+  /** Store the contents of each copy that differs from its blob. */
+  async replaceEdited(): Promise<void> {
+    for (const [id, file, object] of await this.#entries()) {
+      if (!existsSync(file)) continue;
+      const bytes = readFileSync(file);
+      const stored = await this.#bucket.get(object);
+      if (stored && Buffer.from(await stored.arrayBuffer()).equals(bytes)) continue;
+      await this.#bucket.put(object, bytes);
+      // The service checks the size of each blob it serves.
+      await this.#database
+        .prepare('UPDATE generations SET blob_size = ? WHERE blob_id = ?')
+        .bind(bytes.length, id)
+        .run();
+    }
+  }
+
+  /** Save the numbers and a copy of each blob. */
+  async save(): Promise<void> {
+    mkdirSync(this.#directory, { recursive: true });
+    writeFileSync(this.#file, `${JSON.stringify(this.#ids, null, 2)}\n`);
+    for (const [, file, object] of await this.#entries()) {
+      const stored = await this.#bucket.get(object);
+      if (stored) writeFileSync(file, Buffer.from(await stored.arrayBuffer()));
+    }
+  }
+
+  /** The ID, copy, and storage object of each numbered blob still stored. */
+  async #entries(): Promise<[string, string, string][]> {
+    const entries: [string, string, string][] = [];
+    for (const [index, id] of this.#ids.entries()) {
+      const object = await this.#database
+        .prepare('SELECT blob_object FROM generations WHERE blob_id = ?')
+        .bind(id)
+        .first<string>('blob_object');
+      if (object !== null) entries.push([id, join(this.#directory, String(index + 1)), object]);
+    }
+    return entries;
+  }
+}
+
+/**
+ * Run the public cache service from `packages/remote-cache` in workerd and
+ * serve it through a proxy on a free loopback port. The service keeps its D1
+ * database and R2 bucket in `directory/state`, so consecutive servers share
+ * them.
+ *
+ * The proxy adds a signed upload token to each store request, and the service
+ * verifies it with a key served in place of GitHub's. After each response,
+ * `logRequest` receives a line with the method, the route below the endpoint,
+ * the status, and for successful fetches, the kind. Blob routes show the
+ * blob's number instead of its ID.
+ *
+ * When the server closes, each blob is copied to `directory/blobs/{number}`.
+ * The next server stores a copy that has changed as that blob's contents.
+ */
+export async function startCacheServer({
   directory,
   logRequest,
 }: {
-  basePath: string;
   directory: string;
   logRequest: (line: string) => void;
-}) {
-  const stateFile = join(directory, 'state.json');
-  const blobDirectory = join(directory, 'blobs');
-  const state: State = existsSync(stateFile)
-    ? JSON.parse(readFileSync(stateFile, 'utf8'))
-    : { next_blob_id: 1, entries: {}, associations: {} };
-  const entries = new Map(Object.entries(state.entries));
-  const associations = new Map(Object.entries(state.associations));
-  let nextBlobId = state.next_blob_id;
+}): Promise<{ url: string; close: () => Promise<void> }> {
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'test', alg: 'RS256', use: 'sig' };
+  const miniflare = new Miniflare(
+    convertV4MiniflareOptions({
+      // Don't discover or register other local Wrangler/Miniflare sessions.
+      unsafeDevRegistryPath: '',
+      unsafeRegisterWorker: false,
+      resourcePersistencePath: join(directory, 'state'),
+      modules: true,
+      script: await bundleService(),
+      compatibilityDate: '2026-09-11',
+      compatibilityFlags: ['nodejs_compat'],
+      d1Databases: ['INDEX'],
+      r2Buckets: ['ARTIFACTS'],
+      bindings: {
+        DEPLOYMENT_ID: 'local',
+        NAMESPACES: JSON.stringify([namespace]),
+        LIMITS: '{}',
+        GC_BATCH_SIZE: '16',
+        LOG_SAMPLE_RATE: '0',
+      },
+      ratelimits: {
+        READ_LIMITER: { namespace_id: '1001', simple: { limit: 10000, period: 60 } },
+        STORE_LIMITER: { namespace_id: '1002', simple: { limit: 10000, period: 60 } },
+      },
+      outboundService: (request) => {
+        if (request.url !== `${issuer}/.well-known/jwks`) {
+          throw new Error(`Unexpected outbound request to ${request.url}`);
+        }
+        return Response.json({ keys: [jwk] });
+      },
+    }),
+  );
 
-  /** Respond to `request`, returning the kind of a successful fetch response. */
-  async function handle(
-    request: IncomingMessage,
-    response: ServerResponse,
-    path: string,
-  ): Promise<string | undefined> {
-    if (request.method === 'GET' && path.startsWith(`${basePath}/blob/`)) {
-      const file = join(blobDirectory, path.slice(`${basePath}/blob/`.length));
-      if (!existsSync(file)) throw new RequestError(404, 'Blob not found');
-      response.writeHead(200, { 'content-type': 'application/octet-stream' });
-      response.end(readFileSync(file));
-      return undefined;
-    }
-    if (request.method !== 'POST' || ![`${basePath}/fetch`, `${basePath}/store`].includes(path)) {
-      throw new RequestError(404, 'Route not found');
-    }
+  try {
+    const database = await miniflare.getD1Database('INDEX');
+    await initializeDatabase(database);
+    const blobs = new Blobs(directory, database, await miniflare.getR2Bucket('ARTIFACTS'));
+    await blobs.replaceEdited();
 
-    const contentType = request.headers['content-type'] ?? '';
-    const body = await readBody(request);
-    if (path === `${basePath}/fetch`) {
-      if (mediaType(contentType) !== 'application/cbor') {
-        throw new RequestError(400, 'Expected application/cbor');
-      }
-      const fields = byteFields(body, ['key', 'secondary_key']);
-      const exact = entries.get(toHex(fields.get('key')!));
-      const associatedKey = associations.get(toHex(fields.get('secondary_key')!));
-      const fallback = associatedKey === undefined ? undefined : entries.get(associatedKey);
-      if (exact) {
-        cbor(response, { kind: 'exact', value: fromHex(exact.value), blob_id: exact.blob_id });
-        return 'exact';
-      }
-      if (fallback) {
-        cbor(response, {
-          kind: 'fallback',
-          key: fromHex(associatedKey!),
-          value: fromHex(fallback.value),
-          blob_id: fallback.blob_id,
+    const server = createServer(async (request, response) => {
+      const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+      const route = path.startsWith(basePath) ? path.slice(basePath.length) : path;
+      let status = 500;
+      let fields: ResponseFields = {};
+      try {
+        const headers: Record<string, string> = {};
+        for (const [name, value] of Object.entries(request.headers)) {
+          if (value !== undefined && !connectionHeaders.has(name)) headers[name] = String(value);
+        }
+        if (route === '/store')
+          headers['authorization'] = `Bearer ${uploadToken(privateKey, jwk.kid)}`;
+        const body = await readBody(request);
+        const upstream = await miniflare.dispatchFetch(`${origin}${request.url}`, {
+          method: request.method!,
+          headers,
+          ...(body.length > 0 ? { body } : {}),
         });
-        return 'fallback';
+        const bytes = new Uint8Array(await upstream.arrayBuffer());
+        status = upstream.status;
+        response.writeHead(status, Object.fromEntries(upstream.headers));
+        response.end(bytes);
+        if (status === 200) fields = cborFields(upstream.headers.get('content-type'), bytes);
+      } catch (error) {
+        console.error(error);
+        response.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' });
+        response.end('Internal server error');
       }
-      throw new RequestError(404, 'Not found');
-    }
-
-    if (mediaType(contentType) !== 'multipart/form-data') {
-      throw new RequestError(400, 'Expected multipart/form-data');
-    }
-    let parts: Map<string, Buffer>;
-    try {
-      parts = await readParts(body, contentType);
-    } catch {
-      throw new RequestError(400, 'Invalid multipart body');
-    }
-    const metadata = parts.get('metadata');
-    if (metadata === undefined) throw new RequestError(400, 'Missing metadata');
-    const fields = byteFields(metadata, ['key', 'secondary_key', 'value']);
-    const key = toHex(fields.get('key')!);
-    const blob = parts.get('blob');
-    mkdirSync(blobDirectory, { recursive: true });
-    const blobId = blob === undefined ? null : String(nextBlobId++);
-    if (blobId !== null) writeFileSync(join(blobDirectory, blobId), blob!);
-    entries.set(key, { value: toHex(fields.get('value')!), blob_id: blobId });
-    associations.set(toHex(fields.get('secondary_key')!), key);
-    const saved: State = {
-      next_blob_id: nextBlobId,
-      entries: Object.fromEntries(entries),
-      associations: Object.fromEntries(associations),
-    };
-    writeFileSync(stateFile, `${JSON.stringify(saved, null, 2)}\n`);
-    cbor(response, { blob_id: blobId });
-    return undefined;
-  }
-
-  return createServer((request, response) => {
-    const path = new URL(request.url ?? '/', 'http://localhost').pathname;
-    const log = (kind?: string) => {
-      const parts = [request.method, path.slice(basePath.length), response.statusCode, kind];
+      if (route === '/store' && typeof fields.blob_id === 'string') blobs.add(fields.blob_id);
+      const blobId = /^\/blob\/(.+)$/.exec(route)?.[1];
+      const blobNumber = blobId === undefined ? undefined : blobs.find(blobId);
+      const kind = route === '/fetch' && typeof fields.kind === 'string' ? fields.kind : undefined;
+      const parts = [request.method, blobNumber ? `/blob/${blobNumber}` : route, status, kind];
       logRequest(parts.filter((part) => part !== undefined).join(' '));
-    };
-    void handle(request, response, path).then(log, (error: unknown) => {
-      const known = error instanceof RequestError;
-      if (!known) console.error(error);
-      response.writeHead(known ? error.status : 500, {
-        'content-type': 'text/plain; charset=utf-8',
-      });
-      response.end(known ? error.message : 'Internal server error');
-      request.resume();
-      log();
     });
-  });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const { port } = server.address() as AddressInfo;
+
+    return {
+      url: `http://127.0.0.1:${port}${basePath}`,
+      async close() {
+        server.close();
+        server.closeAllConnections();
+        await blobs.save();
+        await miniflare.dispose();
+      },
+    };
+  } catch (error) {
+    await miniflare.dispose();
+    throw error;
+  }
 }

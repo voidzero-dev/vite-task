@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="744" viewBox="0 0 1040 744" role="img" aria-labelledby="title desc" xml:lang="en">
+  <title id="title">Bind a public GitHub repository</title>
+  <desc id="desc">The maintainer enters a GitHub repository, namespace, and main branch. Setup resolves immutable repository and owner IDs, checks public visibility, and produces the public endpoint and OIDC audience. Reads are public. Writes require an authorized main-branch push job from this repository.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #172033; }
+    .muted { fill: #566479; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .section { fill: #5446b7; font-weight: 700; letter-spacing: 1px; }
+    .white { fill: #ffffff; font-weight: 600; }
+  </style>
+  <rect x="0" y="0" width="1040" height="744" rx="0" fill="#f4f6fa" stroke="none"/>
+  <rect x="24" y="24" width="992" height="696" rx="14" fill="#ffffff" stroke="#dce2eb"/>
+  <text x="52" y="72" font-size="27" class="" font-weight="650">Bind a public GitHub repository</text>
+  <text x="52" y="102" font-size="16" class="muted">Setup form schematic · example values</text>
+  <path d="M52 124 H988 M520 148 V510" fill="none" stroke="#e3e8ef"/>
+  <text x="52" y="154" font-size="14" class="section">MAINTAINER INPUTS</text>
+  <text x="556" y="154" font-size="14" class="section">AUTOMATIC VALUES · READ-ONLY</text>
+  <text x="52" y="192" font-size="17" class="" font-weight="600">GitHub repository</text>
+  <rect x="52" y="208" width="432" height="48" rx="8" fill="#ffffff" stroke="#a9b5c5"/>
+  <text x="68" y="239" font-size="18" class="mono">your-org/your-project</text>
+  <text x="52" y="280" font-size="15" class="muted">Public repositories on GitHub.com</text>
+  <text x="52" y="324" font-size="17" class="" font-weight="600">Cache namespace</text>
+  <rect x="52" y="340" width="432" height="48" rx="8" fill="#ffffff" stroke="#a9b5c5"/>
+  <text x="68" y="371" font-size="18" class="mono">docs-trusted-v1</text>
+  <text x="52" y="428" font-size="17" class="" font-weight="600">Main branch</text>
+  <rect x="52" y="444" width="432" height="48" rx="8" fill="#ffffff" stroke="#a9b5c5"/>
+  <text x="68" y="475" font-size="18" class="mono">main</text>
+  <text x="52" y="512" font-size="15" class="muted">Default: main · saved as refs/heads/main</text>
+  <text x="556" y="192" font-size="17" class="" font-weight="600">Repository and owner IDs</text>
+  <rect x="556" y="208" width="432" height="80" rx="8" fill="#f4f6fa" stroke="none"/>
+  <text x="572" y="239" font-size="18" class="">Resolved from GitHub</text>
+  <text x="572" y="267" font-size="14" class="mono muted">repository_id + repository_owner_id</text>
+  <text x="556" y="330" font-size="17" class="" font-weight="600">Required visibility</text>
+  <rect x="826" y="307" width="162" height="34" rx="17" fill="#e5f5ec" stroke="none"/>
+  <text x="850" y="330" font-size="16" class="">Public</text>
+  <text x="556" y="384" font-size="16" class="muted">Read access</text>
+  <text x="556" y="412" font-size="18" class="" font-weight="600">Anyone · no credentials</text>
+  <text x="556" y="464" font-size="16" class="muted">Write access</text>
+  <text x="556" y="492" font-size="18" class="" font-weight="600">This repository · push jobs on main</text>
+  <rect x="52" y="540" width="936" height="104" rx="8" fill="#f4f2ff" stroke="#e3defb"/>
+  <text x="70" y="568" font-size="16" class="" font-weight="600">Public cache endpoint</text>
+  <text x="70" y="598" font-size="19" class="mono">https://cache.example.com/projects/docs-trusted-v1</text>
+  <text x="70" y="627" font-size="15" class="muted">OIDC audience: this exact URL, without a trailing slash</text>
+  <rect x="52" y="666" width="180" height="38" rx="8" fill="#5c48c6" stroke="none"/>
+  <text x="72" y="691" font-size="17" class="white">Save binding</text>
+  <text x="264" y="691" font-size="16" class="muted">No developer registration or cache secret</text>
+</svg>
