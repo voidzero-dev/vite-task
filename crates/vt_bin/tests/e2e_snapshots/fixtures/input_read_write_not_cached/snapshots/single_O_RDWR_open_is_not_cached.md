@@ -8,7 +8,7 @@ Opening a single file with `O_RDWR` (e.g. `touch` keeping the file) should count
 ~/packages/touch-pkg$ vtt touch-file src/data.txt
 
 ---
-vt run: @test/touch-pkg#task not cached because it modified its input. (Run `vt run --last-details` for full details)
+vt run: @test/touch-pkg#task not cached because it modified its inputs. (Run `vt run --last-details` for full details)
 ```
 
 ## `vt run task`
@@ -17,5 +17,5 @@ vt run: @test/touch-pkg#task not cached because it modified its input. (Run `vt 
 ~/packages/touch-pkg$ vtt touch-file src/data.txt
 
 ---
-vt run: @test/touch-pkg#task not cached because it modified its input. (Run `vt run --last-details` for full details)
+vt run: @test/touch-pkg#task not cached because it modified its inputs. (Run `vt run --last-details` for full details)
 ```

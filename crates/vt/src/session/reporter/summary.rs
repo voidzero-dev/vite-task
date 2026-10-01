@@ -728,18 +728,20 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
 
     let total = stats.total;
     let cache_hits = stats.cache_hits;
-    let cache_misses = stats.cache_misses;
+    let cache_hits_count = count_noun(cache_hits, "cache hit", "cache hits");
     let cache_hits_str = match stats.remote_cache_hits {
-        0 => vt_str::format!("• {cache_hits} cache hits"),
-        remote => vt_str::format!("• {cache_hits} cache hits ({remote} remote)"),
+        0 => vt_str::format!("• {cache_hits_count}"),
+        remote => vt_str::format!("• {cache_hits_count} ({remote} remote)"),
     };
     let _ = write!(
         buf,
         "{}  {} {} {}",
         "Statistics:".style(Style::new().bold()),
-        vt_str::format!(" {total} tasks").style(Style::new().bright_white()),
+        vt_str::format!(" {}", count_noun(total, "task", "tasks"))
+            .style(Style::new().bright_white()),
         cache_hits_str.style(Style::new().green()),
-        vt_str::format!("• {cache_misses} cache misses").style(CACHE_MISS_STYLE),
+        vt_str::format!("• {}", count_noun(stats.cache_misses, "cache miss", "cache misses"))
+            .style(CACHE_MISS_STYLE),
     );
     if !cache_disabled_str.is_empty() {
         let _ = write!(buf, " {cache_disabled_str}");
@@ -883,6 +885,11 @@ fn write_error_lines(buf: &mut Vec<u8>, label: impl Display, error: &SavedError,
     write_causes(buf, &error.causes, style);
 }
 
+/// Format `count` followed by `singular` if it is 1, or by `plural` otherwise.
+fn count_noun(count: usize, singular: &str, plural: &str) -> Str {
+    vt_str::format!("{count} {}", if count == 1 { singular } else { plural })
+}
+
 /// Write each cause on its own line, below a task detail line.
 fn write_causes(buf: &mut Vec<u8>, causes: &[Str], style: Style) {
     for cause in causes {
@@ -1000,7 +1007,7 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
     buf
 }
 
-/// Write the "not cached because it modified its input" notice inline.
+/// Write the "not cached because it modified its inputs" notice inline.
 fn format_input_modified_notice(buf: &mut Vec<u8>, task_names: &[Str]) {
     let _ = write!(buf, " ");
 
@@ -1012,7 +1019,7 @@ fn format_input_modified_notice(buf: &mut Vec<u8>, task_names: &[Str]) {
     }
 
     if task_names.len() == 1 {
-        let _ = write!(buf, " not cached because it modified its input.");
+        let _ = write!(buf, " not cached because it modified its inputs.");
     } else {
         let _ = write!(buf, " not cached because they modified their inputs.");
     }
@@ -1149,9 +1156,7 @@ mod tests {
             cache_miss_task("c"),
         ]);
         let lines: Vec<&str> = summary.as_str().lines().collect();
-        assert!(
-            lines.contains(&"Statistics:   3 tasks • 2 cache hits (1 remote) • 1 cache misses")
-        );
+        assert!(lines.contains(&"Statistics:   3 tasks • 2 cache hits (1 remote) • 1 cache miss"));
         assert!(lines.contains(&"      → Cache hit - output replayed - 1s saved"));
         assert!(lines.contains(&"      → Remote cache hit - output replayed - 1s saved"));
 
@@ -1160,7 +1165,7 @@ mod tests {
             summary
                 .as_str()
                 .lines()
-                .any(|line| line == "Statistics:   1 tasks • 1 cache hits • 0 cache misses")
+                .any(|line| line == "Statistics:   1 task • 1 cache hit • 0 cache misses")
         );
     }
 

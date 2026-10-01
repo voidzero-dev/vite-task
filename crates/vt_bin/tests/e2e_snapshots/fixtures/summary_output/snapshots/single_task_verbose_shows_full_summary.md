@@ -13,7 +13,7 @@ built-a
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 0 cache hits • 1 cache misses
+Statistics:   1 task • 0 cache hits • 1 cache miss
 Performance:  0% cache hit rate
 
 Task Details:

@@ -33,7 +33,7 @@ summary reports the replayed cache hit
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 tasks • 1 cache hits • 0 cache misses
+Statistics:   1 task • 1 cache hit • 0 cache misses
 Performance:  100% cache hit rate
 
 Task Details:
