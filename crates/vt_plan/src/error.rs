@@ -89,6 +89,9 @@ pub struct PathFingerprintError {
 /// Errors that can occur when planning a specific execution from a task.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Tool entry path is not valid UTF-8: {path}")]
+    NonUtf8ToolEntry { path: Arc<AbsolutePath> },
+
     #[error("Failed to plan tasks from `{command}` in task {task_display}")]
     NestPlan {
         task_display: TaskDisplay,
