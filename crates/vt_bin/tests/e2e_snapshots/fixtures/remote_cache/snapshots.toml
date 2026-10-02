@@ -1,8 +1,8 @@
 # Cases that use the remote cache backend are ignored because it runs on
 # Node.js. Windows is skipped because the PTY launcher cannot execute pnpm
-# command shims. Steps that upload delay the backend's store responses, so
-# the upload is still running when the task finishes, and vt run always waits
-# for it.
+# command shims. Whether an upload to the backend is still running when the
+# tasks finish depends on timing, so steps that upload hide the message about
+# pending uploads. The cases that test it use stalled-remote-cache instead.
 [[e2e]]
 name = "read_write"
 cfg = "not(windows)"
@@ -19,10 +19,10 @@ steps = [
       "read-write",
     ],
     [
-      "REMOTE_CACHE_STORE_DELAY_MS",
-      "500",
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
     ],
-  ], comment = "The fetch finds no entry. The new execution is uploaded with one store request, which the server delays. vt run waits for it after the task finishes." },
+  ], comment = "The fetch finds no entry. The new execution is uploaded with one store request, and vt run waits for it after the task finishes." },
   { argv = [
     "remote-cache-server",
     "vt",
@@ -52,8 +52,8 @@ steps = [
       "read-write",
     ],
     [
-      "REMOTE_CACHE_STORE_DELAY_MS",
-      "500",
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
     ],
   ] },
   [
@@ -86,8 +86,8 @@ steps = [
       "read-write",
     ],
     [
-      "REMOTE_CACHE_STORE_DELAY_MS",
-      "500",
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
     ],
   ] },
   [
@@ -158,8 +158,8 @@ steps = [
       "read-write",
     ],
     [
-      "REMOTE_CACHE_STORE_DELAY_MS",
-      "500",
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
     ],
   ] },
   [
@@ -201,8 +201,8 @@ steps = [
       "read-write",
     ],
     [
-      "REMOTE_CACHE_STORE_DELAY_MS",
-      "500",
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
     ],
   ] },
   [
@@ -241,8 +241,8 @@ steps = [
       "read-write",
     ],
     [
-      "REMOTE_CACHE_STORE_DELAY_MS",
-      "500",
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
     ],
   ] },
   { argv = [
@@ -293,8 +293,8 @@ steps = [
       "read-write",
     ],
     [
-      "REMOTE_CACHE_STORE_DELAY_MS",
-      "500",
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
     ],
   ] },
   [
@@ -348,11 +348,11 @@ steps = [
 
 [[e2e]]
 name = "pending_uploads"
-cfg = "not(windows)"
-ignore = true
 steps = [
   { argv = [
-    "remote-cache-server",
+    "vtt",
+    "stalled-remote-cache",
+    "--fetch-miss",
     "vt",
     "run",
     "all",
@@ -361,16 +361,15 @@ steps = [
       "VP_REMOTE_CACHE",
       "read-write",
     ],
-    [
-      "REMOTE_CACHE_STORE_DELAY_MS",
-      "2000",
-    ],
-  ], comment = "check doesn't wait for build's upload. Both uploads are still running when check finishes, and vt run waits for them." },
+  ], interactions = [
+    { "expect-milestone" = "uploads-pending" },
+    { "write-key" = "ctrl-c" },
+  ], comment = "The endpoint never responds to the uploads. check doesn't wait for build's upload, so both are still running when check finishes, and vt run waits for them until Ctrl-C." },
   { argv = [
     "vt",
     "run",
     "--last-details",
-  ], comment = "Both uploads succeeded." },
+  ], comment = "Both uploads were cancelled." },
 ]
 
 [[e2e]]
@@ -528,4 +527,29 @@ steps = [
     { "expect-milestone" = "uploads-pending" },
     { "write-key" = "ctrl-c" },
   ], comment = "The endpoint never responds to the upload. fail-after-build exits after build finishes, which doesn't cancel build's upload, so vt run waits for it until Ctrl-C." },
+]
+
+[[e2e]]
+name = "hide_pending_uploads"
+steps = [
+  { argv = [
+    "vtt",
+    "stalled-remote-cache",
+    "--fetch-miss",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], interactions = [
+    { "expect-milestone" = "request" },
+    { "write-key" = "ctrl-c" },
+  ], comment = "The endpoint never responds to the upload. vt run waits for it until Ctrl-C, without the message about pending uploads." },
 ]
