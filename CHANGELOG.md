@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** Cached tasks can now run scripts whose shebang names an interpreter path longer than 126 bytes. Before, the path was cut short and the script failed to start or ran the wrong program ([#788](https://github.com/voidzero-dev/vite-task/pull/788)).
 - **Changed** When a task isn't cached because it wrote a file it also read, `vp run --last-details` now says the task read and wrote the file, and shows the `cache: { input, output }` exclusions that let the task be cached ([#784](https://github.com/voidzero-dev/vite-task/pull/784)).
 - **Changed** The run summary now says a task that wrote a file it also read was `not cached because it modified its inputs`, and the statistics in `vp run --verbose` and `vp run --last-details` use the singular for a count of one, e.g. `1 task • 1 cache miss` ([#783](https://github.com/voidzero-dev/vite-task/pull/783)).
 - **Fixed** An invalid glob in `--filter` no longer shows its error message twice ([#763](https://github.com/voidzero-dev/vite-task/pull/763)).
