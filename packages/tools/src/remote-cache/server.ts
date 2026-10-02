@@ -95,36 +95,21 @@ function cbor(response: ServerResponse, value: unknown): void {
 }
 
 /**
- * Resolve after `ms` milliseconds. If the connection closes first, the timer
- * is cleared and the promise never resolves.
- */
-function delay(response: ServerResponse, ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    response.on('close', () => clearTimeout(timer));
-  });
-}
-
-/**
  * A test backend that keeps its state in `directory`: entries and associations
  * in `state.json`, and each blob in `blobs/` under its ID. Keys, values, and
  * blobs remain opaque bytes. A fetch that matches neither key gets a plain-text
- * 404. A store waits `storeDelayMs` milliseconds after its body arrives before
- * it's handled. After each response, `logRequest` receives a line with the
- * method, the route below `basePath`, the status, and for successful fetch
- * responses, the kind.
+ * 404. After each response, `logRequest` receives a line with the method, the
+ * route below `basePath`, the status, and for successful fetch responses, the
+ * kind.
  */
 export function createCacheServer({
   basePath,
   directory,
   logRequest,
-  storeDelayMs = 0,
 }: {
   basePath: string;
   directory: string;
   logRequest: (line: string) => void;
-  storeDelayMs?: number;
 }) {
   const stateFile = join(directory, 'state.json');
   const blobDirectory = join(directory, 'blobs');
@@ -178,7 +163,6 @@ export function createCacheServer({
       throw new RequestError(404, 'Not found');
     }
 
-    await delay(response, storeDelayMs);
     if (mediaType(contentType) !== 'multipart/form-data') {
       throw new RequestError(400, 'Expected multipart/form-data');
     }

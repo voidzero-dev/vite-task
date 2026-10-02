@@ -2,13 +2,14 @@
 //! (dependency order, concurrency limits, fast-fail), and hands each leaf to
 //! [`execute_spawn`] which owns *how* a single spawn runs.
 
-use std::{cell::RefCell, io::Write as _, num::NonZeroUsize, sync::Arc};
+use std::{cell::RefCell, ffi::OsStr, io::Write as _, num::NonZeroUsize, sync::Arc};
 
 use futures_util::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
 use petgraph::Direction;
 use rustc_hash::FxHashMap;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
+use vt_casefold::EnvName;
 use vt_path::AbsolutePath;
 use vt_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind,
@@ -24,6 +25,12 @@ use crate::{
         reporter::{ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder},
     },
 };
+
+/// If set, the reporter isn't told about the uploads still running when the
+/// graph is done, so there is no message about them. Whether an upload is
+/// still running then depends on how fast the remote cache responds, so tests
+/// set this to keep their output stable.
+const HIDE_PENDING_UPLOADS_ENV: &str = "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS";
 
 /// Holds shared references needed during graph execution.
 ///
@@ -281,7 +288,10 @@ impl Session<'_> {
         // Nested graphs share the cache, so this waits for their uploads too.
         // After Ctrl-C, the uploads are cancelled without a message.
         let mut reporter = reporter.into_inner();
+        let hide_pending_uploads =
+            self.envs.contains_key(EnvName::from_ref(OsStr::new(HIDE_PENDING_UPLOADS_ENV)));
         if !interrupt_token.is_cancelled()
+            && !hide_pending_uploads
             && let Some(pending) = NonZeroUsize::new(cache.pending_uploads())
         {
             reporter.uploads_pending(pending);

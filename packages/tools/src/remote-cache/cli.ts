@@ -12,7 +12,6 @@ const server = createCacheServer({
   basePath,
   directory: 'remote-cache',
   logRequest: (line) => requests.push(line),
-  storeDelayMs: Number(process.env['REMOTE_CACHE_STORE_DELAY_MS'] ?? 0),
 });
 server.listen(0, '127.0.0.1');
 await once(server, 'listening');

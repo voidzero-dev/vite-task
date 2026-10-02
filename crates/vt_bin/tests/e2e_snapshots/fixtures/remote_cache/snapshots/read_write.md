@@ -1,13 +1,12 @@
 # read_write
 
-## `VP_REMOTE_CACHE=read-write REMOTE_CACHE_STORE_DELAY_MS=500 remote-cache-server vt run build`
+## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server vt run build`
 
-The fetch finds no entry. The new execution is uploaded with one store request, which the server delays. vt run waits for it after the task finishes.
+The fetch finds no entry. The new execution is uploaded with one store request, and vt run waits for it after the task finishes.
 
 ```
 $ vtt write-file dist/output.txt built
 
-Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...
 [remote-cache] POST /fetch 404
 [remote-cache] POST /store 200
 ```
