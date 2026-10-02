@@ -25,6 +25,11 @@
       "command": "vtt print done",
       "dependsOn": ["build", "fail"],
       "cache": false
+    },
+    "fail-after-build": {
+      "command": "vtt exit 1",
+      "dependsOn": ["build"],
+      "cache": false
     }
   }
 }

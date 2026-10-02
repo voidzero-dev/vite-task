@@ -2,12 +2,14 @@
 
 ## `VP_REMOTE_CACHE=read-write remote-cache-server vtt stalled-remote-cache --stall /store vt run build`
 
-The proxy forwards the fetch to the backend, which has no entry, but never forwards the upload. Ctrl-C cancels it.
+The proxy forwards the fetch to the backend, which has no entry, but never forwards the upload. Ctrl-C cancels it while vt run waits.
 
-**→ expect-milestone:** `stalled`
+**→ expect-milestone:** `uploads-pending`
 
 ```
 $ vtt write-file dist/output.txt built
+
+Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...
 ```
 
 **← write-key:** `ctrl-c`
@@ -15,8 +17,9 @@ $ vtt write-file dist/output.txt built
 ```
 $ vtt write-file dist/output.txt built
 
+Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...
 ---
-vt run: remote-cache#build not uploaded to the remote cache: cancelled. (Run `vt run --last-details` for full details)
+vt run: remote-cache#build not uploaded to the remote cache: interrupted. (Run `vt run --last-details` for full details)
 [remote-cache] POST /fetch 404
 ```
 
@@ -37,7 +40,7 @@ Task Details:
 ────────────────────────────────────────────────
   [1] remote-cache#build: $ vtt write-file dist/output.txt built ✓
       → Cache miss: no previous cache entry found
-      ⚠ Not uploaded to the remote cache: cancelled
+      ⚠ Not uploaded to the remote cache: interrupted
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 

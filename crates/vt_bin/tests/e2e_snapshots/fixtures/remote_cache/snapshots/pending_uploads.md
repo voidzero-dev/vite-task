@@ -1,41 +1,27 @@
-# corrupt_archive
+# pending_uploads
 
-## `VP_REMOTE_CACHE=read-write REMOTE_CACHE_STORE_DELAY_MS=500 remote-cache-server vt run build`
+## `VP_REMOTE_CACHE=read-write REMOTE_CACHE_STORE_DELAY_MS=2000 remote-cache-server vt run all`
+
+check doesn't wait for build's upload. Both uploads are still running when check finishes, and vt run waits for them.
 
 ```
 $ vtt write-file dist/output.txt built
 
-Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...
+$ vtt print checked
+checked
+
+Waiting for 2 remote cache uploads to finish (Ctrl-C to cancel)...
+---
+vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+[remote-cache] POST /fetch 404
 [remote-cache] POST /fetch 404
 [remote-cache] POST /store 200
-```
-
-## `vtt write-file remote-cache/blobs/1 corrupt`
-
-Overwrite the stored archive.
-
-```
-```
-
-## `vt cache clean`
-
-```
-```
-
-## `remote-cache-server vt run build`
-
-The downloaded archive doesn't decode, so the task reruns.
-
-```
-$ vtt write-file dist/output.txt built ○ cache miss: downloaded archive is corrupt, executing
-
-[remote-cache] POST /fetch 200 exact
-[remote-cache] GET /blob/1 200
+[remote-cache] POST /store 200
 ```
 
 ## `vt run --last-details`
 
-The details include the underlying error.
+Both uploads succeeded.
 
 ```
 
@@ -43,20 +29,15 @@ The details include the underlying error.
     Vite+ Task Runner • Execution Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Statistics:   1 task • 0 cache hits • 1 cache miss
+Statistics:   2 tasks • 0 cache hits • 2 cache misses
 Performance:  0% cache hit rate
 
 Task Details:
 ────────────────────────────────────────────────
   [1] remote-cache#build: $ vtt write-file dist/output.txt built ✓
-      → Cache miss: downloaded archive is corrupt
-        ↳ Unknown frame descriptor
+      → Cache miss: no previous cache entry found
+  ·······················································
+  [2] remote-cache#check: $ vtt print checked ✓
+      → Cache miss: no previous cache entry found
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-## `vtt list-dir node_modules/.vite/task-cache --ext .tmp --recursive`
-
-The corrupt download was removed.
-
-```
 ```

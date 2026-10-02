@@ -7,7 +7,12 @@
 //! Both the live reporter and the `--last-details` display use the same rendering
 //! functions, ensuring consistent output.
 
-use std::{fmt::Display, io::Write, num::NonZeroI32, time::Duration};
+use std::{
+    fmt::Display,
+    io::Write,
+    num::{NonZeroI32, NonZeroUsize},
+    time::Duration,
+};
 
 use owo_colors::Style;
 use serde::{Deserialize, Serialize};
@@ -349,10 +354,6 @@ impl TaskResult {
             cache_update_status,
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete)
         );
-        let upload_error = match cache_update_status {
-            CacheUpdateStatus::Updated { upload_error: Some(err) } => Some(SavedError::new(err)),
-            _ => None,
-        };
 
         match cache_status {
             // The only error a cache hit can have is a failed restore.
@@ -374,7 +375,6 @@ impl TaskResult {
                     ipc_server_error,
                     tool_disabled_cache,
                     tracking_incomplete,
-                    upload_error,
                 ),
             },
             CacheStatus::Miss(cache_miss) => Self::Spawned {
@@ -389,18 +389,24 @@ impl TaskResult {
                     ipc_server_error,
                     tool_disabled_cache,
                     tracking_incomplete,
-                    upload_error,
                 ),
             },
+        }
+    }
+
+    /// Record why uploading the entry to the remote cache failed. The upload
+    /// can fail after the task finishes, so this is set after
+    /// [`Self::from_execution`]. Only a successful spawned task uploads an
+    /// entry, so other results are left as they are.
+    pub fn set_upload_error(&mut self, error: SavedError) {
+        if let Self::Spawned { outcome: SpawnOutcome::Success { upload_error, .. }, .. } = self {
+            *upload_error = Some(error);
         }
     }
 }
 
 /// Build a [`SpawnOutcome`] from process exit status and optional pre-converted error.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "each cache update detail is extracted by the caller and passed through"
-)]
+/// A failed upload is set later, with [`TaskResult::set_upload_error`].
 fn spawn_outcome_from_execution(
     exit_status: Option<std::process::ExitStatus>,
     saved_error: Option<&SavedError>,
@@ -409,7 +415,6 @@ fn spawn_outcome_from_execution(
     ipc_server_error: Option<SavedError>,
     tool_disabled_cache: bool,
     tracking_incomplete: bool,
-    upload_error: Option<SavedError>,
 ) -> SpawnOutcome {
     match (exit_status, saved_error) {
         // Spawn error — process never ran
@@ -422,7 +427,7 @@ fn spawn_outcome_from_execution(
             ipc_server_error,
             tool_disabled_cache,
             tracking_incomplete,
-            upload_error,
+            upload_error: None,
         },
         // Process exited with non-zero code
         (Some(status), _) => {
@@ -1143,6 +1148,22 @@ fn format_upload_failed_notice(buf: &mut Vec<u8>, failures: &[UploadFailure]) {
     let _ = write!(buf, ".");
 }
 
+/// Render the line shown when all tasks are done, but `count` uploads to the
+/// remote cache are still running.
+pub fn format_uploads_pending(count: NonZeroUsize) -> Vec<u8> {
+    let uploads = if count.get() == 1 { "upload" } else { "uploads" };
+    let mut buf = Vec::new();
+    let _ = writeln!(
+        buf,
+        "{}",
+        vt_str::format!(
+            "Waiting for {count} remote cache {uploads} to finish (Ctrl-C to cancel)..."
+        )
+        .style(Style::new().bright_black())
+    );
+    buf
+}
+
 #[cfg(test)]
 mod tests {
     use vt_path::RelativePathBuf;
@@ -1396,6 +1417,19 @@ mod tests {
             summary.as_str(),
             "---\nvp run: 0/2 cache hit (0%). pkg#a (and 1 more) not uploaded to the remote cache. \
              (Run `vp run --last-details` for full details)\n"
+        );
+    }
+
+    #[test]
+    fn uploads_pending_names_the_count() {
+        let pending = |count| strip(&format_uploads_pending(NonZeroUsize::new(count).unwrap()));
+        assert_eq!(
+            pending(1).as_str(),
+            "Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...\n"
+        );
+        assert_eq!(
+            pending(2).as_str(),
+            "Waiting for 2 remote cache uploads to finish (Ctrl-C to cancel)...\n"
         );
     }
 
