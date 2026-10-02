@@ -31,7 +31,7 @@ use self::{
     spawn::{ChildHandle, ChildOutcome, SpawnStdio, spawn},
 };
 use super::{
-    cache::{CacheHit, CacheMiss, ExecutionCache},
+    cache::{CacheHit, CacheHitSource, CacheMiss, ExecutionCache},
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
         ExecutionError,
@@ -345,12 +345,17 @@ impl Report {
 /// lookup failure, spawn failure, cache update failure) do not abort the
 /// caller.
 #[tracing::instrument(level = "debug", skip_all)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "these are the unavoidable inputs for a free-function cache-aware spawn"
+)]
 pub async fn execute_spawn(
     mut leaf_reporter: Box<dyn LeafExecutionReporter>,
     spawn_execution: &SpawnExecution,
     cache: &ExecutionCache,
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
+    program_name: &str,
     fast_fail_token: CancellationToken,
     cancel_token: CancellationToken,
 ) -> SpawnOutcome {
@@ -360,6 +365,7 @@ pub async fn execute_spawn(
         cache,
         workspace_root,
         cache_dir,
+        program_name,
         fast_fail_token,
         cancel_token,
     );
@@ -376,12 +382,14 @@ pub async fn execute_spawn(
 /// report, `Ok` is the report of a pipeline that ran to the end. The caller
 /// unwraps both into the same single `finish()`, so the distinction is pure
 /// control flow and a value on either side is equally valid.
+#[expect(clippy::too_many_arguments, reason = "forwarded verbatim from `execute_spawn`")]
 async fn run(
     reporter: &mut dyn LeafExecutionReporter,
     spawn_execution: &SpawnExecution,
     cache: &ExecutionCache,
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
+    program_name: &str,
     fast_fail_token: CancellationToken,
     cancel_token: CancellationToken,
 ) -> Result<Report, Report> {
@@ -414,6 +422,7 @@ async fn run(
                 metadata,
                 workspace_root,
                 cache_dir,
+                program_name,
             )
             .await);
         }
@@ -577,6 +586,7 @@ async fn replay_cache_hit(
     cache_metadata: &CacheMetadata,
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
+    program_name: &str,
 ) -> Report {
     for output in hit.value.std_outputs.iter() {
         let writer: &mut dyn std::io::Write = match output.kind {
@@ -591,9 +601,18 @@ async fn replay_cache_hit(
     // can't be written. The task fails because the cache promised the
     // outputs would be restored.
     if let Err(err) = cache.restore(cache_metadata, hit, workspace_root, cache_dir).await {
+        let error = match hit.source {
+            CacheHitSource::Local => {
+                ExecutionError::LocalCacheRestore { program_name: program_name.into(), source: err }
+            }
+            // Not recorded locally, so there's no entry to clear.
+            CacheHitSource::Remote => {
+                ExecutionError::Cache { kind: CacheErrorKind::Restore, source: err }
+            }
+        };
         return Report::Failed {
             cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
-            error: ExecutionError::Cache { kind: CacheErrorKind::Restore, source: err },
+            error,
         };
     }
 

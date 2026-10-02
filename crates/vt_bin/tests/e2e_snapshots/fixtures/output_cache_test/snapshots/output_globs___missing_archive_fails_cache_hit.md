@@ -1,6 +1,6 @@
 # output_globs___missing_archive_fails_cache_hit
 
-When the archive of a cache hit is missing, its output files can't be restored. The run fails, and the entry is removed from the cache, so the next run executes the task instead of hitting the entry again.
+When the archive of a cache hit is missing, its output files can't be restored. The run fails and suggests clearing the cache, after which the task executes again.
 
 ## `vt run build`
 
@@ -25,7 +25,7 @@ second run — cache hit, but restoring fails, so the run fails
 
 ```
 $ vtt write-file dist/output.txt built ◉ cache hit, replaying
-✗ Cache restore failed: failed to extract the output archive: <os error>
+✗ Cache restore failed. Run `vt cache clean` to clear the cache: failed to extract the output archive: <os error>
 ```
 
 ## `vt run --last-details`
@@ -47,15 +47,22 @@ Task Details:
 ────────────────────────────────────────────────
   [1] output-cache-test#build: $ vtt write-file dist/output.txt built
       → Cache hit, but the outputs couldn't be restored
-      ✗ Error: Cache restore failed
+      ✗ Error: Cache restore failed. Run `vt cache clean` to clear the cache
         ↳ failed to extract the output archive
         ↳ <os error>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
+## `vt cache clean`
+
+clear the cache, as the error suggests
+
+```
+```
+
 ## `vt run build`
 
-third run — the entry was removed, so the task executes
+third run — cache miss, so the task executes
 
 ```
 $ vtt write-file dist/output.txt built

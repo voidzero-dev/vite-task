@@ -35,7 +35,7 @@ steps = [
 [[e2e]]
 name = "output_globs___missing_archive_fails_cache_hit"
 comment = """
-When the archive of a cache hit is missing, its output files can't be restored. The run fails, and the entry is removed from the cache, so the next run executes the task instead of hitting the entry again.
+When the archive of a cache hit is missing, its output files can't be restored. The run fails and suggests clearing the cache, after which the task executes again.
 """
 steps = [
   { argv = [
@@ -62,9 +62,14 @@ steps = [
   ], comment = "the task is reported as failed, with its error" },
   { argv = [
     "vt",
+    "cache",
+    "clean",
+  ], comment = "clear the cache, as the error suggests" },
+  { argv = [
+    "vt",
     "run",
     "build",
-  ], comment = "third run — the entry was removed, so the task executes" },
+  ], comment = "third run — cache miss, so the task executes" },
 ]
 
 [[e2e]]

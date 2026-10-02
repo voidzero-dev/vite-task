@@ -13,7 +13,7 @@ pub use display::{
     SpawnFingerprintChange, detect_spawn_fingerprint_changes, format_input_change_str,
     format_spawn_change,
 };
-use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -396,12 +396,12 @@ impl ExecutionCache {
         }
 
         // No cache found with the current cache entry key,
-        // check if execution key maps to a different cache entry key. It
-        // still maps to the current key if that entry was removed.
+        // check if execution key maps to a different cache entry key
         if let Some(old_cache_key) =
             self.get_cache_key_by_execution_key(execution_cache_key).await?
-            && old_cache_key != *cache_key
         {
+            // `get_by_cache_key` above returned None for the *current* cache key,
+            // so the associated key must differ.
             let mismatch = old_cache_key.into_mismatch(cache_key);
             return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
         }
@@ -522,8 +522,9 @@ impl ExecutionCache {
     /// Restore the output files of `hit` into `workspace_root`.
     ///
     /// A remote hit is recorded locally once its outputs are restored. If
-    /// restoring fails, the archive is removed, along with the local entry of
-    /// a local hit, so later runs miss instead of failing again.
+    /// they can't be, its downloaded archive is removed instead, so the next
+    /// run fetches it again. Returns an error if the outputs can't be
+    /// restored.
     pub async fn restore(
         &self,
         cache_metadata: &CacheMetadata,
@@ -531,54 +532,27 @@ impl ExecutionCache {
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
     ) -> anyhow::Result<()> {
-        let cache_key = CacheEntryKey::from_metadata(cache_metadata);
         if let Some(archive_name) = &hit.value.output_archive {
             let archive_path = cache_dir.join(archive_name.as_str());
             if let Err(err) = archive::extract_output_archive(workspace_root, &archive_path) {
-                match hit.source {
-                    CacheHitSource::Local => {
-                        if let Err(err) = self.evict(&cache_key, archive_name, cache_dir).await {
-                            tracing::warn!(
-                                ?err,
-                                "failed to remove a cache entry that couldn't be restored"
-                            );
-                        }
-                    }
-                    // Not recorded yet, so only the downloaded archive refers
-                    // to it. Best-effort: the file may already be missing.
-                    CacheHitSource::Remote => {
-                        let _ = std::fs::remove_file(archive_path.as_path());
-                    }
+                if hit.source == CacheHitSource::Remote {
+                    // Best-effort: the file may already be missing.
+                    let _ = std::fs::remove_file(archive_path.as_path());
                 }
                 return Err(err.context("failed to extract the output archive"));
             }
         }
 
-        if hit.source == CacheHitSource::Remote
-            && let Err(err) = self
+        if hit.source == CacheHitSource::Remote {
+            let cache_key = CacheEntryKey::from_metadata(cache_metadata);
+            if let Err(err) = self
                 .record(&cache_key, &cache_metadata.execution_cache_key, &hit.value, cache_dir)
                 .await
-        {
-            // The outputs are restored, so the task still succeeds. The next
-            // run fetches the entry from the remote cache again.
-            tracing::warn!(?err, "failed to record a remote cache hit locally");
-        }
-        Ok(())
-    }
-
-    /// Remove the entry for `cache_key` and its output archive
-    /// `archive_name`, unless the entry no longer refers to that archive.
-    /// Archive names are unique per recorded entry, so an entry that another
-    /// process recorded in the meantime is kept.
-    async fn evict(
-        &self,
-        cache_key: &CacheEntryKey,
-        archive_name: &str,
-        cache_dir: &AbsolutePath,
-    ) -> anyhow::Result<()> {
-        if self.delete_cache_entry_with_archive(cache_key, archive_name).await? {
-            // Best-effort: the archive may already be missing.
-            let _ = std::fs::remove_file(cache_dir.join(archive_name).as_path());
+            {
+                // The outputs are restored, so the task still succeeds. The
+                // next run fetches the entry from the remote cache again.
+                tracing::warn!(?err, "failed to record a remote cache hit locally");
+            }
         }
         Ok(())
     }
@@ -662,38 +636,6 @@ impl ExecutionCache {
         cache_value: &CacheEntryValue,
     ) -> anyhow::Result<()> {
         self.upsert("cache_entries", cache_key, cache_value).await
-    }
-
-    /// Delete the entry for `cache_key` if it still refers to the output
-    /// archive `archive_name`. Returns whether the entry was deleted.
-    #[expect(
-        clippy::significant_drop_tightening,
-        reason = "lock guard must be held for the whole transaction"
-    )]
-    async fn delete_cache_entry_with_archive(
-        &self,
-        cache_key: &CacheEntryKey,
-        archive_name: &str,
-    ) -> anyhow::Result<bool> {
-        let key_blob = serialize_cache(cache_key)?;
-        let mut conn = self.conn.lock().await;
-        // Taking the write lock up front keeps other processes from replacing
-        // the entry between the read and the delete.
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let value_blob: Option<Vec<u8>> = tx
-            .prepare_cached("SELECT value FROM cache_entries WHERE key=?")?
-            .query_row([&key_blob], |row| row.get(0))
-            .optional()?;
-        let Some(value_blob) = value_blob else {
-            return Ok(false);
-        };
-        let value: CacheEntryValue = deserialize_cache(&value_blob)?;
-        if value.output_archive.as_deref() != Some(archive_name) {
-            return Ok(false);
-        }
-        tx.prepare_cached("DELETE FROM cache_entries WHERE key=?")?.execute([&key_blob])?;
-        tx.commit()?;
-        Ok(true)
     }
 
     async fn upsert_task_fingerprint(
@@ -814,52 +756,5 @@ mod tests {
             .query_one("SELECT COUNT(*) FROM cache_entries", (), |r| r.get(0))
             .unwrap();
         assert_eq!(count_b, 0);
-    }
-
-    fn write_archive(dir: &AbsolutePath, name: &str) -> AbsolutePathBuf {
-        let path = dir.join(name);
-        std::fs::write(path.as_path(), b"archive").unwrap();
-        path
-    }
-
-    fn entry_with_archive(name: &str) -> CacheEntryValue {
-        CacheEntryValue { output_archive: Some(Str::from(name)), ..remote::tests::cache_value() }
-    }
-
-    #[tokio::test]
-    async fn evict_removes_the_entry_and_its_archive() {
-        let (_tmp, dir) = temp_dir();
-        let cache = ExecutionCache::load_from_path(&dir).unwrap();
-        let key = remote::tests::cache_key(ResolvedGlobConfig::default_auto());
-        let archive = write_archive(&dir, "stale.tar.zst");
-        cache.upsert_cache_entry(&key, &entry_with_archive("stale.tar.zst")).await.unwrap();
-
-        cache.evict(&key, "stale.tar.zst", &dir).await.unwrap();
-
-        assert!(cache.get_by_cache_key(&key).await.unwrap().is_none());
-        assert!(!archive.as_path().exists());
-    }
-
-    /// Another process can replace the entry between a failed restore and its
-    /// eviction. The replacement is kept, along with its archive.
-    #[tokio::test]
-    async fn evict_keeps_an_entry_replaced_by_another_process() {
-        let (_tmp, dir) = temp_dir();
-        let cache = ExecutionCache::load_from_path(&dir).unwrap();
-        let key = remote::tests::cache_key(ResolvedGlobConfig::default_auto());
-        cache.upsert_cache_entry(&key, &entry_with_archive("stale.tar.zst")).await.unwrap();
-
-        let other_process = ExecutionCache::load_from_path(&dir).unwrap();
-        let replacement = write_archive(&dir, "replacement.tar.zst");
-        other_process
-            .upsert_cache_entry(&key, &entry_with_archive("replacement.tar.zst"))
-            .await
-            .unwrap();
-
-        cache.evict(&key, "stale.tar.zst", &dir).await.unwrap();
-
-        let kept = cache.get_by_cache_key(&key).await.unwrap().unwrap();
-        assert_eq!(kept.output_archive.as_deref(), Some("replacement.tar.zst"));
-        assert!(replacement.as_path().exists());
     }
 }

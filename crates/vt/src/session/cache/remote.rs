@@ -335,7 +335,7 @@ fn decode_key(bytes: &[u8]) -> Result<CacheEntryKey, ReadError> {
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+mod tests {
     use std::{collections::BTreeMap, io::Read as _, net::TcpListener, time::Duration};
 
     use tokio::sync::oneshot;
@@ -355,7 +355,7 @@ pub(super) mod tests {
     /// A key whose spawn fingerprint runs `vtt build`. `SpawnFingerprint`'s
     /// fields are private to `vt_plan`, so it's decoded from types with the
     /// same encoding. Update them if `SpawnFingerprint` changes.
-    pub(in crate::session::cache) fn cache_key(input_config: ResolvedGlobConfig) -> CacheEntryKey {
+    fn cache_key(input_config: ResolvedGlobConfig) -> CacheEntryKey {
         #[derive(SchemaWrite)]
         enum ProgramFingerprintLayout {
             OutsideWorkspace { program_name: Str },
@@ -387,7 +387,7 @@ pub(super) mod tests {
         }
     }
 
-    pub(in crate::session::cache) fn cache_value() -> CacheEntryValue {
+    fn cache_value() -> CacheEntryValue {
         CacheEntryValue {
             post_run_fingerprint: PostRunFingerprint::default(),
             std_outputs: Arc::new([StdOutput {
