@@ -2,13 +2,14 @@
 //! (dependency order, concurrency limits, fast-fail), and hands each leaf to
 //! [`execute_spawn`] which owns *how* a single spawn runs.
 
-use std::{cell::RefCell, io::Write as _, sync::Arc};
+use std::{cell::RefCell, ffi::OsStr, io::Write as _, num::NonZeroUsize, sync::Arc};
 
 use futures_util::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
 use petgraph::Direction;
 use rustc_hash::FxHashMap;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
+use vt_casefold::EnvName;
 use vt_path::AbsolutePath;
 use vt_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind,
@@ -24,6 +25,12 @@ use crate::{
         reporter::{ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder},
     },
 };
+
+/// If set, the reporter isn't told about the uploads still running when the
+/// graph is done, so there is no message about them. Whether an upload is
+/// still running then depends on how fast the remote cache responds, so tests
+/// set this to keep their output stable.
+const HIDE_PENDING_UPLOADS_ENV: &str = "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS";
 
 /// Holds shared references needed during graph execution.
 ///
@@ -52,7 +59,7 @@ struct ExecutionContext<'a> {
     fast_fail_token: CancellationToken,
     /// Token cancelled by Ctrl-C, and by fast-fail as a child of
     /// `fast_fail_token`. Prevents scheduling new tasks and caching results,
-    /// and stops remote cache requests. On Ctrl-C, running processes are
+    /// and stops remote cache lookups. On Ctrl-C, running processes are
     /// left to handle SIGINT naturally.
     cancel_token: CancellationToken,
 }
@@ -233,6 +240,12 @@ impl Session<'_> {
     ///
     /// `fast_fail_token` and `cancel_token` are described on [`ExecutionContext`].
     ///
+    /// Uploads to the remote cache run in the background and can outlive
+    /// their tasks. Once the graph is done, this waits for them before the
+    /// summary, telling the reporter how many are left. `interrupt_token`,
+    /// which only Ctrl-C cancels, cancels them instead. Fast-fail doesn't, so
+    /// tasks that succeeded before another one failed are still uploaded.
+    ///
     /// Returns `Err(ExitStatus)` to indicate the caller should exit with the given status code.
     /// Returns `Ok(())` when all tasks succeeded.
     #[tracing::instrument(level = "debug", skip_all)]
@@ -242,6 +255,7 @@ impl Session<'_> {
         builder: Box<dyn GraphExecutionReporterBuilder>,
         fast_fail_token: CancellationToken,
         cancel_token: CancellationToken,
+        interrupt_token: CancellationToken,
     ) -> Result<(), ExitStatus> {
         // Initialize cache before building the reporter. Cache errors are reported
         // directly to stderr and cause an early exit, keeping the reporter flow clean
@@ -271,8 +285,21 @@ impl Session<'_> {
         // are skipped. Leaf-level errors are reported through the reporter.
         execution_context.execute_expanded_graph(&execution_graph).await;
 
-        // Leaf-level errors and non-zero exit statuses are tracked internally
-        // by the reporter.
-        reporter.into_inner().finish()
+        // Nested graphs share the cache, so this waits for their uploads too.
+        // After Ctrl-C, the uploads are cancelled without a message.
+        let mut reporter = reporter.into_inner();
+        let hide_pending_uploads =
+            self.envs.contains_key(EnvName::from_ref(OsStr::new(HIDE_PENDING_UPLOADS_ENV)));
+        if !interrupt_token.is_cancelled()
+            && !hide_pending_uploads
+            && let Some(pending) = NonZeroUsize::new(cache.pending_uploads())
+        {
+            reporter.uploads_pending(pending);
+        }
+        cache.wait_for_uploads(&interrupt_token).await;
+
+        // Leaf-level errors, non-zero exit statuses, and failed uploads are
+        // tracked internally by the reporter.
+        reporter.finish()
     }
 }

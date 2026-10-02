@@ -100,16 +100,21 @@ function cbor(response: ServerResponse, value: unknown): void {
  * blobs remain opaque bytes. A fetch that matches neither key gets a plain-text
  * 404. After each response, `logRequest` receives a line with the method, the
  * route below `basePath`, the status, and for successful fetch responses, the
- * kind.
+ * kind. A request to one of the `stalledRoutes` is read but never answered or
+ * logged, and `onStall` is called when it arrives.
  */
 export function createCacheServer({
   basePath,
   directory,
   logRequest,
+  stalledRoutes = new Set(),
+  onStall = () => {},
 }: {
   basePath: string;
   directory: string;
   logRequest: (line: string) => void;
+  stalledRoutes?: ReadonlySet<string>;
+  onStall?: () => void;
 }) {
   const stateFile = join(directory, 'state.json');
   const blobDirectory = join(directory, 'blobs');
@@ -194,6 +199,14 @@ export function createCacheServer({
 
   return createServer((request, response) => {
     const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+    if (path.startsWith(`${basePath}/`) && stalledRoutes.has(path.slice(basePath.length))) {
+      // Read the body, so the client can finish sending it, and ignore the
+      // error when the client gives up and closes the connection.
+      request.on('error', () => {});
+      request.resume();
+      onStall();
+      return;
+    }
     const log = (kind?: string) => {
       const parts = [request.method, path.slice(basePath.length), response.statusCode, kind];
       logRequest(parts.filter((part) => part !== undefined).join(' '));

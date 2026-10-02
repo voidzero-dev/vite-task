@@ -1,6 +1,6 @@
 # Cancellation
 
-`vp run` handles two kinds of cancellation: **Ctrl-C** (user interrupt) and **fast-fail** (a task exits with non-zero status). Both prevent new tasks from being scheduled, prevent caching of in-flight results, and stop [remote cache requests](#remote-cache-requests), but they differ in how they treat running processes.
+`vp run` handles two kinds of cancellation: **Ctrl-C** (user interrupt) and **fast-fail** (a task exits with non-zero status). Both prevent new tasks from being scheduled, prevent caching of in-flight results, and stop [remote cache lookups](#remote-cache-lookups), but they differ in how they treat running processes and [remote cache uploads](#remote-cache-uploads).
 
 ## Ctrl-C
 
@@ -18,12 +18,16 @@ When any task exits with non-zero status:
 2. No new tasks are scheduled.
 3. Results of other in-flight tasks are **not cached** (they were killed mid-execution).
 
-## Remote cache requests
+## Remote cache lookups
 
-Both kinds of cancellation stop remote cache lookups, downloads, and uploads right away instead of waiting for them to finish or time out.
+Both kinds of cancellation stop remote cache lookups and downloads right away instead of waiting for them to finish or time out. A task whose cache lookup was still in progress doesn't start and doesn't restore cached outputs, even if the lookup found them. Like a task that was never scheduled, it isn't shown in the summary.
 
-- A task whose cache lookup was still in progress doesn't start and doesn't restore cached outputs, even if the lookup found them. Like a task that was never scheduled, it isn't shown in the summary.
-- A task whose upload is stopped keeps its local cache entry, and the summary warns that it wasn't uploaded.
+## Remote cache uploads
+
+In `read-write` mode, a task's upload to the remote cache starts once its result is cached locally and keeps running after the task finishes, so tasks that depend on it don't wait for it. Once all tasks are done, `vp run` waits for the uploads still running before it prints the summary, with a message saying how many there are.
+
+- Ctrl-C cancels them. Pressed while `vp run` waits, it cancels the uploads right away. Pressed while tasks are running, it cancels the uploads still running once the tasks stop, without the message. Either way, the tasks keep their local cache entries, and the summary warns that they weren't uploaded because they were interrupted.
+- Fast-fail doesn't cancel them. A task that succeeded before another task failed is still uploaded.
 
 ## Why interrupted tasks are not cached
 

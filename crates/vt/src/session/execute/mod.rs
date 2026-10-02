@@ -339,7 +339,9 @@ impl Report {
 ///
 /// Cancelling `fast_fail_token` kills the process. `cancel_token` must be a
 /// child of `fast_fail_token` that Ctrl-C also cancels: cancelling it stops
-/// remote cache requests and prevents caching.
+/// remote cache lookups and prevents caching. A cached run's upload to the
+/// remote cache runs in the background, and the caller waits for it with
+/// [`ExecutionCache::wait_for_uploads`].
 ///
 /// Every path reports through the single `finish()` below — errors (cache
 /// lookup failure, spawn failure, cache update failure) do not abort the

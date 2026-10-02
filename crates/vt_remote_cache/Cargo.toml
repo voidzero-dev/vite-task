@@ -11,6 +11,7 @@ rust-version.workspace = true
 bytes = { workspace = true }
 ciborium = { workspace = true }
 reqwest = { workspace = true, features = [
+  "http2",
   "multipart",
   "rustls-no-provider",
   "stream",

@@ -16,13 +16,13 @@
 use std::{
     fs::File,
     io::{self, Write as _},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, OnceLock, PoisonError},
 };
 
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use vt_path::AbsolutePath;
 use vt_plan::cache_metadata::ExecutionCacheKey;
 use vt_remote_cache::{Client, Download, Fetched};
@@ -44,10 +44,9 @@ pub enum UploadError {
     Remote(#[from] vt_remote_cache::Error),
     #[error("failed to encode the cache entry")]
     Encode(#[from] WriteError),
-    /// The run was cancelled, by Ctrl-C or fast-fail, before the upload
-    /// finished.
-    #[error("cancelled")]
-    Cancelled,
+    /// Ctrl-C cancelled the upload before it finished.
+    #[error("interrupted")]
+    Interrupted,
 }
 
 /// Why no entry could be read from the remote cache. It's a cache miss, and
@@ -196,25 +195,80 @@ impl RemoteClients {
         result.map(|()| archive_name)
     }
 
-    /// Upload an entry that was just recorded locally, along with its output
-    /// archive in `cache_dir`. Stops when `cancel_token` is cancelled.
-    pub(super) async fn upload(
+    /// Prepare to upload an entry that was just recorded locally, along with
+    /// its output archive in `cache_dir`: get the endpoint's client and encode
+    /// the entry. Nothing is sent until the returned future is polled, so an
+    /// invalid endpoint or an entry that doesn't encode fails here. The future
+    /// owns everything the upload needs, so it can run in a spawned task.
+    pub(super) fn prepare_upload(
         &self,
         endpoint: &Arc<str>,
         cache_key: &CacheEntryKey,
         execution_cache_key: &ExecutionCacheKey,
         cache_value: &CacheEntryValue,
         cache_dir: &AbsolutePath,
-        cancel_token: &CancellationToken,
-    ) -> Result<(), UploadError> {
+    ) -> Result<impl Future<Output = Result<(), UploadError>> + Send + use<>, UploadError> {
         let client = self.client(endpoint)?;
         let key = encode_key(cache_key)?;
         let secondary_key = encode_key(execution_cache_key)?;
         let value = serialize_cache(cache_value)?;
         let archive = cache_value.output_archive.as_ref().map(|name| cache_dir.join(name.as_str()));
-        let store = client.store(&key, &secondary_key, &value, archive.as_deref());
-        cancel_token.run_until_cancelled(store).await.ok_or(UploadError::Cancelled)??;
-        Ok(())
+        Ok(async move {
+            client.store(&key, &secondary_key, &value, archive.as_deref()).await?;
+            Ok(())
+        })
+    }
+}
+
+/// Uploads running in the background. Each keeps running after its task
+/// finishes, until [`Self::wait`] waits for all of them.
+#[derive(Debug, Default)]
+pub(super) struct RemoteUploads {
+    tracker: TaskTracker,
+    /// Cancelled when the wait is interrupted, which stops the uploads. It
+    /// stays cancelled, since the run ends after Ctrl-C.
+    cancel: CancellationToken,
+}
+
+impl RemoteUploads {
+    /// Send `upload` in the background. If it fails or is cancelled, the
+    /// error is set in `error`.
+    pub(super) fn spawn(
+        &self,
+        upload: impl Future<Output = Result<(), UploadError>> + Send + 'static,
+        error: Arc<OnceLock<UploadError>>,
+    ) {
+        let cancel = self.cancel.clone();
+        self.tracker.spawn(async move {
+            // A cancelled upload sets its error itself, instead of being
+            // aborted, so every cancelled upload has one.
+            let result =
+                cancel.run_until_cancelled(upload).await.unwrap_or(Err(UploadError::Interrupted));
+            if let Err(err) = result {
+                tracing::debug!(?err, "remote cache upload failed");
+                let _ = error.set(err);
+            }
+        });
+    }
+
+    /// The number of uploads still running.
+    pub(super) fn pending(&self) -> usize {
+        self.tracker.len()
+    }
+
+    /// Wait for all uploads to finish. If `interrupt_token` is cancelled
+    /// first, or already was, cancel them and wait for them to stop.
+    pub(super) async fn wait(&self, interrupt_token: &CancellationToken) {
+        self.tracker.close();
+        tokio::select! {
+            biased;
+            () = self.tracker.wait() => {}
+            () = interrupt_token.cancelled() => {
+                self.cancel.cancel();
+                self.tracker.wait().await;
+            }
+        }
+        self.tracker.reopen();
     }
 }
 
@@ -633,22 +687,67 @@ mod tests {
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
-    #[tokio::test]
-    async fn cancelling_stops_an_upload() {
-        let (endpoint, requested) = serve_stalled(b"");
-        let cancel_token = CancellationToken::new();
+    /// Prepare to upload an entry without an output archive to `endpoint`.
+    fn prepare_upload(
+        clients: &RemoteClients,
+        endpoint: &Arc<str>,
+    ) -> Result<impl Future<Output = Result<(), UploadError>> + use<>, UploadError> {
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
         let value = CacheEntryValue { output_archive: None, ..cache_value() };
         let cache_dir = vt_path::current_dir().unwrap();
+        clients.prepare_upload(endpoint, &key, &execution_key, &value, &cache_dir)
+    }
 
+    fn upload_error(error: &OnceLock<UploadError>) -> Option<Str> {
+        error.get().map(|error| vt_str::format!("{error}"))
+    }
+
+    #[test]
+    fn upload_to_an_invalid_endpoint_fails_before_it_starts() {
+        let endpoint = Arc::from("cache.example/projects/test");
+        let Err(error) = prepare_upload(&RemoteClients::default(), &endpoint) else {
+            panic!("an invalid endpoint should fail");
+        };
+        assert!(
+            matches!(error, UploadError::Remote(vt_remote_cache::Error::InvalidEndpoint(_))),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_upload_sets_its_error() {
+        let (error_status, _) =
+            serve_stalled(b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\n\r\n");
+        // Nothing can listen on port 0.
+        let unreachable = Arc::from("http://127.0.0.1:0/projects/test");
         let clients = RemoteClients::default();
-        let upload =
-            clients.upload(&endpoint, &key, &execution_key, &value, &cache_dir, &cancel_token);
-        let (uploaded, ()) = tokio::join!(upload, async {
-            requested.await.unwrap();
-            cancel_token.cancel();
-        });
-        assert!(matches!(uploaded, Err(UploadError::Cancelled)), "{uploaded:?}");
+        let uploads = RemoteUploads::default();
+
+        for (endpoint, message) in
+            [(error_status, "HTTP status 500"), (unreachable, "network error")]
+        {
+            let error = Arc::new(OnceLock::new());
+            uploads.spawn(prepare_upload(&clients, &endpoint).unwrap(), Arc::clone(&error));
+            uploads.wait(&CancellationToken::new()).await;
+            assert_eq!(uploads.pending(), 0);
+            assert_eq!(upload_error(&error).as_deref(), Some(message));
+        }
+    }
+
+    #[tokio::test]
+    async fn interrupting_the_wait_cancels_the_uploads() {
+        let (endpoint, requested) = serve_stalled(b"");
+        let clients = RemoteClients::default();
+        let uploads = RemoteUploads::default();
+        let error = Arc::new(OnceLock::new());
+        uploads.spawn(prepare_upload(&clients, &endpoint).unwrap(), Arc::clone(&error));
+        requested.await.unwrap();
+        assert_eq!(uploads.pending(), 1);
+
+        let interrupt_token = CancellationToken::new();
+        tokio::join!(uploads.wait(&interrupt_token), async { interrupt_token.cancel() });
+        assert_eq!(uploads.pending(), 0);
+        assert!(matches!(error.get(), Some(UploadError::Interrupted)), "{error:?}");
     }
 }

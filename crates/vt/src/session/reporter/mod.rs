@@ -30,7 +30,7 @@ mod plain;
 pub mod summary;
 mod summary_reporter;
 
-use std::{io::Write, process::ExitStatus as StdExitStatus};
+use std::{io::Write, num::NonZeroUsize, process::ExitStatus as StdExitStatus};
 
 pub use grouped::GroupedReporterBuilder;
 pub use interleaved::InterleavedReporterBuilder;
@@ -161,6 +161,11 @@ pub trait GraphExecutionReporter {
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
     ) -> Box<dyn LeafExecutionReporter>;
+
+    /// Report that all tasks are done, but `count` uploads to the remote cache
+    /// are still running. The caller waits for them before calling
+    /// [`Self::finish`]. Not called after Ctrl-C, which cancels them instead.
+    fn uploads_pending(&mut self, _count: NonZeroUsize) {}
 
     /// Finalize the graph execution session.
     ///
