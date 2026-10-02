@@ -279,7 +279,7 @@ impl SavedError {
 }
 
 impl SavedCacheMissReason {
-    fn from_cache_miss(cache_miss: &CacheMiss) -> Self {
+    pub fn from_cache_miss(cache_miss: &CacheMiss) -> Self {
         match cache_miss {
             CacheMiss::NotFound => Self::NotFound,
             CacheMiss::FingerprintMismatch(mismatch) => match mismatch {
@@ -305,6 +305,31 @@ impl SavedCacheMissReason {
             CacheMiss::RemoteReadFailed(error) => {
                 Self::RemoteReadFailed(SavedError::new(error.as_ref()))
             }
+        }
+    }
+}
+
+/// The reason shown after `Cache miss: ` in the full summary.
+impl Display for SavedCacheMissReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound => f.write_str("no previous cache entry found"),
+            Self::SpawnFingerprintChanged(changes) => {
+                let formatted: Vec<Str> = changes.iter().map(format_spawn_change).collect();
+                if formatted.is_empty() {
+                    f.write_str("configuration changed")
+                } else {
+                    f.write_str(&formatted.iter().map(Str::as_str).collect::<Vec<_>>().join("; "))
+                }
+            }
+            Self::ConfigChanged => f.write_str("input configuration changed"),
+            Self::InputChanged { kind, path } => {
+                f.write_str(&format_input_change_str(*kind, path.as_str()))
+            }
+            Self::TrackedEnvChanged(mismatch) | Self::TrackedEnvQueryChanged { mismatch, .. } => {
+                write!(f, "{mismatch}")
+            }
+            Self::RemoteReadFailed(error) => f.write_str(&error.message),
         }
     }
 }
@@ -615,35 +640,10 @@ impl TaskResult {
             Self::InProcess => Str::from("→ Cache disabled for built-in command"),
             Self::Spawned { cache_status, .. } => match cache_status {
                 SpawnedCacheStatus::Disabled => Str::from("→ Cache disabled in task configuration"),
-                SpawnedCacheStatus::Miss(reason) => match reason {
-                    SavedCacheMissReason::NotFound => {
-                        Str::from("→ Cache miss: no previous cache entry found")
-                    }
-                    SavedCacheMissReason::SpawnFingerprintChanged(changes) => {
-                        let formatted: Vec<Str> = changes.iter().map(format_spawn_change).collect();
-                        if formatted.is_empty() {
-                            Str::from("→ Cache miss: configuration changed")
-                        } else {
-                            let joined =
-                                formatted.iter().map(Str::as_str).collect::<Vec<_>>().join("; ");
-                            vt_str::format!("→ Cache miss: {joined}")
-                        }
-                    }
-                    SavedCacheMissReason::ConfigChanged => {
-                        Str::from("→ Cache miss: input configuration changed")
-                    }
-                    SavedCacheMissReason::InputChanged { kind, path } => {
-                        let desc = format_input_change_str(*kind, path.as_str());
-                        vt_str::format!("→ Cache miss: {desc}")
-                    }
-                    SavedCacheMissReason::TrackedEnvChanged(mismatch)
-                    | SavedCacheMissReason::TrackedEnvQueryChanged { mismatch, .. } => {
-                        vt_str::format!("→ Cache miss: {mismatch}")
-                    }
-                    SavedCacheMissReason::RemoteReadFailed(error) => {
-                        return (vt_str::format!("→ Cache miss: {}", error.message), &error.causes);
-                    }
-                },
+                SpawnedCacheStatus::Miss(SavedCacheMissReason::RemoteReadFailed(error)) => {
+                    return (vt_str::format!("→ Cache miss: {}", error.message), &error.causes);
+                }
+                SpawnedCacheStatus::Miss(reason) => vt_str::format!("→ Cache miss: {reason}"),
             },
         };
         (detail, &[])
@@ -707,7 +707,7 @@ impl TaskResult {
 }
 
 /// "Cache hit" or "Remote cache hit", for the full summary's detail line.
-const fn format_hit(source: CacheHitSource) -> &'static str {
+pub const fn format_hit(source: CacheHitSource) -> &'static str {
     match source {
         CacheHitSource::Local => "Cache hit",
         CacheHitSource::Remote => "Remote cache hit",

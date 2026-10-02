@@ -129,6 +129,10 @@ pub struct RunCommand {
     #[clap(long, exclusive = true)]
     pub(crate) last_details: bool,
 
+    /// Show whether each task would hit the local cache, without running anything.
+    #[clap(long)]
+    pub(crate) dry_run: bool,
+
     #[clap(
         allow_hyphen_values = true,
         value_names = ["TASK_SPECIFIER", "ADDITIONAL_ARGS"],
@@ -200,6 +204,9 @@ pub struct ResolvedRunCommand {
 
     pub flags: RunFlags,
 
+    /// Report predicted cache results instead of running tasks (`--dry-run`).
+    pub dry_run: bool,
+
     /// Additional arguments to pass to the tasks.
     pub additional_args: Vec<Str>,
 }
@@ -214,7 +221,12 @@ impl RunCommand {
         let mut iter = self.task_and_args.into_iter();
         let task_specifier = iter.next();
         let additional_args: Vec<Str> = iter.collect();
-        ResolvedRunCommand { task_specifier, flags: self.flags, additional_args }
+        ResolvedRunCommand {
+            task_specifier,
+            flags: self.flags,
+            dry_run: self.dry_run,
+            additional_args,
+        }
     }
 }
 

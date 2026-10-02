@@ -130,6 +130,13 @@ impl vt_plan::PlanRequestParser for PlanRequestParser<'_> {
                         command.to_synthetic_plan_request(UserCacheConfig::disabled()),
                     )))
                 }
+                ResolvedCommand::Run(run_command) if run_command.dry_run => {
+                    // A nested `--dry-run` runs no tasks, so it isn't expanded into
+                    // the parent's graph.
+                    Ok(Some(PlanRequest::Synthetic(
+                        command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                    )))
+                }
                 ResolvedCommand::Run(run_command) => {
                     match run_command.into_query_plan_request(&command.cwd) {
                         Ok((query_plan_request, _)) => {
@@ -335,6 +342,10 @@ impl<'a> Session<'a> {
                     let qpr = self.handle_no_task(is_interactive, &run_command).await?;
                     self.plan_from_query(qpr).await?
                 };
+
+                if run_command.dry_run {
+                    return self.dry_run(&graph).await.map_err(SessionError::from);
+                }
 
                 let workspace_path = self.workspace_path();
                 let writer: Box<dyn std::io::Write> = Box::new(std::io::stdout());
