@@ -23,7 +23,7 @@ use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use tokio::sync::mpsc;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
-use vt_path::{AbsolutePath, AbsolutePathBuf};
+use vt_path::AbsolutePath;
 use vt_plan::cache_metadata::ExecutionCacheKey;
 use vt_remote_cache::{Client, Download, Fetched};
 use vt_str::Str;
@@ -197,8 +197,9 @@ impl RemoteClients {
 
     /// Prepare to upload an entry that was just recorded locally, along with
     /// its output archive in `cache_dir`: get the endpoint's client and encode
-    /// the entry. Nothing is sent until [`PendingUpload::send`], so an invalid
-    /// endpoint or an entry that doesn't encode fails here.
+    /// the entry. Nothing is sent until the returned future is polled, so an
+    /// invalid endpoint or an entry that doesn't encode fails here. The future
+    /// owns everything the upload needs, so it can run in a spawned task.
     pub(super) fn prepare_upload(
         &self,
         endpoint: &Arc<str>,
@@ -206,34 +207,16 @@ impl RemoteClients {
         execution_cache_key: &ExecutionCacheKey,
         cache_value: &CacheEntryValue,
         cache_dir: &AbsolutePath,
-    ) -> Result<PendingUpload, UploadError> {
-        Ok(PendingUpload {
-            client: self.client(endpoint)?,
-            key: encode_key(cache_key)?,
-            secondary_key: encode_key(execution_cache_key)?,
-            value: serialize_cache(cache_value)?,
-            archive: cache_value.output_archive.as_ref().map(|name| cache_dir.join(name.as_str())),
+    ) -> Result<impl Future<Output = Result<(), UploadError>> + Send + use<>, UploadError> {
+        let client = self.client(endpoint)?;
+        let key = encode_key(cache_key)?;
+        let secondary_key = encode_key(execution_cache_key)?;
+        let value = serialize_cache(cache_value)?;
+        let archive = cache_value.output_archive.as_ref().map(|name| cache_dir.join(name.as_str()));
+        Ok(async move {
+            client.store(&key, &secondary_key, &value, archive.as_deref()).await?;
+            Ok(())
         })
-    }
-}
-
-/// An encoded entry ready to be uploaded. It owns everything the upload
-/// needs, so it can be sent from a spawned task.
-#[derive(Debug)]
-pub(super) struct PendingUpload {
-    client: Arc<Client>,
-    key: Vec<u8>,
-    secondary_key: Vec<u8>,
-    value: Vec<u8>,
-    /// The output archive to upload as the entry's blob, if it has one.
-    archive: Option<AbsolutePathBuf>,
-}
-
-impl PendingUpload {
-    async fn send(self) -> Result<(), UploadError> {
-        let Self { client, key, secondary_key, value, archive } = self;
-        client.store(&key, &secondary_key, &value, archive.as_deref()).await?;
-        Ok(())
     }
 }
 
@@ -250,15 +233,17 @@ pub(super) struct RemoteUploads {
 impl RemoteUploads {
     /// Send `upload` in the background. If it fails or is cancelled, the
     /// error is set in `error`.
-    pub(super) fn spawn(&self, upload: PendingUpload, error: Arc<OnceLock<UploadError>>) {
+    pub(super) fn spawn(
+        &self,
+        upload: impl Future<Output = Result<(), UploadError>> + Send + 'static,
+        error: Arc<OnceLock<UploadError>>,
+    ) {
         let cancel = self.cancel.clone();
         self.tracker.spawn(async move {
             // A cancelled upload sets its error itself, instead of being
             // aborted, so every cancelled upload has one.
-            let result = cancel
-                .run_until_cancelled(upload.send())
-                .await
-                .unwrap_or(Err(UploadError::Interrupted));
+            let result =
+                cancel.run_until_cancelled(upload).await.unwrap_or(Err(UploadError::Interrupted));
             if let Err(err) = result {
                 tracing::debug!(?err, "remote cache upload failed");
                 let _ = error.set(err);
@@ -706,7 +691,7 @@ mod tests {
     fn prepare_upload(
         clients: &RemoteClients,
         endpoint: &Arc<str>,
-    ) -> Result<PendingUpload, UploadError> {
+    ) -> Result<impl Future<Output = Result<(), UploadError>> + use<>, UploadError> {
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
         let value = CacheEntryValue { output_archive: None, ..cache_value() };
@@ -721,7 +706,9 @@ mod tests {
     #[test]
     fn upload_to_an_invalid_endpoint_fails_before_it_starts() {
         let endpoint = Arc::from("cache.example/projects/test");
-        let error = prepare_upload(&RemoteClients::default(), &endpoint).unwrap_err();
+        let Err(error) = prepare_upload(&RemoteClients::default(), &endpoint) else {
+            panic!("an invalid endpoint should fail");
+        };
         assert!(
             matches!(error, UploadError::Remote(vt_remote_cache::Error::InvalidEndpoint(_))),
             "{error:?}"
