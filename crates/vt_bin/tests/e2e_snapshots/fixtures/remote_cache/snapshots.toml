@@ -302,7 +302,7 @@ steps = [
     "--ext",
     ".tar.zst",
     "--recursive",
-  ], comment = "The downloaded archive was removed along with the entry." },
+  ], comment = "The downloaded archive was removed, and the entry wasn't cached locally." },
   [
     "vtt",
     "rm",
@@ -313,7 +313,7 @@ steps = [
     "vt",
     "run",
     "build",
-  ], comment = "The local entry was removed, so the remote entry is fetched and restored again." },
+  ], comment = "Nothing was cached locally, so the remote entry is fetched and restored again." },
 ]
 
 [[e2e]]

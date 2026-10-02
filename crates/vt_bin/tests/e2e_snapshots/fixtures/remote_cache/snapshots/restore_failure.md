@@ -69,7 +69,7 @@ Task Details:
 
 ## `vtt list-dir node_modules/.vite/task-cache --ext .tar.zst --recursive`
 
-The downloaded archive was removed along with the entry.
+The downloaded archive was removed, and the entry wasn't cached locally.
 
 ```
 ```
@@ -81,7 +81,7 @@ The downloaded archive was removed along with the entry.
 
 ## `remote-cache-server vt run build`
 
-The local entry was removed, so the remote entry is fetched and restored again.
+Nothing was cached locally, so the remote entry is fetched and restored again.
 
 ```
 $ vtt write-file dist/output.txt built ◉ remote cache hit, replaying

@@ -31,7 +31,7 @@ use self::{
     spawn::{ChildHandle, ChildOutcome, SpawnStdio, spawn},
 };
 use super::{
-    cache::{CacheEntryValue, CacheHit, CacheMiss, ExecutionCache, archive},
+    cache::{CacheHit, CacheMiss, ExecutionCache},
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
         ExecutionError,
@@ -402,12 +402,14 @@ async fn run(
     //    runs exactly once on every arm) and either replay the hit — no need
     //    to execute the command — or carry the globbed inputs into the run.
     let (stdio_config, globbed_inputs) = match lookup {
-        CacheLookup::Hit { hit: CacheHit { value: cached, source }, metadata } => {
-            let mut stdio_config =
-                reporter.start(CacheStatus::Hit { replayed_duration: cached.duration, source });
+        CacheLookup::Hit { hit, metadata } => {
+            let mut stdio_config = reporter.start(CacheStatus::Hit {
+                replayed_duration: hit.value.duration,
+                source: hit.source,
+            });
             return Ok(replay_cache_hit(
                 &mut stdio_config,
-                &cached,
+                &hit,
                 cache,
                 metadata,
                 workspace_root,
@@ -567,16 +569,16 @@ async fn lookup_cache<'a>(
 }
 
 /// Phase 3 (cache hit): replay the captured stdout/stderr and restore the
-/// output archive.
+/// output files.
 async fn replay_cache_hit(
     stdio_config: &mut StdioConfig,
-    cached: &CacheEntryValue,
+    hit: &CacheHit,
     cache: &ExecutionCache,
     cache_metadata: &CacheMetadata,
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
 ) -> Report {
-    for output in cached.std_outputs.iter() {
+    for output in hit.value.std_outputs.iter() {
         let writer: &mut dyn std::io::Write = match output.kind {
             pipe::OutputKind::StdOut => &mut stdio_config.writers.stdout_writer,
             pipe::OutputKind::StdErr => &mut stdio_config.writers.stderr_writer,
@@ -585,24 +587,14 @@ async fn replay_cache_hit(
         let _ = writer.flush();
     }
 
-    // Restore output files from the cached archive. Failure here means the
-    // archive is missing or unreadable, or its files can't be written. The
-    // task fails because the cache promised the outputs would be restored,
-    // and the entry is removed so later runs miss instead of failing again.
-    if let Some(ref archive_name) = cached.output_archive {
-        let archive_path = cache_dir.join(archive_name.as_str());
-        if let Err(err) = archive::extract_output_archive(workspace_root, &archive_path) {
-            if let Err(err) = cache.remove(cache_metadata, &archive_path).await {
-                tracing::warn!(?err, "failed to remove a cache entry that couldn't be restored");
-            }
-            return Report::Failed {
-                cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
-                error: ExecutionError::Cache {
-                    kind: CacheErrorKind::Restore,
-                    source: err.context("failed to extract the output archive"),
-                },
-            };
-        }
+    // Failure here means the archive is missing or unreadable, or its files
+    // can't be written. The task fails because the cache promised the
+    // outputs would be restored.
+    if let Err(err) = cache.restore(cache_metadata, hit, workspace_root, cache_dir).await {
+        return Report::Failed {
+            cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
+            error: ExecutionError::Cache { kind: CacheErrorKind::Restore, source: err },
+        };
     }
 
     Report::CacheHit
