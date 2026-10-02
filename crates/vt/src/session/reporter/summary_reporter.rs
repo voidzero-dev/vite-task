@@ -4,7 +4,14 @@
 //! results, then renders a summary when the graph execution completes. The inner
 //! reporter handles all output formatting (interleaved, labeled, grouped).
 
-use std::{cell::RefCell, io::Write, process::ExitStatus as StdExitStatus, rc::Rc, sync::Arc};
+use std::{
+    cell::RefCell,
+    io::Write,
+    num::NonZeroUsize,
+    process::ExitStatus as StdExitStatus,
+    rc::Rc,
+    sync::{Arc, OnceLock},
+};
 
 use vt_path::AbsolutePath;
 use vt_plan::{ExecutionItemDisplay, LeafExecutionKind};
@@ -15,10 +22,11 @@ use super::{
     LeafExecutionReporter, StdioConfig,
 };
 use crate::session::{
+    cache::remote::UploadError,
     event::{CacheStatus, CacheUpdateStatus, ExecutionError},
     reporter::summary::{
         LastRunSummary, SavedError, SpawnOutcome, TaskResult, TaskSummary, format_compact_summary,
-        format_full_summary,
+        format_full_summary, format_uploads_pending,
     },
 };
 
@@ -67,9 +75,18 @@ impl GraphExecutionReporterBuilder for SummaryReporterBuilder {
     }
 }
 
+/// A finished task's summary, without the result of its upload to the remote
+/// cache, which may still be running.
+struct RecordedTask {
+    summary: TaskSummary,
+    /// Where the upload's error is set if it fails. `None` if the task didn't
+    /// update the cache.
+    upload_error: Option<Arc<OnceLock<UploadError>>>,
+}
+
 struct SummaryGraphReporter {
     inner: Box<dyn GraphExecutionReporter>,
-    tasks: Rc<RefCell<Vec<TaskSummary>>>,
+    tasks: Rc<RefCell<Vec<RecordedTask>>>,
     workspace_path: Arc<AbsolutePath>,
     writer: Box<dyn Write>,
     show_details: bool,
@@ -93,11 +110,29 @@ impl GraphExecutionReporter for SummaryGraphReporter {
         })
     }
 
+    fn uploads_pending(&mut self, count: NonZeroUsize) {
+        let _ = self.writer.write_all(&format_uploads_pending(count));
+        let _ = self.writer.flush();
+        pty_terminal_test_client::mark_milestone("uploads-pending");
+    }
+
+    /// Called after the uploads to the remote cache finish, so their errors
+    /// are in the summary, and in the saved one.
     fn finish(self: Box<Self>) -> Result<(), ExitStatus> {
         // Let inner reporter finish first (flushes any pending output).
         let inner_result = self.inner.finish();
 
-        let tasks = self.tasks.take();
+        let tasks: Vec<TaskSummary> = self
+            .tasks
+            .take()
+            .into_iter()
+            .map(|RecordedTask { mut summary, upload_error }| {
+                if let Some(error) = upload_error.as_deref().and_then(OnceLock::get) {
+                    summary.result.set_upload_error(SavedError::new(error));
+                }
+                summary
+            })
+            .collect();
 
         let has_infra_errors = tasks.iter().any(|t| t.result.error().is_some());
 
@@ -159,7 +194,7 @@ impl GraphExecutionReporter for SummaryGraphReporter {
 /// Leaf reporter wrapper that records task results for the summary.
 struct SummaryLeafReporter {
     inner: Box<dyn LeafExecutionReporter>,
-    tasks: Rc<RefCell<Vec<TaskSummary>>>,
+    tasks: Rc<RefCell<Vec<RecordedTask>>>,
     display: ExecutionItemDisplay,
     workspace_path: Arc<AbsolutePath>,
     cache_status: Option<CacheStatus>,
@@ -188,7 +223,7 @@ impl LeafExecutionReporter for SummaryLeafReporter {
                     Str::default()
                 };
 
-            let task_summary = TaskSummary {
+            let summary = TaskSummary {
                 package_name: self.display.task_display.package_name.clone(),
                 task_name: self.display.task_display.task_name.clone(),
                 command: self.display.command.clone(),
@@ -202,10 +237,103 @@ impl LeafExecutionReporter for SummaryLeafReporter {
                     &self.workspace_path,
                 ),
             };
+            let upload_error = match &cache_update_status {
+                CacheUpdateStatus::Updated { upload_error } => Some(Arc::clone(upload_error)),
+                CacheUpdateStatus::NotUpdated(_) => None,
+            };
 
-            self.tasks.borrow_mut().push(task_summary);
+            self.tasks.borrow_mut().push(RecordedTask { summary, upload_error });
         }
 
         self.inner.finish(status, cache_update_status, error);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vt_plan::ExecutionItemKind;
+
+    use super::*;
+    use crate::session::{
+        cache::CacheMiss,
+        reporter::{
+            InterleavedReporterBuilder,
+            test_fixtures::{spawn_task, test_path},
+        },
+    };
+
+    /// A writer whose output stays readable after it's moved into a reporter.
+    #[derive(Clone, Default)]
+    struct SharedBuffer(Rc<RefCell<Vec<u8>>>);
+
+    impl Write for SharedBuffer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl SharedBuffer {
+        fn text(&self) -> Str {
+            let bytes = self.0.borrow();
+            let text = std::str::from_utf8(&bytes).unwrap();
+            vt_str::format!("{}", anstream::adapter::strip_str(text))
+        }
+    }
+
+    #[test]
+    fn upload_error_set_after_the_task_finishes_is_in_the_summary() {
+        let task = spawn_task("build");
+        let item = &task.items[0];
+        let ExecutionItemKind::Leaf(leaf_kind) = &item.kind else {
+            panic!("test fixture item must be a Leaf");
+        };
+        let output = SharedBuffer::default();
+        let saved = SharedBuffer::default();
+        let write_summary: WriteSummaryFn = Box::new({
+            let mut saved = saved.clone();
+            move |summary| saved.write_all(&format_compact_summary(summary, "vp")).unwrap()
+        });
+        let mut reporter = Box::new(SummaryReporterBuilder::new(
+            Box::new(InterleavedReporterBuilder::new(
+                test_path(),
+                Box::new(std::io::sink()),
+                ColorSupport::uniform(false),
+            )),
+            test_path(),
+            Box::new(output.clone()),
+            false,
+            Some(write_summary),
+            Str::from("vp"),
+            ColorSupport::uniform(false),
+        ))
+        .build();
+
+        let upload_error = Arc::new(OnceLock::new());
+        let mut leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind);
+        leaf.start(CacheStatus::Miss(CacheMiss::NotFound));
+        leaf.finish(
+            Some(StdExitStatus::default()),
+            CacheUpdateStatus::Updated { upload_error: Arc::clone(&upload_error) },
+            None,
+        );
+        reporter.uploads_pending(NonZeroUsize::MIN);
+        upload_error.set(UploadError::Interrupted).unwrap();
+        reporter.finish().unwrap();
+
+        let summary = "---\nvp run: pkg#build not uploaded to the remote cache: interrupted. \
+                       (Run `vp run --last-details` for full details)\n";
+        assert_eq!(saved.text().as_str(), summary);
+        assert_eq!(
+            output.text().as_str(),
+            vt_str::format!(
+                "Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...\n{summary}"
+            )
+            .as_str()
+        );
     }
 }

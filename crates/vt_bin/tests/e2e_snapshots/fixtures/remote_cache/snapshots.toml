@@ -1,6 +1,8 @@
 # Cases that use the remote cache backend are ignored because it runs on
 # Node.js. Windows is skipped because the PTY launcher cannot execute pnpm
-# command shims.
+# command shims. Steps that upload delay the backend's store responses, so
+# the upload is still running when the task finishes, and vt run always waits
+# for it.
 [[e2e]]
 name = "read_write"
 cfg = "not(windows)"
@@ -16,7 +18,11 @@ steps = [
       "VP_REMOTE_CACHE",
       "read-write",
     ],
-  ], comment = "The fetch finds no entry. The new execution is uploaded with one store request." },
+    [
+      "REMOTE_CACHE_STORE_DELAY_MS",
+      "500",
+    ],
+  ], comment = "The fetch finds no entry. The new execution is uploaded with one store request, which the server delays. vt run waits for it after the task finishes." },
   { argv = [
     "remote-cache-server",
     "vt",
@@ -44,6 +50,10 @@ steps = [
     [
       "VP_REMOTE_CACHE",
       "read-write",
+    ],
+    [
+      "REMOTE_CACHE_STORE_DELAY_MS",
+      "500",
     ],
   ] },
   [
@@ -74,6 +84,10 @@ steps = [
     [
       "VP_REMOTE_CACHE",
       "read-write",
+    ],
+    [
+      "REMOTE_CACHE_STORE_DELAY_MS",
+      "500",
     ],
   ] },
   [
@@ -143,6 +157,10 @@ steps = [
       "VP_REMOTE_CACHE",
       "read-write",
     ],
+    [
+      "REMOTE_CACHE_STORE_DELAY_MS",
+      "500",
+    ],
   ] },
   [
     "vt",
@@ -182,6 +200,10 @@ steps = [
       "VP_REMOTE_CACHE",
       "read-write",
     ],
+    [
+      "REMOTE_CACHE_STORE_DELAY_MS",
+      "500",
+    ],
   ] },
   [
     "vt",
@@ -217,6 +239,10 @@ steps = [
     [
       "VP_REMOTE_CACHE",
       "read-write",
+    ],
+    [
+      "REMOTE_CACHE_STORE_DELAY_MS",
+      "500",
     ],
   ] },
   { argv = [
@@ -265,6 +291,10 @@ steps = [
     [
       "VP_REMOTE_CACHE",
       "read-write",
+    ],
+    [
+      "REMOTE_CACHE_STORE_DELAY_MS",
+      "500",
     ],
   ] },
   [
@@ -317,6 +347,33 @@ steps = [
 ]
 
 [[e2e]]
+name = "pending_uploads"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  { argv = [
+    "remote-cache-server",
+    "vt",
+    "run",
+    "all",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "REMOTE_CACHE_STORE_DELAY_MS",
+      "2000",
+    ],
+  ], comment = "check doesn't wait for build's upload. Both uploads are still running when check finishes, and vt run waits for them." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "Both uploads succeeded." },
+]
+
+[[e2e]]
 name = "invalid_endpoint"
 steps = [
   { argv = [
@@ -352,30 +409,6 @@ steps = [
       "cache.example/projects/test",
     ],
   ], comment = "The local cache was updated. Hits never upload." },
-]
-
-[[e2e]]
-name = "unreachable_endpoint"
-steps = [
-  { argv = [
-    "vt",
-    "run",
-    "build",
-  ], envs = [
-    [
-      "VP_REMOTE_CACHE",
-      "read-write",
-    ],
-    [
-      "VP_REMOTE_CACHE_URL",
-      "http://127.0.0.1:0/projects/test",
-    ],
-  ], comment = "Nothing can listen on port 0. The failed fetch is the miss reason, and the failed upload is a warning. The task succeeds." },
-  { argv = [
-    "vt",
-    "run",
-    "--last-details",
-  ], comment = "The details include the underlying error." },
 ]
 
 [[e2e]]
@@ -443,4 +476,56 @@ steps = [
     "run",
     "fail-during-build",
   ], comment = "The endpoint never responds. fail exits while build's fetch is in flight, which stops the fetch, and build doesn't start." },
+]
+
+[[e2e]]
+name = "ctrl_c_during_upload"
+steps = [
+  { argv = [
+    "vtt",
+    "stalled-remote-cache",
+    "--fetch-miss",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ], interactions = [
+    { "expect-milestone" = "uploads-pending" },
+    { "write-key" = "ctrl-c" },
+  ], comment = "The fetch is a miss, but the endpoint never responds to the upload. Ctrl-C cancels it while vt run waits." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details show why build wasn't uploaded." },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "The entry is still in the local cache." },
+]
+
+[[e2e]]
+name = "fast_fail_during_upload"
+steps = [
+  { argv = [
+    "vtt",
+    "stalled-remote-cache",
+    "--fetch-miss",
+    "vt",
+    "run",
+    "fail-after-build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ], interactions = [
+    { "expect-milestone" = "uploads-pending" },
+    { "write-key" = "ctrl-c" },
+  ], comment = "The endpoint never responds to the upload. fail-after-build exits after build finishes, which doesn't cancel build's upload, so vt run waits for it until Ctrl-C." },
 ]

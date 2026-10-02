@@ -1,4 +1,8 @@
-use std::{process::ExitStatus, time::Duration};
+use std::{
+    process::ExitStatus,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use vt_path::RelativePathBuf;
 use vt_server::Error as IpcServerError;
@@ -126,9 +130,13 @@ pub enum CacheNotUpdatedReason {
 pub enum CacheUpdateStatus {
     /// Cache was successfully updated with new fingerprint and outputs
     Updated {
-        /// Why uploading the entry to the remote cache failed. `None` if the
-        /// upload succeeded or wasn't attempted.
-        upload_error: Option<UploadError>,
+        /// Why uploading the entry to the remote cache failed. It's set only
+        /// if the upload fails, which can happen in the background after the
+        /// task finishes. Empty if the upload succeeded or wasn't attempted.
+        /// Read it only after
+        /// [`ExecutionCache::wait_for_uploads`](super::cache::ExecutionCache::wait_for_uploads)
+        /// returns.
+        upload_error: Arc<OnceLock<UploadError>>,
     },
     /// Cache was not updated (with reason).
     /// The reason is part of the `LeafExecutionReporter` trait contract — reporters

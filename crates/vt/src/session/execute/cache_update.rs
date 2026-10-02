@@ -46,7 +46,7 @@ type TrackedEnvQueryValues = BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHas
 /// `finish()` call; this function never reports by itself. The guard clauses
 /// run in priority order — each names the reason the run is *not* cached, and
 /// only a run that passes them all is stored. A run cancelled by Ctrl-C or
-/// fast-fail (`cancel_token`) isn't cached, and cancelling stops the upload.
+/// fast-fail (`cancel_token`) isn't cached.
 #[expect(
     clippy::too_many_arguments,
     reason = "the run's full context is genuinely needed to decide and store the cache entry"
@@ -187,8 +187,8 @@ pub(super) async fn update_cache(
         globbed_inputs,
         output_archive,
     };
-    match cache.update(metadata, new_cache_value, cache_dir, cancel_token).await {
-        Ok(upload) => (CacheUpdateStatus::Updated { upload_error: upload.err() }, None),
+    match cache.update(metadata, new_cache_value, cache_dir).await {
+        Ok(upload_error) => (CacheUpdateStatus::Updated { upload_error }, None),
         Err(err) => (
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
             Some(ExecutionError::Cache { kind: CacheErrorKind::Update, source: err }),

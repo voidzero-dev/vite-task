@@ -5,7 +5,14 @@ pub mod display;
 pub mod remote;
 mod validation;
 
-use std::{collections::BTreeMap, fmt::Display, fs::File, io::Write, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    fmt::Display,
+    fs::File,
+    io::Write,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 // Re-export display functions for convenience
 pub use display::format_cache_status_inline;
@@ -30,7 +37,7 @@ use wincode::{
     error::{ReadResult, WriteResult},
 };
 
-use self::remote::{ReadError, RemoteClients, Restore, UploadError};
+use self::remote::{ReadError, RemoteClients, RemoteUploads, Restore, UploadError};
 use super::execute::{
     fingerprint::{PostRunFingerprint, TrackedEnvQuery},
     pipe::StdOutput,
@@ -112,6 +119,7 @@ pub struct CacheEntryValue {
 pub struct ExecutionCache {
     conn: Mutex<Connection>,
     remote_clients: RemoteClients,
+    uploads: RemoteUploads,
 }
 
 /// A cache hit: the entry to replay, and the cache it came from.
@@ -303,7 +311,11 @@ impl ExecutionCache {
              CREATE TABLE IF NOT EXISTS task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
         )?;
         // Lock is released when lock_file is dropped
-        Ok(Self { conn: Mutex::new(conn), remote_clients: RemoteClients::default() })
+        Ok(Self {
+            conn: Mutex::new(conn),
+            remote_clients: RemoteClients::default(),
+            uploads: RemoteUploads::default(),
+        })
     }
 
     #[tracing::instrument]
@@ -487,36 +499,57 @@ impl ExecutionCache {
     /// as [`Self::record`] does.
     ///
     /// In `read-write` remote mode, the entry is then uploaded to the remote
-    /// cache, until `cancel_token` is cancelled. Returns `Ok(Err(_))` if the
-    /// local update succeeded but the upload failed.
+    /// cache in the background, and the task doesn't wait for it. Returns
+    /// where the upload's error is set if it fails: right away if the upload
+    /// can't start, or later by the background upload. Read it after
+    /// [`Self::wait_for_uploads`] returns.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn update(
         &self,
         cache_metadata: &CacheMetadata,
         cache_value: CacheEntryValue,
         cache_dir: &AbsolutePath,
-        cancel_token: &CancellationToken,
-    ) -> anyhow::Result<Result<(), UploadError>> {
+    ) -> anyhow::Result<Arc<OnceLock<UploadError>>> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
 
         self.record(&cache_key, execution_cache_key, &cache_value, cache_dir).await?;
 
+        let upload_error = Arc::new(OnceLock::new());
         let url = match &cache_metadata.remote_cache {
             Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::ReadWrite, url }) => url,
             Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::Read, .. }) | None => {
-                return Ok(Ok(()));
+                return Ok(upload_error);
             }
         };
-        let upload = self
-            .remote_clients
-            .upload(url, &cache_key, execution_cache_key, &cache_value, cache_dir, cancel_token)
-            .await;
-        if let Err(err) = &upload {
-            tracing::debug!(?err, "remote cache upload failed");
+        match self.remote_clients.prepare_upload(
+            url,
+            &cache_key,
+            execution_cache_key,
+            &cache_value,
+            cache_dir,
+        ) {
+            Ok(upload) => self.uploads.spawn(upload, Arc::clone(&upload_error)),
+            Err(err) => {
+                tracing::debug!(?err, "remote cache upload failed");
+                let _ = upload_error.set(err);
+            }
         }
-        Ok(upload)
+        Ok(upload_error)
+    }
+
+    /// The number of uploads to the remote cache still running.
+    pub fn pending_uploads(&self) -> usize {
+        self.uploads.pending()
+    }
+
+    /// Wait for the uploads to the remote cache to finish. If
+    /// `interrupt_token` is cancelled first, or already was, the uploads are
+    /// cancelled instead, each with [`UploadError::Interrupted`] as its error.
+    /// The entries stay in the local cache.
+    pub async fn wait_for_uploads(&self, interrupt_token: &CancellationToken) {
+        self.uploads.wait(interrupt_token).await;
     }
 
     /// Restore the output files of `hit` into `workspace_root`.
