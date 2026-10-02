@@ -148,7 +148,8 @@ impl Client {
         // ring too.
         let _ = rustls::crypto::ring::default_provider().install_default();
         // A redirect fails like any other status. Following one could turn a
-        // store into a GET of a login page that responds with 200.
+        // store into a GET of a login page that responds with 200. HTTPS
+        // endpoints use HTTP/2 if the server accepts it in the TLS handshake.
         let http = reqwest::Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(READ_TIMEOUT)
@@ -627,6 +628,34 @@ mod tests {
         let error = client.store(b"k", b"s", b"v", None).await.unwrap_err();
         assert!(matches!(error, Error::Status(StatusCode::FOUND, None)), "{error:?}");
         server.join().unwrap();
+    }
+
+    /// Accept one connection and return the TLS record it starts with, which
+    /// is the `ClientHello`, then close the connection without responding.
+    fn read_client_hello(listener: &TcpListener) -> Vec<u8> {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut record = vec![0; 5];
+        stream.read_exact(&mut record).unwrap();
+        assert_eq!(record[0], 0x16, "not a TLS handshake record");
+        let length = usize::from(u16::from_be_bytes([record[3], record[4]]));
+        record.resize(5 + length, 0);
+        stream.read_exact(&mut record[5..]).unwrap();
+        record
+    }
+
+    #[tokio::test]
+    async fn offers_http2_over_tls() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client =
+            Client::new(&vt_str::format!("https://127.0.0.1:{port}/projects/test")).unwrap();
+        let server = std::thread::spawn(move || read_client_hello(&listener));
+
+        let error = client.fetch(b"k", b"s").await.unwrap_err();
+        assert!(matches!(error, Error::Network(_)), "{error:?}");
+
+        // The ALPN extension lists h2, then http/1.1.
+        assert!(contains(&server.join().unwrap(), b"\x02h2\x08http/1.1"));
     }
 
     #[tokio::test]
