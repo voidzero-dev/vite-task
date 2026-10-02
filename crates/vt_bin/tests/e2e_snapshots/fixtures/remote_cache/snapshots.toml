@@ -416,6 +416,34 @@ steps = [
 ]
 
 [[e2e]]
+name = "unreachable_endpoint"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_REMOTE_CACHE_URL",
+      "http://127.0.0.1:0/projects/test",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "Nothing can listen on port 0. The failed fetch is the miss reason, and the upload fails in the background with a warning. The task succeeds." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details include the underlying error." },
+]
+
+[[e2e]]
 name = "read_invalid_endpoint"
 steps = [
   { argv = [
