@@ -2,7 +2,7 @@
 # Node.js. Windows is skipped because the PTY launcher cannot execute pnpm
 # command shims. Whether an upload to the backend is still running when the
 # tasks finish depends on timing, so steps that upload hide the message about
-# pending uploads. The cases that test it use stalled-remote-cache instead.
+# pending uploads. The cases that test it stall the uploads instead.
 [[e2e]]
 name = "read_write"
 cfg = "not(windows)"
@@ -348,11 +348,13 @@ steps = [
 
 [[e2e]]
 name = "pending_uploads"
+cfg = "not(windows)"
+ignore = true
 steps = [
   { argv = [
-    "vtt",
-    "stalled-remote-cache",
-    "--fetch-miss",
+    "remote-cache-server",
+    "--stall",
+    "/store",
     "vt",
     "run",
     "all",
@@ -364,7 +366,7 @@ steps = [
   ], interactions = [
     { "expect-milestone" = "uploads-pending" },
     { "write-key" = "ctrl-c" },
-  ], comment = "The endpoint never responds to the uploads. check doesn't wait for build's upload, so both are still running when check finishes, and vt run waits for them until Ctrl-C." },
+  ], comment = "The backend never responds to the uploads. check doesn't wait for build's upload, so both are still running when check finishes, and vt run waits for them until Ctrl-C." },
   { argv = [
     "vt",
     "run",
@@ -507,11 +509,13 @@ steps = [
 
 [[e2e]]
 name = "ctrl_c_during_upload"
+cfg = "not(windows)"
+ignore = true
 steps = [
   { argv = [
-    "vtt",
-    "stalled-remote-cache",
-    "--fetch-miss",
+    "remote-cache-server",
+    "--stall",
+    "/store",
     "vt",
     "run",
     "build",
@@ -523,7 +527,7 @@ steps = [
   ], interactions = [
     { "expect-milestone" = "uploads-pending" },
     { "write-key" = "ctrl-c" },
-  ], comment = "The fetch is a miss, but the endpoint never responds to the upload. Ctrl-C cancels it while vt run waits." },
+  ], comment = "The fetch is a miss, but the backend never responds to the upload. Ctrl-C cancels it while vt run waits." },
   { argv = [
     "vt",
     "run",
@@ -538,11 +542,13 @@ steps = [
 
 [[e2e]]
 name = "fast_fail_during_upload"
+cfg = "not(windows)"
+ignore = true
 steps = [
   { argv = [
-    "vtt",
-    "stalled-remote-cache",
-    "--fetch-miss",
+    "remote-cache-server",
+    "--stall",
+    "/store",
     "vt",
     "run",
     "fail-after-build",
@@ -554,16 +560,18 @@ steps = [
   ], interactions = [
     { "expect-milestone" = "uploads-pending" },
     { "write-key" = "ctrl-c" },
-  ], comment = "The endpoint never responds to the upload. fail-after-build exits after build finishes, which doesn't cancel build's upload, so vt run waits for it until Ctrl-C." },
+  ], comment = "The backend never responds to the upload. fail-after-build exits after build finishes, which doesn't cancel build's upload, so vt run waits for it until Ctrl-C." },
 ]
 
 [[e2e]]
 name = "hide_pending_uploads"
+cfg = "not(windows)"
+ignore = true
 steps = [
   { argv = [
-    "vtt",
-    "stalled-remote-cache",
-    "--fetch-miss",
+    "remote-cache-server",
+    "--stall",
+    "/store",
     "vt",
     "run",
     "build",
@@ -577,7 +585,7 @@ steps = [
       "1",
     ],
   ], interactions = [
-    { "expect-milestone" = "request" },
+    { "expect-milestone" = "stalled" },
     { "write-key" = "ctrl-c" },
-  ], comment = "The endpoint never responds to the upload. vt run waits for it until Ctrl-C, without the message about pending uploads." },
+  ], comment = "The backend never responds to the upload. vt run waits for it until Ctrl-C, without the message about pending uploads." },
 ]

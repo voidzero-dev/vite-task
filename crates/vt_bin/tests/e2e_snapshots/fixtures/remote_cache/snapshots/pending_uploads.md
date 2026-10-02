@@ -1,8 +1,8 @@
 # pending_uploads
 
-## `VP_REMOTE_CACHE=read-write vtt stalled-remote-cache --fetch-miss vt run all`
+## `VP_REMOTE_CACHE=read-write remote-cache-server --stall /store vt run all`
 
-The endpoint never responds to the uploads. check doesn't wait for build's upload, so both are still running when check finishes, and vt run waits for them until Ctrl-C.
+The backend never responds to the uploads. check doesn't wait for build's upload, so both are still running when check finishes, and vt run waits for them until Ctrl-C.
 
 **→ expect-milestone:** `uploads-pending`
 
@@ -26,6 +26,8 @@ checked
 Waiting for 2 remote cache uploads to finish (Ctrl-C to cancel)...
 ---
 vt run: 0/2 cache hit (0%). remote-cache#build (and 1 more) not uploaded to the remote cache: interrupted. (Run `vt run --last-details` for full details)
+[remote-cache] POST /fetch 404
+[remote-cache] POST /fetch 404
 ```
 
 ## `vt run --last-details`

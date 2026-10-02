@@ -1,8 +1,8 @@
 # ctrl_c_during_upload
 
-## `VP_REMOTE_CACHE=read-write vtt stalled-remote-cache --fetch-miss vt run build`
+## `VP_REMOTE_CACHE=read-write remote-cache-server --stall /store vt run build`
 
-The fetch is a miss, but the endpoint never responds to the upload. Ctrl-C cancels it while vt run waits.
+The fetch is a miss, but the backend never responds to the upload. Ctrl-C cancels it while vt run waits.
 
 **→ expect-milestone:** `uploads-pending`
 
@@ -20,6 +20,7 @@ $ vtt write-file dist/output.txt built
 Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...
 ---
 vt run: remote-cache#build not uploaded to the remote cache: interrupted. (Run `vt run --last-details` for full details)
+[remote-cache] POST /fetch 404
 ```
 
 ## `vt run --last-details`
