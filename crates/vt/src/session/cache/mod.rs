@@ -26,9 +26,8 @@ use vt_plan::{
 use vt_str::Str;
 use wincode::{
     SchemaRead, SchemaReadOwned, SchemaWrite,
-    config::{ConfigCore, Configuration},
+    config::Configuration,
     error::{ReadResult, WriteResult},
-    io::{Reader, Writer},
 };
 
 use self::remote::{ReadError, RemoteClients, Restore, UploadError};
@@ -90,39 +89,6 @@ impl CacheEntryKey {
     }
 }
 
-/// wincode schema adapter for `Duration`.
-struct DurationSchema;
-
-// SAFETY: Writes exactly `size_of::<u64>() + size_of::<u32>()` bytes matching size_of.
-unsafe impl<C: ConfigCore> SchemaWrite<C> for DurationSchema {
-    type Src = Duration;
-
-    fn size_of(_src: &Self::Src) -> WriteResult<usize> {
-        Ok(size_of::<u64>() + size_of::<u32>())
-    }
-
-    fn write(mut writer: impl Writer, src: &Self::Src) -> WriteResult<()> {
-        <u64 as SchemaWrite<C>>::write(writer.by_ref(), &src.as_secs())?;
-        <u32 as SchemaWrite<C>>::write(writer.by_ref(), &src.subsec_nanos())?;
-        Ok(())
-    }
-}
-
-// SAFETY: Reads u64 + u32, matching the write format; dst is initialized on Ok.
-unsafe impl<'de, C: ConfigCore> SchemaRead<'de, C> for DurationSchema {
-    type Dst = Duration;
-
-    fn read(
-        mut reader: impl Reader<'de>,
-        dst: &mut std::mem::MaybeUninit<Self::Dst>,
-    ) -> ReadResult<()> {
-        let secs = <u64 as SchemaRead<'de, C>>::get(&mut reader)?;
-        let nanos = <u32 as SchemaRead<'de, C>>::get(&mut reader)?;
-        dst.write(Duration::new(secs, nanos));
-        Ok(())
-    }
-}
-
 /// Cached execution result for a task.
 ///
 /// Contains the post-run fingerprint (from fspy), captured outputs,
@@ -131,7 +97,6 @@ unsafe impl<'de, C: ConfigCore> SchemaRead<'de, C> for DurationSchema {
 pub struct CacheEntryValue {
     pub post_run_fingerprint: PostRunFingerprint,
     pub std_outputs: Arc<[StdOutput]>,
-    #[wincode(with = "DurationSchema")]
     pub duration: Duration,
     /// Hashes of explicit input files computed from positive globs.
     /// Files matching negative globs are already filtered out.

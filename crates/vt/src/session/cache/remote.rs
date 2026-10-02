@@ -519,6 +519,45 @@ mod tests {
         }
     }
 
+    /// Regression test for #780: decoding a duration whose nanoseconds carry
+    /// past `u64::MAX` seconds used to panic.
+    #[test]
+    fn value_with_an_overflowing_duration_is_a_corrupt_entry() {
+        /// `CacheEntryValue` with the duration's seconds and nanoseconds as
+        /// separate fields. Update it if `CacheEntryValue` changes.
+        #[derive(SchemaWrite)]
+        struct CacheEntryValueLayout {
+            post_run_fingerprint: PostRunFingerprint,
+            std_outputs: Arc<[StdOutput]>,
+            duration_secs: u64,
+            duration_nanos: u32,
+            globbed_inputs: BTreeMap<RelativePathBuf, u64>,
+            output_archive: Option<Str>,
+        }
+        let encode = |duration_nanos| {
+            let CacheEntryValue { post_run_fingerprint, std_outputs, globbed_inputs, .. } =
+                cache_value();
+            serialize_cache(&CacheEntryValueLayout {
+                post_run_fingerprint,
+                std_outputs,
+                duration_secs: u64::MAX,
+                duration_nanos,
+                globbed_inputs,
+                output_archive: None,
+            })
+            .unwrap()
+        };
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+
+        let fetched = Ok(Some(Fetched::Exact { value: encode(999_999_999), blob_id: None }));
+        let restore = resolve(fetched, &key, validate_against(BTreeMap::new())).unwrap();
+        assert_eq!(restore.value.duration, Duration::MAX);
+
+        let fetched = Ok(Some(Fetched::Exact { value: encode(1_000_000_000), blob_id: None }));
+        let miss = resolve(fetched, &key, not_validated).unwrap_err();
+        assert_eq!(read_failure(miss), "remote cache value is corrupt");
+    }
+
     #[test]
     fn blob_that_does_not_match_the_value_is_a_read_failure() {
         let key = cache_key(ResolvedGlobConfig::default_auto());
