@@ -1,0 +1,19 @@
+{
+  "tasks": {
+    "tagged": {
+      "command": "vtt replace-file-content tagged/sub/state.txt i !"
+    },
+    "untagged": {
+      "command": "vtt replace-file-content untagged/state.txt i !"
+    },
+    "invalid-signature": {
+      "command": "vtt replace-file-content invalid-signature/state.txt i !"
+    },
+    "tag-is-dir": {
+      "command": "vtt replace-file-content tag-is-dir/state.txt i !"
+    },
+    "tagged-write": {
+      "command": "vtt write-file tagged/out/built.txt built"
+    }
+  }
+}
