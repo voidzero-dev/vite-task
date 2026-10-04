@@ -9,7 +9,7 @@ remote-cache-server cbor-http POST /store --form-cbor "metadata={\"key\": 'A', \
 remote-cache-server cbor-http POST /fetch --cbor "{\"key\": 'A', \"secondary_key\": 'S'}"
 ```
 
-`remote-cache-server COMMAND [ARGS...]` starts the backend on a free loopback port and runs the command with `VP_REMOTE_CACHE_URL` set to the endpoint, `http://127.0.0.1:<port>/projects/test`. The fixed base path gives every endpoint a namespace path. The wrapper takes no options and passes all arguments to the command unchanged. The command inherits stdio. When it exits, the server stops and the wrapper exits with the command's exit code.
+`remote-cache-server COMMAND [ARGS...]` starts the backend on a free loopback port and runs the command with `VP_REMOTE_CACHE_URL` set to the endpoint, `http://127.0.0.1:<port>/projects/test`. The fixed base path gives every endpoint a namespace path. The wrapper takes no options and passes all arguments to the command unchanged. The command inherits stdio and handles Ctrl-C, which the wrapper ignores. When it exits, the server stops and the wrapper exits with the command's exit code.
 
 After the command exits, the wrapper prints one line to stderr for each request it served, in the order of the responses. Each line has the method, the path below the base path, and the status. Successful fetch responses add their kind:
 

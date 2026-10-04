@@ -1,10 +1,10 @@
 # ctrl_c_during_fetch
 
-## `vtt stalled-remote-cache vt run build`
+## `VP_REMOTE_CACHE_URL=http://127.0.0.1:0/projects/test vtt stalled-remote-cache --stall /fetch vt run build`
 
-The endpoint never responds. Ctrl-C stops the fetch, and the task doesn't start.
+The proxy never answers the fetch, so nothing needs to listen behind it. Ctrl-C stops the fetch, and the task doesn't start.
 
-**→ expect-milestone:** `request`
+**→ expect-milestone:** `stalled`
 
 ```
 ```

@@ -424,13 +424,20 @@ steps = [
   { argv = [
     "vtt",
     "stalled-remote-cache",
+    "--stall",
+    "/fetch",
     "vt",
     "run",
     "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE_URL",
+      "http://127.0.0.1:0/projects/test",
+    ],
   ], interactions = [
-    { "expect-milestone" = "request" },
+    { "expect-milestone" = "stalled" },
     { "write-key" = "ctrl-c" },
-  ], comment = "The endpoint never responds. Ctrl-C stops the fetch, and the task doesn't start." },
+  ], comment = "The proxy never answers the fetch, so nothing needs to listen behind it. Ctrl-C stops the fetch, and the task doesn't start." },
 ]
 
 [[e2e]]
@@ -439,8 +446,50 @@ steps = [
   { argv = [
     "vtt",
     "stalled-remote-cache",
+    "--stall",
+    "/fetch",
     "vt",
     "run",
     "fail-during-build",
-  ], comment = "The endpoint never responds. fail exits while build's fetch is in flight, which stops the fetch, and build doesn't start." },
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE_URL",
+      "http://127.0.0.1:0/projects/test",
+    ],
+  ], comment = "The proxy never answers the fetch. fail exits while build's fetch is in flight, which stops the fetch, and build doesn't start." },
+]
+
+[[e2e]]
+name = "ctrl_c_during_upload"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  { argv = [
+    "remote-cache-server",
+    "vtt",
+    "stalled-remote-cache",
+    "--stall",
+    "/store",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+  ], interactions = [
+    { "expect-milestone" = "stalled" },
+    { "write-key" = "ctrl-c" },
+  ], comment = "The proxy forwards the fetch to the backend, which has no entry, but never forwards the upload. Ctrl-C cancels it." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details show why build wasn't uploaded." },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "The entry is still in the local cache." },
 ]

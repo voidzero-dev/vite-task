@@ -16,6 +16,8 @@ const server = createCacheServer({
 server.listen(0, '127.0.0.1');
 await once(server, 'listening');
 const { port } = server.address() as AddressInfo;
+// Ctrl-C is left to the command.
+process.on('SIGINT', () => {});
 const child = spawn(command!, args, {
   stdio: 'inherit',
   env: { ...process.env, VP_REMOTE_CACHE_URL: `http://127.0.0.1:${port}${basePath}` },
