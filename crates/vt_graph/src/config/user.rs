@@ -412,6 +412,10 @@ impl ResolvedGlobalCacheConfig {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct UserRemoteCacheConfig {
     /// HTTP or HTTPS namespace endpoint. Overridden by `VP_REMOTE_CACHE_URL`.
+    ///
+    /// In a GitHub Actions job with `permissions: id-token: write`, uploads
+    /// authenticate with a GitHub Actions OIDC token whose audience is the
+    /// endpoint without a trailing slash.
     pub url: Arc<str>,
 }
 

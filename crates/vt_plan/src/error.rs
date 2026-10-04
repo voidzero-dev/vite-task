@@ -184,6 +184,10 @@ pub enum Error {
     #[error("Remote caching requires cache.remote.url or VP_REMOTE_CACHE_URL")]
     MissingRemoteCacheEndpoint,
 
+    /// The value isn't shown, since it can be a credential.
+    #[error("Invalid value for {0}: not valid UTF-8")]
+    NonUtf8RemoteCacheAuthEnv(&'static str),
+
     /// A cycle was detected in the task dependency graph during planning.
     ///
     /// This is caught by `AcyclicGraph::try_from_graph`, which validates that the

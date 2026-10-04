@@ -2,6 +2,8 @@
 //! bytes; the caller decides what they contain.
 
 pub mod auth;
+#[cfg(test)]
+mod test_server;
 
 use std::{sync::Arc, time::Duration};
 
@@ -314,16 +316,16 @@ async fn blob_part(path: &AbsolutePath) -> Result<Part, Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        io::{Read as _, Write as _},
-        net::TcpListener,
-    };
+    use std::{io::Read as _, net::TcpListener};
 
     use reqwest::header::{HeaderName, HeaderValue};
     use vt_path::AbsolutePathBuf;
 
     use super::*;
-    use crate::auth::{Anonymous, AuthHeaders};
+    use crate::{
+        auth::{Anonymous, AuthHeaders},
+        test_server::{contains, no_request_waiting, serve_once, serve_raw_once},
+    };
 
     fn store_url(endpoint: &str) -> Result<Url, Error> {
         route_url(&parse_endpoint(endpoint)?, "store")
@@ -423,48 +425,6 @@ mod tests {
             assert!(matches!(error, Error::MalformedResponse(_)), "{error:?}");
             assert_eq!(error.to_string(), "malformed response");
         }
-    }
-
-    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
-        haystack.windows(needle.len()).any(|window| window == needle)
-    }
-
-    /// Accept one HTTP request, respond with `status_line` and `body`, and
-    /// return the raw request.
-    fn serve_once(listener: &TcpListener, status_line: &str, body: &[u8]) -> Vec<u8> {
-        let headers = vt_str::format!("{status_line}\r\ncontent-length: {}\r\n\r\n", body.len());
-        serve_raw_once(listener, &[headers.as_bytes(), body].concat())
-    }
-
-    /// Accept one HTTP request, write `response`, close the connection, and
-    /// return the raw request.
-    fn serve_raw_once(listener: &TcpListener, response: &[u8]) -> Vec<u8> {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut request = Vec::new();
-        let mut buf = [0; 4096];
-        let header_end = loop {
-            let n = stream.read(&mut buf).unwrap();
-            assert_ne!(n, 0, "connection closed before the request headers ended");
-            request.extend_from_slice(&buf[..n]);
-            if let Some(pos) = request.windows(4).position(|window| window == b"\r\n\r\n") {
-                break pos + 4;
-            }
-        };
-        let content_length: usize = std::str::from_utf8(&request[..header_end])
-            .unwrap()
-            .lines()
-            .find_map(|line| {
-                let (name, value) = line.split_once(':')?;
-                name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse().unwrap())
-            })
-            .unwrap_or(0);
-        while request.len() < header_end + content_length {
-            let n = stream.read(&mut buf).unwrap();
-            assert_ne!(n, 0, "connection closed before the request body ended");
-            request.extend_from_slice(&buf[..n]);
-        }
-        stream.write_all(response).unwrap();
-        request
     }
 
     fn client_for(listener: &TcpListener) -> Client {
@@ -738,8 +698,7 @@ mod tests {
             assert_eq!(error.to_string(), "failed to authenticate");
             assert_eq!(std::error::Error::source(&error).unwrap().to_string(), "no credentials");
         }
-        listener.set_nonblocking(true).unwrap();
-        assert_eq!(listener.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        assert!(no_request_waiting(&listener));
     }
 
     /// Accept one connection and return the TLS record it starts with, which

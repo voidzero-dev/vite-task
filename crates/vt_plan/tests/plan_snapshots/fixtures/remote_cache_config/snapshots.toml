@@ -70,3 +70,17 @@ args = ["run", "siblings"]
 [[plan]]
 name = "sibling_endpoint_isolation"
 args = ["run", "endpoints"]
+
+# In a GitHub Actions job that can request OIDC tokens, stores authenticate
+# with a token whose audience is the endpoint without a trailing slash. The
+# request token is redacted.
+[[plan]]
+name = "github_oidc_auth"
+args = ["run", "build"]
+env = { "VP_REMOTE_CACHE_URL" = "https://cache.example/projects/test/", "ACTIONS_ID_TOKEN_REQUEST_URL" = "https://token.example/idtoken?api-version=2.0", "ACTIONS_ID_TOKEN_REQUEST_TOKEN" = "request-token" }
+
+# Without the request token, requests are anonymous.
+[[plan]]
+name = "github_oidc_auth_needs_request_token"
+args = ["run", "build"]
+env = { "ACTIONS_ID_TOKEN_REQUEST_URL" = "https://token.example/idtoken?api-version=2.0" }

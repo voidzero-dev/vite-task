@@ -5,6 +5,10 @@ use std::{error::Error as StdError, fmt, pin::Pin, sync::Arc};
 
 use reqwest::header::HeaderMap;
 
+mod github_oidc;
+
+pub use github_oidc::GithubOidc;
+
 /// The operation a request performs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {

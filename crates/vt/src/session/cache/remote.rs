@@ -30,7 +30,7 @@ use vt_plan::{
 };
 use vt_remote_cache::{
     Client, Download, Fetched,
-    auth::{Anonymous, Auth},
+    auth::{Anonymous, Auth, GithubOidc},
 };
 use vt_str::Str;
 use wincode::{
@@ -246,6 +246,11 @@ impl RemoteClients {
 fn build_auth(auth: &RemoteCacheAuth) -> Arc<dyn Auth> {
     match auth {
         RemoteCacheAuth::Anonymous => Arc::new(Anonymous),
+        RemoteCacheAuth::GithubOidc(github_oidc) => Arc::new(GithubOidc::new(
+            &github_oidc.request_url,
+            github_oidc.request_token.expose(),
+            &github_oidc.audience,
+        )),
     }
 }
 
@@ -426,7 +431,7 @@ mod tests {
     use vt_path::{AbsolutePathBuf, RelativePathBuf};
     use vt_plan::{
         cache_metadata::{EnvValueHash, SpawnFingerprint},
-        remote_cache::RemoteCacheAccess,
+        remote_cache::{GithubOidcAuth, RemoteCacheAccess, Secret},
     };
 
     use super::*;
@@ -765,12 +770,22 @@ mod tests {
             serve_stalled(b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\n\r\n");
         // Nothing can listen on port 0.
         let unreachable = anonymous("http://127.0.0.1:0/projects/test");
+        let github_oidc_unavailable = ResolvedRemoteCacheConfig {
+            auth: RemoteCacheAuth::GithubOidc(GithubOidcAuth {
+                request_url: Arc::from("http://127.0.0.1:0/token"),
+                request_token: Secret::new(Arc::from("request-token")),
+                audience: Arc::from("http://127.0.0.1:0/projects/test"),
+            }),
+            ..unreachable.clone()
+        };
         let clients = RemoteClients::default();
         let uploads = RemoteUploads::default();
 
-        for (remote_config, message) in
-            [(error_status, "HTTP status 500"), (unreachable, "network error")]
-        {
+        for (remote_config, message) in [
+            (error_status, "HTTP status 500"),
+            (unreachable, "network error"),
+            (github_oidc_unavailable, "failed to authenticate"),
+        ] {
             let error = Arc::new(OnceLock::new());
             uploads.spawn(prepare_upload(&clients, &remote_config).unwrap(), Arc::clone(&error));
             uploads.wait(&CancellationToken::new()).await;

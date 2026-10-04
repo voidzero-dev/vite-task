@@ -1,0 +1,48 @@
+// run build
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "build"
+      ],
+      "node": {
+        "items": [
+          {
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "remote_cache": {
+                      "access": "read",
+                      "url": "https://cache.example/projects/test/",
+                      "auth": {
+                        "kind": "github-oidc",
+                        "request_url": "https://token.example/idtoken?api-version=2.0",
+                        "request_token": "<redacted>",
+                        "audience": "https://cache.example/projects/test"
+                      }
+                    }
+                  },
+                  "spawn_command": {
+                    "spawn_envs": {
+                      "VP_REMOTE_CACHE_URL": "https://cache.example/projects/test/"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
