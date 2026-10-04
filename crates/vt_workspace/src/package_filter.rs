@@ -403,11 +403,17 @@ impl PackageQueryArgs {
                     PackageQuery::filters(Vec1::new(PackageFilter {
                         exclude: false,
                         selector: PackageSelector::Name(PackageNamePattern::Exact {
-                            name,
+                            name: name.clone(),
                             unique: true,
                         }),
                         traversal,
-                        source: None,
+                        // The specifier's package name is user-typed, so it
+                        // carries a source like a --filter token: a typo then
+                        // joins the unmatched-selector warning and the
+                        // --fail-if-no-match strict error instead of silently
+                        // emptying the graph (synthetic filters stay
+                        // source-less).
+                        source: Some(name),
                     })),
                     false,
                 ))
@@ -1241,6 +1247,35 @@ mod tests {
         let cwd = abs("/workspace");
         let f = parse_filter("@test/app...", cwd).unwrap();
         assert_eq!(f.source.as_deref(), Some("@test/app..."));
+    }
+
+    #[test]
+    fn specifier_package_name_sets_source() {
+        // `vp run <pkg>#<task>`: the explicit package name is user-typed, so the
+        // compiled filter must carry it as `source` — otherwise a typo'd package
+        // is skipped by the unmatched-selector warning and `--fail-if-no-match`,
+        // and the run silently exits 0.
+        let cwd: Arc<AbsolutePath> = Arc::from(abs("/workspace"));
+        let args = PackageQueryArgs {
+            recursive: false,
+            transitive: false,
+            workspace_root: false,
+            filters: Vec::new(),
+            fail_if_no_match: false,
+        };
+        let (query, _) = args.into_package_query(Some(Str::from("@test/app")), &cwd).unwrap();
+        match &query.0 {
+            crate::package_graph::PackageQueryKind::Filters(filters) => {
+                assert_eq!(filters.len(), 1);
+                assert_exact_name(&filters[0], "@test/app");
+                assert_eq!(
+                    filters[0].source.as_deref(),
+                    Some("@test/app"),
+                    "explicit specifier package must carry a source"
+                );
+            }
+            crate::package_graph::PackageQueryKind::All => panic!("expected Filters, got All"),
+        }
     }
 
     #[test]
