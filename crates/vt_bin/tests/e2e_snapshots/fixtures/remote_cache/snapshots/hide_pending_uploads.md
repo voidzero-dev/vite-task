@@ -4,7 +4,7 @@
 
 The proxy never forwards the upload. vt run waits for it until Ctrl-C, without the message about pending uploads.
 
-**→ expect-milestone:** `stalled`
+**→ expect-milestone:** `uploads-pending`
 
 ```
 $ vtt write-file dist/output.txt built

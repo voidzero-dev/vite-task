@@ -113,7 +113,6 @@ impl GraphExecutionReporter for SummaryGraphReporter {
     fn uploads_pending(&mut self, count: NonZeroUsize) {
         let _ = self.writer.write_all(&format_uploads_pending(count));
         let _ = self.writer.flush();
-        pty_terminal_test_client::mark_milestone("uploads-pending");
     }
 
     /// Called after the uploads to the remote cache finish, so their errors

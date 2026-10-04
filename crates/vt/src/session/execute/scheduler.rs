@@ -27,9 +27,10 @@ use crate::{
 };
 
 /// If set, the reporter isn't told about the uploads still running when the
-/// graph is done, so there is no message about them. Whether an upload is
-/// still running then depends on how fast the remote cache responds, so tests
-/// set this to keep their output stable.
+/// graph is done, so there is no message about them, but the `uploads-pending`
+/// milestone is still emitted. Whether an upload is still running then depends
+/// on how fast the remote cache responds, so tests set this to keep their
+/// output stable.
 const HIDE_PENDING_UPLOADS_ENV: &str = "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS";
 
 /// Holds shared references needed during graph execution.
@@ -291,10 +292,12 @@ impl Session<'_> {
         let hide_pending_uploads =
             self.envs.contains_key(EnvName::from_ref(OsStr::new(HIDE_PENDING_UPLOADS_ENV)));
         if !interrupt_token.is_cancelled()
-            && !hide_pending_uploads
             && let Some(pending) = NonZeroUsize::new(cache.pending_uploads())
         {
-            reporter.uploads_pending(pending);
+            if !hide_pending_uploads {
+                reporter.uploads_pending(pending);
+            }
+            pty_terminal_test_client::mark_milestone("uploads-pending");
         }
         cache.wait_for_uploads(&interrupt_token).await;
 

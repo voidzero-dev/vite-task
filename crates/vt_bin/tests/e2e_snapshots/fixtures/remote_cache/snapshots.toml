@@ -608,7 +608,7 @@ steps = [
       "1",
     ],
   ], interactions = [
-    { "expect-milestone" = "stalled" },
+    { "expect-milestone" = "uploads-pending" },
     { "write-key" = "ctrl-c" },
   ], comment = "The proxy never forwards the upload. vt run waits for it until Ctrl-C, without the message about pending uploads." },
 ]
