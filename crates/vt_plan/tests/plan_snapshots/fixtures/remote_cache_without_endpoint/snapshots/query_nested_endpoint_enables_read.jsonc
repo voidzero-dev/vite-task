@@ -26,7 +26,10 @@
                                 "cache_metadata": {
                                   "remote_cache": {
                                     "access": "read",
-                                    "url": "https://cache.example/projects/inner"
+                                    "url": "https://cache.example/projects/inner",
+                                    "auth": {
+                                      "kind": "anonymous"
+                                    }
                                   }
                                 }
                               }

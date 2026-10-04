@@ -26,7 +26,10 @@
                     },
                     "remote_cache": {
                       "access": "read",
-                      "url": "https://cache.example/projects/test"
+                      "url": "https://cache.example/projects/test",
+                      "auth": {
+                        "kind": "anonymous"
+                      }
                     }
                   },
                   "spawn_command": {

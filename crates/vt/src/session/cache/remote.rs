@@ -24,8 +24,14 @@ use rustc_hash::FxHashMap;
 use tokio::sync::mpsc;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use vt_path::AbsolutePath;
-use vt_plan::cache_metadata::ExecutionCacheKey;
-use vt_remote_cache::{Client, Download, Fetched};
+use vt_plan::{
+    cache_metadata::ExecutionCacheKey,
+    remote_cache::{RemoteCacheAuth, ResolvedRemoteCacheConfig},
+};
+use vt_remote_cache::{
+    Client, Download, Fetched,
+    auth::{Anonymous, Auth},
+};
 use vt_str::Str;
 use wincode::{
     SchemaWrite,
@@ -130,35 +136,49 @@ pub(super) fn resolve(
     }
 }
 
-/// Remote cache clients, each created when its endpoint is first used.
+/// An endpoint and the auth that its requests use. Each has its own client.
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct ClientKey {
+    url: Arc<str>,
+    auth: RemoteCacheAuth,
+}
+
+/// Remote cache clients, each created when its endpoint is first used with
+/// its auth.
 #[derive(Debug, Default)]
 pub struct RemoteClients {
-    clients: Mutex<FxHashMap<Arc<str>, Arc<Client>>>,
+    clients: Mutex<FxHashMap<ClientKey, Arc<Client>>>,
 }
 
 impl RemoteClients {
-    fn client(&self, endpoint: &Arc<str>) -> Result<Arc<Client>, vt_remote_cache::Error> {
+    fn client(
+        &self,
+        remote_config: &ResolvedRemoteCacheConfig,
+    ) -> Result<Arc<Client>, vt_remote_cache::Error> {
+        let key =
+            ClientKey { url: Arc::clone(&remote_config.url), auth: remote_config.auth.clone() };
         let mut clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(client) = clients.get(endpoint) {
+        if let Some(client) = clients.get(&key) {
             return Ok(Arc::clone(client));
         }
-        let client = Arc::new(Client::new(endpoint)?);
-        clients.insert(Arc::clone(endpoint), Arc::clone(&client));
+        let client = Arc::new(Client::new(&remote_config.url, build_auth(&remote_config.auth))?);
+        clients.insert(key, Arc::clone(&client));
         drop(clients);
         Ok(client)
     }
 
-    /// Fetch the entry stored under `cache_key`, falling back to the entry
-    /// last stored for `execution_cache_key`. Returns `None` if neither key
-    /// matched. Stops when `cancel_token` is cancelled.
+    /// Fetch the entry stored under `cache_key` in the remote cache that
+    /// `remote_config` configures, falling back to the entry last stored for
+    /// `execution_cache_key`. Returns `None` if neither key matched. Stops
+    /// when `cancel_token` is cancelled.
     pub(super) async fn fetch(
         &self,
-        endpoint: &Arc<str>,
+        remote_config: &ResolvedRemoteCacheConfig,
         cache_key: &CacheEntryKey,
         execution_cache_key: &ExecutionCacheKey,
         cancel_token: &CancellationToken,
     ) -> Result<Option<Fetched>, ReadError> {
-        let client = self.client(endpoint).map_err(ReadError::Fetch)?;
+        let client = self.client(remote_config).map_err(ReadError::Fetch)?;
         let key = encode_key(cache_key)?;
         let secondary_key = encode_key(execution_cache_key)?;
         cancel_token
@@ -168,18 +188,19 @@ impl RemoteClients {
             .map_err(ReadError::Fetch)
     }
 
-    /// Download the blob `blob_id` into `cache_dir`, checking that it decodes
-    /// as an output archive as it arrives. It's downloaded to a `.tmp` file,
-    /// which is renamed once the check passes and removed otherwise, such as
-    /// when `cancel_token` is cancelled. Returns the archive's file name.
+    /// Download the blob `blob_id` from the remote cache that `remote_config`
+    /// configures into `cache_dir`, checking that it decodes as an output
+    /// archive as it arrives. It's downloaded to a `.tmp` file, which is
+    /// renamed once the check passes and removed otherwise, such as when
+    /// `cancel_token` is cancelled. Returns the archive's file name.
     pub(super) async fn download_archive(
         &self,
-        endpoint: &Arc<str>,
+        remote_config: &ResolvedRemoteCacheConfig,
         blob_id: &str,
         cache_dir: &AbsolutePath,
         cancel_token: &CancellationToken,
     ) -> Result<Str, ReadError> {
-        let client = self.client(endpoint).map_err(ReadError::Download)?;
+        let client = self.client(remote_config).map_err(ReadError::Download)?;
         let archive_name = vt_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
         let archive_path = cache_dir.join(archive_name.as_str());
         let temp_path = cache_dir.join(vt_str::format!("{archive_name}.tmp").as_str());
@@ -196,19 +217,20 @@ impl RemoteClients {
     }
 
     /// Prepare to upload an entry that was just recorded locally, along with
-    /// its output archive in `cache_dir`: get the endpoint's client and encode
-    /// the entry. Nothing is sent until the returned future is polled, so an
-    /// invalid endpoint or an entry that doesn't encode fails here. The future
-    /// owns everything the upload needs, so it can run in a spawned task.
+    /// its output archive in `cache_dir`, to the remote cache that
+    /// `remote_config` configures: get its client and encode the entry.
+    /// Nothing is sent until the returned future is polled, so an invalid
+    /// endpoint or an entry that doesn't encode fails here. The future owns
+    /// everything the upload needs, so it can run in a spawned task.
     pub(super) fn prepare_upload(
         &self,
-        endpoint: &Arc<str>,
+        remote_config: &ResolvedRemoteCacheConfig,
         cache_key: &CacheEntryKey,
         execution_cache_key: &ExecutionCacheKey,
         cache_value: &CacheEntryValue,
         cache_dir: &AbsolutePath,
     ) -> Result<impl Future<Output = Result<(), UploadError>> + Send + use<>, UploadError> {
-        let client = self.client(endpoint)?;
+        let client = self.client(remote_config)?;
         let key = encode_key(cache_key)?;
         let secondary_key = encode_key(execution_cache_key)?;
         let value = serialize_cache(cache_value)?;
@@ -217,6 +239,13 @@ impl RemoteClients {
             client.store(&key, &secondary_key, &value, archive.as_deref()).await?;
             Ok(())
         })
+    }
+}
+
+/// The credentials that requests carry for `auth`.
+fn build_auth(auth: &RemoteCacheAuth) -> Arc<dyn Auth> {
+    match auth {
+        RemoteCacheAuth::Anonymous => Arc::new(Anonymous),
     }
 }
 
@@ -395,7 +424,10 @@ mod tests {
     use tokio::sync::oneshot;
     use vt_graph::config::ResolvedGlobConfig;
     use vt_path::{AbsolutePathBuf, RelativePathBuf};
-    use vt_plan::cache_metadata::{EnvValueHash, SpawnFingerprint};
+    use vt_plan::{
+        cache_metadata::{EnvValueHash, SpawnFingerprint},
+        remote_cache::RemoteCacheAccess,
+    };
 
     use super::*;
     use crate::session::{
@@ -604,14 +636,25 @@ mod tests {
         }
     }
 
+    /// A `read-write` remote cache at `url` without credentials.
+    fn anonymous(url: &str) -> ResolvedRemoteCacheConfig {
+        ResolvedRemoteCacheConfig {
+            access: RemoteCacheAccess::ReadWrite,
+            url: Arc::from(url),
+            auth: RemoteCacheAuth::Anonymous,
+        }
+    }
+
     /// Serve one request on a loopback endpoint: once the request head
     /// arrives, write `response`, then send nothing more and keep the
-    /// connection open until the client closes it. Returns the endpoint and a
-    /// receiver that resolves once `response` is written.
-    fn serve_stalled(response: &'static [u8]) -> (Arc<str>, oneshot::Receiver<()>) {
+    /// connection open until the client closes it. Returns the remote cache
+    /// there and a receiver that resolves once `response` is written.
+    fn serve_stalled(
+        response: &'static [u8],
+    ) -> (ResolvedRemoteCacheConfig, oneshot::Receiver<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let endpoint =
-            Arc::from(vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
+        let remote_config =
+            anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
         let (responded_sender, responded) = oneshot::channel();
         std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
@@ -626,20 +669,20 @@ mod tests {
             let _ = responded_sender.send(());
             while stream.read(&mut buf).is_ok_and(|n| n > 0) {}
         });
-        (endpoint, responded)
+        (remote_config, responded)
     }
 
     #[tokio::test]
     async fn failed_archive_check_stops_the_download() {
         // The response announces more than it sends, so only the failed check
         // can end the download.
-        let (endpoint, _) =
+        let (remote_config, _) =
             serve_stalled(b"HTTP/1.1 200 OK\r\ncontent-length: 1000\r\n\r\nnot an archive");
         let dir = tempfile::tempdir().unwrap();
         let cache_dir = AbsolutePathBuf::new(dir.path().to_path_buf()).unwrap();
 
         let error = RemoteClients::default()
-            .download_archive(&endpoint, "1", &cache_dir, &CancellationToken::new())
+            .download_archive(&remote_config, "1", &cache_dir, &CancellationToken::new())
             .await
             .unwrap_err();
         assert!(matches!(error, ReadError::CorruptArchive(_)), "{error:?}");
@@ -648,13 +691,13 @@ mod tests {
 
     #[tokio::test]
     async fn cancelling_stops_a_fetch() {
-        let (endpoint, requested) = serve_stalled(b"");
+        let (remote_config, requested) = serve_stalled(b"");
         let cancel_token = CancellationToken::new();
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
 
         let clients = RemoteClients::default();
-        let fetch = clients.fetch(&endpoint, &key, &execution_key, &cancel_token);
+        let fetch = clients.fetch(&remote_config, &key, &execution_key, &cancel_token);
         let (fetched, ()) = tokio::join!(fetch, async {
             requested.await.unwrap();
             cancel_token.cancel();
@@ -666,14 +709,14 @@ mod tests {
     async fn cancelling_stops_a_download_and_removes_it() {
         // The response announces a body that never arrives, so only
         // cancelling can end the download.
-        let (endpoint, responded) =
+        let (remote_config, responded) =
             serve_stalled(b"HTTP/1.1 200 OK\r\ncontent-length: 1000\r\n\r\n");
         let cancel_token = CancellationToken::new();
         let dir = tempfile::tempdir().unwrap();
         let cache_dir = AbsolutePathBuf::new(dir.path().to_path_buf()).unwrap();
 
         let clients = RemoteClients::default();
-        let download = clients.download_archive(&endpoint, "1", &cache_dir, &cancel_token);
+        let download = clients.download_archive(&remote_config, "1", &cache_dir, &cancel_token);
         let (downloaded, ()) = tokio::join!(download, async {
             responded.await.unwrap();
             // Cancel once the `.tmp` file exists, so the download has started
@@ -687,16 +730,17 @@ mod tests {
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
-    /// Prepare to upload an entry without an output archive to `endpoint`.
+    /// Prepare to upload an entry without an output archive to the remote
+    /// cache that `remote_config` configures.
     fn prepare_upload(
         clients: &RemoteClients,
-        endpoint: &Arc<str>,
+        remote_config: &ResolvedRemoteCacheConfig,
     ) -> Result<impl Future<Output = Result<(), UploadError>> + use<>, UploadError> {
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
         let value = CacheEntryValue { output_archive: None, ..cache_value() };
         let cache_dir = vt_path::current_dir().unwrap();
-        clients.prepare_upload(endpoint, &key, &execution_key, &value, &cache_dir)
+        clients.prepare_upload(remote_config, &key, &execution_key, &value, &cache_dir)
     }
 
     fn upload_error(error: &OnceLock<UploadError>) -> Option<Str> {
@@ -705,8 +749,8 @@ mod tests {
 
     #[test]
     fn upload_to_an_invalid_endpoint_fails_before_it_starts() {
-        let endpoint = Arc::from("cache.example/projects/test");
-        let Err(error) = prepare_upload(&RemoteClients::default(), &endpoint) else {
+        let remote_config = anonymous("cache.example/projects/test");
+        let Err(error) = prepare_upload(&RemoteClients::default(), &remote_config) else {
             panic!("an invalid endpoint should fail");
         };
         assert!(
@@ -720,15 +764,15 @@ mod tests {
         let (error_status, _) =
             serve_stalled(b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\n\r\n");
         // Nothing can listen on port 0.
-        let unreachable = Arc::from("http://127.0.0.1:0/projects/test");
+        let unreachable = anonymous("http://127.0.0.1:0/projects/test");
         let clients = RemoteClients::default();
         let uploads = RemoteUploads::default();
 
-        for (endpoint, message) in
+        for (remote_config, message) in
             [(error_status, "HTTP status 500"), (unreachable, "network error")]
         {
             let error = Arc::new(OnceLock::new());
-            uploads.spawn(prepare_upload(&clients, &endpoint).unwrap(), Arc::clone(&error));
+            uploads.spawn(prepare_upload(&clients, &remote_config).unwrap(), Arc::clone(&error));
             uploads.wait(&CancellationToken::new()).await;
             assert_eq!(uploads.pending(), 0);
             assert_eq!(upload_error(&error).as_deref(), Some(message));
@@ -737,11 +781,11 @@ mod tests {
 
     #[tokio::test]
     async fn interrupting_the_wait_cancels_the_uploads() {
-        let (endpoint, requested) = serve_stalled(b"");
+        let (remote_config, requested) = serve_stalled(b"");
         let clients = RemoteClients::default();
         let uploads = RemoteUploads::default();
         let error = Arc::new(OnceLock::new());
-        uploads.spawn(prepare_upload(&clients, &endpoint).unwrap(), Arc::clone(&error));
+        uploads.spawn(prepare_upload(&clients, &remote_config).unwrap(), Arc::clone(&error));
         requested.await.unwrap();
         assert_eq!(uploads.pending(), 1);
 

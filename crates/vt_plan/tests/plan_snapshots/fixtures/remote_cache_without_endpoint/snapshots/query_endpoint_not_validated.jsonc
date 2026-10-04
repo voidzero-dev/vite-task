@@ -15,7 +15,10 @@
                   "cache_metadata": {
                     "remote_cache": {
                       "access": "read",
-                      "url": "cache.example/projects/test"
+                      "url": "cache.example/projects/test",
+                      "auth": {
+                        "kind": "anonymous"
+                      }
                     }
                   }
                 }

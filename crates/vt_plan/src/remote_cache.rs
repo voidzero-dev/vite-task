@@ -1,5 +1,5 @@
 //! Remote cache settings: the mode requested with `--remote-cache` or
-//! `VP_REMOTE_CACHE`, and the access resolved from it for each `vp run` level.
+//! `VP_REMOTE_CACHE`, and the access and auth resolved for each `vp run` level.
 
 use std::{ffi::OsStr, sync::Arc};
 
@@ -32,13 +32,23 @@ impl RemoteCacheMode {
     }
 }
 
-/// Remote cache access and endpoint resolved for a `vp run` level from the
-/// requested mode, `VP_REMOTE_CACHE_URL`, and `cache.remote.url`.
+/// Remote cache access, endpoint, and auth resolved for a `vp run` level from
+/// the requested mode, `VP_REMOTE_CACHE_URL`, and `cache.remote.url`.
 #[derive(Debug, Clone, Serialize)]
 pub struct ResolvedRemoteCacheConfig {
     pub access: RemoteCacheAccess,
     /// Endpoint as configured. It is validated when the remote cache is used.
     pub url: Arc<str>,
+    pub auth: RemoteCacheAuth,
+}
+
+/// How requests to the remote cache authenticate. It holds everything needed
+/// to build the credentials, so nothing reads envs after planning.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum RemoteCacheAuth {
+    /// Requests carry no credentials.
+    Anonymous,
 }
 
 /// Remote cache access after resolution. `off` resolves to no remote cache.
@@ -80,18 +90,15 @@ pub(crate) fn resolve(
         None => configured_url.filter(|url| !url.is_empty()).cloned(),
     };
 
-    match (mode, url) {
-        (Some(RemoteCacheMode::Off), _) | (None, None) => Ok(None),
-        (Some(RemoteCacheMode::Read) | None, Some(url)) => {
-            Ok(Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::Read, url }))
-        }
-        (Some(RemoteCacheMode::ReadWrite), Some(url)) => {
-            Ok(Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::ReadWrite, url }))
-        }
+    let (access, url) = match (mode, url) {
+        (Some(RemoteCacheMode::Off), _) | (None, None) => return Ok(None),
+        (Some(RemoteCacheMode::Read) | None, Some(url)) => (RemoteCacheAccess::Read, url),
+        (Some(RemoteCacheMode::ReadWrite), Some(url)) => (RemoteCacheAccess::ReadWrite, url),
         (Some(RemoteCacheMode::Read | RemoteCacheMode::ReadWrite), None) => {
-            Err(Error::MissingRemoteCacheEndpoint)
+            return Err(Error::MissingRemoteCacheEndpoint);
         }
-    }
+    };
+    Ok(Some(ResolvedRemoteCacheConfig { access, url, auth: RemoteCacheAuth::Anonymous }))
 }
 
 #[cfg(test)]

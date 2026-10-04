@@ -1,18 +1,22 @@
 //! Client for the remote cache server API. Keys, values, and blobs are opaque
 //! bytes; the caller decides what they contain.
 
-use std::time::Duration;
+pub mod auth;
+
+use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use reqwest::{
     Response, StatusCode,
-    header::CONTENT_TYPE,
+    header::{CONTENT_TYPE, HeaderMap},
     multipart::{Form, Part},
 };
 use serde::{Deserialize, Serialize};
 use url::{ParseError, Url};
 use vt_path::AbsolutePath;
 use vt_str::Str;
+
+use crate::auth::{Auth, AuthError, Operation};
 
 /// Time allowed to establish a connection, including the TLS handshake.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -37,6 +41,10 @@ pub enum Error {
     /// The blob file couldn't be opened.
     #[error("failed to read the blob")]
     ReadBlob(#[source] std::io::Error),
+    /// The request's credentials couldn't be obtained, so it wasn't sent.
+    /// The source says why.
+    #[error("failed to authenticate")]
+    Auth(#[source] AuthError),
     /// No complete response arrived, for example because the connection
     /// failed, timed out, or closed before the whole body arrived. The source
     /// leaves out the request URL, because the endpoint may contain
@@ -124,6 +132,7 @@ pub enum Fetched {
 #[derive(Debug)]
 pub struct Client {
     http: reqwest::Client,
+    auth: Arc<dyn Auth>,
     fetch_url: Url,
     store_url: Url,
     /// `{endpoint}/blob`, to which each download appends a blob ID.
@@ -133,12 +142,13 @@ pub struct Client {
 impl Client {
     /// Create a client for `endpoint`, a base URL that may include a
     /// namespace path, such as `https://cache.example.com/projects/my-project`.
+    /// Each request carries the headers that `auth` supplies for it.
     ///
     /// # Errors
     ///
     /// Returns [`Error::InvalidEndpoint`] if `endpoint` isn't a usable URL, or
     /// [`Error::HttpClient`] if the HTTP client can't be created.
-    pub fn new(endpoint: &str) -> Result<Self, Error> {
+    pub fn new(endpoint: &str, auth: Arc<dyn Auth>) -> Result<Self, Error> {
         let endpoint = parse_endpoint(endpoint)?;
         let fetch_url = route_url(&endpoint, "fetch")?;
         let store_url = route_url(&endpoint, "store")?;
@@ -156,7 +166,11 @@ impl Client {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(Error::HttpClient)?;
-        Ok(Self { http, fetch_url, store_url, blob_url })
+        Ok(Self { http, auth, fetch_url, store_url, blob_url })
+    }
+
+    async fn auth_headers(&self, operation: Operation) -> Result<HeaderMap, Error> {
+        self.auth.headers(operation, &self.http).await.map_err(Error::Auth)
     }
 
     /// Fetch the entry stored under `key` with `POST {endpoint}/fetch`,
@@ -165,14 +179,16 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns an error if the request fails, the server responds with a
-    /// status other than 200 or 404, or the body of a 200 response isn't an
-    /// exact or fallback match.
+    /// Returns an error if the credentials can't be obtained, the request
+    /// fails, the server responds with a status other than 200 or 404, or the
+    /// body of a 200 response isn't an exact or fallback match.
     pub async fn fetch(&self, key: &[u8], secondary_key: &[u8]) -> Result<Option<Fetched>, Error> {
+        let headers = self.auth_headers(Operation::Fetch).await?;
         let body = encode_cbor(&FetchRequest { key, secondary_key });
         let response = self
             .http
             .post(self.fetch_url.clone())
+            .headers(headers)
             .header(CONTENT_TYPE, "application/cbor")
             .body(body)
             .send()
@@ -194,12 +210,13 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns an error if the request fails or the server responds with a
-    /// status other than 200.
+    /// Returns an error if the credentials can't be obtained, the request
+    /// fails, or the server responds with a status other than 200.
     pub async fn download(&self, blob_id: &str) -> Result<Download, Error> {
         let mut url = self.blob_url.clone();
         url.path_segments_mut().map_err(|()| Error::InvalidEndpoint(None))?.push(blob_id);
-        let response = self.http.get(url).send().await.map_err(network_error)?;
+        let headers = self.auth_headers(Operation::Download).await?;
+        let response = self.http.get(url).headers(headers).send().await.map_err(network_error)?;
         Ok(Download { response: check_status(response).await? })
     }
 
@@ -209,8 +226,9 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns an error if the blob file can't be opened, the request fails,
-    /// or the server responds with a status other than 200.
+    /// Returns an error if the credentials can't be obtained, the blob file
+    /// can't be opened, the request fails, or the server responds with a
+    /// status other than 200.
     pub async fn store(
         &self,
         key: &[u8],
@@ -218,6 +236,7 @@ impl Client {
         value: &[u8],
         blob: Option<&AbsolutePath>,
     ) -> Result<(), Error> {
+        let headers = self.auth_headers(Operation::Store).await?;
         let metadata = StoreMetadata { key, secondary_key, value };
         let mut form = Form::new().part("metadata", metadata_part(&metadata));
         if let Some(blob) = blob {
@@ -226,6 +245,7 @@ impl Client {
         let response = self
             .http
             .post(self.store_url.clone())
+            .headers(headers)
             .multipart(form)
             .send()
             .await
@@ -299,9 +319,11 @@ mod tests {
         net::TcpListener,
     };
 
+    use reqwest::header::{HeaderName, HeaderValue};
     use vt_path::AbsolutePathBuf;
 
     use super::*;
+    use crate::auth::{Anonymous, AuthHeaders};
 
     fn store_url(endpoint: &str) -> Result<Url, Error> {
         route_url(&parse_endpoint(endpoint)?, "store")
@@ -323,7 +345,8 @@ mod tests {
     fn rejects_endpoints_that_are_not_http_urls() {
         for endpoint in ["cache.example/projects/test", "ftp://cache.example", "mailto:a@b.example"]
         {
-            assert!(matches!(Client::new(endpoint), Err(Error::InvalidEndpoint(_))), "{endpoint}");
+            let client = Client::new(endpoint, Arc::new(Anonymous));
+            assert!(matches!(client, Err(Error::InvalidEndpoint(_))), "{endpoint}");
         }
     }
 
@@ -445,8 +468,12 @@ mod tests {
     }
 
     fn client_for(listener: &TcpListener) -> Client {
+        client_with_auth(listener, Arc::new(Anonymous))
+    }
+
+    fn client_with_auth(listener: &TcpListener, auth: Arc<dyn Auth>) -> Client {
         let port = listener.local_addr().unwrap().port();
-        Client::new(&vt_str::format!("http://127.0.0.1:{port}/projects/test")).unwrap()
+        Client::new(&vt_str::format!("http://127.0.0.1:{port}/projects/test"), auth).unwrap()
     }
 
     /// The `metadata` part of a store request for key `k`, secondary key `s`,
@@ -630,6 +657,91 @@ mod tests {
         server.join().unwrap();
     }
 
+    /// Adds an `x-operation` header that names the request's operation.
+    #[derive(Debug)]
+    struct NamesOperation;
+
+    impl Auth for NamesOperation {
+        fn headers<'a>(&'a self, operation: Operation, _: &'a reqwest::Client) -> AuthHeaders<'a> {
+            let name = match operation {
+                Operation::Fetch => "fetch",
+                Operation::Download => "download",
+                Operation::Store => "store",
+            };
+            let headers = HeaderMap::from_iter([(
+                HeaderName::from_static("x-operation"),
+                HeaderValue::from_static(name),
+            )]);
+            Box::pin(std::future::ready(Ok(headers)))
+        }
+    }
+
+    /// Run `send` with a client whose requests carry the headers from `auth`,
+    /// and return the request it sent. The server responds with 404.
+    async fn request_with_auth<F: Future<Output = ()>>(
+        auth: Arc<dyn Auth>,
+        send: impl FnOnce(Client) -> F,
+    ) -> Vec<u8> {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = client_with_auth(&listener, auth);
+        let server =
+            std::thread::spawn(move || serve_once(&listener, "HTTP/1.1 404 Not Found", b""));
+        send(client).await;
+        server.join().unwrap()
+    }
+
+    #[tokio::test]
+    async fn each_request_carries_the_auth_headers_for_its_operation() {
+        let auth: Arc<dyn Auth> = Arc::new(NamesOperation);
+        let fetch = request_with_auth(Arc::clone(&auth), |client| async move {
+            assert_eq!(client.fetch(b"k", b"s").await.unwrap(), None);
+        })
+        .await;
+        assert!(contains(&fetch, b"x-operation: fetch\r\n"));
+
+        let download = request_with_auth(Arc::clone(&auth), |client| async move {
+            client.download("7").await.unwrap_err();
+        })
+        .await;
+        assert!(contains(&download, b"x-operation: download\r\n"));
+
+        let store = request_with_auth(auth, |client| async move {
+            client.store(b"k", b"s", b"v", None).await.unwrap_err();
+        })
+        .await;
+        assert!(contains(&store, b"x-operation: store\r\n"));
+    }
+
+    /// Fails to supply credentials for every request.
+    #[derive(Debug)]
+    struct Unavailable;
+
+    impl Auth for Unavailable {
+        fn headers<'a>(&'a self, _: Operation, _: &'a reqwest::Client) -> AuthHeaders<'a> {
+            let error: AuthError = Arc::new(std::io::Error::other("no credentials"));
+            Box::pin(std::future::ready(Err(error)))
+        }
+    }
+
+    #[tokio::test]
+    async fn requests_without_credentials_are_not_sent() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = client_with_auth(&listener, Arc::new(Unavailable));
+
+        let errors = [
+            client.fetch(b"k", b"s").await.unwrap_err(),
+            client.download("7").await.unwrap_err(),
+            client.store(b"k", b"s", b"v", None).await.unwrap_err(),
+        ];
+        for error in errors {
+            assert!(matches!(error, Error::Auth(_)), "{error:?}");
+            assert_eq!(error.to_string(), "failed to authenticate");
+            assert_eq!(std::error::Error::source(&error).unwrap().to_string(), "no credentials");
+        }
+        listener.set_nonblocking(true).unwrap();
+        assert_eq!(listener.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+    }
+
     /// Accept one connection and return the TLS record it starts with, which
     /// is the `ClientHello`, then close the connection without responding.
     fn read_client_hello(listener: &TcpListener) -> Vec<u8> {
@@ -647,8 +759,11 @@ mod tests {
     async fn offers_http2_over_tls() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let client =
-            Client::new(&vt_str::format!("https://127.0.0.1:{port}/projects/test")).unwrap();
+        let client = Client::new(
+            &vt_str::format!("https://127.0.0.1:{port}/projects/test"),
+            Arc::new(Anonymous),
+        )
+        .unwrap();
         let server = std::thread::spawn(move || read_client_hello(&listener));
 
         let error = client.fetch(b"k", b"s").await.unwrap_err();
@@ -660,8 +775,8 @@ mod tests {
 
     #[tokio::test]
     async fn network_errors_leave_out_the_url() {
-        let client =
-            Client::new("http://user:password@127.0.0.1:0/projects/test?token=secret").unwrap();
+        let endpoint = "http://user:password@127.0.0.1:0/projects/test?token=secret";
+        let client = Client::new(endpoint, Arc::new(Anonymous)).unwrap();
 
         let error = client.fetch(b"k", b"s").await.unwrap_err();
         assert!(matches!(error, Error::Network(_)), "{error:?}");
