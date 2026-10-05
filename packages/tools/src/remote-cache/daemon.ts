@@ -13,8 +13,10 @@ import { basePath, serverFile, type ServerInfo } from './state.ts';
 
 // The process that `remote-cache-server start` leaves running for one e2e case.
 // It serves the backend at the endpoint through a tap that forwards requests
-// and responses unchanged and records a line for each response. A control
-// server hands those lines to `remote-cache-server run` and `stop`.
+// and responses unchanged and records a line for each response. Blob IDs in
+// the lines become numbers in upload order, so they're the same on every run.
+// A control server hands the lines to `remote-cache-server run` and `stop`,
+// and changes blobs for `remote-cache-server corrupt-blob`.
 
 const directory = process.argv[2]!;
 /** Stop after this long without requests, e.g. when a case timed out before its stop step. */
@@ -27,6 +29,8 @@ const backend = await startBackend({ basePath, directory });
 const requests: string[] = [];
 /** Problems on the backend's side, which make `stop` fail. */
 const anomalies: string[] = [];
+/** The ID of each stored blob, in upload order. Blob number `n` is at `n - 1`. */
+const blobs: string[] = [];
 let lastUse = Date.now();
 let stopping = false;
 
@@ -34,24 +38,29 @@ function endToEnd(headers: IncomingHttpHeaders): IncomingHttpHeaders {
   return Object.fromEntries(Object.entries(headers).filter(([name]) => !hopByHop.has(name)));
 }
 
-/** The kind of a successful fetch response. */
-function fetchKind(body: Buffer): string | undefined {
+/** The fields of a CBOR map. */
+function cborFields(body: Buffer): Record<string, unknown> {
   try {
     const value: unknown = decode(body);
-    if (typeof value === 'object' && value !== null && 'kind' in value) {
-      return typeof value.kind === 'string' ? value.kind : undefined;
-    }
+    if (typeof value === 'object' && value !== null) return value as Record<string, unknown>;
   } catch {
     // Not CBOR. vp reports the malformed response itself.
   }
-  return undefined;
+  return {};
+}
+
+/** `route` with a stored blob's ID replaced by its number. */
+function numbered(route: string): string {
+  const id = /^\/blob\/(.+)$/.exec(route)?.[1];
+  const index = id === undefined ? -1 : blobs.indexOf(id);
+  return index === -1 ? route : `/blob/${index + 1}`;
 }
 
 const tap = createServer((request, response) => {
   lastUse = Date.now();
   const path = new URL(request.url ?? '/', 'http://localhost').pathname;
   const route = path.startsWith(basePath) ? path.slice(basePath.length) : path;
-  const label = `${request.method} ${route}`;
+  const label = `${request.method} ${numbered(route)}`;
   let clientGone = false;
   const upstream = forward(
     `${backend.origin}${request.url}`,
@@ -60,13 +69,17 @@ const tap = createServer((request, response) => {
       const status = reply.statusCode!;
       if (status >= 500) anomalies.push(`${label} got ${status} from the backend`);
       response.writeHead(status, endToEnd(reply.headers));
+      // Fetch and store responses are small CBOR maps with the kind or blob ID.
       const chunks: Buffer[] = [];
-      if (route === '/fetch' && status === 200) {
+      if ((route === '/fetch' || route === '/store') && status === 200) {
         reply.on('data', (chunk: Buffer) => chunks.push(chunk));
       }
       reply.pipe(response);
       response.on('finish', () => {
-        const kind = chunks.length > 0 ? fetchKind(Buffer.concat(chunks)) : undefined;
+        const fields = chunks.length > 0 ? cborFields(Buffer.concat(chunks)) : {};
+        const blobId = fields['blob_id'];
+        if (route === '/store' && typeof blobId === 'string') blobs.push(blobId);
+        const kind = route === '/fetch' ? fields['kind'] : undefined;
         requests.push([label, status, kind].filter((part) => part !== undefined).join(' '));
       });
     },
@@ -93,8 +106,22 @@ const control = createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify(value));
   };
+  const corrupt = /^\/corrupt-blob\/(\d+)$/.exec(request.url ?? '')?.[1];
   if (request.method === 'POST' && request.url === '/take') {
     reply(requests.splice(0));
+  } else if (request.method === 'POST' && corrupt !== undefined) {
+    const id = blobs[Number(corrupt) - 1];
+    if (id === undefined) {
+      response.writeHead(404).end();
+      return;
+    }
+    backend.writeBlob(id, Buffer.from('corrupt')).then(
+      () => reply(null),
+      (error: unknown) => {
+        console.error(error);
+        response.writeHead(500).end();
+      },
+    );
   } else if (request.method === 'POST' && request.url === '/stop') {
     response.on('finish', () => void stop());
     reply({ requests: requests.splice(0), anomalies });
