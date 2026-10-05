@@ -1,12 +1,13 @@
 import { Busboy } from '@fastify/busboy';
 import { decode } from 'cbor2/decoder';
 import { encode } from 'cbor2/encoder';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, verify } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
+import { issuer, type repository, type TrustedKey } from './github.ts';
 
 interface Entry {
   value: string;
@@ -91,6 +92,51 @@ async function readParts(body: Buffer, contentType: string): Promise<Map<string,
   });
 }
 
+function decodePart(part: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(Buffer.from(part, 'base64url').toString());
+    return typeof value === 'object' && value !== null
+      ? (value as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The claims of `token`, if it's an RS256 JSON Web Token that `key` signed for
+ * GitHub's issuer and it's valid now, with the time bounds the service uses.
+ */
+function verifiedClaims(token: string, key: TrustedKey): Record<string, unknown> | undefined {
+  const [header, payload, signature] = token.split('.') as [string, string, string];
+  const protectedHeader = decodePart(header);
+  if (protectedHeader?.['alg'] !== 'RS256' || protectedHeader['kid'] !== key.kid) return undefined;
+  const signed = Buffer.from(`${header}.${payload}`);
+  if (!verify('sha256', signed, key.publicKey, Buffer.from(signature, 'base64url')))
+    return undefined;
+  const claims = decodePart(payload);
+  const [exp, nbf, iat] = [claims?.['exp'], claims?.['nbf'], claims?.['iat']];
+  const now = Date.now() / 1000;
+  if (
+    claims?.['iss'] !== issuer ||
+    !Number.isSafeInteger(exp) ||
+    !Number.isSafeInteger(nbf) ||
+    !Number.isSafeInteger(iat)
+  ) {
+    return undefined;
+  }
+  const [expires, notBefore, issued] = [exp as number, nbf as number, iat as number];
+  const valid =
+    expires > now &&
+    notBefore <= now + 30 &&
+    issued <= now + 30 &&
+    issued >= now - 930 &&
+    notBefore <= expires &&
+    issued < expires &&
+    expires - issued <= 900;
+  return valid ? claims : undefined;
+}
+
 function cbor(response: ServerResponse, value: unknown): void {
   response.writeHead(200, { 'content-type': 'application/cbor' });
   response.end(encode(value));
@@ -110,13 +156,25 @@ export interface Backend {
  * `directory`: entries and associations in `state.json`, and each blob in
  * `blobs/` under its ID, a random UUID. Keys, values, and blobs remain opaque
  * bytes. A fetch that matches neither key gets a plain-text 404.
+ *
+ * Like the public cache service, the backend only accepts a store with a
+ * GitHub Actions token whose audience is `endpoint`, for a push to the main
+ * branch of `registered`. It trusts tokens signed with `key` in place of
+ * GitHub's. It answers other stores as the service does: 401 for a missing or
+ * invalid token, and 403 for a token that the write policy doesn't allow.
  */
 export async function startBackend({
   basePath,
   directory,
+  endpoint,
+  key,
+  registered,
 }: {
   basePath: string;
   directory: string;
+  endpoint: string;
+  key: TrustedKey;
+  registered: typeof repository;
 }): Promise<Backend> {
   const stateFile = join(directory, 'state.json');
   const blobDirectory = join(directory, 'blobs');
@@ -124,6 +182,23 @@ export async function startBackend({
     ? JSON.parse(readFileSync(stateFile, 'utf8'))
     : { entries: {}, associations: {} };
   const entries = new Map(Object.entries(state.entries));
+
+  function authorize(authorization: string | undefined): void {
+    const token = /^Bearer ([\w-]+\.[\w-]+\.[\w-]+)$/i.exec(authorization ?? '')?.[1];
+    const claims = token === undefined ? undefined : verifiedClaims(token, key);
+    if (claims === undefined) throw new RequestError(401, 'Invalid credentials');
+    if (
+      claims['aud'] !== endpoint ||
+      claims['repository_id'] !== registered.id ||
+      claims['repository_owner_id'] !== registered.ownerId ||
+      claims['repository_visibility'] !== 'public' ||
+      claims['ref'] !== registered.branch ||
+      claims['ref_type'] !== 'branch' ||
+      claims['event_name'] !== 'push'
+    ) {
+      throw new RequestError(403, 'Write not permitted');
+    }
+  }
   const associations = new Map(Object.entries(state.associations));
 
   async function handle(
@@ -142,6 +217,7 @@ export async function startBackend({
       throw new RequestError(404, 'Route not found');
     }
 
+    if (path === `${basePath}/store`) authorize(request.headers.authorization);
     const contentType = request.headers['content-type'] ?? '';
     const body = await readBody(request);
     if (path === `${basePath}/fetch`) {

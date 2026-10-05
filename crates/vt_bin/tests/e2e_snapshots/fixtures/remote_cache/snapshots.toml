@@ -1,6 +1,8 @@
 # Cases that use the remote cache backend are ignored because it runs on
 # Node.js. Each of these cases starts its own backend first, runs commands
-# against it with `remote-cache-server run`, and stops it last. Whether an
+# against it with `remote-cache-server run`, and stops it last. The backend
+# only accepts uploads with a GitHub Actions token, so steps that upload run
+# with `--github-actions`, as a job of a push to the main branch. Whether an
 # upload to the backend is still running when the tasks finish depends on
 # timing, so steps that upload hide the message about pending uploads. The
 # cases that test it stall the uploads instead, with
@@ -16,6 +18,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -32,6 +35,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -58,6 +62,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -101,6 +106,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -128,6 +134,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -184,6 +191,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -236,6 +244,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -285,6 +294,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -345,6 +355,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -424,6 +435,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vtt",
     "stalled-remote-cache",
     "--stall",
@@ -646,6 +658,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vtt",
     "stalled-remote-cache",
     "--stall",
@@ -689,6 +702,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vtt",
     "stalled-remote-cache",
     "--stall",
@@ -722,6 +736,7 @@ steps = [
   { argv = [
     "remote-cache-server",
     "run",
+    "--github-actions",
     "vtt",
     "stalled-remote-cache",
     "--stall",

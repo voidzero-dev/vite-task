@@ -7,10 +7,11 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crossSpawn from 'cross-spawn';
+import { defaultRequestToken } from './github.ts';
 import { logFile, serverFile, stateDirectory, type ServerInfo } from './state.ts';
 
 const usage =
-  'Usage: remote-cache-server start | run COMMAND [ARGS...] | corrupt-blob NUMBER | stop';
+  'Usage: remote-cache-server start | run [--github-actions] COMMAND [ARGS...] | corrupt-blob NUMBER | stop';
 const directory = resolve(stateDirectory);
 
 function fail(message: string): never {
@@ -74,16 +75,21 @@ async function start(): Promise<void> {
   daemon.unref();
 }
 
-async function run([command, ...args]: string[]): Promise<void> {
+async function run(argv: string[]): Promise<void> {
+  const githubActions = argv[0] === '--github-actions';
+  const [command, ...args] = githubActions ? argv.slice(1) : argv;
   if (command === undefined) fail(usage);
   const info = readInfo();
+  const env: NodeJS.ProcessEnv = { ...process.env, VP_REMOTE_CACHE_URL: info.url };
+  if (githubActions) {
+    // As in a GitHub Actions job with `id-token: write`.
+    env['ACTIONS_ID_TOKEN_REQUEST_URL'] = info.tokenRequestUrl;
+    env['ACTIONS_ID_TOKEN_REQUEST_TOKEN'] ??= defaultRequestToken;
+  }
   // Ctrl-C is left to the command.
   process.on('SIGINT', () => {});
   // cross-spawn runs pnpm's `.cmd` shims on Windows.
-  const child = crossSpawn(command, args, {
-    stdio: 'inherit',
-    env: { ...process.env, VP_REMOTE_CACHE_URL: info.url },
-  });
+  const child = crossSpawn(command, args, { stdio: 'inherit', env });
   const [code] = (await once(child, 'exit')) as [number | null];
   printRequests(await control<string[]>(info, '/take'));
   process.exitCode = code;
