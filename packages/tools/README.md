@@ -28,17 +28,17 @@ The endpoint is a tap in front of the backend. It forwards every request and res
 [remote-cache] GET /blob/1 200
 ```
 
-Like the public cache service, the backend only accepts a store with a GitHub Actions token for a push to the main branch of its registered repository, whose audience is the endpoint. It answers other stores as the service does: `401` with `Invalid credentials` for a missing or invalid token, and `403` with `Write not permitted` for a token that the write policy doesn't allow. The stand-in signs tokens with a key that the backend trusts in place of GitHub's, for the workflow run that the request token stands for:
+The backend is [Vite+'s Cloudflare remote cache](https://github.com/voidzero-dev/vite-plus-remote-cache-cloudflare), at the commit that `package.json` pins, in workerd through Miniflare, with the compatibility settings, bindings, and limits in its `wrangler.jsonc`, and its namespaces limited to `test`. Like a deployment, its database has every migration applied, and the namespace is registered for the endpoint and the repository `owner/repository`. Responses follow [its protocol](https://github.com/voidzero-dev/vite-plus-remote-cache-cloudflare#protocol): for example, a fetch that matches no entry gets a `404`.
+
+It only accepts a store with a GitHub Actions token for a push to the main branch of the registered repository, whose audience is the endpoint. It answers other stores with `401` and `Invalid credentials` for a missing or invalid token, and `403` and `Write not permitted` for a token that the write policy doesn't allow. The Worker fetches GitHub's key set to verify tokens and gets the stand-in's key instead; any other outbound request fails. The stand-in signs tokens for the workflow run that the request token stands for:
 
 | Request token  | Workflow run                              |
 | -------------- | ----------------------------------------- |
 | `main-push`    | A push to `main` of `owner/repository`    |
 | `pull-request` | A pull request against `owner/repository` |
 
-The backend keeps its state in `remote-cache/`. `state.json` holds the entries and associations, with keys and values hex-encoded. Each blob is a file in `remote-cache/blobs/` named by its blob ID, a random UUID.
-
-The backend implements `POST /fetch`, `POST /store`, and `GET /blob/{blob_id}` from the [remote cache server API](https://github.com/voidzero-dev/vite-task/pull/713). A fetch that matches neither key gets a `404` with the plain-text body `Not found`. Keys, values, and blobs are opaque bytes without length limits. Writes need a token as described above.
+The Worker keeps its D1 database and R2 bucket in `remote-cache/state/`.
 
 Run `pnpm --filter vite-task-tools check` for type checking. Run `cargo test -p vt_bin --test e2e_snapshots -- remote_cache --ignored` for the snapshots that use the backend.
 
-Those snapshots are skipped on Windows because the PTY launcher cannot execute pnpm command shims.
+Those snapshots are skipped on Windows because the PTY launcher cannot execute pnpm command shims, and on musl because workerd's prebuilt binaries require glibc.

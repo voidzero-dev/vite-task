@@ -1,16 +1,18 @@
 # Cases that use the remote cache backend are ignored because it runs on
 # Node.js. Windows is skipped because the PTY launcher cannot execute pnpm
-# command shims. Each of these cases starts its own backend first, runs
-# commands against it with `remote-cache-server run`, and stops it last. The
-# backend only accepts uploads with a GitHub Actions token, so steps that
-# upload run with `--github-actions`, as a job of a push to the main branch.
-# Whether an upload to the backend is still running when the tasks finish
-# depends on timing, so steps that upload hide the message about pending
-# uploads. The cases that test it stall the uploads instead, with
-# stalled-remote-cache in front of the backend.
+# command shims, and musl because the backend runs Vite+'s Cloudflare remote
+# cache in workerd, whose prebuilt binaries require glibc. Each of these cases
+# starts its own backend first, runs commands against it with
+# `remote-cache-server run`, and stops it last. The backend only accepts
+# uploads with a GitHub Actions token, so steps that upload run with
+# `--github-actions`, as a job of a push to the main branch. Whether an upload
+# to the backend is still running when the tasks finish depends on timing, so
+# steps that upload hide the message about pending uploads. The cases that
+# test it stall the uploads instead, with stalled-remote-cache in front of the
+# backend.
 [[e2e]]
 name = "read_write"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -55,7 +57,7 @@ steps = [
 
 [[e2e]]
 name = "read"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -100,7 +102,7 @@ steps = [
 
 [[e2e]]
 name = "restore"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -186,7 +188,7 @@ steps = [
 
 [[e2e]]
 name = "local_and_remote_hits"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -240,7 +242,7 @@ steps = [
 
 [[e2e]]
 name = "fallback"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -291,7 +293,7 @@ steps = [
 
 [[e2e]]
 name = "corrupt_archive"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -353,7 +355,7 @@ steps = [
 
 [[e2e]]
 name = "restore_failure"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -434,7 +436,7 @@ steps = [
 
 [[e2e]]
 name = "pending_uploads"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -576,7 +578,7 @@ steps = [
 
 [[e2e]]
 name = "pull_request_upload"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -617,7 +619,7 @@ steps = [
 
 [[e2e]]
 name = "upload_without_token"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -734,7 +736,7 @@ steps = [
 
 [[e2e]]
 name = "ctrl_c_during_upload"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -779,7 +781,7 @@ steps = [
 
 [[e2e]]
 name = "fast_fail_during_upload"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
@@ -814,7 +816,7 @@ steps = [
 
 [[e2e]]
 name = "hide_pending_uploads"
-cfg = "not(windows)"
+cfg = 'not(any(windows, target_env = "musl"))'
 ignore = true
 steps = [
   [
