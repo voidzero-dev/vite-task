@@ -15,48 +15,86 @@ const fn is_whitespace(c: u8) -> bool {
 #[derive(Clone, Copy, Debug)]
 pub struct ParseShebangOptions {
     pub split_arguments: bool, // TODO: recursive
+    /// How many bytes of the file the kernel reads to find the shebang line.
+    pub max_line_len: usize,
+    /// Whether the line must end with a newline within `max_line_len` bytes.
+    ///
+    /// macOS refuses a script without one. Linux accepts it as long as the
+    /// interpreter path is followed by a space or tab, so only the
+    /// arguments can have been cut off.
+    pub require_newline: bool,
 }
 
-#[cfg_attr(
-    not(target_vendor = "apple"),
-    expect(
-        clippy::derivable_impls,
-        reason = "on macOS split_arguments defaults to true via cfg!, which is not derivable"
-    )
-)]
-impl Default for ParseShebangOptions {
-    fn default() -> Self {
-        Self { split_arguments: cfg!(target_vendor = "apple") }
+/// Size of the buffer the macOS kernel reads the shebang line into (`IMG_SHSIZE`).
+const MACOS_MAX_LINE_LEN: usize = 512;
+/// Size of the buffer the Linux kernel reads the shebang line into (`BINPRM_BUF_SIZE`).
+const LINUX_MAX_LINE_LEN: usize = 256;
+
+impl ParseShebangOptions {
+    #[must_use]
+    pub const fn macos() -> Self {
+        Self { split_arguments: true, max_line_len: MACOS_MAX_LINE_LEN, require_newline: true }
+    }
+
+    #[must_use]
+    pub const fn linux() -> Self {
+        Self { split_arguments: false, max_line_len: LINUX_MAX_LINE_LEN, require_newline: false }
     }
 }
 
+impl Default for ParseShebangOptions {
+    fn default() -> Self {
+        if cfg!(target_vendor = "apple") { Self::macos() } else { Self::linux() }
+    }
+}
+
+/// Parses the shebang line of the executable at `path` the way the kernel does.
+///
+/// Returns `ENOEXEC` where the kernel would refuse the script instead of
+/// running a truncated interpreter path.
+///
+/// # Panics
+///
+/// Panics if `options.max_line_len` is larger than 512.
 pub fn parse_shebang(
     mut peek_executable: impl FnMut(&Path, &mut [u8]) -> nix::Result<usize>,
     path: &Path,
     options: ParseShebangOptions,
 ) -> Result<Option<Shebang>, nix::Error> {
-    // https://lwn.net/Articles/779997/
-    // > The array used to hold the shebang line is defined to be 128 bytes in length
-    // TODO: check linux/macOS' kernel source
-    const PEEK_SIZE: usize = 128;
+    let mut buf = [0u8; MACOS_MAX_LINE_LEN];
+    let buf = &mut buf[..options.max_line_len];
 
-    let mut buf = [0u8; PEEK_SIZE];
+    let total_read_size = peek_executable(path, buf)?;
+    let buf = &buf[..total_read_size];
 
-    let total_read_size = peek_executable(path, &mut buf)?;
-
-    let Some(buf) = buf[..total_read_size].strip_prefix(b"#!") else {
+    let Some(line) = buf.strip_prefix(b"#!") else {
         return Ok(None);
     };
 
-    let Some(buf) = buf.split(|ch| matches!(*ch, b'\n')).next() else {
-        // https://github.com/torvalds/linux/blob/5723cc3450bccf7f98f227b9723b5c9f6b3af1c5/fs/binfmt_script.c#L59-L80
+    let line = if let Some(newline) = line.find_byte(b'\n') {
+        &line[..newline]
+    } else if options.require_newline {
         return Err(nix::Error::ENOEXEC);
+    } else if total_read_size < options.max_line_len {
+        // The whole file fits in the buffer, so nothing was cut off.
+        line
+    } else {
+        // https://github.com/torvalds/linux/blob/v6.12/fs/binfmt_script.c
+        // Like the kernel, keep the last byte of the buffer as a terminator.
+        let line = &line[..line.len() - 1];
+        // The interpreter path must be followed by a space or tab, or it may be cut off.
+        if !line.iter().skip_while(|ch| is_whitespace(**ch)).any(|ch| is_whitespace(*ch)) {
+            return Err(nix::Error::ENOEXEC);
+        }
+        line
     };
-    let buf = buf.trim_ascii();
-    let Some(interpreter) = buf.split(|ch| is_whitespace(*ch)).next() else {
-        return Ok(None);
-    };
-    let arguments_buf = buf[interpreter.len()..].trim_ascii_start().as_bstr();
+
+    let line = line.trim_ascii();
+    let interpreter = line.split(|ch| is_whitespace(*ch)).next().unwrap_or_default();
+    if interpreter.is_empty() {
+        return Err(nix::Error::ENOEXEC);
+    }
+    let arguments_buf = line[interpreter.len()..].trim_ascii_start().as_bstr();
 
     let arguments: Vec<BString> = if options.split_arguments {
         arguments_buf
@@ -228,3 +266,99 @@ pub fn parse_shebang(
 //         );
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    fn parse(content: &[u8], options: ParseShebangOptions) -> nix::Result<Option<Shebang>> {
+        parse_shebang(
+            |_, buf| {
+                let len = content.len().min(buf.len());
+                buf[..len].copy_from_slice(&content[..len]);
+                Ok(len)
+            },
+            Path::new("/script"),
+            options,
+        )
+    }
+
+    fn script_with_interpreter_len(len: usize) -> (Vec<u8>, Vec<u8>) {
+        let interpreter = [b"/".as_slice(), &vec![b'x'; len - 1]].concat();
+        let script = [b"#!".as_slice(), &interpreter, b"\necho hi\n"].concat();
+        (script, interpreter)
+    }
+
+    #[test]
+    fn keeps_interpreter_paths_longer_than_128_bytes() {
+        for options in [ParseShebangOptions::macos(), ParseShebangOptions::linux()] {
+            let (script, interpreter) = script_with_interpreter_len(200);
+            let shebang = parse(&script, options).unwrap().unwrap();
+            assert_eq!(shebang.interpreter, interpreter);
+        }
+    }
+
+    #[test]
+    fn macos_accepts_line_up_to_512_bytes() {
+        // "#!" + 509 bytes + "\n" is exactly 512 bytes.
+        let (script, interpreter) = script_with_interpreter_len(509);
+        let shebang = parse(&script, ParseShebangOptions::macos()).unwrap().unwrap();
+        assert_eq!(shebang.interpreter, interpreter);
+
+        let (script, _) = script_with_interpreter_len(510);
+        assert_eq!(parse(&script, ParseShebangOptions::macos()).unwrap_err(), nix::Error::ENOEXEC);
+    }
+
+    #[test]
+    fn macos_requires_newline() {
+        let result = parse(b"#!/bin/sh", ParseShebangOptions::macos());
+        assert_eq!(result.unwrap_err(), nix::Error::ENOEXEC);
+    }
+
+    #[test]
+    fn linux_accepts_line_up_to_256_bytes() {
+        // "#!" + 253 bytes + "\n" is exactly 256 bytes.
+        let (script, interpreter) = script_with_interpreter_len(253);
+        let shebang = parse(&script, ParseShebangOptions::linux()).unwrap().unwrap();
+        assert_eq!(shebang.interpreter, interpreter);
+
+        let (script, _) = script_with_interpreter_len(254);
+        assert_eq!(parse(&script, ParseShebangOptions::linux()).unwrap_err(), nix::Error::ENOEXEC);
+    }
+
+    #[test]
+    fn linux_accepts_missing_newline_at_end_of_file() {
+        let shebang = parse(b"#!/bin/sh -e", ParseShebangOptions::linux()).unwrap().unwrap();
+        assert_eq!(shebang.interpreter, "/bin/sh");
+        assert_eq!(shebang.arguments, vec![BString::from("-e")]);
+    }
+
+    #[test]
+    fn linux_refuses_truncated_interpreter() {
+        let (script, _) = script_with_interpreter_len(300);
+        assert_eq!(parse(&script, ParseShebangOptions::linux()).unwrap_err(), nix::Error::ENOEXEC);
+    }
+
+    #[test]
+    fn linux_truncates_long_arguments() {
+        let script = [b"#!/bin/sh ".as_slice(), &[b'a'; 300], b"\n"].concat();
+        let shebang = parse(&script, ParseShebangOptions::linux()).unwrap().unwrap();
+        assert_eq!(shebang.interpreter, "/bin/sh");
+        // 256-byte buffer, minus "#!/bin/sh " and the reserved last byte.
+        assert_eq!(shebang.arguments, vec![BString::from(vec![b'a'; 256 - 10 - 1])]);
+    }
+
+    #[test]
+    fn missing_interpreter_is_an_error() {
+        for options in [ParseShebangOptions::macos(), ParseShebangOptions::linux()] {
+            assert_eq!(parse(b"#!  \n", options).unwrap_err(), nix::Error::ENOEXEC);
+        }
+    }
+
+    #[test]
+    fn not_a_script() {
+        assert!(parse(b"\x7fELF", ParseShebangOptions::default()).unwrap().is_none());
+    }
+}

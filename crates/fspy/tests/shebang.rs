@@ -41,3 +41,37 @@ async fn spawn_sh_shebang() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn spawn_shebang_with_long_interpreter_path() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::TempDir::new()?;
+
+    // Kernels read 256 (Linux) or 512 (macOS) bytes of the shebang line, so a
+    // 200-byte interpreter path must be kept whole.
+    let mut interpreter = tmp_dir.path().to_path_buf();
+    while interpreter.as_os_str().len() < 150 {
+        interpreter.push("d".repeat(40));
+    }
+    fs::create_dir_all(&interpreter).await?;
+    interpreter.push("x".repeat(200 - interpreter.as_os_str().len() - 1));
+    assert_eq!(interpreter.as_os_str().len(), 200);
+    fs::symlink("/bin/sh", &interpreter).await?;
+
+    let script_path = tmp_dir.path().join("long_shebang.sh");
+    fs::write(&script_path, format!("#!{}\necho ok\n", interpreter.display())).await?;
+    fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).await?;
+    let script_path = script_path.into_os_string().into_string().unwrap();
+
+    let accesses = track_fn!(script_path, |script_path: String| {
+        let output = Command::new(&script_path)
+            .stdin(Stdio::null())
+            .output()
+            .expect("Failed to execute shebang script");
+        assert_eq!(output.stdout, b"ok\n", "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    })
+    .await?;
+
+    assert_contains(&accesses, &interpreter, AccessMode::READ);
+
+    Ok(())
+}
