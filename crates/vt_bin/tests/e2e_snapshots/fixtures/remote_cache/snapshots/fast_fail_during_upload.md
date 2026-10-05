@@ -1,6 +1,11 @@
 # fast_fail_during_upload
 
-## `VP_REMOTE_CACHE=read-write remote-cache-server vtt stalled-remote-cache --stall /store vt run fail-after-build`
+## `remote-cache-server start`
+
+```
+```
+
+## `VP_REMOTE_CACHE=read-write remote-cache-server run vtt stalled-remote-cache --stall /store vt run fail-after-build`
 
 The proxy never forwards the upload. fail-after-build exits after build finishes, which doesn't cancel build's upload, so vt run waits for it until Ctrl-C.
 
@@ -27,4 +32,9 @@ Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...
 ---
 vt run: 0/2 cache hit (0%), 1 failed. remote-cache#build not uploaded to the remote cache: interrupted. (Run `vt run --last-details` for full details)
 [remote-cache] POST /fetch 404
+```
+
+## `remote-cache-server stop`
+
+```
 ```
