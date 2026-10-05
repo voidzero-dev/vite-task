@@ -2,13 +2,11 @@
   "name": "vite-task-tools",
   "private": true,
   "bin": {
-    "cbor-http": "./src/cbor-http.ts",
     "remote-cache-server": "./src/remote-cache/cli.ts"
   },
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test src/*.test.ts"
+    "check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "catalog:",
@@ -19,7 +17,6 @@
     "@voidzero-dev/vite-task-client": "workspace:*",
     "astro": "catalog:",
     "bun": "catalog:",
-    "cbor-edn": "catalog:",
     "cbor2": "catalog:",
     "cross-env": "catalog:",
     "cross-spawn": "catalog:",

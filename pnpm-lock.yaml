@@ -36,9 +36,6 @@ catalogs:
     bun:
       specifier: 1.4.2
       version: 1.4.2
-    cbor-edn:
-      specifier: 0.2.2
-      version: 0.2.2
     cbor2:
       specifier: 1.12.0
       version: 1.12.0
@@ -143,9 +140,6 @@ importers:
       bun:
         specifier: 'catalog:'
         version: 1.4.2
-      cbor-edn:
-        specifier: 'catalog:'
-        version: 0.2.2
       cbor2:
         specifier: 'catalog:'
         version: 1.12.0
@@ -2199,15 +2193,6 @@ packages:
 
   caniuse-lite@1.0.30001820:
     resolution: {integrity: sha512-gfWD6MxqVCqAOwmODfZf7DchWvlrA+SRdNX7ceLfg3xRqe5ssjjpF7EgslC/0tiLiNTajdaNN/q8c/5u/7Gz8w==}
-
-  cbor-edn@0.2.2:
-    resolution: {integrity: sha512-/zu3hPQmrkHtHoW1Bp73pYRlIg1R34rNiP4L87FMI2EbBf7l0cO3B2W/rBx3W8mvqDh3Qc4cJy3DcAnVaamQPQ==}
-    engines: {node: '>=18.7'}
-    hasBin: true
-
-  cbor2@1.11.0:
-    resolution: {integrity: sha512-teHnpDGcDzwouFJgCJLpDY2zMaEOYvYDryd6sln67wPrCuObmwriG1NAA1w7rUIf/l++bNdts4U7WeVdYTGwLg==}
-    engines: {node: '>=18.7'}
 
   cbor2@1.12.0:
     resolution: {integrity: sha512-3Cco8XQhi27DogSp9Ri6LYNZLi/TBY/JVnDe+mj06NkBjW/ZYOtekaEU4wZ4xcRMNrFkDv8KNtOAqHyDfz3lYg==}
@@ -4871,12 +4856,6 @@ snapshots:
   cac@7.1.0: {}
 
   caniuse-lite@1.0.30001820: {}
-
-  cbor-edn@0.2.2:
-    dependencies:
-      cbor2: 1.11.0
-
-  cbor2@1.11.0: {}
 
   cbor2@1.12.0: {}
 
