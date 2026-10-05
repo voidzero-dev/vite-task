@@ -22,10 +22,10 @@ use super::{Auth, AuthError, AuthHeaders, Operation};
 /// arrives.
 const TOKEN_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// A token that expires within this time isn't reused. The server checks that
-/// the token is still valid when it publishes a store, and gives a store at
-/// most two minutes, so a store that starts with a reused token ends before
-/// the token expires.
+/// A token that expires within this time isn't reused. A server can check the
+/// token only once the whole store has arrived, as Cloudflare Workers do, and
+/// check it again when it publishes the store, so the token has to outlast the
+/// upload and the server's work on it.
 const REFRESH_MARGIN: Duration = Duration::from_secs(120);
 
 /// Authenticates stores with a GitHub Actions OIDC token, sent as
@@ -37,9 +37,16 @@ const REFRESH_MARGIN: Duration = Duration::from_secs(120);
 /// same request. Once a request fails, every later store fails the same way,
 /// without another request.
 pub struct GithubOidc {
-    /// How to request a token, or why the settings can't make a request.
-    request: Result<TokenRequest, AuthError>,
-    state: Mutex<TokenState>,
+    state: Mutex<State>,
+}
+
+/// What the next store does.
+enum State {
+    /// It reuses `token` if it's still fresh, and otherwise requests a new
+    /// one with `request`.
+    Ready { request: TokenRequest, token: Option<Token> },
+    /// It fails with this error, without a request.
+    Failed(AuthError),
 }
 
 impl GithubOidc {
@@ -51,39 +58,42 @@ impl GithubOidc {
     /// sent in a header, every store fails.
     #[must_use]
     pub fn new(request_url: &str, request_token: &str, audience: &str) -> Self {
-        let request = TokenRequest::new(request_url, request_token, audience)
-            .map_err(|err| -> AuthError { Arc::new(err) });
-        Self { request, state: Mutex::new(TokenState::Empty) }
+        let state = match TokenRequest::new(request_url, request_token, audience) {
+            Ok(request) => State::Ready { request, token: None },
+            Err(err) => State::Failed(Arc::new(err)),
+        };
+        Self { state: Mutex::new(state) }
     }
 
     /// The `Authorization` header for a store.
     async fn authorization(&self, http: &reqwest::Client) -> Result<HeaderValue, AuthError> {
-        let request = self.request.as_ref().map_err(Arc::clone)?;
         // The lock is held during the request, so concurrent stores wait for
         // its token instead of making their own requests.
         let mut state = self.state.lock().await;
-        match &*state {
-            TokenState::Failed(err) => return Err(Arc::clone(err)),
-            TokenState::Cached { authorization, refresh_at } if SystemTime::now() < *refresh_at => {
-                return Ok(authorization.clone());
-            }
-            TokenState::Empty | TokenState::Cached { .. } => {}
+        let (request, token) = match &mut *state {
+            State::Ready { request, token } => (request, token),
+            State::Failed(err) => return Err(Arc::clone(err)),
+        };
+        if let Some(token) = token.as_ref().filter(|token| SystemTime::now() < token.refresh_at) {
+            return Ok(token.authorization.clone());
         }
-        let sent = request.send(http).await.map_err(|err| -> AuthError { Arc::new(err) });
-        *state = match &sent {
-            Ok(token) => token.reuse(),
-            Err(err) => TokenState::Failed(Arc::clone(err)),
+        let authorization = match request.send(http).await {
+            Ok(fresh) => Ok(token.insert(fresh).authorization.clone()),
+            Err(err) => {
+                let err: AuthError = Arc::new(err);
+                *state = State::Failed(Arc::clone(&err));
+                Err(err)
+            }
         };
         drop(state);
-        sent.map(|token| token.authorization)
+        authorization
     }
 }
 
 impl fmt::Debug for GithubOidc {
     /// Leaves out the tokens.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let url = self.request.as_ref().ok().map(|request| request.url.as_str());
-        f.debug_struct("GithubOidc").field("url", &url).finish_non_exhaustive()
+        f.debug_struct("GithubOidc").finish_non_exhaustive()
     }
 }
 
@@ -97,16 +107,6 @@ impl Auth for GithubOidc {
             Ok(headers)
         })
     }
-}
-
-/// The token a store can reuse, if any.
-enum TokenState {
-    /// No token can be reused.
-    Empty,
-    /// The `Authorization` header with a token to reuse until `refresh_at`.
-    Cached { authorization: HeaderValue, refresh_at: SystemTime },
-    /// The last request failed, so every store fails with its error.
-    Failed(AuthError),
 }
 
 /// Why no token could be obtained. The messages name only the kind of
@@ -123,8 +123,8 @@ enum TokenError {
     Network(#[source] reqwest::Error),
     #[error("GitHub Actions OIDC token request failed with HTTP status {}", .0.as_u16())]
     Status(StatusCode),
-    /// The body isn't JSON with a token in `value`, or the token can't be
-    /// sent in a header.
+    /// The body isn't JSON with a token in `value`, the token has no `exp`
+    /// claim, or it can't be sent in a header.
     #[error("malformed GitHub Actions OIDC token response")]
     MalformedResponse,
 }
@@ -141,22 +141,8 @@ struct TokenRequest {
 struct Token {
     /// `Bearer <token>`.
     authorization: HeaderValue,
-    /// When the token expires, if it says.
-    expiry: Option<SystemTime>,
-}
-
-impl Token {
-    /// The state that lets later stores reuse this token until shortly
-    /// before it expires.
-    fn reuse(&self) -> TokenState {
-        self.expiry.and_then(|expiry| expiry.checked_sub(REFRESH_MARGIN)).map_or(
-            TokenState::Empty,
-            |refresh_at| TokenState::Cached {
-                authorization: self.authorization.clone(),
-                refresh_at,
-            },
-        )
-    }
+    /// When stores stop reusing the token: shortly before it expires.
+    refresh_at: SystemTime,
 }
 
 /// The body of a successful token response.
@@ -194,11 +180,11 @@ impl TokenRequest {
         let body = response.bytes().await.map_err(network_error)?;
         let TokenResponse { value } =
             serde_json::from_slice(&body).map_err(|_| TokenError::MalformedResponse)?;
-        if value.is_empty() {
-            return Err(TokenError::MalformedResponse);
-        }
+        let refresh_at = expiry(&value)
+            .and_then(|expiry| expiry.checked_sub(REFRESH_MARGIN))
+            .ok_or(TokenError::MalformedResponse)?;
         let authorization = bearer(&value).ok_or(TokenError::MalformedResponse)?;
-        Ok(Token { authorization, expiry: expiry(&value) })
+        Ok(Token { authorization, refresh_at })
     }
 }
 
@@ -384,25 +370,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn token_that_expires_soon_or_does_not_say_is_not_reused() {
-        for first in [jwt(Duration::from_secs(100), "a"), Str::from("opaque")] {
-            let endpoints = Endpoints::new();
-            let second = jwt(Duration::from_secs(300), "b");
-            let tokens = endpoints.serve_tokens(vec![
-                ("HTTP/1.1 200 OK", token_response(&first)),
-                ("HTTP/1.1 200 OK", token_response(&second)),
-            ]);
-            let stores = endpoints.serve_stores(2);
+    async fn token_that_expires_soon_is_not_reused() {
+        let endpoints = Endpoints::new();
+        let first = jwt(Duration::from_secs(100), "a");
+        let second = jwt(Duration::from_secs(300), "b");
+        let tokens = endpoints.serve_tokens(vec![
+            ("HTTP/1.1 200 OK", token_response(&first)),
+            ("HTTP/1.1 200 OK", token_response(&second)),
+        ]);
+        let stores = endpoints.serve_stores(2);
 
-            endpoints.store().await.unwrap();
-            endpoints.store().await.unwrap();
+        endpoints.store().await.unwrap();
+        endpoints.store().await.unwrap();
 
-            assert_eq!(tokens.join().unwrap().len(), 2);
-            let stores = stores.join().unwrap();
-            for (request, token) in stores.iter().zip([&first, &second]) {
-                let authorization = vt_str::format!("authorization: Bearer {token}\r\n");
-                assert!(contains(request, authorization.as_bytes()), "{first}");
-            }
+        assert_eq!(tokens.join().unwrap().len(), 2);
+        let stores = stores.join().unwrap();
+        for (request, token) in stores.iter().zip([&first, &second]) {
+            let authorization = vt_str::format!("authorization: Bearer {token}\r\n");
+            assert!(contains(request, authorization.as_bytes()));
         }
     }
 
@@ -432,15 +417,18 @@ mod tests {
     #[tokio::test]
     async fn malformed_token_responses_fail_the_store() {
         for body in [
-            b"not json".as_slice(),
-            b"{}",
-            br#"{"value":1}"#,
-            br#"{"value":""}"#,
-            // A token with a newline can't be sent in a header.
-            br#"{"value":"a\nb"}"#,
+            b"not json".to_vec(),
+            b"{}".to_vec(),
+            br#"{"value":1}"#.to_vec(),
+            br#"{"value":""}"#.to_vec(),
+            // Tokens without an `exp` claim.
+            br#"{"value":"opaque"}"#.to_vec(),
+            br#"{"value":"eyJhbGciOiJSUzI1NiJ9.e30.a"}"#.to_vec(),
+            // A token with a newline, escaped in JSON, can't be sent in a header.
+            token_response(&jwt(Duration::from_secs(300), "a\\nb")),
         ] {
             let endpoints = Endpoints::new();
-            let tokens = endpoints.serve_tokens(vec![("HTTP/1.1 200 OK", body.to_vec())]);
+            let tokens = endpoints.serve_tokens(vec![("HTTP/1.1 200 OK", body)]);
 
             let error = endpoints.store().await.unwrap_err();
             assert_eq!(
