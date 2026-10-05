@@ -1,6 +1,11 @@
 # corrupt_archive
 
-## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server vt run build`
+## `remote-cache-server start`
+
+```
+```
+
+## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server run vt run build`
 
 ```
 $ vtt write-file dist/output.txt built
@@ -21,7 +26,7 @@ Overwrite the stored archive.
 ```
 ```
 
-## `remote-cache-server vt run build`
+## `remote-cache-server run vt run build`
 
 The downloaded archive doesn't decode, so the task reruns.
 
@@ -56,6 +61,11 @@ Task Details:
 ## `vtt list-dir node_modules/.vite/task-cache --ext .tmp --recursive`
 
 The corrupt download was removed.
+
+```
+```
+
+## `remote-cache-server stop`
 
 ```
 ```

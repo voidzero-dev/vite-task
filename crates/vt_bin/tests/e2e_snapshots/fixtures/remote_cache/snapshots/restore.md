@@ -1,6 +1,11 @@
 # restore
 
-## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server vt run build`
+## `remote-cache-server start`
+
+```
+```
+
+## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server run vt run build`
 
 ```
 $ vtt write-file dist/output.txt built
@@ -19,7 +24,7 @@ $ vtt write-file dist/output.txt built
 ```
 ```
 
-## `VP_REMOTE_CACHE=read-write remote-cache-server vt run build`
+## `VP_REMOTE_CACHE=read-write remote-cache-server run vt run build`
 
 A remote hit downloads the output archive. Hits never upload.
 
@@ -40,7 +45,7 @@ The outputs are restored.
 built
 ```
 
-## `remote-cache-server vt run build`
+## `remote-cache-server run vt run build`
 
 The remote hit was recorded locally, so this is a local hit with no requests.
 
@@ -61,7 +66,7 @@ vt run: cache hit.
 ```
 ```
 
-## `remote-cache-server vt run build`
+## `remote-cache-server run vt run build`
 
 The exact entry fails validation, so the archive isn't downloaded.
 
@@ -69,4 +74,9 @@ The exact entry fails validation, so the archive isn't downloaded.
 $ vtt write-file dist/output.txt built ○ cache miss: 'src/a.txt' modified, executing
 
 [remote-cache] POST /fetch 200 exact
+```
+
+## `remote-cache-server stop`
+
+```
 ```
