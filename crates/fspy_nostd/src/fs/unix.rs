@@ -6,7 +6,7 @@ use bitflags::bitflags;
 use super::linux as imp;
 #[cfg(any(target_os = "linux", target_os = "none"))]
 pub use super::linux::readlinkat;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "freebsd"))]
 use super::mac as imp;
 #[cfg(target_os = "macos")]
 pub use super::mac::fcntl_getpath;
