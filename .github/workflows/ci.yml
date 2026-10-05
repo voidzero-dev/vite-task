@@ -90,6 +90,11 @@ jobs:
             cargo_cmd: cargo
             build_target: aarch64-apple-darwin
             shard: macos-arm64
+          - os: namespace-profile-windows-4c-8g
+            target: x86_64-pc-windows-msvc
+            cargo_cmd: cargo
+            build_target: x86_64-pc-windows-msvc
+            shard: windows
     runs-on: ${{ matrix.os }}
     steps: &test-steps
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
@@ -168,141 +173,6 @@ jobs:
       # its x64 browser so fspy can inject its x64 preload.
       PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac15
     steps: *test-steps
-
-  # Windows tests are cross-compiled on a fast Linux runner with cargo-xwin
-  # (clang-cl + lld-link against the xwin-downloaded MSVC CRT/Windows SDK)
-  # and packed into a portable nextest archive. The Windows runners then only
-  # download the archive and run it: no Rust toolchain or compilation on the
-  # slow runners. Two nextest partitions avoid most repeated setup while keeping
-  # enough parallelism for the Windows-heavy default test workload. The much
-  # smaller Node-backed ignored suite runs once in its own job, avoiding
-  # duplicate Windows Node setup.
-  build-windows-tests:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.code-changed == 'true'
-    name: Build Windows tests
-    runs-on: namespace-profile-linux-x64-default
-    env:
-      XWIN_ACCEPT_LICENSE: '1'
-      # The MSVC STL from xwin's VS17 manifest static-asserts a minimum Clang
-      # version newer than what runner images ship. Microsoft's documented
-      # escape hatch lets Detours (the only C++ in the workspace, and far older
-      # than any STL/clang concern here) compile with the system clang-cl.
-      # cargo-xwin folds a pre-set CXXFLAGS into the env it generates.
-      CXXFLAGS: -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH
-    steps:
-      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
-
-      - name: Update submodules
-        run: git submodule update --init --recursive
-
-      # llvm-tools provides llvm-ar in the toolchain's rustlib bin dir;
-      # cargo-xwin symlinks the MSVC-style llvm-lib/llvm-dlltool (used by cc-rs
-      # to archive Detours) and lld-link from there when the runner image has
-      # no system LLVM.
-      - uses: oxc-project/setup-rust@3d6fb132fbe7cdcb66bf8ec193911c2945369d12 # v1.0.17
-        with:
-          save-cache: ${{ github.ref_name == 'main' }}
-          cache-key: windows-cross
-          components: llvm-tools
-
-      - run: rustup target add x86_64-pc-windows-msvc
-
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
-        with:
-          tool: cargo-nextest,cargo-xwin
-
-      # Downloading and unpacking the MSVC CRT/Windows SDK dominates this
-      # job's wall time on a cold cache; the unpacked result is immutable for a
-      # given manifest version, so cache it. Bump the key when bumping the
-      # xwin version.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: xwin-cache
-        with:
-          path: ~/.cache/cargo-xwin
-          key: cargo-xwin-msvc-17
-
-      - name: Build test archive
-        run: |
-          # cargo-xwin resolves the rustflags configured in .cargo/config.toml,
-          # appends its -Lnative Windows SDK paths, and re-exports the result as
-          # CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS, so the plain cargo
-          # that nextest invokes cross-compiles exactly like `cargo xwin` would.
-          eval "$(cargo xwin env --target x86_64-pc-windows-msvc | grep '^export ')"
-          # `cargo xwin env` renders its intended *removal* of RUSTFLAGS as
-          # `export RUSTFLAGS="";` — actually remove it so it cannot shadow the
-          # target-specific rustflags set above.
-          unset RUSTFLAGS
-          cargo nextest archive --workspace --target x86_64-pc-windows-msvc --archive-file windows-tests.tar.zst
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: windows-test-archive
-          path: windows-tests.tar.zst
-          retention-days: 7
-
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: steps.xwin-cache.outputs.cache-hit != 'true'
-        with:
-          path: ~/.cache/cargo-xwin
-          key: cargo-xwin-msvc-17
-
-  test-windows:
-    needs: build-windows-tests
-    name: Test (${{ matrix.shard }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - shard: windows-1
-            partition: count:1/2
-            mode: default
-          - shard: windows-2
-            partition: count:2/2
-            mode: default
-          - shard: windows-ignored
-            partition: ''
-            mode: ignored
-    runs-on: namespace-profile-windows-4c-8g
-    env:
-      PARTITION: ${{ matrix.partition }}
-    steps:
-      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
-
-      # The Detours submodule is needed at run time: fspy_detours_sys's
-      # bindings test re-generates bindgen bindings against the checked-out
-      # headers.
-      - name: Update submodules
-        run: git submodule update --init --recursive
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: windows-test-archive
-
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
-        with:
-          tool: cargo-nextest
-
-      # The default (non-ignored) test set needs nothing beyond the test
-      # binaries themselves; this step verifies that contract before Node.js
-      # and pnpm enter the picture. `cargo-nextest` is invoked directly so the
-      # job never depends on the runner's Rust toolchain.
-      - name: Run tests
-        if: matrix.mode == 'default'
-        run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --partition "$PARTITION"
-
-      - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
-        if: matrix.mode == 'ignored'
-
-      - name: Install runtime binaries
-        if: matrix.mode == 'ignored'
-        run: pnpm --filter vite-task-tools rebuild --pending
-
-      - name: Run ignored tests
-        if: matrix.mode == 'ignored'
-        run: |
-          pnpm --filter vite-task-tools test
-          cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
 
   # Building without a Rust cache inside the Alpine container makes this one of
   # the slowest jobs, so pull requests run it only with the `ci: full` label.
@@ -412,8 +282,6 @@ jobs:
       - test
       - test-macos-x64
       - test-musl
-      - build-windows-tests
-      - test-windows
       - fmt
     steps:
       - run: exit 1
