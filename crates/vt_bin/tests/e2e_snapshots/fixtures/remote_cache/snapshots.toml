@@ -575,6 +575,83 @@ steps = [
 ]
 
 [[e2e]]
+name = "pull_request_upload"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+      "pull-request",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "The job runs for a pull request, so its token doesn't satisfy the write policy and the backend rejects the upload. The task succeeds." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details include the backend's message." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "upload_without_token"
+cfg = "not(windows)"
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "Outside GitHub Actions, the upload has no token, so the backend rejects it. The task succeeds." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details include the backend's message." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
 name = "read_invalid_endpoint"
 steps = [
   { argv = [
