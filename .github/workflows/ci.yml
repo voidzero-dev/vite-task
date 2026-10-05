@@ -71,6 +71,11 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.code-changed == 'true'
     name: Test (${{ matrix.shard }})
+    env:
+      # The steps, shared with `test-macos-x64`, read these instead of `matrix`.
+      TEST_TARGET: ${{ matrix.target }}
+      TEST_CARGO_CMD: ${{ matrix.cargo_cmd }}
+      TEST_BUILD_TARGET: ${{ matrix.build_target }}
     strategy:
       fail-fast: false
       matrix:
@@ -97,37 +102,37 @@ jobs:
           save-cache: ${{ github.ref_name == 'main' }}
           cache-key: test
 
-      - run: rustup target add ${{ matrix.target }}
+      - run: rustup target add $TEST_TARGET
 
       - run: rustup target add x86_64-unknown-linux-musl
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: env.TEST_TARGET == 'x86_64-unknown-linux-gnu'
 
       - run: pipx install cargo-zigbuild
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: env.TEST_TARGET == 'x86_64-unknown-linux-gnu'
 
       # pipx isolates cargo-zigbuild in its own venv, so its ziglang dependency
       # (which bundles zig) isn't on PATH. Install zig separately.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: env.TEST_TARGET == 'x86_64-unknown-linux-gnu'
 
       - name: Build tests
-        run: ${{ matrix.cargo_cmd }} test --no-run --target ${{ matrix.build_target }}
+        run: $TEST_CARGO_CMD test --no-run --target $TEST_BUILD_TARGET
 
       # Default `cargo test` runs only tests that need nothing beyond the
       # Rust toolchain; this step verifies that contract before Node.js
       # and pnpm enter the picture.
       - name: Run tests
-        run: ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }}
+        run: $TEST_CARGO_CMD test --target $TEST_BUILD_TARGET
 
       # x86_64-apple-darwin runs on arm64 runner under Rosetta; install x64 Node
       # so fspy's x86_64 preload dylib can be injected into spawned node procs.
       - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
         with:
-          architecture: ${{ matrix.target == 'x86_64-apple-darwin' && 'x64' || '' }}
+          architecture: ${{ env.TEST_TARGET == 'x86_64-apple-darwin' && 'x64' || '' }}
 
       - name: Install runtime binaries
         run: |
-          if [[ '${{ matrix.target }}' == 'x86_64-apple-darwin' ]]; then
+          if [[ "$TEST_TARGET" == 'x86_64-apple-darwin' ]]; then
             # Bun normally prefers the native arm64 binary under Rosetta, but
             # this job needs x64 Bun so the x64 preload dylib can be injected.
             PATH="$(dirname "$(command -v node)"):$PNPM_HOME:/usr/bin:/bin" \
@@ -137,13 +142,13 @@ jobs:
           fi
 
       - name: Install Chromium system dependencies
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: env.TEST_TARGET == 'x86_64-unknown-linux-gnu'
         run: pnpm --filter vite-task-tools exec playwright install-deps chromium
 
       - name: Run ignored tests
         run: |
           pnpm --filter vite-task-tools test
-          ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }} -- --ignored
+          $TEST_CARGO_CMD test --target $TEST_BUILD_TARGET -- --ignored
 
   # Running x64 binaries under Rosetta makes this the slowest job, so pull
   # requests run it only with the `ci: full` label.
@@ -152,21 +157,16 @@ jobs:
     if: >-
       needs.detect-changes.outputs.code-changed == 'true' &&
       (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci: full'))
-    name: Test (${{ matrix.shard }})
+    # No matrix: a skipped matrix job is listed under its unexpanded name.
+    name: Test (macos-x64)
+    runs-on: namespace-profile-mac-default
     env:
+      TEST_TARGET: x86_64-apple-darwin
+      TEST_CARGO_CMD: cargo
+      TEST_BUILD_TARGET: x86_64-apple-darwin
       # Playwright detects the physical Apple Silicon CPU under Rosetta. Force
       # its x64 browser so fspy can inject its x64 preload.
       PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac15
-    strategy:
-      # A single-entry matrix provides the `matrix` values the shared steps read.
-      matrix:
-        include:
-          - os: namespace-profile-mac-default
-            target: x86_64-apple-darwin
-            cargo_cmd: cargo
-            build_target: x86_64-apple-darwin
-            shard: macos-x64
-    runs-on: ${{ matrix.os }}
     steps: *test-steps
 
   # Windows tests are cross-compiled on a fast Linux runner with cargo-xwin
