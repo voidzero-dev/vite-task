@@ -5,7 +5,7 @@
 ```
 ```
 
-## `VP_REMOTE_CACHE=read-write remote-cache-server run vtt stalled-remote-cache --stall /store vt run all`
+## `VP_REMOTE_CACHE=read-write remote-cache-server run --github-actions vtt stalled-remote-cache --stall /store vt run all`
 
 The proxy never forwards the uploads. check doesn't wait for build's upload, so both are still running when check finishes, and vt run waits for them until Ctrl-C.
 
