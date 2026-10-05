@@ -1,6 +1,7 @@
 import { Busboy } from '@fastify/busboy';
 import { decode } from 'cbor2/decoder';
 import { encode } from 'cbor2/encoder';
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -14,7 +15,6 @@ interface Entry {
 
 /** The contents of `state.json`. Keys and values are hex-encoded. */
 interface State {
-  next_blob_id: number;
   entries: Record<string, Entry>;
   associations: Record<string, string>;
 }
@@ -100,14 +100,16 @@ function cbor(response: ServerResponse, value: unknown): void {
 export interface Backend {
   /** Where the backend listens, e.g. `http://127.0.0.1:1234`, without a path. */
   origin: string;
+  /** Replace the contents of the blob with ID `id`. */
+  writeBlob(id: string, contents: Uint8Array): Promise<void>;
   close(): Promise<void>;
 }
 
 /**
  * Start a test backend on a free loopback port that keeps its state in
  * `directory`: entries and associations in `state.json`, and each blob in
- * `blobs/` under its ID. Keys, values, and blobs remain opaque bytes. A fetch
- * that matches neither key gets a plain-text 404.
+ * `blobs/` under its ID, a random UUID. Keys, values, and blobs remain opaque
+ * bytes. A fetch that matches neither key gets a plain-text 404.
  */
 export async function startBackend({
   basePath,
@@ -120,10 +122,9 @@ export async function startBackend({
   const blobDirectory = join(directory, 'blobs');
   const state: State = existsSync(stateFile)
     ? JSON.parse(readFileSync(stateFile, 'utf8'))
-    : { next_blob_id: 1, entries: {}, associations: {} };
+    : { entries: {}, associations: {} };
   const entries = new Map(Object.entries(state.entries));
   const associations = new Map(Object.entries(state.associations));
-  let nextBlobId = state.next_blob_id;
 
   async function handle(
     request: IncomingMessage,
@@ -182,12 +183,11 @@ export async function startBackend({
     const key = toHex(fields.get('key')!);
     const blob = parts.get('blob');
     mkdirSync(blobDirectory, { recursive: true });
-    const blobId = blob === undefined ? null : String(nextBlobId++);
+    const blobId = blob === undefined ? null : randomUUID();
     if (blobId !== null) writeFileSync(join(blobDirectory, blobId), blob!);
     entries.set(key, { value: toHex(fields.get('value')!), blob_id: blobId });
     associations.set(toHex(fields.get('secondary_key')!), key);
     const saved: State = {
-      next_blob_id: nextBlobId,
       entries: Object.fromEntries(entries),
       associations: Object.fromEntries(associations),
     };
@@ -212,6 +212,7 @@ export async function startBackend({
   const { port } = server.address() as AddressInfo;
   return {
     origin: `http://127.0.0.1:${port}`,
+    writeBlob: async (id, contents) => writeFileSync(join(blobDirectory, id), contents),
     close: () =>
       new Promise((resolve) => {
         server.close(() => resolve());
