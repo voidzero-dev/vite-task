@@ -104,7 +104,7 @@ jobs:
 
       - uses: oxc-project/setup-rust@3d6fb132fbe7cdcb66bf8ec193911c2945369d12 # v1.0.17
         with:
-          save-cache: ${{ github.ref_name == 'main' || env.TEST_TARGET == 'x86_64-pc-windows-msvc' }}
+          save-cache: ${{ github.ref_name == 'main' }}
           cache-key: test
 
       - run: rustup target add $TEST_TARGET
