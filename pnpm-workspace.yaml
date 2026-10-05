@@ -13,9 +13,9 @@ minimumReleaseAgeExclude:
   - '@voidzero-dev/*'
 
 catalog:
-  '@anthropic-ai/sandbox-runtime': 0.0.77
+  '@anthropic-ai/sandbox-runtime': 0.0.78
   '@fastify/busboy': 3.2.2
-  '@openai/codex': 0.156.1
+  '@openai/codex': 0.160.0
   '@tsconfig/strictest': ^2.0.8
   '@types/node': 25.0.3
   '@playwright/browser-chromium': 1.63.0
@@ -45,7 +45,7 @@ overrides:
   # exercise the real vite-task-client integration. The global `vite: catalog:`
   # override above routes vite to the Vite+ toolchain fork, which does not carry
   # the integration — so scope vite-task-tools' `vite` to a real upstream build.
-  vite-task-tools>vite: 8.3.1
+  vite-task-tools>vite: 8.3.2
 peerDependencyRules:
   allowAny:
     - vite
