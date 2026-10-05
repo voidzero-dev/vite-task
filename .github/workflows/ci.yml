@@ -7,7 +7,9 @@ permissions:
 on:
   workflow_dispatch:
   pull_request:
-    types: [opened, synchronize]
+    # `labeled` reruns CI when a pull request gets the `ci: full` label, which
+    # adds the jobs that pull requests otherwise skip.
+    types: [opened, synchronize, labeled]
   push:
     branches:
       - main
@@ -69,10 +71,6 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.code-changed == 'true'
     name: Test (${{ matrix.shard }})
-    env:
-      # Playwright detects the physical Apple Silicon CPU under Rosetta. Force
-      # its x64 browser for the x86_64 shard so fspy can inject its x64 preload.
-      PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: ${{ matrix.target == 'x86_64-apple-darwin' && 'mac15' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -87,13 +85,8 @@ jobs:
             cargo_cmd: cargo
             build_target: aarch64-apple-darwin
             shard: macos-arm64
-          - os: namespace-profile-mac-default
-            target: x86_64-apple-darwin
-            cargo_cmd: cargo
-            build_target: x86_64-apple-darwin
-            shard: macos-x64
     runs-on: ${{ matrix.os }}
-    steps:
+    steps: &test-steps
       - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
 
       - name: Update submodules
@@ -151,6 +144,30 @@ jobs:
         run: |
           pnpm --filter vite-task-tools test
           ${{ matrix.cargo_cmd }} test --target ${{ matrix.build_target }} -- --ignored
+
+  # Running x64 binaries under Rosetta makes this the slowest job, so pull
+  # requests run it only with the `ci: full` label.
+  test-macos-x64:
+    needs: detect-changes
+    if: >-
+      needs.detect-changes.outputs.code-changed == 'true' &&
+      (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci: full'))
+    name: Test (${{ matrix.shard }})
+    env:
+      # Playwright detects the physical Apple Silicon CPU under Rosetta. Force
+      # its x64 browser so fspy can inject its x64 preload.
+      PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac15
+    strategy:
+      # A single-entry matrix provides the `matrix` values the shared steps read.
+      matrix:
+        include:
+          - os: namespace-profile-mac-default
+            target: x86_64-apple-darwin
+            cargo_cmd: cargo
+            build_target: x86_64-apple-darwin
+            shard: macos-x64
+    runs-on: ${{ matrix.os }}
+    steps: *test-steps
 
   # Windows tests are cross-compiled on a fast Linux runner with cargo-xwin
   # (clang-cl + lld-link against the xwin-downloaded MSVC CRT/Windows SDK)
@@ -287,9 +304,13 @@ jobs:
           pnpm --filter vite-task-tools test
           cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
 
+  # Building without a Rust cache inside the Alpine container makes this one of
+  # the slowest jobs, so pull requests run it only with the `ci: full` label.
   test-musl:
     needs: detect-changes
-    if: needs.detect-changes.outputs.code-changed == 'true'
+    if: >-
+      needs.detect-changes.outputs.code-changed == 'true' &&
+      (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci: full'))
     name: Test (musl)
     runs-on: namespace-profile-linux-x64-default
     container:
@@ -389,6 +410,7 @@ jobs:
     needs:
       - clippy
       - test
+      - test-macos-x64
       - test-musl
       - build-windows-tests
       - test-windows
