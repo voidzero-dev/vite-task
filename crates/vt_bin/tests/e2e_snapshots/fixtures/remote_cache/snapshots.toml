@@ -306,10 +306,9 @@ steps = [
     ],
   ] },
   { argv = [
-    "vtt",
-    "write-file",
-    "remote-cache/blobs/1",
-    "corrupt",
+    "remote-cache-server",
+    "corrupt-blob",
+    "1",
   ], comment = "Overwrite the stored archive." },
   [
     "vt",
