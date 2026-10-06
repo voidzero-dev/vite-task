@@ -1,0 +1,139 @@
+[[e2e]]
+name = "predicts_hits_and_misses"
+comment = """
+`--dry-run` reports each task's local cache result without running it. A task whose dependency isn't a hit is unknown. The dry run writes nothing, so it creates no cache and doesn't replace the last summary.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "test",
+  ], comment = "no cache yet: build misses, test is unknown" },
+  { argv = [
+    "vtt",
+    "stat-file",
+    "node_modules",
+  ], comment = "the dry run created no cache" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "populate the cache" },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "test",
+  ], comment = "both hit" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "src.txt",
+    "source",
+    "changed",
+  ], comment = "modify build's input" },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "test",
+  ], comment = "build misses with the reason, test is unknown" },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "test",
+  ], comment = "unchanged: the dry run didn't update the cache" },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "still the summary of the last real run" },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "the real run reports the same miss" },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "test",
+  ], comment = "both hit again" },
+]
+
+[[e2e]]
+name = "and_split_parts"
+comment = """
+A later `&&` part of a task is unknown when an earlier part isn't a hit.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "both",
+  ],
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "src.txt",
+    "source",
+    "changed",
+  ], comment = "modify an input of both parts" },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "both",
+  ], comment = "the first part misses, the second is unknown" },
+]
+
+[[e2e]]
+name = "cache_disabled"
+comment = """
+Tasks with caching off are reported as disabled, even when the cache has an entry.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "uncached",
+  ], comment = "cache: false" },
+  [
+    "vt",
+    "run",
+    "test",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--no-cache",
+    "test",
+  ], comment = "--no-cache turns caching off for every task" },
+]
+
+[[e2e]]
+name = "remote_cache_not_checked"
+comment = """
+The dry run only reads the local cache. It says so once when a remote cache is configured.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE_URL",
+      "cache.example/projects/test",
+    ],
+  ] },
+]
+
+[[e2e]]
+name = "conflicts_with_last_details"
+steps = [["vt", "run", "--dry-run", "--last-details"]]

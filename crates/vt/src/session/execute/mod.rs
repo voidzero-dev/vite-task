@@ -1,4 +1,5 @@
 mod cache_update;
+mod dry_run;
 pub mod fingerprint;
 pub mod glob;
 mod hash;

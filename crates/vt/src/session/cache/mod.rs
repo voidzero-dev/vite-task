@@ -20,7 +20,7 @@ pub use display::{
     SpawnFingerprintChange, detect_spawn_fingerprint_changes, format_input_change_str,
     format_spawn_change,
 };
-use rusqlite::{Connection, OptionalExtension as _};
+use rusqlite::{Connection, OpenFlags, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -318,6 +318,24 @@ impl ExecutionCache {
         })
     }
 
+    /// Open the cache database at `path` read-only, for `--dry-run`. Returns
+    /// `None` if there is no database yet. Nothing is created or written.
+    pub fn open_read_only(path: &AbsolutePath) -> anyhow::Result<Option<Self>> {
+        let db_path = path.join("cache.db");
+        if !db_path.as_path().exists() {
+            return Ok(None);
+        }
+        let conn = Connection::open_with_flags(
+            db_path.as_path(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        Ok(Some(Self {
+            conn: Mutex::new(conn),
+            remote_clients: RemoteClients::default(),
+            uploads: RemoteUploads::default(),
+        }))
+    }
+
     #[tracing::instrument]
     pub async fn save(self) -> anyhow::Result<()> {
         // do some cleanup in the future
@@ -348,7 +366,13 @@ impl ExecutionCache {
             .try_hit_local(cache_metadata, &cache_key, globbed_inputs, workspace_root)
             .await?
         {
-            Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Local })),
+            Ok(value) => {
+                // Associate the execution key to the cache entry key if not already,
+                // so that next time we can find it and report what changed
+                self.upsert_task_fingerprint(&cache_metadata.execution_cache_key, &cache_key)
+                    .await?;
+                return Ok(Ok(CacheHit { value, source: CacheHitSource::Local }));
+            }
             Err(miss) => miss,
         };
         #[expect(
@@ -385,6 +409,24 @@ impl ExecutionCache {
         }))
     }
 
+    /// Look up the task in the local cache without writing to it, for
+    /// `--dry-run`. Returns `Ok(Ok(_))` on a hit and `Ok(Err(miss))` otherwise.
+    /// The remote cache is never queried.
+    pub async fn peek_local(
+        &self,
+        cache_metadata: &CacheMetadata,
+        globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
+        workspace_root: &AbsolutePath,
+    ) -> anyhow::Result<Result<(), CacheMiss>> {
+        let cache_key = CacheEntryKey::from_metadata(cache_metadata);
+        Ok(self
+            .try_hit_local(cache_metadata, &cache_key, globbed_inputs, workspace_root)
+            .await?
+            .map(drop))
+    }
+
+    /// Look up the task in the local cache. Read-only: on a hit, the caller
+    /// decides whether to record the execution key.
     async fn try_hit_local(
         &self,
         cache_metadata: &CacheMetadata,
@@ -403,9 +445,6 @@ impl ExecutionCache {
             )? {
                 return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
             }
-            // Associate the execution key to the cache entry key if not already,
-            // so that next time we can find it and report what changed
-            self.upsert_task_fingerprint(execution_cache_key, cache_key).await?;
             return Ok(Ok(cache_value));
         }
 

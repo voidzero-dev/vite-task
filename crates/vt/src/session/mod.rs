@@ -130,6 +130,13 @@ impl vt_plan::PlanRequestParser for PlanRequestParser<'_> {
                         command.to_synthetic_plan_request(UserCacheConfig::disabled()),
                     )))
                 }
+                ResolvedCommand::Run(run_command) if run_command.dry_run => {
+                    // A nested `--dry-run` runs no tasks, so it isn't expanded into
+                    // the parent's graph.
+                    Ok(Some(PlanRequest::Synthetic(
+                        command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                    )))
+                }
                 ResolvedCommand::Run(run_command) => {
                     match run_command.into_query_plan_request(&command.cwd) {
                         Ok((query_plan_request, _)) => {
@@ -336,6 +343,10 @@ impl<'a> Session<'a> {
                     self.plan_from_query(qpr).await?
                 };
 
+                if run_command.dry_run {
+                    return self.dry_run(&graph).await.map_err(SessionError::from);
+                }
+
                 let workspace_path = self.workspace_path();
                 let writer: Box<dyn std::io::Write> = Box::new(std::io::stdout());
 
@@ -349,26 +360,12 @@ impl<'a> Session<'a> {
                     stderr: stderr_supports_color(),
                 };
 
-                let inner: Box<dyn reporter::GraphExecutionReporterBuilder> = match run_command
-                    .flags
-                    .log
-                {
-                    crate::cli::LogMode::Interleaved => Box::new(InterleavedReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                    )),
-                    crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                    )),
-                    crate::cli::LogMode::Grouped => Box::new(GroupedReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                    )),
-                };
+                let inner = log_reporter_builder(
+                    run_command.flags.log,
+                    Arc::clone(&workspace_path),
+                    writer,
+                    color_support,
+                );
 
                 let builder = Box::new(SummaryReporterBuilder::new(
                     inner,
@@ -874,4 +871,24 @@ fn stderr_supports_color() -> bool {
     use std::sync::OnceLock;
     static CACHE: OnceLock<bool> = OnceLock::new();
     *CACHE.get_or_init(|| supports_color::on(supports_color::Stream::Stderr).is_some())
+}
+
+/// Build the reporter for the `--log` mode.
+fn log_reporter_builder(
+    log: crate::cli::LogMode,
+    workspace_path: Arc<AbsolutePath>,
+    writer: Box<dyn std::io::Write>,
+    color_support: ColorSupport,
+) -> Box<dyn reporter::GraphExecutionReporterBuilder> {
+    match log {
+        crate::cli::LogMode::Interleaved => {
+            Box::new(InterleavedReporterBuilder::new(workspace_path, writer, color_support))
+        }
+        crate::cli::LogMode::Labeled => {
+            Box::new(LabeledReporterBuilder::new(workspace_path, writer, color_support))
+        }
+        crate::cli::LogMode::Grouped => {
+            Box::new(GroupedReporterBuilder::new(workspace_path, writer, color_support))
+        }
+    }
 }
