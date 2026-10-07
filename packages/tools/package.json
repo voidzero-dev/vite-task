@@ -10,22 +10,26 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "catalog:",
-    "@fastify/busboy": "catalog:",
+    "@cloudflare/workers-types": "5.20260911.1",
     "@openai/codex": "catalog:",
     "@playwright/browser-chromium": "catalog:",
     "@vitest/browser-playwright": "catalog:",
+    "@voidzero-dev/vite-plus-remote-cache-cloudflare": "github:voidzero-dev/vite-plus-remote-cache-cloudflare#43603a62673dd61619e72dfec4990fe7ac5da110",
     "@voidzero-dev/vite-task-client": "workspace:*",
     "bun": "catalog:",
     "cbor2": "catalog:",
     "cross-env": "catalog:",
     "deno": "catalog:",
+    "esbuild": "0.28.1",
+    "miniflare": "5.20260911.0-alpha",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "playwright": "catalog:",
     "typescript": "7.1.0-dev.20261001.1",
     "vite": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "wrangler": "4.131.1"
   },
   "devDependencies": {
     "vite-task-tools": "workspace:*"
