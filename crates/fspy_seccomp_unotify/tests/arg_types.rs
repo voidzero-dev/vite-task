@@ -51,7 +51,7 @@ async fn run_in_pre_exec(
 ) -> Result<Vec<Syscall>, Box<dyn Error>> {
     Ok(timeout(Duration::from_secs(5), async move {
         let mut cmd = Command::new("/bin/echo");
-        let supervisor = supervise::<SyscallRecorder>()?;
+        let supervisor = supervise(SyscallRecorder::default)?;
 
         let payload = supervisor.payload().clone();
 

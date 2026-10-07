@@ -1,4 +1,3 @@
-#[cfg(not(target_env = "musl"))]
 pub mod channel;
 mod ipc_path;
 use std::fmt::Debug;

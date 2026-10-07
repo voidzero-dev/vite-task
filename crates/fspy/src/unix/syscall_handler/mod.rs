@@ -9,33 +9,30 @@ use std::{
     io,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use fspy_seccomp_unotify::{
     impl_handler,
     supervisor::handler::arg::{CStrPtr, Caller, Fd},
 };
-use fspy_shared::ipc::{AccessMode, PathAccess};
-
-use crate::arena::PathAccessArena;
+use fspy_shared::ipc::{AccessMode, PathAccess, channel::Sender};
 
 const PATH_MAX: usize = libc::PATH_MAX as usize;
 
-#[derive(Debug)]
+/// Records the accesses of intercepted syscalls into the IPC channel.
+///
+/// The supervisor lets a syscall continue only after its handler returns, so
+/// every record is published before the access it describes, as the channel
+/// requires of its senders.
 pub struct SyscallHandler {
-    arena: PathAccessArena,
+    ipc_sender: Arc<Sender>,
     path_read_buf: [u8; PATH_MAX],
 }
 
-impl Default for SyscallHandler {
-    fn default() -> Self {
-        Self { arena: PathAccessArena::default(), path_read_buf: [0; PATH_MAX] }
-    }
-}
-
 impl SyscallHandler {
-    pub fn into_arena(self) -> PathAccessArena {
-        self.arena
+    pub const fn new(ipc_sender: Arc<Sender>) -> Self {
+        Self { ipc_sender, path_read_buf: [0; PATH_MAX] }
     }
 
     fn handle_open(
@@ -57,7 +54,7 @@ impl SyscallHandler {
             }
             path = Cow::Owned(resolved_path);
         }
-        self.arena.add(PathAccess {
+        self.ipc_sender.send(&PathAccess {
             mode: match flags & libc::O_ACCMODE {
                 libc::O_RDWR => AccessMode::READ | AccessMode::WRITE,
                 libc::O_WRONLY => AccessMode::WRITE,
@@ -68,9 +65,13 @@ impl SyscallHandler {
         Ok(())
     }
 
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "same receiver as `handle_open`, which writes `path_read_buf`"
+    )]
     fn handle_open_dir(&mut self, caller: Caller, fd: Fd) -> io::Result<()> {
         let path = fd.get_path(caller)?;
-        self.arena.add(PathAccess {
+        self.ipc_sender.send(&PathAccess {
             mode: AccessMode::READ_DIR,
             path: OsStr::from_bytes(path.as_bytes()).into(),
         });

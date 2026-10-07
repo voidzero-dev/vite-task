@@ -4,13 +4,15 @@ mod syscall_handler;
 #[cfg(target_os = "macos")]
 mod macos_artifacts;
 
+#[cfg(target_os = "linux")]
+use std::sync::Arc;
 use std::{io, path::Path};
 
 #[cfg(target_os = "linux")]
 use fspy_seccomp_unotify::supervisor::supervise;
-use fspy_shared::ipc::PathAccess;
 #[cfg(not(target_env = "musl"))]
-use fspy_shared::ipc::{IpcStr, channel::channel};
+use fspy_shared::ipc::IpcStr;
+use fspy_shared::ipc::{PathAccess, channel::channel};
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::{Payload, encode_payload},
@@ -22,9 +24,10 @@ use syscall_handler::SyscallHandler;
 use tokio::task::spawn_blocking;
 use tokio_util::sync::CancellationToken;
 
-#[cfg(not(target_env = "musl"))]
-use crate::ipc::ChannelAccesses;
-use crate::{ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError};
+use crate::{
+    ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError,
+    ipc::ChannelAccesses,
+};
 
 #[derive(Debug)]
 #[cfg_attr(
@@ -83,12 +86,17 @@ impl SpyImpl {
         mut command: Command,
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
-        #[cfg(target_os = "linux")]
-        let supervisor = supervise::<SyscallHandler>().map_err(SpawnError::Supervisor)?;
-
-        #[cfg(not(target_env = "musl"))]
         let ipc_receiver = channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)
             .map_err(SpawnError::ChannelCreation)?;
+
+        // The supervisor records the accesses it intercepts into the same
+        // channel as the preload library.
+        #[cfg(target_os = "linux")]
+        let supervisor = {
+            let ipc_sender = Arc::new(ipc_receiver.sender().map_err(SpawnError::ChannelCreation)?);
+            supervise(move || SyscallHandler::new(Arc::clone(&ipc_sender)))
+                .map_err(SpawnError::Supervisor)?
+        };
 
         let payload = Payload {
             #[cfg(not(target_env = "musl"))]
@@ -163,26 +171,15 @@ impl SpyImpl {
                     }
                 };
 
-                let arenas = std::iter::once(exec_resolve_accesses);
-                // Stop the supervisor and collect path accesses from it.
+                // Stop the supervisor before closing the channel, so the
+                // accesses it intercepted are all recorded in the channel.
                 #[cfg(target_os = "linux")]
-                let arenas = arenas.chain(
-                    supervisor
-                        .stop()
-                        .await?
-                        .into_iter()
-                        .map(syscall_handler::SyscallHandler::into_arena),
-                );
-                let arenas = arenas.collect::<Vec<_>>();
+                supervisor.stop().await?;
 
                 // Close the ipc channel after the child has exited.
                 // We are not interested in path accesses from descendants after the main child has exited.
-                #[cfg(not(target_env = "musl"))]
-                #[cfg(not(target_env = "musl"))]
                 let path_accesses = ChannelAccesses::try_from(ipc_receiver)
-                    .map(|ipc_accesses| PathAccessIterable { arenas, ipc_accesses });
-                #[cfg(target_env = "musl")]
-                let path_accesses = Ok(PathAccessIterable { arenas });
+                    .map(|ipc_accesses| PathAccessIterable { exec_resolve_accesses, ipc_accesses });
 
                 io::Result::Ok(ChildTermination { status, path_accesses })
             })
@@ -193,24 +190,19 @@ impl SpyImpl {
 }
 
 pub struct PathAccessIterable {
-    arenas: Vec<PathAccessArena>,
-    #[cfg(not(target_env = "musl"))]
+    exec_resolve_accesses: PathAccessArena,
     ipc_accesses: ChannelAccesses,
 }
 
 impl PathAccessIterable {
+    /// Iterates over the path accesses in the order they were made.
+    ///
+    /// Accesses made at the same time by different threads or processes
+    /// appear in an unspecified order relative to each other.
     pub fn iter(&self) -> impl Iterator<Item = PathAccess<'_>> {
-        let accesses_in_arena =
-            self.arenas.iter().flat_map(|arena| arena.borrow_accesses().iter()).copied();
-
-        #[cfg(not(target_env = "musl"))]
-        {
-            let accesses_in_shm = self.ipc_accesses.iter_path_accesses();
-            accesses_in_shm.chain(accesses_in_arena)
-        }
-        #[cfg(target_env = "musl")]
-        {
-            accesses_in_arena
-        }
+        // Resolving the program happens before the child is spawned.
+        let accesses_in_arena = self.exec_resolve_accesses.borrow_accesses().iter().copied();
+        let accesses_in_shm = self.ipc_accesses.iter_path_accesses();
+        accesses_in_arena.chain(accesses_in_shm)
     }
 }

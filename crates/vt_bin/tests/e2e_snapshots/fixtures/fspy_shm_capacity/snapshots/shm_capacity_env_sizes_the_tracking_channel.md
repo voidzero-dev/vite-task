@@ -4,8 +4,6 @@
 
 The task runs to the end anyway: recording must never stop the program doing the work, so the accesses past that go unrecorded and the process carries on to a clean exit, printing its last line. What the run cannot claim is that it saw every file the task touched, so it is not cached, and the second run says the same rather than replaying an entry built from part of a trace.
 
-Not on musl, which has no preload: those builds collect through the seccomp supervisor, on the runner's own side of the boundary, so they have no shared-memory channel to fill.
-
 ## `VP_RUN_INTERNAL_FSPY_SHM_CAPACITY=536936448 vt run -v stat`
 
 512 MiB of table and 64 KiB of room for records

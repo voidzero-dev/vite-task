@@ -1,6 +1,5 @@
 pub mod error;
 
-#[cfg(not(target_env = "musl"))]
 mod ipc;
 
 #[cfg(unix)]

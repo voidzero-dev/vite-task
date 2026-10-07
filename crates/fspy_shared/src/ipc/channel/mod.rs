@@ -12,7 +12,7 @@ use std::{env::temp_dir, ffi::OsStr, io, num::NonZeroUsize, path::PathBuf};
 use allocator_api2::alloc::Allocator;
 use fspy_nostd::Fat;
 use fspy_nostd_alloc::OsCString;
-use fspy_shm::Mapping;
+use fspy_shm::{Mapping, ShmHandle};
 use shm_io::{SealError, ShmReader, ShmWriter};
 
 /// Reads the committed frames of a sealed channel; borrows the shared
@@ -74,7 +74,7 @@ pub fn channel<A: Allocator>(capacity: usize, allocator: A) -> io::Result<Receiv
         ));
     }
 
-    Ok(Receiver { keeper, mapping })
+    Ok(Receiver { keeper, handle, mapping })
 }
 
 /// Encodes `path` as an owned NUL-terminated platform C string.
@@ -263,13 +263,15 @@ pub struct Receiver<A: Allocator> {
     /// Keeps the shared memory's backing file alive for as long as senders
     /// may attach.
     keeper: ShmKeeper<A>,
+    /// Maps the region again for senders in this process.
+    handle: ShmHandle,
     mapping: Mapping,
 }
 
-// SAFETY: `Receiver` only holds the mapping; it accesses it exclusively
-// through the `shm_io` protocol in `close`, which synchronizes with senders
-// via atomic operations. The mapping's address is stable and independently
-// owned.
+// SAFETY: `Receiver` only holds the mapping and the handle that maps it; it
+// accesses the mapping exclusively through the `shm_io` protocol in `close`,
+// which synchronizes with senders via atomic operations. The mapping's
+// address is stable and independently owned.
 unsafe impl<A: Allocator + Send> Send for Receiver<A> {}
 
 // SAFETY: see the `Send` impl.
@@ -281,6 +283,30 @@ impl<A: Allocator> Receiver<A> {
     #[must_use]
     pub fn conf(&self) -> ChannelConf<'_> {
         ChannelConf { shm_id: IpcStr::from_os_c_str(self.keeper.path.as_c_str()) }
+    }
+
+    /// Creates a sender in this process.
+    ///
+    /// The sender maps the region separately, so like a sender in another
+    /// process it stays usable after the receiver closes; its claims are
+    /// refused from then on.
+    ///
+    /// # Errors
+    ///
+    /// When the region cannot be mapped again.
+    ///
+    /// # Panics
+    ///
+    /// When the region cannot hold the protocol, which [`channel`] proved
+    /// it could.
+    pub fn sender(&self) -> io::Result<Sender> {
+        let mapping = self.handle.map().map_err(shm_error_to_io)?;
+        // SAFETY: `mapping` maps the region `channel` created
+        // zero-initialized and accessed only through the `shm_io` protocol
+        // since.
+        let writer = unsafe { ShmWriter::new(mapping, SLOTS) }
+            .expect("the shared-memory region cannot hold the channel");
+        Ok(Sender { writer })
     }
 
     /// Closes the channel and returns every committed frame, borrowed from
@@ -307,7 +333,8 @@ impl<A: Allocator> Receiver<A> {
     /// When the region cannot hold the protocol, which [`channel`] proved
     /// it could before any sender saw it.
     pub fn close(self) -> Result<FrameReader, RecordsLost> {
-        let Self { keeper, mapping } = self;
+        let Self { keeper, handle, mapping } = self;
+        drop(handle);
         // SAFETY: `mapping` was created zero-initialized by `channel`, its
         // address is stable and independently owned, and all attached
         // processes access it only through the `shm_io` protocol.
@@ -505,6 +532,37 @@ mod tests {
 
         assert!(
             sender.writer.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap_err()
+                == shm_io::ClaimError::Closed
+        );
+    }
+
+    /// A sender the receiver creates in its own process writes into the
+    /// same region as senders in other processes, and like an attached
+    /// sender it outlives the close with every claim refused.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn receiver_sender_shares_the_region_with_other_processes() {
+        let receiver = channel(CAPACITY, Global).unwrap();
+        let local_sender = receiver.sender().unwrap();
+
+        let mut frame = local_sender.writer.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap();
+        frame.copy_from_slice(&[4, 2]);
+        frame.finish();
+
+        let conf = wincode::serialize(&receiver.conf()).unwrap();
+        let cmd = command_for_fn!(conf, |conf: Vec<u8>| {
+            let conf: ChannelConf = wincode::deserialize(&conf).unwrap();
+            let sender = conf.sender(Global).unwrap();
+            let mut frame = sender.writer.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap();
+            frame.copy_from_slice(&[2, 4]);
+            frame.finish();
+        });
+        assert!(std::process::Command::from(cmd).status().unwrap().success());
+
+        let frames = receiver.close().unwrap();
+        assert!(frames.iter().collect::<Vec<_>>() == [&[4, 2], &[2, 4]]);
+
+        assert!(
+            local_sender.writer.claim_frame(NonZeroUsize::new(2).unwrap()).unwrap_err()
                 == shm_io::ClaimError::Closed
         );
     }

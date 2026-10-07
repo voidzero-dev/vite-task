@@ -57,12 +57,18 @@ impl<H> Supervisor<H> {
 
 /// Creates a new supervisor that listens for seccomp user notifications.
 ///
+/// `new_handler` creates the handler for each notification fd a target
+/// process sends.
+///
 /// # Panics
 /// Panics if the seccomp filter cannot be compiled or the target architecture is unsupported.
 ///
 /// # Errors
 /// Returns an error if the temporary IPC socket cannot be created.
-pub fn supervise<H: SeccompNotifyHandler + Default + Send + 'static>() -> io::Result<Supervisor<H>>
+pub fn supervise<H, F>(mut new_handler: F) -> io::Result<Supervisor<H>>
+where
+    H: SeccompNotifyHandler + Send + 'static,
+    F: FnMut() -> H + Send + 'static,
 {
     let notify_listener = tempfile::Builder::new()
         .prefix("fspy_seccomp_notify")
@@ -104,7 +110,7 @@ pub fn supervise<H: SeccompNotifyHandler + Default + Send + 'static>() -> io::Re
             let notify_fd = unsafe { OwnedFd::from_raw_fd(notify_fd) };
             let mut listener = NotifyListener::try_from(notify_fd)?;
 
-            let mut handler = H::default();
+            let mut handler = new_handler();
             let mut resp_buf = alloc_seccomp_notif_resp();
 
             join_set.spawn(async move {

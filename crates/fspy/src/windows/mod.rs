@@ -36,6 +36,10 @@ pub struct PathAccessIterable {
 }
 
 impl PathAccessIterable {
+    /// Iterates over the path accesses in the order they were made.
+    ///
+    /// Accesses made at the same time by different threads or processes
+    /// appear in an unspecified order relative to each other.
     pub fn iter(&self) -> impl Iterator<Item = PathAccess<'_>> {
         self.ipc_accesses.iter_path_accesses()
     }
