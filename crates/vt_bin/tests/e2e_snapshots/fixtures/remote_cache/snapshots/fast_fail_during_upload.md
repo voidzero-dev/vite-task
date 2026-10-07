@@ -5,7 +5,7 @@
 ```
 ```
 
-## `VP_REMOTE_CACHE=read-write remote-cache-server run vtt stalled-remote-cache --stall /store vt run fail-after-build`
+## `VP_REMOTE_CACHE=read-write remote-cache-server run --github-actions vtt stalled-remote-cache --stall /store vt run fail-after-build`
 
 The proxy never forwards the upload. fail-after-build exits after build finishes, which doesn't cancel build's upload, so vt run waits for it until Ctrl-C.
 

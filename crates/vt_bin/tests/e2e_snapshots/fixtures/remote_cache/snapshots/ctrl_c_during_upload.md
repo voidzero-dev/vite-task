@@ -5,7 +5,7 @@
 ```
 ```
 
-## `VP_REMOTE_CACHE=read-write remote-cache-server run vtt stalled-remote-cache --stall /store vt run build`
+## `VP_REMOTE_CACHE=read-write remote-cache-server run --github-actions vtt stalled-remote-cache --stall /store vt run build`
 
 The proxy forwards the fetch to the backend, which has no entry, but never forwards the upload. Ctrl-C cancels it while vt run waits.
 
