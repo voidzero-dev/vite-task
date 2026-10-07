@@ -146,9 +146,7 @@ jobs:
         run: pnpm --filter vite-task-tools exec playwright install-deps chromium
 
       - name: Run ignored tests
-        run: |
-          pnpm --filter vite-task-tools test
-          $TEST_CARGO_CMD test --target $TEST_BUILD_TARGET -- --ignored
+        run: $TEST_CARGO_CMD test --target $TEST_BUILD_TARGET -- --ignored
 
   # Running x64 binaries under Rosetta makes this the slowest job, so pull
   # requests run it only with the `ci: full` label.
@@ -300,9 +298,7 @@ jobs:
 
       - name: Run ignored tests
         if: matrix.mode == 'ignored'
-        run: |
-          pnpm --filter vite-task-tools test
-          cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
+        run: cargo-nextest nextest run --archive-file windows-tests.tar.zst --workspace-remap . --run-ignored ignored-only
 
   # Building without a Rust cache inside the Alpine container makes this one of
   # the slowest jobs, so pull requests run it only with the `ci: full` label.
@@ -360,9 +356,7 @@ jobs:
       - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
 
       - name: Run ignored tests
-        run: |
-          pnpm --filter vite-task-tools test
-          cargo test -- --ignored
+        run: cargo test -- --ignored
 
   fmt:
     name: Format and Check Deps
