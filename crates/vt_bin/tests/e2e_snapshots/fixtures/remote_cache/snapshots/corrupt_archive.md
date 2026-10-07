@@ -14,7 +14,7 @@ $ vtt write-file dist/output.txt built
 [remote-cache] POST /store 200
 ```
 
-## `vtt write-file remote-cache/blobs/1 corrupt`
+## `remote-cache-server corrupt-blob 1`
 
 Overwrite the stored archive.
 
