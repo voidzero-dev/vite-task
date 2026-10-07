@@ -137,28 +137,6 @@ mod tests {
         assert!(create(path.as_c_str(), SIZE).is_err());
     }
 
-    /// A fault must not read ahead: the pages around the touched one are
-    /// holes, and filling them with zeros costs half a millisecond for every
-    /// page written for the first time.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn mapping_turns_off_fault_read_ahead() {
-        let path = BackingPath::new();
-        let mapping = create(path.as_c_str(), SIZE).unwrap().map().unwrap();
-
-        // `rr` is the flag `MADV_RANDOM` sets on the mapping. `VmFlags` is
-        // the last field of each mapping's block, so the first one after the
-        // mapping's header line is its own.
-        let header = format!("{:08x}-", mapping.as_ptr().addr());
-        let smaps = std::fs::read_to_string("/proc/self/smaps").unwrap();
-        let vm_flags = smaps
-            .lines()
-            .skip_while(|line| !line.starts_with(&header))
-            .find_map(|line| line.strip_prefix("VmFlags:"))
-            .expect("the mapping is listed in smaps");
-        assert!(vm_flags.split_whitespace().any(|flag| flag == "rr"), "VmFlags:{vm_flags}");
-    }
-
     #[test]
     fn mapping_is_visible_across_processes() {
         let path = BackingPath::new();

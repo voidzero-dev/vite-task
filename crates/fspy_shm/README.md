@@ -28,8 +28,6 @@ One implementation serves every platform: a sparse file at the caller's path. An
 
 Only written pages ever occupy memory or disk. The multi-gigabyte capacity fspy asks for therefore costs about as much as the data a run actually records.
 
-On Unix, every mapping is advised `MADV_RANDOM`. Without it, a fault reads ahead the pages around the one touched, and in a sparse file those are holes the kernel fills with zeros. On Linux that cost half a millisecond for each page written for the first time, and filled the page cache with zero pages nobody wrote.
-
 The crate is `no_std`: paths arrive as platform C strings and errors are raw OS error codes, so it stays usable from the preload contexts described in [`fspy_nostd`](../fspy_nostd)'s README. Every operation goes through `fspy_nostd` wrappers or direct Win32 calls. The platform-specific parts are three short passages:
 
 | Concern          | Unix                                     | Windows                                                                     |
