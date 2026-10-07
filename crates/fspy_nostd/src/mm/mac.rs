@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 
-use super::{MapFlags, MprotectFlags, ProtFlags};
+use super::{Advice, MapFlags, MprotectFlags, ProtFlags};
 use crate::{BorrowedFd, Error, Result};
 
 pub(super) const PROT_READ: u32 = libc::PROT_READ.cast_unsigned();
@@ -54,6 +54,18 @@ pub(super) unsafe fn mprotect(
 ) -> Result<()> {
     // SAFETY: the caller upholds the mapped-region contract.
     if unsafe { libc::mprotect(address, length, protection.bits().cast_signed()) } == -1 {
+        Err(Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+pub(super) unsafe fn madvise(address: *mut c_void, length: usize, advice: Advice) -> Result<()> {
+    let advice = match advice {
+        Advice::Random => libc::MADV_RANDOM,
+    };
+    // SAFETY: the caller upholds the mapped-region contract.
+    if unsafe { libc::madvise(address, length, advice) } == -1 {
         Err(Error::last_os_error())
     } else {
         Ok(())

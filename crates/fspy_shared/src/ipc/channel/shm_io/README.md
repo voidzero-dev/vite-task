@@ -68,7 +68,7 @@ No slot is touched, so sealing a channel holding ten million frames costs what s
 
 ## Deployment note
 
-On Linux, the first touch of the sparse backing file costs a millisecond or two on journalling filesystems. It is the fault path rather than block allocation, so `fallocate` does not help. Whichever side touches the region first pays it, once per channel. A filesystem that does not journal avoids it.
+Each page of the sparse backing file costs one fault the first time a process touches it, a few microseconds. That holds because `fspy_shm` turns off fault read-ahead: with it on, Linux filled the holes around every first-touched page with zeros, which cost half a millisecond per page.
 
 ## Files
 

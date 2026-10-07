@@ -117,6 +117,29 @@ mod unix {
         unsafe { imp::mprotect(address, length, protection) }
     }
 
+    /// How mapped pages are expected to be accessed.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum Advice {
+        /// Pages are accessed in no particular order, so a fault should not
+        /// read ahead the pages around it.
+        Random,
+    }
+
+    /// Advises the kernel how `address..address + length` will be accessed.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error reported by the operating system.
+    ///
+    /// # Safety
+    ///
+    /// `address..address + length` must be a mapped region owned by the
+    /// caller.
+    pub unsafe fn madvise(address: *mut c_void, length: usize, advice: Advice) -> Result<()> {
+        // SAFETY: forwarded from this function's contract.
+        unsafe { imp::madvise(address, length, advice) }
+    }
+
     /// Releases a mapping.
     ///
     /// # Errors

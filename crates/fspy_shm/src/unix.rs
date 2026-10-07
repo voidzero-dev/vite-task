@@ -140,6 +140,13 @@ impl ShmHandle {
             let _ = unsafe { fspy_nostd::mm::munmap(mapped, len) };
             return Err(fspy_nostd::Error::INVAL);
         };
+        // A fault in a shared file mapping reads ahead the pages around it.
+        // In this sparse file those are holes, which the fault fills with
+        // zeros at the cost of half a millisecond per first-touched page on
+        // Linux, so turn read-ahead off. It is only advice: the mapping
+        // works the same without it, so a refusal is ignored.
+        // SAFETY: this is the complete mapping just established above.
+        let _ = unsafe { fspy_nostd::mm::madvise(mapped, len, fspy_nostd::mm::Advice::Random) };
         Ok(Mapping { ptr, len })
     }
 }

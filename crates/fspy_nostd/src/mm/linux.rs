@@ -1,6 +1,6 @@
 use core::{ffi::c_void, ptr};
 
-use super::{MapFlags, MprotectFlags, ProtFlags};
+use super::{Advice, MapFlags, MprotectFlags, ProtFlags};
 use crate::{BorrowedFd, Error, Result};
 
 pub(super) const PROT_READ: u32 = linux_raw_sys::general::PROT_READ;
@@ -65,6 +65,16 @@ pub(super) unsafe fn mprotect(
 ) -> Result<()> {
     // SAFETY: the caller upholds the mapped-region contract.
     unsafe { syscalls::syscall!(syscalls::Sysno::mprotect, address, length, protection.bits()) }
+        .map_err(Error::from)?;
+    Ok(())
+}
+
+pub(super) unsafe fn madvise(address: *mut c_void, length: usize, advice: Advice) -> Result<()> {
+    let advice = match advice {
+        Advice::Random => linux_raw_sys::general::MADV_RANDOM,
+    };
+    // SAFETY: the caller upholds the mapped-region contract.
+    unsafe { syscalls::syscall!(syscalls::Sysno::madvise, address, length, advice) }
         .map_err(Error::from)?;
     Ok(())
 }
