@@ -73,7 +73,8 @@ pub struct RunFlags {
     ///
     /// If you don't pass this flag, `VP_REMOTE_CACHE` selects the mode. If neither
     /// is set, the mode is `read` when an endpoint is configured, or `off` otherwise.
-    #[clap(long)]
+    // Accepted but hidden from help while remote caching is unreleased.
+    #[clap(long, hide = true)]
     pub remote_cache: Option<RemoteCacheMode>,
 
     /// How task output is displayed.

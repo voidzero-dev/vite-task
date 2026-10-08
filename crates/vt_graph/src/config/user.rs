@@ -240,6 +240,8 @@ pub struct EnabledCacheConfig {
     ///   `VP_REMOTE_CACHE_URL`.
     /// - Remote access isn't set to `off` with `--remote-cache` or `VP_REMOTE_CACHE`. It
     ///   defaults to `read`, which downloads cached results without uploading new ones.
+    // Parsed but left out of the public types while remote caching is unreleased.
+    #[cfg_attr(all(test, not(clippy)), ts(skip))]
     pub remote: Option<bool>,
 }
 
@@ -368,6 +370,8 @@ pub enum UserGlobalCacheConfig {
         tasks: Option<bool>,
 
         /// Remote cache shared by tasks in the workspace.
+        // Parsed but left out of the public types while remote caching is unreleased.
+        #[cfg_attr(all(test, not(clippy)), ts(skip))]
         remote: Option<UserRemoteCacheConfig>,
     },
 }
@@ -407,8 +411,6 @@ impl ResolvedGlobalCacheConfig {
 
 /// Remote cache settings in the workspace root's `cache` config.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-// TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "RemoteCacheConfig"))]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct UserRemoteCacheConfig {
     /// HTTP or HTTPS namespace endpoint. Overridden by `VP_REMOTE_CACHE_URL`.
