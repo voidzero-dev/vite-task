@@ -9,6 +9,7 @@ mod plan;
 pub mod plan_request;
 mod ps1_shim;
 pub mod remote_cache;
+mod tool_entry;
 
 use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, sync::Arc};
 

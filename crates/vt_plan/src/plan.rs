@@ -561,7 +561,15 @@ pub fn plan_synthetic_request(
     parent_cache_config: ParentCacheConfig,
     resolved_remote_cache: Option<&ResolvedRemoteCacheConfig>,
 ) -> Result<SpawnExecution, Error> {
-    let SyntheticPlanRequest { program, args, cache_config, envs } = synthetic_plan_request;
+    let SyntheticPlanRequest { program, args, tool_entry, cache_config, envs } =
+        synthetic_plan_request;
+    let args = if let Some(entry) = tool_entry {
+        std::iter::once(crate::tool_entry::entry_argument(&entry, cwd, workspace_path)?)
+            .chain(args.iter().cloned())
+            .collect()
+    } else {
+        args
+    };
 
     let program_path = which(&program, &envs, cwd)?;
     let (program_path, args) =

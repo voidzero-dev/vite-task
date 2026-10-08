@@ -26,6 +26,7 @@ impl ScriptCommand {
         SyntheticPlanRequest {
             program: Arc::from(OsStr::new(&self.program)),
             args: self.args.clone(),
+            tool_entry: None,
             cache_config,
             envs: self.envs.clone(),
         }
@@ -84,8 +85,16 @@ pub struct SyntheticPlanRequest {
     /// The program to execute
     pub program: Arc<OsStr>,
 
-    /// The arguments to pass to the program
+    /// The arguments to pass after `tool_entry`, or directly to the program when absent.
     pub args: Arc<[Str]>,
+
+    /// A known executable script loaded by `program`, inserted before `args`.
+    ///
+    /// Producers supply the absolute entry path, not a duplicate in `args`. The planner
+    /// makes an in-workspace entry relative to the actual task cwd for both execution
+    /// and caching. External paths and paths containing parent traversal stay absolute.
+    /// `None` preserves ordinary argument handling; arguments are never inspected for paths.
+    pub tool_entry: Option<Arc<AbsolutePath>>,
 
     /// The cache config as if it's defined in `vite.config.*`
     pub cache_config: UserCacheConfig,
