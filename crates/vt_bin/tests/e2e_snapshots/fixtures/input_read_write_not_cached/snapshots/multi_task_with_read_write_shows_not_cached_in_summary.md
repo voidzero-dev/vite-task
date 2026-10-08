@@ -13,7 +13,7 @@ hello
 ~/packages/rw-pkg$ vtt replace-file-content src/data.txt i !
 
 ---
-vt run: 0/3 cache hit (0%). @test/touch-pkg#task (and 1 more) not cached because they modified their inputs. (Run `vt run --last-details` for full details)
+vt run: 0/3 cache hit (0%), 3/3 successful. @test/touch-pkg#task (and 1 more) not cached because they modified their inputs. (Run `vt run --last-details` for full details)
 ```
 
 ## `vt run -r task`
@@ -27,5 +27,5 @@ hello
 ~/packages/rw-pkg$ vtt replace-file-content src/data.txt i !
 
 ---
-vt run: 1/3 cache hit (33%). @test/touch-pkg#task (and 1 more) not cached because they modified their inputs. (Run `vt run --last-details` for full details)
+vt run: 1/3 cache hit (33%), 3/3 successful. @test/touch-pkg#task (and 1 more) not cached because they modified their inputs. (Run `vt run --last-details` for full details)
 ```

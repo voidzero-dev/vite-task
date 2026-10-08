@@ -14,7 +14,7 @@ built-a
 built-b
 
 ---
-vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+vt run: 0/2 cache hit (0%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```
 
 ## `vt run --last-details`

@@ -10,5 +10,5 @@ Package b depends on a, so without --parallel they run sequentially. Both use a 
 
 
 ---
-vt run: (Run `vt run --last-details` for full details)
+vt run: 2/2 successful. (Run `vt run --last-details` for full details)
 ```

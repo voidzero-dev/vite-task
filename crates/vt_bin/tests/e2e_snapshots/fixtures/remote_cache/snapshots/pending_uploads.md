@@ -25,7 +25,7 @@ checked
 
 Waiting for 2 remote cache uploads to finish...
 ---
-vt run: 0/2 cache hit (0%). remote-cache#build (and 1 more) not uploaded to the remote cache: interrupted. (Run `vt run --last-details` for full details)
+vt run: 0/2 cache hit (0%), 2/2 successful. remote-cache#build (and 1 more) not uploaded to the remote cache: interrupted. (Run `vt run --last-details` for full details)
 [remote-cache] POST /fetch 404
 [remote-cache] POST /fetch 404
 ```

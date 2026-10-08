@@ -16,5 +16,5 @@ stdout:tty
 stderr:tty
 
 ---
-vt run: 0/1 cache hit (0%). (Run `vt run --last-details` for full details)
+vt run: 0/1 cache hit (0%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```

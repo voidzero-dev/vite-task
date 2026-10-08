@@ -14,5 +14,5 @@ building-a
 building-b
 
 ---
-vt run: (Run `vt run --last-details` for full details)
+vt run: 2/2 successful. (Run `vt run --last-details` for full details)
 ```

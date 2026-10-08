@@ -6,6 +6,4 @@ The default-success rule must apply to nested `vt run --filter ...` invocations 
 
 ```
 No packages matched the filter: nonexistent
----
-vt run: (Run `vt run --last-details` for full details)
 ```

@@ -12,6 +12,5 @@ The proxy never answers the fetch, so nothing needs to listen behind it. Ctrl-C 
 **← write-key:** `ctrl-c`
 
 ```
----
-vt run: (Run `vt run --last-details` for full details)
+
 ```

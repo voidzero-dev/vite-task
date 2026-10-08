@@ -16,7 +16,7 @@ A cache-hit replay across multiple tasks under labeled mode should reproduce eac
 [labeled-stdio-test#check-tty-cached] stderr:not-tty
 
 ---
-vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+vt run: 0/2 cache hit (0%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```
 
 ## `vt run --log=labeled -r check-tty-cached`
@@ -33,5 +33,5 @@ vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
 [labeled-stdio-test#check-tty-cached] stderr:not-tty
 
 ---
-vt run: 2/2 cache hit (100%). (Run `vt run --last-details` for full details)
+vt run: 2/2 cache hit (100%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```

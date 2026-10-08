@@ -12,5 +12,5 @@ Same failure-cancellation scenario, but with `--cache` so execution goes through
 
 
 ---
-vt run: 0/2 cache hit (0%), 2 failed. (Run `vt run --last-details` for full details)
+vt run: 0/2 cache hit (0%), 0/2 successful. (Run `vt run --last-details` for full details)
 ```

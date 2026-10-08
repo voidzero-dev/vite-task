@@ -14,7 +14,7 @@ $ vtt print bar
 bar
 
 ---
-vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+vt run: 0/2 cache hit (0%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```
 
 ## `vtt replace-file-content vite-task.json 'vtt print foo && vtt print bar' 'vtt print baz && vtt print bar'`
@@ -36,7 +36,7 @@ $ vtt print bar ◉ cache hit, replaying
 bar
 
 ---
-vt run: 1/2 cache hit (50%). (Run `vt run --last-details` for full details)
+vt run: 1/2 cache hit (50%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```
 
 ## `vtt replace-file-content vite-task.json 'vtt print baz && vtt print bar' 'vtt print bar'`

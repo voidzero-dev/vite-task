@@ -12,7 +12,7 @@ $ vtt write-file dist/keep.txt keep
 $ vtt write-file dist/skip.txt skip
 
 ---
-vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+vt run: 0/2 cache hit (0%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```
 
 ## `vtt print-file dist/keep.txt`
@@ -48,7 +48,7 @@ $ vtt write-file dist/keep.txt keep ◉ cache hit, replaying
 $ vtt write-file dist/skip.txt skip ◉ cache hit, replaying
 
 ---
-vt run: 2/2 cache hit (100%). (Run `vt run --last-details` for full details)
+vt run: 2/2 cache hit (100%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```
 
 ## `vtt print-file dist/keep.txt`

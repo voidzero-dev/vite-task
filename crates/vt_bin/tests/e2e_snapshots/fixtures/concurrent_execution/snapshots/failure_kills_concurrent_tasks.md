@@ -12,5 +12,5 @@ When one concurrent task fails, the sibling running under inherited stdio must b
 
 
 ---
-vt run: 2 failed. (Run `vt run --last-details` for full details)
+vt run: 0/2 successful. (Run `vt run --last-details` for full details)
 ```

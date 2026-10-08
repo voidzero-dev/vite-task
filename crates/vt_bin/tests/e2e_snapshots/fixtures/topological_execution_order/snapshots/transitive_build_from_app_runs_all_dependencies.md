@@ -17,5 +17,5 @@ Building lib
 Building app
 
 ---
-vt run: (Run `vt run --last-details` for full details)
+vt run: 3/3 successful. (Run `vt run --last-details` for full details)
 ```

@@ -1018,14 +1018,20 @@ impl InputModified {
 /// Render a compact summary (one-liner or empty).
 ///
 /// Rules:
+/// - No tasks → empty
 /// - Single task + not cache hit → empty (no summary at all)
 /// - Single task + cache hit → thin line + "vp run: cache hit, {duration} saved."
 ///   ("remote cache hit" for a remote hit)
-/// - Multi-task → thin line + "vp run: {hits}/{cacheable} cache hit ({rate}%), {duration} saved."
-///   where `cacheable` leaves out tasks with caching disabled, with an optional remote hit
-///   count ("({rate}%, {remote} remote)"), failure count, and `--verbose` hint. The hit count
-///   is left out when `cacheable` is 0.
+/// - Multi-task → thin line + "vp run: {hits}/{cacheable} cache hit ({rate}%),
+///   {successful}/{total} successful, {duration} saved." where `cacheable` leaves out tasks
+///   with caching disabled, and `successful` includes cache hits. The hit count is left out
+///   when `cacheable` is 0, and has an optional remote hit count ("({rate}%, {remote} remote)").
+///   Followed by the `--last-details` hint.
 pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> Vec<u8> {
+    if summary.tasks.is_empty() {
+        return Vec::new();
+    }
+
     let stats = SummaryStats::compute(&summary.tasks);
 
     let is_single_task = summary.tasks.len() == 1;
@@ -1081,27 +1087,25 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
             if stats.remote_cache_hits > 0 {
                 let _ = write!(buf, ", {} remote", stats.remote_cache_hits);
             }
-            let _ = write!(buf, ")");
-
-            if stats.total_saved > Duration::ZERO {
-                let formatted_total_saved = format_summary_duration(stats.total_saved);
-                let _ = write!(
-                    buf,
-                    ", {} saved",
-                    formatted_total_saved.style(Style::new().green().bold()),
-                );
-            }
+            let _ = write!(buf, "),");
         }
 
-        if stats.failed > 0 {
-            let n = stats.failed;
-            let separator = if cacheable > 0 { "," } else { "" };
-            let _ = write!(buf, "{separator} {} failed", n.style(Style::new().red()));
+        let total = stats.total;
+        let successful = total - stats.failed;
+        let successful_style = if successful < total { Style::new().red() } else { Style::new() };
+        let _ = write!(
+            buf,
+            " {} successful",
+            vt_str::format!("{successful}/{total}").style(successful_style)
+        );
+
+        if stats.total_saved > Duration::ZERO {
+            let formatted_total_saved = format_summary_duration(stats.total_saved);
+            let _ =
+                write!(buf, ", {} saved", formatted_total_saved.style(Style::new().green().bold()));
         }
 
-        if cacheable > 0 || stats.failed > 0 {
-            let _ = write!(buf, ".");
-        }
+        let _ = write!(buf, ".");
     } else {
         // Single task, no cache hit — only shown with a notice below
         let _ = write!(buf, "{}", run_label.as_str().style(Style::new().blue().bold()));
@@ -1373,13 +1377,13 @@ mod tests {
                 cache_miss_task("c"),
             ])
             .as_str(),
-            "---\nvp run: 2/3 cache hit (66%, 1 remote), 2s saved. \
+            "---\nvp run: 2/3 cache hit (66%, 1 remote), 3/3 successful, 2s saved. \
              (Run `vp run --last-details` for full details)\n"
         );
         assert_eq!(
             compact_summary(vec![cache_hit_task("a", CacheHitSource::Local), cache_miss_task("b")])
                 .as_str(),
-            "---\nvp run: 1/2 cache hit (50%), 1s saved. \
+            "---\nvp run: 1/2 cache hit (50%), 2/2 successful, 1s saved. \
              (Run `vp run --last-details` for full details)\n"
         );
     }
@@ -1395,7 +1399,7 @@ mod tests {
         };
         assert_eq!(
             compact_summary(tasks()).as_str(),
-            "---\nvp run: 1/2 cache hit (50%), 1s saved. \
+            "---\nvp run: 1/2 cache hit (50%), 3/3 successful, 1s saved. \
              (Run `vp run --last-details` for full details)\n"
         );
         assert!(
@@ -1406,7 +1410,7 @@ mod tests {
         );
         assert_eq!(
             compact_summary(vec![cache_disabled_task("a"), cache_disabled_task("b")]).as_str(),
-            "---\nvp run: (Run `vp run --last-details` for full details)\n"
+            "---\nvp run: 2/2 successful. (Run `vp run --last-details` for full details)\n"
         );
         assert!(
             full_summary(vec![cache_disabled_task("a")])
@@ -1458,7 +1462,7 @@ mod tests {
         ]);
         assert_eq!(
             summary.as_str(),
-            "---\nvp run: 0/2 cache hit (0%). pkg#a (and 1 more) not uploaded to the remote cache: \
+            "---\nvp run: 0/2 cache hit (0%), 2/2 successful. pkg#a (and 1 more) not uploaded to the remote cache: \
              network error. (Run `vp run --last-details` for full details)\n"
         );
 
@@ -1468,7 +1472,7 @@ mod tests {
         ]);
         assert_eq!(
             summary.as_str(),
-            "---\nvp run: 0/2 cache hit (0%). pkg#a (and 1 more) not uploaded to the remote cache. \
+            "---\nvp run: 0/2 cache hit (0%), 2/2 successful. pkg#a (and 1 more) not uploaded to the remote cache. \
              (Run `vp run --last-details` for full details)\n"
         );
     }
