@@ -366,8 +366,14 @@ fn link_tools_node_modules(tmp_dir: &std::path::Path) {
 /// Append a fenced markdown block containing `body`. The opening and closing
 /// fences sit on their own lines, and trailing whitespace inside `body` is
 /// trimmed so the close fence isn't preceded by blank lines.
+///
+/// The `^C` that Unix terminal drivers echo when ETX (0x03) is written to the
+/// PTY is removed first, so a screen left with only the echo is as empty as
+/// on Windows, whose `ConPTY` doesn't echo it.
 #[expect(clippy::disallowed_types, reason = "String required by mutable appender")]
 fn push_fenced_block(out: &mut String, body: &str) {
+    use cow_utils::CowUtils as _;
+    let body = body.cow_replace("^C", "");
     let trimmed = body.trim_end_matches(['\n', ' ', '\t']);
     out.push_str("```\n");
     if !trimmed.is_empty() {

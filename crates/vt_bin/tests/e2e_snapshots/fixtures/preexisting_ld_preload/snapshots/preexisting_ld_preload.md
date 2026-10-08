@@ -18,7 +18,7 @@ $ vtt print-file preload_test_short_circuit.txt
 preload_test_short_circuit.txt: not found
 
 ---
-vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+vt run: 0/2 cache hit (0%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```
 
 ## `LD_PRELOAD=<PRELOAD_TEST_LIB_PATH> vt run read`
@@ -33,7 +33,7 @@ $ vtt print-file preload_test_short_circuit.txt ◉ cache hit, replaying
 preload_test_short_circuit.txt: not found
 
 ---
-vt run: 2/2 cache hit (100%). (Run `vt run --last-details` for full details)
+vt run: 2/2 cache hit (100%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```
 
 ## `vtt write-file preload_test_short_circuit.txt 'modified short-circuited content'`
@@ -55,7 +55,7 @@ $ vtt print-file preload_test_short_circuit.txt ◉ cache hit, replaying
 preload_test_short_circuit.txt: not found
 
 ---
-vt run: 2/2 cache hit (100%). (Run `vt run --last-details` for full details)
+vt run: 2/2 cache hit (100%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```
 
 ## `vtt write-file real.txt 'modified real content'`
@@ -76,5 +76,5 @@ $ vtt print-file preload_test_short_circuit.txt ◉ cache hit, replaying
 preload_test_short_circuit.txt: not found
 
 ---
-vt run: 1/2 cache hit (50%). (Run `vt run --last-details` for full details)
+vt run: 1/2 cache hit (50%), 2/2 successful. (Run `vt run --last-details` for full details)
 ```
