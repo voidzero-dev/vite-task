@@ -13,5 +13,5 @@ $ echo bar ⊘ cache disabled
 bar
 
 ---
-vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+vt run: (Run `vt run --last-details` for full details)
 ```

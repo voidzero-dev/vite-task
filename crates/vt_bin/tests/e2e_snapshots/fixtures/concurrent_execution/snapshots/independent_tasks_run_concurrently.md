@@ -10,5 +10,5 @@ Two packages with no dependency relationship should run concurrently. Both tasks
 
 
 ---
-vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+vt run: (Run `vt run --last-details` for full details)
 ```

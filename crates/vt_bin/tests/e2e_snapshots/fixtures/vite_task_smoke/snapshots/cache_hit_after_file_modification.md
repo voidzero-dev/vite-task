@@ -14,7 +14,7 @@ $ vtt print-file main.js
 console.log('foo');
 
 ---
-vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+vt run: 0/1 cache hit (0%). (Run `vt run --last-details` for full details)
 ```
 
 ## `vtt replace-file-content main.js foo bar`
@@ -36,5 +36,5 @@ $ vtt print-file main.js ○ cache miss: 'main.js' modified, executing
 console.log('bar');
 
 ---
-vt run: 0/2 cache hit (0%). (Run `vt run --last-details` for full details)
+vt run: 0/1 cache hit (0%). (Run `vt run --last-details` for full details)
 ```

@@ -13,7 +13,7 @@ $ vtt write-file dist/output.txt built
 
 $ vtt exit 1 ⊘ cache disabled
 
-Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...
+Waiting for 1 remote cache upload to finish...
 ```
 
 **← write-key:** `ctrl-c`
@@ -23,8 +23,8 @@ $ vtt write-file dist/output.txt built
 
 $ vtt exit 1 ⊘ cache disabled
 
-Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...
+Waiting for 1 remote cache upload to finish...
 ---
-vt run: 0/2 cache hit (0%), 1 failed. remote-cache#build not uploaded to the remote cache: interrupted. (Run `vt run --last-details` for full details)
+vt run: 0/1 cache hit (0%), 1 failed. remote-cache#build not uploaded to the remote cache: interrupted. (Run `vt run --last-details` for full details)
 [remote-cache] POST /fetch 404
 ```

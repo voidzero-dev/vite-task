@@ -329,10 +329,7 @@ mod tests {
         assert_eq!(saved.text().as_str(), summary);
         assert_eq!(
             output.text().as_str(),
-            vt_str::format!(
-                "Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...\n{summary}"
-            )
-            .as_str()
+            vt_str::format!("Waiting for 1 remote cache upload to finish...\n{summary}").as_str()
         );
     }
 }

@@ -9,7 +9,7 @@ The proxy forwards the fetch to the backend, which has no entry, but never forwa
 ```
 $ vtt write-file dist/output.txt built
 
-Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...
+Waiting for 1 remote cache upload to finish...
 ```
 
 **← write-key:** `ctrl-c`
@@ -17,7 +17,7 @@ Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...
 ```
 $ vtt write-file dist/output.txt built
 
-Waiting for 1 remote cache upload to finish (Ctrl-C to cancel)...
+Waiting for 1 remote cache upload to finish...
 ---
 vt run: remote-cache#build not uploaded to the remote cache: interrupted. (Run `vt run --last-details` for full details)
 [remote-cache] POST /fetch 404

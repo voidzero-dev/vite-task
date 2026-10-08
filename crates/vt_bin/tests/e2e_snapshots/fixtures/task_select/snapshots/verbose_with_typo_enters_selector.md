@@ -28,7 +28,7 @@ build app
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Statistics:   1 task • 0 cache hits • 0 cache misses • 1 cache disabled
-Performance:  0% cache hit rate
+Performance:  no task has caching enabled
 
 Task Details:
 ────────────────────────────────────────────────
