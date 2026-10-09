@@ -26,8 +26,9 @@ pub struct TrackedPathAccesses {
 
 impl TrackedPathAccesses {
     /// Build from fspy's raw iterable by stripping the workspace prefix and
-    /// normalizing `..` components. `.git/*` paths are skipped. User-configured
-    /// negatives are applied by the caller (see module docs).
+    /// normalizing `..` components. `.git/*` paths and pnpm's workspace state
+    /// file are skipped. User-configured negatives are applied by the caller
+    /// (see module docs).
     pub fn from_raw(raw: &PathAccessIterable, workspace_root: &AbsolutePath) -> Self {
         let mut accesses = Self::default();
         for access in raw.iter() {
@@ -88,13 +89,31 @@ fn normalize_tracked_workspace_path(stripped_path: &std::path::Path) -> Option<R
         return None;
     }
 
+    // Skip pnpm's cache of its dependency check before `pnpm run` and
+    // `pnpm exec`. It holds a timestamp and absolute project paths, and pnpm
+    // rewrites it during the task when manifests have newer mtimes. Whether
+    // the check passes doesn't change what a cached task outputs.
+    if relative.as_str() == "node_modules/.pnpm-workspace-state-v1.json" {
+        return None;
+    }
+
     Some(relative)
 }
 
 #[cfg(test)]
 mod tests {
-    #[cfg(windows)]
     use super::*;
+
+    #[test]
+    fn pnpm_workspace_state_is_ignored() {
+        #[expect(
+            clippy::disallowed_types,
+            reason = "normalize_tracked_workspace_path requires std::path::Path for fspy strip_path_prefix output"
+        )]
+        let normalize = |path: &str| normalize_tracked_workspace_path(std::path::Path::new(path));
+        assert!(normalize("node_modules/.pnpm-workspace-state-v1.json").is_none());
+        assert!(normalize("node_modules/.modules.yaml").is_some());
+    }
 
     #[cfg(windows)]
     #[test]

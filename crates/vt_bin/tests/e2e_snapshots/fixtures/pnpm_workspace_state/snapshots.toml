@@ -1,0 +1,41 @@
+[[e2e]]
+name = "pnpm_workspace_state_ignored"
+comment = """
+pnpm's `node_modules/.pnpm-workspace-state-v1.json` is neither an input nor an output, so a task that reads and rewrites it, like pnpm's dependency check before `pnpm run`, is cached, and changes to the file keep the cache hit.
+"""
+steps = [
+  [
+    "vtt",
+    "mkdir",
+    "-p",
+    "node_modules",
+  ],
+  [
+    "vtt",
+    "cp",
+    "workspace-state.json",
+    "node_modules/.pnpm-workspace-state-v1.json",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "verify-deps",
+  ], comment = "cache miss: reads and rewrites the state" },
+  { argv = [
+    "vt",
+    "run",
+    "verify-deps",
+  ], comment = "cache hit" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "node_modules/.pnpm-workspace-state-v1.json",
+    "/home/alice/project",
+    "/home/bob/project",
+  ], comment = "install with the workspace at another path" },
+  { argv = [
+    "vt",
+    "run",
+    "verify-deps",
+  ], comment = "cache hit" },
+]

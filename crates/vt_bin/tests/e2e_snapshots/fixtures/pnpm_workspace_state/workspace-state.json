@@ -1,0 +1,11 @@
+{
+  "lastValidatedTimestamp": 1791447500251,
+  "projects": {
+    "/home/alice/project": {
+      "name": "pnpm-workspace-state"
+    }
+  },
+  "pnpmfiles": [],
+  "settings": {},
+  "filteredInstall": false
+}

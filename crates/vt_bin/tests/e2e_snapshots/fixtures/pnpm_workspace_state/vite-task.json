@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "verify-deps": {
+      "command": "vtt replace-file-content node_modules/.pnpm-workspace-state-v1.json 1791447500251 1791447600000",
+      "cache": true
+    }
+  }
+}
