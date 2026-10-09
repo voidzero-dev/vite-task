@@ -123,6 +123,7 @@ pub enum CacheNotUpdatedReason {
     /// none for a record that long. The accesses that did arrive are a
     /// subset of what the task touched, so caching from them would bake in
     /// inputs and outputs that are not all of them.
+    #[cfg(fspy)]
     TrackingIncomplete,
 }
 

@@ -8,13 +8,10 @@ use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::ffi::OsStringExt as _;
 use std::{borrow::Cow, ffi::OsStr, fmt::Debug, mem::MaybeUninit};
 
-use allocator_api2::alloc::Allocator;
 use bumpalo::Bump;
 #[cfg(windows)]
 use bytemuck::must_cast_slice;
 use bytemuck::{TransparentWrapper, TransparentWrapperAlloc};
-use fspy_nostd::{Fat, OsCStr};
-use fspy_nostd_alloc::OsCString;
 use wincode::{
     SchemaRead, SchemaWrite,
     config::Config,
@@ -94,49 +91,27 @@ impl IpcStr {
         Self::wrap_ref(bump.alloc_slice_copy(&self.data))
     }
 
-    /// Creates an IPC string that borrows the code units of `path`, without
-    /// its NUL terminator.
+    /// The raw code units of this string.
     ///
-    /// This is the inverse of [`to_os_c_string_in`](Self::to_os_c_string_in);
-    /// neither direction goes through [`OsStr`], so both work without std.
+    /// On Unix these are the bytes of the string; on Windows they are `u16`
+    /// code units (wide chars) viewed as their byte representation. This is
+    /// the inverse of [`from_data`](Self::from_data) and lets a crate that
+    /// has its own C-string type interoperate with an [`IpcStr`] without
+    /// depending on that C-string type.
     #[must_use]
-    pub fn from_os_c_str(path: OsCStr<'_, Fat>) -> &Self {
-        #[cfg(unix)]
-        return Self::wrap_ref(path.as_units());
-        #[cfg(windows)]
-        return Self::wrap_ref(must_cast_slice(path.as_units()));
+    pub const fn as_data(&self) -> &[u8] {
+        &self.data
     }
 
-    /// Decodes this IPC string into an owned NUL-terminated platform C
-    /// string allocated in `allocator`.
+    /// Wraps the raw code units `units` as an [`IpcStr`], borrowing them
+    /// without copying.
     ///
-    /// Returns [`None`] when the contents cannot name a path: an odd byte
-    /// length on Windows, or an interior NUL code unit.
+    /// `units` must be the platform's native representation: the string's
+    /// bytes on Unix, or `u16` code units viewed as bytes on Windows (the
+    /// inverse of [`as_data`](Self::as_data)).
     #[must_use]
-    pub fn to_os_c_string_in<A: Allocator>(&self, allocator: A) -> Option<OsCString<Fat, A>> {
-        #[cfg(unix)]
-        {
-            let mut units =
-                allocator_api2::vec::Vec::with_capacity_in(self.data.len() + 1, allocator);
-            units.extend_from_slice(&self.data);
-            units.push(0);
-            OsCString::from_vec_with_nul(units)
-        }
-        #[cfg(windows)]
-        {
-            if !self.data.len().is_multiple_of(2) {
-                return None;
-            }
-            let len = self.data.len() / 2;
-            let mut units = allocator_api2::vec::Vec::with_capacity_in(len + 1, allocator);
-            units.resize(len, 0);
-            // The destination is aligned `u16` storage; viewing it as bytes
-            // sidesteps the source's unspecified alignment (see the field
-            // docs).
-            bytemuck::must_cast_slice_mut::<u16, u8>(&mut units).copy_from_slice(&self.data);
-            units.push(0);
-            OsCString::from_vec_with_nul(units)
-        }
+    pub fn from_data(units: &[u8]) -> &Self {
+        Self::wrap_ref(units)
     }
 }
 

@@ -355,10 +355,15 @@ impl TaskResult {
             cache_update_status,
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ToolRequested)
         );
+        #[cfg(fspy)]
         let tracking_incomplete = matches!(
             cache_update_status,
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete)
         );
+        // `TrackingIncomplete` only exists when fspy tracking is compiled in;
+        // the serialized field is cfg-agnostic and stays `false` otherwise.
+        #[cfg(not(fspy))]
+        let tracking_incomplete = false;
 
         match cache_status {
             // The only error a cache hit can have is a failed restore.

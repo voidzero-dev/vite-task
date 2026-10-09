@@ -62,7 +62,7 @@ pub(super) async fn update_cache(
     cancel_token: &CancellationToken,
 ) -> (CacheUpdateStatus, Option<ExecutionError>) {
     let CacheState { metadata, globbed_inputs, std_outputs, tracking } = state;
-    let fspy = tracking.fspy.as_ref();
+    let fspy = tracking.auto_inference;
 
     if let Some(reports) = reports
         && reports.cache_disabled
@@ -104,7 +104,8 @@ pub(super) async fn update_cache(
         #[cfg(fspy)]
         path_accesses,
         metadata,
-        fspy,
+        #[cfg(fspy)]
+        tracking.fspy.as_ref(),
         &ignored_input_rels,
         &ignored_output_rels,
         workspace_root,
@@ -124,7 +125,7 @@ pub(super) async fn update_cache(
         );
     }
 
-    if fspy_outcome.is_none() && fspy.is_some() {
+    if fspy_outcome.is_none() && fspy {
         // Task requested fspy auto-inference but this binary was built without
         // `cfg(fspy)`. Task ran, but we can't compute a valid cache entry
         // without tracked path accesses.
@@ -205,10 +206,17 @@ pub(super) async fn update_cache(
 /// user-configured input negatives, and by tool-reported `ignoreInput` paths.
 /// `path_writes` is filtered by user-configured output negatives and
 /// tool-reported `ignoreOutput` paths before read-write overlap detection.
+#[cfg_attr(
+    not(fspy),
+    expect(
+        clippy::missing_const_for_fn,
+        reason = "const-eligibility only holds for the no-op `cfg(not(fspy))` body"
+    )
+)]
 fn observe_fspy(
     #[cfg(fspy)] path_accesses: Option<&fspy::PathAccessIterable>,
     metadata: &CacheMetadata,
-    fspy: Option<&super::FspyTracking<'_>>,
+    #[cfg(fspy)] fspy: Option<&super::FspyTracking<'_>>,
     ignored_input_rels: &FxHashSet<RelativePathBuf>,
     ignored_output_rels: &FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
@@ -266,7 +274,7 @@ fn observe_fspy(
     }
     #[cfg(not(fspy))]
     {
-        let _ = (metadata, fspy, ignored_input_rels, ignored_output_rels, workspace_root);
+        let _ = (metadata, ignored_input_rels, ignored_output_rels, workspace_root);
         None
     }
 }
@@ -300,6 +308,7 @@ fn normalize_ignored_paths(
 
 /// Whether `path` is covered by any `ignored` entry. An ignored entry matches
 /// itself (exact file) and everything under it (directory subtree).
+#[cfg(fspy)]
 fn is_ignored(path: &RelativePathBuf, ignored: &FxHashSet<RelativePathBuf>) -> bool {
     if ignored.is_empty() {
         return false;

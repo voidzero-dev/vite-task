@@ -9,8 +9,10 @@ mod shm_io;
 
 use std::{env::temp_dir, ffi::OsStr, io, num::NonZeroUsize, path::PathBuf};
 
+#[cfg(windows)]
+use bytemuck::must_cast_slice;
+use fspy_nostd::{Fat, OsCStr};
 use allocator_api2::alloc::Allocator;
-use fspy_nostd::Fat;
 use fspy_nostd_alloc::OsCString;
 use fspy_shm::{Mapping, ShmHandle};
 use shm_io::{SealError, ShmReader, ShmWriter};
@@ -83,6 +85,53 @@ fn os_c_string<A: Allocator>(path: &OsStr, allocator: A) -> io::Result<OsCString
     units.push(0);
     OsCString::from_vec_with_nul(units)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"))
+}
+
+/// Decodes an [`IpcStr`] into an owned NUL-terminated platform C string
+/// allocated in `allocator`.
+///
+/// Inverse of [`ipc_str_from_os_c_str`]. Returns [`None`] when the contents
+/// cannot name a path: an odd byte length on Windows, or an interior NUL code
+/// unit.
+fn ipc_str_to_os_c_string_in<A: Allocator>(ipc_str: &IpcStr, allocator: A) -> Option<OsCString<Fat, A>> {
+    #[cfg(unix)]
+    {
+        let mut units =
+            allocator_api2::vec::Vec::with_capacity_in(ipc_str.as_data().len() + 1, allocator);
+        units.extend_from_slice(ipc_str.as_data());
+        units.push(0);
+        OsCString::from_vec_with_nul(units)
+    }
+    #[cfg(windows)]
+    {
+        let data = ipc_str.as_data();
+        if !data.len().is_multiple_of(2) {
+            return None;
+        }
+        let len = data.len() / 2;
+        let mut units = allocator_api2::vec::Vec::with_capacity_in(len + 1, allocator);
+        units.resize(len, 0);
+        // The destination is aligned `u16` storage; viewing it as bytes
+        // sidesteps the source's unspecified alignment (see `IpcStr`'s field docs).
+        bytemuck::must_cast_slice_mut::<u16, u8>(&mut units).copy_from_slice(data);
+        units.push(0);
+        OsCString::from_vec_with_nul(units)
+    }
+}
+
+/// Creates an [`IpcStr`] borrowing the code units of `path`, without its NUL
+/// terminator.
+///
+/// Inverse of [`ipc_str_to_os_c_string_in`].
+fn ipc_str_from_os_c_str(path: OsCStr<'_, Fat>) -> &IpcStr {
+    #[cfg(unix)]
+    {
+        IpcStr::from_data(path.as_units())
+    }
+    #[cfg(windows)]
+    {
+        IpcStr::from_data(must_cast_slice(path.as_units()))
+    }
 }
 
 #[cfg(unix)]
@@ -182,9 +231,7 @@ impl ChannelConf<'_> {
         // The allocation is transient: the decoded path only has to outlive
         // the open call below, and dropping it hands the space back to a
         // bump allocator, whose most recent allocation it is.
-        let shm_path = self
-            .shm_id
-            .to_os_c_string_in(allocator)
+        let shm_path = ipc_str_to_os_c_string_in(self.shm_id, allocator)
             .expect("the channel's shared-memory path is not a valid C string");
         let mapping = match fspy_shm::open(shm_path.as_c_str().as_thin()) {
             Ok(handle) => handle.map().expect("cannot map the shared-memory channel"),
@@ -282,7 +329,7 @@ impl<A: Allocator> Receiver<A> {
     /// [`ChannelConf::sender`], borrowing this receiver's storage.
     #[must_use]
     pub fn conf(&self) -> ChannelConf<'_> {
-        ChannelConf { shm_id: IpcStr::from_os_c_str(self.keeper.path.as_c_str()) }
+        ChannelConf { shm_id: ipc_str_from_os_c_str(self.keeper.path.as_c_str()) }
     }
 
     /// Creates a sender in this process.
