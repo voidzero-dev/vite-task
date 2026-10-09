@@ -1,0 +1,69 @@
+[[e2e]]
+name = "pnpm_modules_manifest_unstable_fields"
+comment = """
+Fields of pnpm's `node_modules/.modules.yaml` that vary with time or with the machine are left out of its fingerprint, so changing them keeps the cache hit. Changing any other field is a cache miss.
+"""
+steps = [
+  [
+    "vtt",
+    "mkdir",
+    "-p",
+    "node_modules",
+  ],
+  [
+    "vtt",
+    "cp",
+    "modules.json",
+    "node_modules/.modules.yaml",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "read-manifest",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "node_modules/.modules.yaml",
+    "Thu, 08 Oct 2026 08:18:18 GMT",
+    "Fri, 09 Oct 2026 03:13:58 GMT",
+  ], comment = "reinstall: new prunedAt" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "node_modules/.modules.yaml",
+    "/home/alice/.local/share/pnpm/store/v11",
+    "/home/bob/.local/share/pnpm/store/v11",
+  ], comment = "another machine: new storeDir" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "node_modules/.modules.yaml",
+    "\".pnpm\"",
+    "\"../../home/bob/.local/share/pnpm/store/v11/links\"",
+  ], comment = "global virtual store: new virtualStoreDir" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "node_modules/.modules.yaml",
+    "\".claude/skills/a\"",
+    "\"/home/bob/skills/a\"",
+  ], comment = "skill outside the workspace: new linkedSkills" },
+  { argv = [
+    "vt",
+    "run",
+    "read-manifest",
+  ], comment = "cache hit" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "node_modules/.modules.yaml",
+    "pnpm@11.24.0",
+    "pnpm@11.25.0",
+  ], comment = "new packageManager" },
+  { argv = [
+    "vt",
+    "run",
+    "read-manifest",
+  ], comment = "cache miss: 'node_modules/.modules.yaml' modified" },
+]

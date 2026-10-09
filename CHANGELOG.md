@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** Reinstalling dependencies with pnpm no longer causes cache misses in tasks that run Vite or Vitest ([#823](https://github.com/voidzero-dev/vite-task/pull/823)).
 - **Added** Vite+ now builds and runs on platforms without file-access tracking support, such as FreeBSD. On those platforms, automatic input and output tracking is unavailable, so tasks that rely on it report that tracking is unsupported and must configure their `input` and `output` manually to be cached ([#829](https://github.com/voidzero-dev/vite-task/pull/829)).
 - **Changed** The `vp run` summary now reads like `3/4 cache hit (75%), 9/10 successful, 2s saved.` The cache hit count leaves out tasks with caching disabled, and the count of successful tasks out of all tasks replaces the count of failed tasks. When no task has caching enabled, the summary shows only the successful count. In `vp run --verbose` and `vp run --last-details`, the cache hit rate also leaves out tasks with caching disabled, and says `no task has caching enabled` when there are none ([#821](https://github.com/voidzero-dev/vite-task/pull/821)).
 - **Perf** On Linux, tasks with automatic file-access tracking start faster ([#817](https://github.com/voidzero-dev/vite-task/pull/817)).

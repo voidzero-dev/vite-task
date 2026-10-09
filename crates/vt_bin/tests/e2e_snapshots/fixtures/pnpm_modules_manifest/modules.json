@@ -1,0 +1,7 @@
+{
+  "packageManager": "pnpm@11.24.0",
+  "prunedAt": "Thu, 08 Oct 2026 08:18:18 GMT",
+  "storeDir": "/home/alice/.local/share/pnpm/store/v11",
+  "virtualStoreDir": ".pnpm",
+  "linkedSkills": [".claude/skills/a"]
+}
