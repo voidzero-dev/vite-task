@@ -5,6 +5,7 @@
 //! `redact` action, and call them from
 //! [`hash_file_content`](super::hash::hash_file_content).
 
+pub(super) mod node_modules_bin;
 pub(super) mod pnpm_modules_manifest;
 
 use std::io;

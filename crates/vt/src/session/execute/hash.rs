@@ -3,7 +3,7 @@ use std::{hash::Hasher as _, io};
 use twox_hash::XxHash3_64;
 use vt_path::AbsolutePath;
 
-use super::redact::{UnexpectedFormat, pnpm_modules_manifest};
+use super::redact::{UnexpectedFormat, node_modules_bin, pnpm_modules_manifest};
 
 /// Hash content using 8 KiB buffered `xxHash3_64`.
 pub(super) fn hash_content(mut stream: impl io::Read) -> io::Result<u64> {
@@ -24,6 +24,9 @@ pub(super) fn hash_content(mut stream: impl io::Read) -> io::Result<u64> {
 pub(super) fn hash_file_content(path: &AbsolutePath, stream: impl io::Read) -> io::Result<u64> {
     if pnpm_modules_manifest::matches(path) {
         return hash_redacted(stream, pnpm_modules_manifest::redact);
+    }
+    if node_modules_bin::matches(path) {
+        return hash_redacted(stream, node_modules_bin::redact);
     }
     hash_content(stream)
 }
