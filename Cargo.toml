@@ -195,7 +195,8 @@ winsafe = { version = "0.0.27" }
 xxhash-rust = "0.8.15"
 ntest = "0.9.5"
 terminal_size = "0.4"
-zstd = "0.13"
+# The cache only reads archives it wrote, so zstd's default legacy (pre-1.0) decoders and dictionary builder are unused.
+zstd = { version = "0.13", default-features = false }
 
 [workspace.metadata.cargo-shear]
 ignored = [
