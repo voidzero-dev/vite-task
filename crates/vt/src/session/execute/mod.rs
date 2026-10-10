@@ -16,9 +16,12 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+#[cfg(not(fspy))]
+use std::marker::PhantomData;
 
 use futures_util::future::LocalBoxFuture;
 use tokio_util::sync::CancellationToken;
+#[cfg(fspy)]
 use vt_glob::path::PathGlobSet;
 use vt_ipc_shared::NODE_CLIENT_PATH_ENV_NAME;
 use vt_path::{AbsolutePath, RelativePathBuf};
@@ -106,6 +109,7 @@ type IpcDriver = LocalBoxFuture<'static, Result<Recorder, vt_server::Error>>;
 
 /// fspy path-tracking state, present only when a cached task needs automatic
 /// input or output inference.
+#[cfg(fspy)]
 struct FspyTracking<'a> {
     input_negative_globs: PathGlobSet<'a>,
     output_negative_globs: PathGlobSet<'a>,
@@ -113,8 +117,20 @@ struct FspyTracking<'a> {
 
 /// Per-task runner-aware tracking: IPC server handle plus optional fspy state.
 /// Lifetime-tied to a single `execute_spawn` call.
+///
+/// `auto_inference` is cfg-agnostic (read by the `FspyUnsupported` decision in
+/// [`update_cache`] on every platform). The fspy state itself only exists when
+/// fspy is compiled in (`cfg(fspy)`); on other platforms a task requesting
+/// auto-inference reports `FspyUnsupported` and requires manual `input`/`output`.
 struct Tracking<'a> {
+    /// Whether the task's config requests automatic input or output inference.
+    auto_inference: bool,
+    #[cfg(fspy)]
     fspy: Option<FspyTracking<'a>>,
+    #[cfg(not(fspy))]
+    /// Keeps the `'a` lifetime parameter used on platforms without fspy,
+    /// where the `fspy` field that carried it is not compiled in.
+    _lifetime: PhantomData<&'a ()>,
     ipc_envs: Vec<(&'static OsStr, OsString)>,
     ipc_server_fut: IpcDriver,
     stop_accepting: StopAccepting,
@@ -170,7 +186,10 @@ impl<'a> ExecutionMode<'a> {
             });
         };
 
-        let fspy = if metadata.input_config.includes_auto || metadata.output_config.includes_auto {
+        let auto_inference =
+            metadata.input_config.includes_auto || metadata.output_config.includes_auto;
+        #[cfg(fspy)]
+        let fspy = if auto_inference {
             // Resolve negative globs for fspy path filtering (already
             // workspace-root-relative).
             let input_negative_globs = PathGlobSet::new(&metadata.input_config.negative_globs)
@@ -188,8 +207,16 @@ impl<'a> ExecutionMode<'a> {
         let (ipc_envs, ServerHandle { driver, stop_accepting }) =
             serve(Recorder::new(Arc::clone(&metadata.unfiltered_envs)))
                 .map_err(ExecutionError::IpcServerBind)?;
-        let tracking =
-            Tracking { fspy, ipc_envs: ipc_envs.collect(), ipc_server_fut: driver, stop_accepting };
+        let tracking = Tracking {
+            auto_inference,
+            #[cfg(fspy)]
+            fspy,
+            #[cfg(not(fspy))]
+            _lifetime: PhantomData,
+            ipc_envs: ipc_envs.collect(),
+            ipc_server_fut: driver,
+            stop_accepting,
+        };
 
         Ok(Self::Cached {
             pipe_writers: stdio_config.writers,
@@ -219,7 +246,7 @@ impl<'a> ExecutionMode<'a> {
     /// whether fspy tracking is on.
     const fn spawn_config(&self) -> (SpawnStdio, bool) {
         match self {
-            Self::Cached { state, .. } => (SpawnStdio::Piped, state.tracking.fspy.is_some()),
+            Self::Cached { state, .. } => (SpawnStdio::Piped, state.tracking.auto_inference),
             Self::Uncached { pipe_writers: Some(_) } => (SpawnStdio::Piped, false),
             Self::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
         }
