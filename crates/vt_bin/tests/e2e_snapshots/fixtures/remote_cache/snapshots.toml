@@ -1,16 +1,23 @@
 # Cases that use the remote cache backend are ignored because it runs on
 # Node.js. Windows is skipped because the PTY launcher cannot execute pnpm
-# command shims. Whether an upload to the backend is still running when the
-# tasks finish depends on timing, so steps that upload hide the message about
-# pending uploads. The cases that test it stall the uploads instead, with
+# command shims. Each of these cases starts its own backend first, runs
+# commands against it with `remote-cache-server run`, and stops it last.
+# Whether an upload to the backend is still running when the tasks finish
+# depends on timing, so steps that upload hide the message about pending
+# uploads. The cases that test it stall the uploads instead, with
 # stalled-remote-cache in front of the backend.
 [[e2e]]
 name = "read_write"
 cfg = "not(windows)"
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -26,6 +33,7 @@ steps = [
   ], comment = "The fetch finds no entry. The new execution is uploaded with one store request, and vt run waits for it after the task finishes." },
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -35,6 +43,10 @@ steps = [
       "read-write",
     ],
   ], comment = "A local hit makes no requests." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
@@ -42,8 +54,13 @@ name = "read"
 cfg = "not(windows)"
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -65,10 +82,15 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
   ], comment = "An endpoint without a mode selects read. The task reruns without uploading." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
@@ -76,8 +98,13 @@ name = "restore"
 cfg = "not(windows)"
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -104,6 +131,7 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -120,6 +148,7 @@ steps = [
   ], comment = "The outputs are restored." },
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -137,10 +166,15 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
   ], comment = "The exact entry fails validation, so the archive isn't downloaded." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
@@ -148,8 +182,13 @@ name = "local_and_remote_hits"
 cfg = "not(windows)"
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -175,6 +214,7 @@ steps = [
   ], comment = "Without an endpoint, check is cached only locally." },
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "all",
@@ -184,6 +224,10 @@ steps = [
     "run",
     "--last-details",
   ], comment = "The details show which hit came from the remote cache." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
@@ -191,8 +235,13 @@ name = "fallback"
 cfg = "not(windows)"
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -220,10 +269,15 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
   ], comment = "The entry stored for this task has a different key. The miss reason compares it with the current key." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
@@ -231,8 +285,13 @@ name = "corrupt_archive"
 cfg = "not(windows)"
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -259,6 +318,7 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -276,6 +336,10 @@ steps = [
     ".tmp",
     "--recursive",
   ], comment = "The corrupt download was removed." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
@@ -283,8 +347,13 @@ name = "restore_failure"
 cfg = "not(windows)"
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -317,6 +386,7 @@ steps = [
   ], comment = "A file where the output directory goes makes restoring fail." },
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -341,10 +411,15 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
   ], comment = "Nothing was cached locally, so the remote entry is fetched and restored again." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
@@ -352,8 +427,13 @@ name = "pending_uploads"
 cfg = "not(windows)"
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vtt",
     "stalled-remote-cache",
     "--stall",
@@ -375,6 +455,10 @@ steps = [
     "run",
     "--last-details",
   ], comment = "Both uploads were cancelled." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
@@ -565,8 +649,13 @@ name = "ctrl_c_during_upload"
 cfg = "not(windows)"
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vtt",
     "stalled-remote-cache",
     "--stall",
@@ -593,6 +682,10 @@ steps = [
     "run",
     "build",
   ], comment = "The entry is still in the local cache." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
@@ -600,8 +693,13 @@ name = "fast_fail_during_upload"
 cfg = "not(windows)"
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vtt",
     "stalled-remote-cache",
     "--stall",
@@ -618,6 +716,10 @@ steps = [
     { "expect-milestone" = "uploads-pending" },
     { "write-key" = "ctrl-c" },
   ], comment = "The proxy never forwards the upload. fail-after-build exits after build finishes, which doesn't cancel build's upload, so vt run waits for it until Ctrl-C." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
@@ -625,8 +727,13 @@ name = "hide_pending_uploads"
 cfg = "not(windows)"
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vtt",
     "stalled-remote-cache",
     "--stall",
@@ -647,4 +754,8 @@ steps = [
     { "expect-milestone" = "uploads-pending" },
     { "write-key" = "ctrl-c" },
   ], comment = "The proxy never forwards the upload. vt run waits for it until Ctrl-C, without the message about pending uploads." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]

@@ -21,7 +21,6 @@ catalog:
   '@playwright/browser-chromium': 1.63.0
   '@vitest/browser-playwright': 5.0.3
   bun: 1.4.2
-  cbor-edn: 0.2.2
   cbor2: 1.12.0
   cross-env: ^10.1.0
   deno: 2.9.6

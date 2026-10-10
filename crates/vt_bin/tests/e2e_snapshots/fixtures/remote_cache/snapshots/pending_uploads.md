@@ -1,6 +1,11 @@
 # pending_uploads
 
-## `VP_REMOTE_CACHE=read-write remote-cache-server vtt stalled-remote-cache --stall /store vt run all`
+## `remote-cache-server start`
+
+```
+```
+
+## `VP_REMOTE_CACHE=read-write remote-cache-server run vtt stalled-remote-cache --stall /store vt run all`
 
 The proxy never forwards the uploads. check doesn't wait for build's upload, so both are still running when check finishes, and vt run waits for them until Ctrl-C.
 
@@ -53,4 +58,9 @@ Task Details:
       → Cache miss: no previous cache entry found
       ⚠ Not uploaded to the remote cache: interrupted
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+## `remote-cache-server stop`
+
+```
 ```

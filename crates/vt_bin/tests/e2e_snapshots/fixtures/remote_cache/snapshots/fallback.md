@@ -1,6 +1,11 @@
 # fallback
 
-## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server vt run build`
+## `remote-cache-server start`
+
+```
+```
+
+## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server run vt run build`
 
 ```
 $ vtt write-file dist/output.txt built
@@ -19,7 +24,7 @@ $ vtt write-file dist/output.txt built
 ```
 ```
 
-## `remote-cache-server vt run build`
+## `remote-cache-server run vt run build`
 
 The entry stored for this task has a different key. The miss reason compares it with the current key.
 
@@ -27,4 +32,9 @@ The entry stored for this task has a different key. The miss reason compares it 
 $ vtt write-file dist/output.txt rebuilt ○ cache miss: args changed, executing
 
 [remote-cache] POST /fetch 200 fallback
+```
+
+## `remote-cache-server stop`
+
+```
 ```
