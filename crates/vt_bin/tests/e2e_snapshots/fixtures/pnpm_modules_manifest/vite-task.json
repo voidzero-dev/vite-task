@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "read-manifest": {
+      "command": "vtt print-file node_modules/.modules.yaml",
+      "cache": true
+    }
+  }
+}

@@ -130,7 +130,7 @@ fn strip_root(
 }
 
 fn hash_file_content(path: &AbsolutePath) -> io::Result<u64> {
-    super::hash::hash_content(io::BufReader::new(File::open(path.as_path())?))
+    super::hash::hash_file_content(path, io::BufReader::new(File::open(path.as_path())?))
 }
 
 #[cfg(test)]

@@ -417,7 +417,7 @@ pub fn fingerprint_path(
             return process_directory(std_path, path_read);
         }
     }
-    Ok(PathFingerprint::FileContentHash(super::hash::hash_content(reader)?))
+    Ok(PathFingerprint::FileContentHash(super::hash::hash_file_content(path, reader)?))
 }
 
 /// Process a directory on Windows using `std::fs::read_dir`
