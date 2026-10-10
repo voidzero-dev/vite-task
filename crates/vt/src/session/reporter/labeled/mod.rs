@@ -7,7 +7,7 @@ use vt_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
     ColorSupport, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
-    LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion,
+    LeafExecutionReporter, PipeWriters, RetryingWriter, StdioConfig, StdioSuggestion,
     format_command_with_cache_status, format_task_label, maybe_strip_writer,
     write_leaf_trailing_output,
 };
@@ -101,11 +101,17 @@ impl LeafExecutionReporter for LabeledLeafReporter {
             suggestion: StdioSuggestion::Piped,
             writers: PipeWriters {
                 stdout_writer: Box::new(LabeledWriter::new(
-                    maybe_strip_writer(Box::new(std::io::stdout()), self.color_support.stdout),
+                    maybe_strip_writer(
+                        Box::new(RetryingWriter::new(std::io::stdout())),
+                        self.color_support.stdout,
+                    ),
                     prefix.as_bytes().to_vec(),
                 )),
                 stderr_writer: Box::new(LabeledWriter::new(
-                    maybe_strip_writer(Box::new(std::io::stderr()), self.color_support.stderr),
+                    maybe_strip_writer(
+                        Box::new(RetryingWriter::new(std::io::stderr())),
+                        self.color_support.stderr,
+                    ),
                     prefix.as_bytes().to_vec(),
                 )),
             },

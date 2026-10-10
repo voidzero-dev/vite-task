@@ -27,6 +27,7 @@ mod grouped;
 mod interleaved;
 mod labeled;
 mod plain;
+mod retrying_writer;
 pub mod summary;
 mod summary_reporter;
 
@@ -37,6 +38,7 @@ pub use interleaved::InterleavedReporterBuilder;
 pub use labeled::LabeledReporterBuilder;
 use owo_colors::Style;
 pub use plain::PlainReporter;
+use retrying_writer::RetryingWriter;
 pub use summary_reporter::SummaryReporterBuilder;
 use vt_path::AbsolutePath;
 use vt_plan::{ExecutionItemDisplay, LeafExecutionKind};

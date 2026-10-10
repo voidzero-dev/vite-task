@@ -7,7 +7,7 @@ use vt_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
     ColorSupport, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
-    LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion,
+    LeafExecutionReporter, PipeWriters, RetryingWriter, StdioConfig, StdioSuggestion,
     format_command_with_cache_status, maybe_strip_writer, write_leaf_trailing_output,
 };
 use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
@@ -101,11 +101,11 @@ impl LeafExecutionReporter for InterleavedLeafReporter {
             suggestion: self.stdio_suggestion,
             writers: PipeWriters {
                 stdout_writer: maybe_strip_writer(
-                    Box::new(std::io::stdout()),
+                    Box::new(RetryingWriter::new(std::io::stdout())),
                     self.color_support.stdout,
                 ),
                 stderr_writer: maybe_strip_writer(
-                    Box::new(std::io::stderr()),
+                    Box::new(RetryingWriter::new(std::io::stderr())),
                     self.color_support.stderr,
                 ),
             },

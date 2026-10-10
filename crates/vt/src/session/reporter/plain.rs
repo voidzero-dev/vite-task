@@ -6,7 +6,7 @@
 use std::io::Write;
 
 use super::{
-    ColorSupport, LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion,
+    ColorSupport, LeafExecutionReporter, PipeWriters, RetryingWriter, StdioConfig, StdioSuggestion,
     format_cache_hit_message, format_error_message, maybe_strip_writer,
 };
 // `maybe_strip_writer` is used for the child-process pipe writers; reporter
@@ -85,11 +85,11 @@ impl LeafExecutionReporter for PlainReporter {
                 suggestion: StdioSuggestion::Inherited,
                 writers: PipeWriters {
                     stdout_writer: maybe_strip_writer(
-                        Box::new(std::io::stdout()),
+                        Box::new(RetryingWriter::new(std::io::stdout())),
                         self.color_support.stdout,
                     ),
                     stderr_writer: maybe_strip_writer(
-                        Box::new(std::io::stderr()),
+                        Box::new(RetryingWriter::new(std::io::stderr())),
                         self.color_support.stderr,
                     ),
                 },

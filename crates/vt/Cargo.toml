@@ -73,7 +73,7 @@ tempfile = { workspace = true }
 fspy = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["dir"] }
+nix = { workspace = true, features = ["dir", "poll"] }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { workspace = true, features = ["handleapi", "jobapi2", "winnt"] }
