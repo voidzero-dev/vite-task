@@ -6,14 +6,14 @@ Run `pnpm install` at the repository root to install `remote-cache-server` into 
 
 ```sh
 remote-cache-server start
-VP_REMOTE_CACHE=read-write remote-cache-server run vt run build
+VP_REMOTE_CACHE=read-write remote-cache-server run --github-actions vt run build
 remote-cache-server stop
 ```
 
 An E2E case starts its own backend in its first step and stops it in its last, so the backend keeps its state for the whole case. Each subcommand works in the current directory, the case's directory:
 
 - `remote-cache-server start` starts the backend in the background on free loopback ports and returns once it's ready. The backend runs in its own session and doesn't use the terminal, so the step can finish and Ctrl-C in later steps doesn't reach it. It writes its endpoint, `http://127.0.0.1:<port>/projects/test`, to `remote-cache/server.json`, and its output to `remote-cache/server.log`.
-- `remote-cache-server run COMMAND [ARGS...]` runs the command with `VP_REMOTE_CACHE_URL` set to the endpoint. The fixed base path gives the endpoint a namespace path. The command inherits stdio and handles Ctrl-C, which `run` ignores. `run` exits with the command's exit code.
+- `remote-cache-server run [--github-actions] COMMAND [ARGS...]` runs the command with `VP_REMOTE_CACHE_URL` set to the endpoint. The fixed base path gives the endpoint a namespace path. With `--github-actions`, the command runs as if in a GitHub Actions job with `id-token: write`: `ACTIONS_ID_TOKEN_REQUEST_URL` points to the backend's stand-in for GitHub's token service, and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` defaults to `main-push`. The command inherits stdio and handles Ctrl-C, which `run` ignores. `run` exits with the command's exit code.
 - `remote-cache-server corrupt-blob NUMBER` overwrites a stored blob, numbered as in the request lines, with other bytes.
 - `remote-cache-server stop` stops the backend. It fails if the backend answered a request with a 5xx status or couldn't be reached.
 
@@ -28,9 +28,16 @@ The endpoint is a tap in front of the backend. It forwards every request and res
 [remote-cache] GET /blob/1 200
 ```
 
+Like the public cache service, the backend only accepts a store with a GitHub Actions token for a push to the main branch of its registered repository, whose audience is the endpoint. It answers other stores as the service does: `401` with `Invalid credentials` for a missing or invalid token, and `403` with `Write not permitted` for a token that the write policy doesn't allow. The stand-in signs tokens with a key that the backend trusts in place of GitHub's, for the workflow run that the request token stands for:
+
+| Request token  | Workflow run                              |
+| -------------- | ----------------------------------------- |
+| `main-push`    | A push to `main` of `owner/repository`    |
+| `pull-request` | A pull request against `owner/repository` |
+
 The backend keeps its state in `remote-cache/`. `state.json` holds the entries and associations, with keys and values hex-encoded. Each blob is a file in `remote-cache/blobs/` named by its blob ID, a random UUID.
 
-The backend implements `POST /fetch`, `POST /store`, and `GET /blob/{blob_id}` from the [remote cache server API](https://github.com/voidzero-dev/vite-task/pull/713). A fetch that matches neither key gets a `404` with the plain-text body `Not found`. Keys, values, and blobs are opaque bytes without length limits. There is no authentication.
+The backend implements `POST /fetch`, `POST /store`, and `GET /blob/{blob_id}` from the [remote cache server API](https://github.com/voidzero-dev/vite-task/pull/713). A fetch that matches neither key gets a `404` with the plain-text body `Not found`. Keys, values, and blobs are opaque bytes without length limits. Writes need a token as described above.
 
 Run `pnpm --filter vite-task-tools check` for type checking. Run `cargo test -p vt_bin --test e2e_snapshots -- remote_cache --ignored` for the snapshots that use the backend.
 
