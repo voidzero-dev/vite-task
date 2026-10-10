@@ -8,7 +8,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logFile, serverFile, stateDirectory, type ServerInfo } from './state.ts';
 
-const usage = 'Usage: remote-cache-server start | run COMMAND [ARGS...] | stop';
+const usage =
+  'Usage: remote-cache-server start | run COMMAND [ARGS...] | corrupt-blob NUMBER | stop';
 const directory = resolve(stateDirectory);
 
 function fail(message: string): never {
@@ -23,12 +24,19 @@ function readInfo(): ServerInfo {
   return JSON.parse(readFileSync(serverFile(directory), 'utf8')) as ServerInfo;
 }
 
-/** POST to the backend's control server and return the JSON response. */
-function control<T>(info: ServerInfo, path: string): Promise<T> {
+/**
+ * POST to the backend's control server and return the JSON response. A 404
+ * fails with `notFound`.
+ */
+function control<T>(info: ServerInfo, path: string, notFound = 'unknown request'): Promise<T> {
   return new Promise((resolve) => {
     const unreachable = (error: Error) =>
       fail(`the backend is unreachable (${error.message}). See ${logFile(stateDirectory)}.`);
     const call = request(`${info.control}${path}`, { method: 'POST', agent: false }, (response) => {
+      if (response.statusCode === 404) fail(notFound);
+      if (response.statusCode !== 200) {
+        fail(`the backend failed (${response.statusCode}). See ${logFile(stateDirectory)}.`);
+      }
       const chunks: Buffer[] = [];
       response.on('data', (chunk: Buffer) => chunks.push(chunk));
       response.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString()) as T));
@@ -79,6 +87,11 @@ async function run([command, ...args]: string[]): Promise<void> {
   process.exitCode = code;
 }
 
+async function corruptBlob([number]: string[]): Promise<void> {
+  if (number === undefined || !/^[1-9]\d*$/.test(number)) fail(usage);
+  await control(readInfo(), `/corrupt-blob/${number}`, `no blob ${number} has been stored.`);
+}
+
 async function stop(): Promise<void> {
   const { requests, anomalies } = await control<{ requests: string[]; anomalies: string[] }>(
     readInfo(),
@@ -92,5 +105,6 @@ async function stop(): Promise<void> {
 const [subcommand, ...args] = process.argv.slice(2);
 if (subcommand === 'start') await start();
 else if (subcommand === 'run') await run(args);
+else if (subcommand === 'corrupt-blob') await corruptBlob(args);
 else if (subcommand === 'stop') await stop();
 else fail(usage);

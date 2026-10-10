@@ -14,11 +14,12 @@ An E2E case starts its own backend in its first step and stops it in its last, s
 
 - `remote-cache-server start` starts the backend in the background on free loopback ports and returns once it's ready. The backend runs in its own session and doesn't use the terminal, so the step can finish and Ctrl-C in later steps doesn't reach it. It writes its endpoint, `http://127.0.0.1:<port>/projects/test`, to `remote-cache/server.json`, and its output to `remote-cache/server.log`.
 - `remote-cache-server run COMMAND [ARGS...]` runs the command with `VP_REMOTE_CACHE_URL` set to the endpoint. The fixed base path gives the endpoint a namespace path. The command inherits stdio and handles Ctrl-C, which `run` ignores. `run` exits with the command's exit code.
+- `remote-cache-server corrupt-blob NUMBER` overwrites a stored blob, numbered as in the request lines, with other bytes.
 - `remote-cache-server stop` stops the backend. It fails if the backend answered a request with a 5xx status or couldn't be reached.
 
 A backend whose case directory disappears stops by itself, as does one that has had no requests for ten minutes, e.g. because its case timed out before the stop step.
 
-The endpoint is a tap in front of the backend. It forwards every request and response unchanged and records a line for each response, in the order of the responses. Each line has the method, the path below the base path, and the status. Successful fetch responses add their kind. After the command exits, `run` prints the lines for the requests it caused to stderr, and `stop` prints any that are left:
+The endpoint is a tap in front of the backend. It forwards every request and response unchanged and records a line for each response, in the order of the responses. Each line has the method, the path below the base path, and the status. Successful fetch responses add their kind. Blob IDs are random, so blob paths show the blob's number in upload order instead, keeping snapshots deterministic. After the command exits, `run` prints the lines for the requests it caused to stderr, and `stop` prints any that are left:
 
 ```text
 [remote-cache] POST /fetch 404
@@ -27,7 +28,7 @@ The endpoint is a tap in front of the backend. It forwards every request and res
 [remote-cache] GET /blob/1 200
 ```
 
-The backend keeps its state in `remote-cache/`. `state.json` holds the entries, associations, and next blob ID, with keys and values hex-encoded. Each blob is a file in `remote-cache/blobs/` named by its blob ID. Blob IDs are sequential strings, keeping snapshots deterministic.
+The backend keeps its state in `remote-cache/`. `state.json` holds the entries and associations, with keys and values hex-encoded. Each blob is a file in `remote-cache/blobs/` named by its blob ID, a random UUID.
 
 The backend implements `POST /fetch`, `POST /store`, and `GET /blob/{blob_id}` from the [remote cache server API](https://github.com/voidzero-dev/vite-task/pull/713). A fetch that matches neither key gets a `404` with the plain-text body `Not found`. Keys, values, and blobs are opaque bytes without length limits. There is no authentication.
 
