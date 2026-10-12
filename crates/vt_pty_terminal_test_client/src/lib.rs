@@ -1,6 +1,6 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
-const MILESTONE_TITLE_MARKER: &str = "pty-terminal-test:";
+const MILESTONE_TITLE_MARKER: &str = "vt-pty-terminal-test:";
 
 #[cfg(any(feature = "testing", test))]
 fn encode_milestone_title(name: &str) -> String {
@@ -99,9 +99,9 @@ mod tests {
     #[test]
     fn ignores_normal_and_malformed_titles() {
         assert!(decode_milestone_title(b"normal title").is_none());
-        assert!(decode_milestone_title(b"pty-terminal-test:not-hex:cmVhZHk").is_none());
+        assert!(decode_milestone_title(b"vt-pty-terminal-test:not-hex:cmVhZHk").is_none());
         assert!(
-            decode_milestone_title(b"pty-terminal-test:00000000000000000000000000000000:*")
+            decode_milestone_title(b"vt-pty-terminal-test:00000000000000000000000000000000:*")
                 .is_none()
         );
     }

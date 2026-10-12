@@ -27,7 +27,7 @@ impl Server {
             clippy::disallowed_macros,
             reason = "the generated pipe name exceeds Str inline capacity"
         )]
-        let name = OsString::from(format!(r"\\.\pipe\socket_ipc_{}", uuid::Uuid::new_v4()));
+        let name = OsString::from(format!(r"\\.\pipe\vt_socket_ipc_{}", uuid::Uuid::new_v4()));
         let pending = ServerOptions::new().first_pipe_instance(true).create(&name)?;
         Ok(Self { name, pending })
     }

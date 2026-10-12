@@ -74,7 +74,7 @@ pub struct Server {
 
 impl Server {
     pub fn bind() -> io::Result<Self> {
-        let dir = tempfile::Builder::new().prefix("socket_ipc_").tempdir()?;
+        let dir = tempfile::Builder::new().prefix("vt_socket_ipc_").tempdir()?;
         let root = AbsolutePath::new(dir.path())
             .expect("temp directories are absolute")
             .to_absolute_path_buf();

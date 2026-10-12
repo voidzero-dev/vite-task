@@ -48,7 +48,7 @@ assert!(status.success());
 Milestones are encoded as unique window titles:
 
 ```text
-pty-terminal-test:<32-hex-random-id>:<name-base64url>
+vt-pty-terminal-test:<32-hex-random-id>:<name-base64url>
 ```
 
 `Reader::expect_milestone` works like this:
