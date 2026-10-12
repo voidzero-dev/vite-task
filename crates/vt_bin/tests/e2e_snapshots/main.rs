@@ -9,11 +9,11 @@ use std::{
 };
 
 use cp_r::CopyOptions;
-use pty_terminal::{geo::ScreenSize, terminal::CommandBuilder};
-use pty_terminal_test::TestTerminal;
 use redact::redact_e2e_output;
 use vec1::Vec1;
 use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
+use vt_pty_terminal::{geo::ScreenSize, terminal::CommandBuilder};
+use vt_pty_terminal_test::TestTerminal;
 use vt_str::Str;
 use vt_workspace::find_workspace_root;
 
@@ -311,10 +311,10 @@ enum TerminationState {
 /// line, so snapshots stay machine-independent.
 fn resolve_env_placeholder(raw: &str) -> std::borrow::Cow<'_, OsStr> {
     if raw == "<PRELOAD_TEST_LIB_PATH>" {
-        let path = env::var_os("CARGO_CDYLIB_FILE_PRELOAD_TEST_LIB").unwrap_or_else(|| {
+        let path = env::var_os("CARGO_CDYLIB_FILE_VT_PRELOAD_TEST_LIB").unwrap_or_else(|| {
             panic!(
-                "CARGO_CDYLIB_FILE_PRELOAD_TEST_LIB not set; the e2e harness requires \
-                 the preload_test_lib cdylib artifact to be built by cargo"
+                "CARGO_CDYLIB_FILE_VT_PRELOAD_TEST_LIB not set; the e2e harness requires \
+                 the vt_preload_test_lib cdylib artifact to be built by cargo"
             )
         });
         std::borrow::Cow::Owned(path)
@@ -324,7 +324,7 @@ fn resolve_env_placeholder(raw: &str) -> std::borrow::Cow<'_, OsStr> {
 }
 
 /// Render the byte stream produced by `screen_contents_formatted` (which uses
-/// `vt100::Screen::rows_formatted` — see [`pty_terminal`]) into a
+/// `vt100::Screen::rows_formatted` — see [`vt_pty_terminal`]) into a
 /// snapshot-friendly string. Newlines (added as row separators by the PTY
 /// helper) stay literal so the snapshot remains multi-line; SGR escapes and
 /// other bytes outside printable ASCII come out as `\xNN`, `\t`, etc.
@@ -398,7 +398,7 @@ fn run_case(
     case_index: usize,
     e2e: &E2e,
 ) -> Result<(), String> {
-    let snapshots = snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
+    let snapshots = vt_snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
 
     // Copy the fixture to a per-case staging directory so the test runs in
     // isolation and workspace-root discovery doesn't walk past the fixture.

@@ -20,7 +20,7 @@ anyhow = { workspace = true }
 ctrlc = { workspace = true }
 libc = { workspace = true }
 notify = { workspace = true }
-pty_terminal_test_client = { workspace = true }
+vt_pty_terminal_test_client = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 jsonc-parser = { workspace = true, features = ["serde"] }
@@ -39,10 +39,10 @@ cargo-platform = { workspace = true }
 cow-utils = { workspace = true }
 cp_r = { workspace = true }
 libtest-mimic = { workspace = true }
-snapshot_test = { workspace = true }
-pty_terminal = { workspace = true }
-pty_terminal_test = { workspace = true }
-pty_terminal_test_client = { workspace = true, features = ["testing"] }
+vt_snapshot_test = { workspace = true }
+vt_pty_terminal = { workspace = true }
+vt_pty_terminal_test = { workspace = true }
+vt_pty_terminal_test_client = { workspace = true, features = ["testing"] }
 regex = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 shell-escape = { workspace = true }
@@ -54,11 +54,11 @@ vt_workspace = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 # Artifact dep: the cdylib is built and its path is exposed to the e2e
-# test harness via `CARGO_CDYLIB_FILE_PRELOAD_TEST_LIB` at test-runtime.
-preload_test_lib = { path = "../preload_test_lib", artifact = "cdylib" }
+# test harness via `CARGO_CDYLIB_FILE_VT_PRELOAD_TEST_LIB` at test-runtime.
+vt_preload_test_lib = { path = "../vt_preload_test_lib", artifact = "cdylib" }
 
 [package.metadata.cargo-shear]
-ignored = ["preload_test_lib"]
+ignored = ["vt_preload_test_lib"]
 
 [lints]
 workspace = true

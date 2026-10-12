@@ -15,9 +15,9 @@ use fspy_shared::{
     windows::{PAYLOAD_ID, Payload},
 };
 use futures_util::FutureExt;
-use materialized_artifact::{Artifact, artifact};
 use ntapi::{ntpsapi::NtResumeProcess, ntrtl::RtlNtStatusToDosError};
 use tokio_util::sync::CancellationToken;
+use vt_materialized_artifact::{Artifact, artifact};
 use winapi::{
     shared::{minwindef::TRUE, ntdef::NT_SUCCESS},
     um::winbase::CREATE_SUSPENDED,

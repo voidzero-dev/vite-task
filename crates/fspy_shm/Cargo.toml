@@ -20,7 +20,7 @@ windows-sys = { workspace = true, features = [
 
 [dev-dependencies]
 ctor = { workspace = true }
-subprocess_test = { workspace = true }
+vt_subprocess_test = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

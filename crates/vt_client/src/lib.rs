@@ -6,13 +6,13 @@ use std::{
 };
 
 use rustc_hash::FxHashMap;
-use socket_ipc::Client as Stream;
 use vt_casefold::EnvName;
 use vt_ipc_shared::{
     EnvQuery as IpcEnvQuery, GetEnvResponse, GetEnvsResponse, IPC_ENV_NAME, Request,
 };
 use vt_ipc_str::IpcStr;
 use vt_path::{self, AbsolutePath};
+use vt_socket_ipc::Client as Stream;
 use wincode::{SchemaRead, config::DefaultConfig};
 
 pub struct Client {

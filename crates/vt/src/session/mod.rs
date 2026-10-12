@@ -544,7 +544,7 @@ impl<'a> Session<'a> {
         let select_result = vt_select::select_list(&mut stdout, &params, mode, |state| {
             let milestone_name =
                 vt_str::format!("task-select:{}:{}", state.query, state.selected_index);
-            pty_terminal_test_client::mark_milestone(&milestone_name);
+            vt_pty_terminal_test_client::mark_milestone(&milestone_name);
         })?;
 
         if matches!(select_result, vt_select::SelectResult::Cancelled) {

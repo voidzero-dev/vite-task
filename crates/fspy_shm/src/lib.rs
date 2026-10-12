@@ -30,7 +30,7 @@ mod tests {
     use std::{ffi::OsStr, mem::align_of, path::PathBuf, process::Command};
 
     use fspy_nostd::{OsCStr, Thin};
-    use subprocess_test::command_for_fn;
+    use vt_subprocess_test::command_for_fn;
 
     use super::{Mapping, create, open, remove};
 

@@ -556,7 +556,7 @@ mod tests {
         use std::process::{Child, Command};
 
         use rustc_hash::FxHashSet;
-        use subprocess_test::command_for_fn;
+        use vt_subprocess_test::command_for_fn;
 
         const CHILD_COUNT: usize = 12;
         const FRAME_COUNT_EACH_CHILD: usize = 100;
@@ -632,7 +632,7 @@ mod tests {
             process::{Command, Stdio},
         };
 
-        use subprocess_test::command_for_fn;
+        use vt_subprocess_test::command_for_fn;
 
         const SHM_SIZE: usize = 1024 * 1024;
 

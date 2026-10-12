@@ -297,7 +297,7 @@ impl Session<'_> {
             if !hide_pending_uploads {
                 reporter.uploads_pending(pending);
             }
-            pty_terminal_test_client::mark_milestone("uploads-pending");
+            vt_pty_terminal_test_client::mark_milestone("uploads-pending");
         }
         cache.wait_for_uploads(&interrupt_token).await;
 

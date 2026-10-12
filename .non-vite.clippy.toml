@@ -1,5 +1,5 @@
-# Clippy configuration for non-vt crates (fspy_*, subprocess_test, pty_terminal, etc.)
-# that don't depend on vt_str/vt_path.
+# Clippy configuration for crates that don't depend on vt_str/vt_path
+# (fspy_*, vt_subprocess_test, vt_pty_terminal, etc.).
 #
 # This is a subset of the root .clippy.toml, with rules recommending vt_str/vt_path
 # alternatives removed. Generic rules (cow_utils, rustc-hash) still apply.

@@ -6,13 +6,13 @@ use std::{
 };
 
 use rustc_hash::FxHashMap;
-use socket_ipc::Client as RawStream;
 use tokio::runtime::Builder;
 use vt_casefold::EnvName;
 use vt_client::{Client, GetEnvsQuery};
 use vt_ipc_shared::{EnvQuery as RawEnvQuery, GetEnvResponse, Request};
 use vt_ipc_str::IpcStr;
 use vt_server::{EnvQuery, Error, Recorder, Reports, ServerHandle, serve};
+use vt_socket_ipc::Client as RawStream;
 
 fn env_map(pairs: &[(&str, &str)]) -> FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>> {
     pairs

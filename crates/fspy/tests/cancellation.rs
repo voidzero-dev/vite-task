@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 
 #[test_log::test(tokio::test)]
 async fn cancellation_kills_tracked_child() -> anyhow::Result<()> {
-    let cmd = subprocess_test::command_for_fn!((), |()| {
+    let cmd = vt_subprocess_test::command_for_fn!((), |()| {
         use std::io::Write as _;
         // Signal readiness via stdout
         std::io::stdout().write_all(b"ready\n").unwrap();

@@ -29,7 +29,7 @@ winapi = { workspace = true, features = ["std"] }
 assert2 = { workspace = true }
 ctor = { workspace = true }
 rustc-hash = { workspace = true }
-subprocess_test = { workspace = true }
+vt_subprocess_test = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 
 [lints]

@@ -173,7 +173,7 @@ fn run_case(
 ) -> Result<(), String> {
     let fixture_name = fixture_path.file_name().unwrap().to_str().unwrap();
     assert_identifier_like("fixture folder", fixture_name);
-    let snapshots = snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
+    let snapshots = vt_snapshot_test::Snapshots::new(fixture_path.join("snapshots"));
     run_case_inner(runtime, tmpdir, fixture_path, fixture_name, &snapshots, cases_file)
 }
 
@@ -187,7 +187,7 @@ fn run_case_inner(
     tmpdir: &AbsolutePath,
     fixture_path: &std::path::Path,
     fixture_name: &str,
-    snapshots: &snapshot_test::Snapshots,
+    snapshots: &vt_snapshot_test::Snapshots,
     cases_file: SnapshotsFile,
 ) -> Result<(), String> {
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.

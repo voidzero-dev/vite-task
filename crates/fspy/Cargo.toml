@@ -11,7 +11,7 @@ wincode = { workspace = true }
 bstr = { workspace = true, features = ["alloc", "std"] }
 bumpalo = { workspace = true, features = ["allocator-api2", "collections"] }
 derive_more = { workspace = true, features = ["debug"] }
-materialized_artifact = { workspace = true }
+vt_materialized_artifact = { workspace = true }
 fspy_shared = { workspace = true }
 futures-util = { workspace = true }
 libc = { workspace = true }
@@ -62,7 +62,7 @@ anyhow = { workspace = true }
 csv-async = { workspace = true, features = ["tokio"] }
 ctor = { workspace = true }
 ntest = { workspace = true }
-subprocess_test = { workspace = true, features = ["fspy"] }
+vt_subprocess_test = { workspace = true, features = ["fspy"] }
 test-log = { workspace = true, features = ["trace"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "io-std"] }
 

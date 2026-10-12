@@ -3,7 +3,7 @@
 
 use std::{env, fs, sync::LazyLock};
 
-use materialized_artifact::artifact;
+use vt_materialized_artifact::artifact;
 use vt_path::{AbsolutePath, AbsolutePathBuf};
 
 /// Path to the materialized `vt_client_napi` `.node` addon.

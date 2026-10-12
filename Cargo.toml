@@ -74,8 +74,6 @@ derive_more = "2.0.1"
 diff-struct = "0.5.3"
 directories = "6.0.0"
 elf = { version = "0.8.0", default-features = false }
-materialized_artifact = { path = "crates/materialized_artifact" }
-materialized_artifact_macros = { path = "crates/materialized_artifact_macros" }
 flate2 = "1.0.35"
 fspy = { path = "crates/fspy" }
 fspy_benchmark_launcher = { path = "crates/fspy_benchmark_launcher", artifact = "bin" }
@@ -119,9 +117,6 @@ phf = "0.13.0"
 portable-pty = "0.9.0"
 pretty_assertions = "1.4.1"
 proc-macro2 = "1"
-pty_terminal = { path = "crates/pty_terminal" }
-pty_terminal_test = { path = "crates/pty_terminal_test" }
-pty_terminal_test_client = { path = "crates/pty_terminal_test_client" }
 quote = "1"
 ratatui = "0.30.0"
 rayon = "1.10.0"
@@ -144,10 +139,7 @@ fspy_nostd_alloc = { path = "crates/fspy_nostd_alloc" }
 similar = "3.0.0"
 smallvec = "2.0.0-alpha.12"
 static_cell = "2"
-snapshot_test = { path = "crates/snapshot_test" }
-socket_ipc = { path = "crates/socket_ipc" }
 stackalloc = "1.2.1"
-subprocess_test = { path = "crates/subprocess_test" }
 supports-color = "3.0.1"
 syn = "2"
 syscalls = { version = "0.8.0", default-features = false }
@@ -169,12 +161,20 @@ vec1 = "1.12.1"
 vt_casefold = { path = "crates/vt_casefold" }
 vt_glob = { path = "crates/vt_glob" }
 vt_graph_ser = { path = "crates/vt_graph_ser" }
+vt_materialized_artifact = { path = "crates/vt_materialized_artifact" }
+vt_materialized_artifact_macros = { path = "crates/vt_materialized_artifact_macros" }
 vt_path = { path = "crates/vt_path" }
 vt_powershell = { path = "crates/vt_powershell" }
+vt_pty_terminal = { path = "crates/vt_pty_terminal" }
+vt_pty_terminal_test = { path = "crates/vt_pty_terminal_test" }
+vt_pty_terminal_test_client = { path = "crates/vt_pty_terminal_test_client" }
 vt_remote_cache = { path = "crates/vt_remote_cache" }
 vt_select = { path = "crates/vt_select" }
 vt_shell = { path = "crates/vt_shell" }
+vt_snapshot_test = { path = "crates/vt_snapshot_test" }
+vt_socket_ipc = { path = "crates/vt_socket_ipc" }
 vt_str = { path = "crates/vt_str" }
+vt_subprocess_test = { path = "crates/vt_subprocess_test" }
 vt = { path = "crates/vt" }
 vt_bin = { path = "crates/vt_bin" }
 vt_client = { path = "crates/vt_client" }

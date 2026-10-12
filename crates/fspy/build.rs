@@ -56,7 +56,7 @@ struct BinaryDownload {
     /// On-disk filename in `OUT_DIR`.
     name: &'static str,
     /// Env var published via `cargo:rustc-env`, through which
-    /// `materialized_artifact::artifact!` finds and embeds the binary.
+    /// `vt_materialized_artifact::artifact!` finds and embeds the binary.
     env_var: &'static str,
     /// GitHub release asset URL.
     url: &'static str,

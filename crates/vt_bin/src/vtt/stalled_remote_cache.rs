@@ -83,7 +83,7 @@ impl Proxy {
             .strip_prefix(self.base_path.as_str())
             .is_some_and(|route| self.stalled_routes.iter().any(|stalled| stalled == route))
         {
-            pty_terminal_test_client::mark_milestone("stalled");
+            vt_pty_terminal_test_client::mark_milestone("stalled");
             let mut buf = [0; 4096];
             while client.read(&mut buf).is_ok_and(|n| n > 0) {}
             return;

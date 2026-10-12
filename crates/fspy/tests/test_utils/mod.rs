@@ -15,7 +15,7 @@ use fspy::{AccessMode, PathAccessIterable};
     unused_imports,
     reason = "used by track_child! macro; not all test files use this macro"
 )]
-pub use subprocess_test::command_for_fn;
+pub use vt_subprocess_test::command_for_fn;
 
 /// # Panics
 ///
@@ -77,7 +77,7 @@ macro_rules! track_fn {
     reason = "allow attribute required for conditionally-used helper"
 )]
 #[allow(dead_code, reason = "used by track_fn! macro; not all test files use this macro")]
-pub async fn spawn_command(cmd: subprocess_test::Command) -> anyhow::Result<PathAccessIterable> {
+pub async fn spawn_command(cmd: vt_subprocess_test::Command) -> anyhow::Result<PathAccessIterable> {
     let termination = fspy::Command::from(cmd)
         .spawn(tokio_util::sync::CancellationToken::new())
         .await?

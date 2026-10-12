@@ -373,7 +373,7 @@ mod tests {
     use allocator_api2::alloc::Global;
     use assert2::assert;
     use bstr::B;
-    use subprocess_test::command_for_fn;
+    use vt_subprocess_test::command_for_fn;
 
     use super::*;
     use crate::ipc::{AccessMode, IpcPath, PathAccess};
