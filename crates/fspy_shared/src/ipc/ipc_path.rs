@@ -10,7 +10,7 @@ use std::{
 
 use bumpalo::Bump;
 use bytemuck::TransparentWrapper;
-use fspy_ipc_str::IpcStr;
+use vt_ipc_str::IpcStr;
 use wincode::{
     SchemaRead, SchemaWrite,
     config::Config,

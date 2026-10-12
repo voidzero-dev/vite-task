@@ -102,7 +102,6 @@ monostate = "1.0.2"
 napi = "3"
 napi-build = "2"
 napi-derive = "3"
-fspy_ipc_str = { path = "crates/fspy_ipc_str" }
 nix = "0.31.2"
 ntapi = "0.4.1"
 nucleo-matcher = "0.3.1"
@@ -182,6 +181,7 @@ vt_client = { path = "crates/vt_client" }
 vt_client_napi = { path = "crates/vt_client_napi", artifact = "cdylib" }
 vt_graph = { path = "crates/vt_graph" }
 vt_ipc_shared = { path = "crates/vt_ipc_shared" }
+vt_ipc_str = { path = "crates/vt_ipc_str" }
 vt_plan = { path = "crates/vt_plan" }
 vt_server = { path = "crates/vt_server" }
 vt_workspace = { path = "crates/vt_workspace" }

@@ -1,4 +1,4 @@
-# fspy_ipc_str
+# vt_ipc_str
 
 A platform-native string type for lossless, zero-copy IPC.
 
@@ -20,7 +20,7 @@ This type is designed for same-platform IPC (e.g., shared memory between a paren
 ## Usage
 
 ```rust
-use fspy_ipc_str::IpcStr;
+use vt_ipc_str::IpcStr;
 
 // Unix: construct from bytes
 #[cfg(unix)]

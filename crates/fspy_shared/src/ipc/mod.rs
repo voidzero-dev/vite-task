@@ -3,8 +3,8 @@ mod ipc_path;
 use std::fmt::Debug;
 
 use bitflags::bitflags;
-pub use fspy_ipc_str::IpcStr;
 pub use ipc_path::IpcPath;
+pub use vt_ipc_str::IpcStr;
 use wincode::{SchemaRead, SchemaWrite};
 
 #[derive(SchemaWrite, SchemaRead, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]

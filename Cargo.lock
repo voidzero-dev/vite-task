@@ -1438,18 +1438,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fspy_ipc_str"
-version = "0.0.0"
-dependencies = [
- "allocator-api2",
- "bumpalo",
- "bytemuck",
- "fspy_nostd",
- "fspy_nostd_alloc",
- "wincode",
-]
-
-[[package]]
 name = "fspy_nostd"
 version = "0.0.0"
 dependencies = [
@@ -1536,7 +1524,6 @@ dependencies = [
  "bumpalo",
  "bytemuck",
  "ctor",
- "fspy_ipc_str",
  "fspy_nostd",
  "fspy_nostd_alloc",
  "fspy_shm",
@@ -1546,6 +1533,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+ "vt_ipc_str",
  "vt_path",
  "winapi",
  "wincode",
@@ -5133,11 +5121,11 @@ dependencies = [
 name = "vt_client"
 version = "0.0.0"
 dependencies = [
- "fspy_ipc_str",
  "rustc-hash",
  "socket_ipc",
  "vt_casefold",
  "vt_ipc_shared",
+ "vt_ipc_str",
  "vt_path",
  "wincode",
 ]
@@ -5198,8 +5186,20 @@ dependencies = [
 name = "vt_ipc_shared"
 version = "0.0.0"
 dependencies = [
- "fspy_ipc_str",
  "rustc-hash",
+ "vt_ipc_str",
+ "wincode",
+]
+
+[[package]]
+name = "vt_ipc_str"
+version = "0.0.0"
+dependencies = [
+ "allocator-api2",
+ "bumpalo",
+ "bytemuck",
+ "fspy_nostd",
+ "fspy_nostd_alloc",
  "wincode",
 ]
 
@@ -5303,7 +5303,6 @@ dependencies = [
 name = "vt_server"
 version = "0.0.0"
 dependencies = [
- "fspy_ipc_str",
  "futures",
  "rustc-hash",
  "socket_ipc",
@@ -5315,6 +5314,7 @@ dependencies = [
  "vt_client",
  "vt_glob",
  "vt_ipc_shared",
+ "vt_ipc_str",
  "vt_path",
  "wincode",
 ]

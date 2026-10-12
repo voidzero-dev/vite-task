@@ -1,5 +1,5 @@
-use fspy_ipc_str::IpcStr;
 use rustc_hash::FxHashMap;
+use vt_ipc_str::IpcStr;
 use wincode::{SchemaRead, SchemaWrite};
 
 pub const IPC_ENV_NAME: &str = "VP_RUN_IPC_NAME";

@@ -7,12 +7,12 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-fspy_ipc_str = { workspace = true }
 rustc-hash = { workspace = true }
 socket_ipc = { workspace = true }
 vt_casefold = { workspace = true }
 vt_path = { workspace = true }
 vt_ipc_shared = { workspace = true }
+vt_ipc_str = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
 
 [lints]
