@@ -16,7 +16,7 @@ base64 = { workspace = true }
 getrandom = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
-winapi = { workspace = true, features = ["wincon"], optional = true }
+winapi = { workspace = true, features = ["synchapi", "winbase", "wincon"], optional = true }
 
 [dev-dependencies]
 getrandom = { workspace = true }

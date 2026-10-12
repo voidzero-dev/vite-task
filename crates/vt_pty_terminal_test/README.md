@@ -53,10 +53,12 @@ vt-pty-terminal-test:<32-hex-random-id>:<name-base64url>
 
 `Reader::expect_milestone` works like this:
 
-1. Drain title events captured by `PtyReader`.
+1. Drain title events captured by `PtyReader`, acknowledging each milestone.
 2. Ignore ordinary titles and completed non-target milestones.
 3. If no match exists, continue reading from the PTY and repeat.
 4. Return the current screen once the requested title is observed.
+
+`Reader::wait_for_exit` also acknowledges the milestones it reads.
 
 ## Cross-platform behavior
 
@@ -64,6 +66,15 @@ On Windows the client calls `SetConsoleTitleW`; ConPTY emits the resulting title
 through its asynchronous renderer after preceding text and cursor state. On Unix
 the client emits an OSC 2 title update, which follows normal PTY byte ordering.
 The same token decoder and test API are used on every platform.
+
+ConPTY emits only the latest title when it renders, so a title set by another
+process before then would replace a milestone. `TestTerminal::spawn` sets
+`VT_PTY_TERMINAL_TEST_MILESTONE_LOCK` for the child on Windows. A producer
+that inherits it holds a named lock shared by the processes in the terminal
+from setting its title until the reader acknowledges the milestone by
+signaling a named event derived from the milestone's random id. A process that
+doesn't inherit it, such as a task that `vp` runs with a filtered environment,
+only sets the title.
 
 ## Typical test pattern
 

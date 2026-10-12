@@ -13,6 +13,9 @@ portable-pty = { workspace = true }
 vt_pty_terminal = { workspace = true }
 vt_pty_terminal_test_client = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+winapi = { workspace = true, features = ["handleapi", "synchapi", "winnt"] }
+
 [dev-dependencies]
 crossterm = { workspace = true }
 ctor = { workspace = true }

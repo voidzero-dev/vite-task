@@ -13,10 +13,6 @@ use std::{
 /// forwarded or answered: each emits a "stalled" milestone when it arrives,
 /// and its connection is held until the client closes it. Other requests are
 /// forwarded, each on its own connection. Ctrl-C is left to the command.
-///
-/// On Windows a milestone is the console title, which `ConPTY` sends when it
-/// next renders, so if the command sets one at about the same time, the
-/// earlier title can be lost.
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut args = args;
     let mut stalled_routes = Vec::new();

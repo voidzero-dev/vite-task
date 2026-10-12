@@ -152,3 +152,60 @@ fn descendant_process_can_mark_milestone() {
     let _ = reader.expect_milestone("nested");
     assert!(reader.wait_for_exit().unwrap().success());
 }
+
+/// Two processes mark milestones at the same time. `ConPTY` emits only the
+/// latest console title when it renders, so without the lock in
+/// `mark_milestone` the nested process's titles could replace `target`.
+#[test]
+#[timeout(5000)]
+#[expect(clippy::redundant_clone, reason = "command_for_fn evaluates its argument twice")]
+fn concurrent_milestones_are_not_lost() {
+    let nested = command_for_fn!((), |(): ()| {
+        for _ in 0..20 {
+            vt_pty_terminal_test_client::mark_milestone("noise");
+        }
+    });
+    let nested_program = nested.program.to_string_lossy().into_owned();
+    let nested_args =
+        nested.args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>();
+
+    let cmd = CommandBuilder::from(command_for_fn!(
+        (nested_program.clone(), nested_args.clone()),
+        |(nested_program, nested_args): (String, Vec<String>)| {
+            let mut nested =
+                std::process::Command::new(nested_program).args(nested_args).spawn().unwrap();
+            vt_pty_terminal_test_client::mark_milestone("target");
+            assert!(nested.wait().unwrap().success());
+        }
+    ));
+
+    let TestTerminal { writer: _, mut reader, child_handle: _ } =
+        TestTerminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let _ = reader.expect_milestone("target");
+    assert!(reader.wait_for_exit().unwrap().success());
+}
+
+/// The child prints nothing after the milestone until the harness responds.
+#[test]
+#[timeout(5000)]
+fn milestone_without_later_output() {
+    let cmd = CommandBuilder::from(command_for_fn!((), |(): ()| {
+        use std::io::{Write, stdout};
+
+        let mut stdout = stdout();
+        write!(stdout, "waiting").unwrap();
+        stdout.flush().unwrap();
+        vt_pty_terminal_test_client::mark_milestone("waiting");
+
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).unwrap();
+    }));
+
+    let TestTerminal { mut writer, mut reader, child_handle: _ } =
+        TestTerminal::spawn(ScreenSize { rows: 80, cols: 80 }, cmd).unwrap();
+    let screen = reader.expect_milestone("waiting");
+    assert_eq!(screen.trim(), "waiting");
+
+    writer.write_line(b"").unwrap();
+    assert!(reader.wait_for_exit().unwrap().success());
+}

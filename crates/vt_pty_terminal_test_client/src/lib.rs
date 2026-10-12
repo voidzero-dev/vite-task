@@ -2,18 +2,42 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
 const MILESTONE_TITLE_MARKER: &str = "vt-pty-terminal-test:";
 
+/// Environment variable through which the test harness asks milestone
+/// producers on Windows to wait until it has seen each milestone. Its value
+/// identifies the test terminal.
+pub const MILESTONE_LOCK_ENV: &str = "VT_PTY_TERMINAL_TEST_MILESTONE_LOCK";
+
+/// A milestone decoded from a window title.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Milestone {
+    /// Random identity that distinguishes repeated milestones with the same name.
+    pub id: u128,
+    pub name: String,
+}
+
+/// Name of the Windows event that the producer of milestone `id` waits on
+/// until the test harness has seen its title.
+#[must_use]
+pub fn milestone_ack_event_name(id: u128) -> String {
+    format!("Local\\vt-pty-terminal-test-ack-{id:032x}")
+}
+
 #[cfg(any(feature = "testing", test))]
-fn encode_milestone_title(name: &str) -> String {
+fn new_milestone_id() -> u128 {
     let mut random = [0u8; 16];
     getrandom::fill(&mut random).expect("failed to generate milestone identity");
-    let id = u128::from_be_bytes(random);
+    u128::from_be_bytes(random)
+}
+
+#[cfg(any(feature = "testing", test))]
+fn encode_milestone_title(id: u128, name: &str) -> String {
     let encoded_name = URL_SAFE_NO_PAD.encode(name.as_bytes());
     format!("{MILESTONE_TITLE_MARKER}{id:032x}:{encoded_name}")
 }
 
 /// Decodes a milestone title, ignoring ordinary application title updates.
 #[must_use]
-pub fn decode_milestone_title(title: &[u8]) -> Option<String> {
+pub fn decode_milestone_title(title: &[u8]) -> Option<Milestone> {
     let encoded = title.strip_prefix(MILESTONE_TITLE_MARKER.as_bytes())?;
     let (encoded_id, encoded_name) = encoded.split_at_checked(32)?;
     let (&b':', encoded_name) = encoded_name.split_first()? else {
@@ -23,11 +47,13 @@ pub fn decode_milestone_title(title: &[u8]) -> Option<String> {
         return None;
     }
 
+    let id = u128::from_str_radix(std::str::from_utf8(encoded_id).ok()?, 16).ok()?;
+
     let name_bytes = URL_SAFE_NO_PAD.decode(encoded_name).ok()?;
     if URL_SAFE_NO_PAD.encode(&name_bytes).as_bytes() != encoded_name {
         return None;
     }
-    String::from_utf8(name_bytes).ok()
+    Some(Milestone { id, name: String::from_utf8(name_bytes).ok()? })
 }
 
 /// Emits a milestone marker as a unique window-title update.
@@ -40,6 +66,12 @@ pub fn decode_milestone_title(title: &[u8]) -> Option<String> {
 /// preceding text and cursor state. Other platforms emit the equivalent OSC 2
 /// title update through the ordered PTY byte stream.
 ///
+/// `ConPTY` emits only the latest title when it renders, so on Windows a title
+/// set by another process before then would replace the milestone. When
+/// [`MILESTONE_LOCK_ENV`] is set, this holds a lock named after it, shared by
+/// the processes in the test terminal, until the harness signals the event
+/// named by [`milestone_ack_event_name`] after it has seen the title.
+///
 /// When the `testing` feature is disabled, this is a no-op.
 ///
 /// # Panics
@@ -47,26 +79,88 @@ pub fn decode_milestone_title(title: &[u8]) -> Option<String> {
 /// Panics if secure randomness is unavailable or emitting the title fails.
 #[cfg(feature = "testing")]
 pub fn mark_milestone(name: &str) {
-    emit_title(&encode_milestone_title(name)).expect("failed to emit milestone title");
+    let id = new_milestone_id();
+    emit_title(id, &encode_milestone_title(id, name)).expect("failed to emit milestone title");
 }
 
 #[cfg(all(feature = "testing", windows))]
-fn emit_title(title: &str) -> std::io::Result<()> {
-    use std::io::Write as _;
+fn emit_title(id: u128, title: &str) -> std::io::Result<()> {
+    use std::{
+        io::Write as _,
+        os::windows::io::{FromRawHandle as _, OwnedHandle},
+        ptr,
+    };
+
+    use winapi::um::{synchapi, winbase, wincon};
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain([0]).collect()
+    }
+
+    fn check_handle(handle: winapi::um::winnt::HANDLE) -> std::io::Result<OwnedHandle> {
+        if handle.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: `handle` is a valid handle that nothing else owns.
+        Ok(unsafe { OwnedHandle::from_raw_handle(handle.cast()) })
+    }
+
+    fn wait(handle: &OwnedHandle) -> std::io::Result<()> {
+        use std::os::windows::io::AsRawHandle as _;
+
+        // SAFETY: `handle` is a valid synchronization object.
+        match unsafe {
+            synchapi::WaitForSingleObject(handle.as_raw_handle().cast(), winbase::INFINITE)
+        } {
+            // A lock abandoned by a process that exited while holding it is
+            // still acquired.
+            winbase::WAIT_OBJECT_0 | winbase::WAIT_ABANDONED => Ok(()),
+            _ => Err(std::io::Error::last_os_error()),
+        }
+    }
+
+    struct Release<'a>(&'a OwnedHandle);
+    impl Drop for Release<'_> {
+        fn drop(&mut self) {
+            use std::os::windows::io::AsRawHandle as _;
+
+            // SAFETY: the current thread owns the mutex.
+            unsafe { synchapi::ReleaseMutex(self.0.as_raw_handle().cast()) };
+        }
+    }
 
     std::io::stdout().flush()?;
-    let mut wide = title.encode_utf16().collect::<Vec<_>>();
-    wide.push(0);
-    // SAFETY: `wide` is a valid NUL-terminated UTF-16 title.
-    if unsafe { winapi::um::wincon::SetConsoleTitleW(wide.as_ptr()) } == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
+    let title = wide(title);
+    let set_title = || {
+        // SAFETY: `title` is a valid NUL-terminated UTF-16 title.
+        if unsafe { wincon::SetConsoleTitleW(title.as_ptr()) } == 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    };
+    let Ok(terminal) = std::env::var(MILESTONE_LOCK_ENV) else {
+        return set_title();
+    };
+
+    let lock_name = wide(&format!("Local\\vt-pty-terminal-test-lock-{terminal}"));
+    // SAFETY: `lock_name` is a valid NUL-terminated UTF-16 name.
+    let lock =
+        check_handle(unsafe { synchapi::CreateMutexW(ptr::null_mut(), 0, lock_name.as_ptr()) })?;
+    wait(&lock)?;
+    let _release = Release(&lock);
+
+    let ack_name = wide(&milestone_ack_event_name(id));
+    // SAFETY: `ack_name` is a valid NUL-terminated UTF-16 name. The event is
+    // manual-reset and starts unsignaled.
+    let ack =
+        check_handle(unsafe { synchapi::CreateEventW(ptr::null_mut(), 1, 0, ack_name.as_ptr()) })?;
+    set_title()?;
+    wait(&ack)
 }
 
 #[cfg(all(feature = "testing", not(windows)))]
-fn emit_title(title: &str) -> std::io::Result<()> {
+fn emit_title(_id: u128, title: &str) -> std::io::Result<()> {
     use std::io::Write as _;
 
     let mut stdout = std::io::stdout().lock();
@@ -87,13 +181,17 @@ mod tests {
 
     #[test]
     fn title_round_trip() {
-        let title = encode_milestone_title("task-select:lib#:0");
-        assert_eq!(decode_milestone_title(title.as_bytes()).as_deref(), Some("task-select:lib#:0"));
+        let id = new_milestone_id();
+        let title = encode_milestone_title(id, "task-select:lib#:0");
+        assert_eq!(
+            decode_milestone_title(title.as_bytes()),
+            Some(Milestone { id, name: "task-select:lib#:0".to_owned() })
+        );
     }
 
     #[test]
-    fn repeated_names_get_unique_titles() {
-        assert_ne!(encode_milestone_title("ready"), encode_milestone_title("ready"));
+    fn repeated_names_get_unique_ids() {
+        assert_ne!(new_milestone_id(), new_milestone_id());
     }
 
     #[test]

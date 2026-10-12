@@ -5232,6 +5232,7 @@ dependencies = [
  "vt_pty_terminal",
  "vt_pty_terminal_test_client",
  "vt_subprocess_test",
+ "winapi",
 ]
 
 [[package]]

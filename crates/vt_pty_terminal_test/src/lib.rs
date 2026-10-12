@@ -1,4 +1,4 @@
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read as _};
 
 pub use portable_pty::CommandBuilder;
 use vt_pty_terminal::terminal::{PtyReader, Terminal};
@@ -32,6 +32,21 @@ impl TestTerminal {
     ///
     /// Returns an error if the PTY cannot be opened or the command fails to spawn.
     pub fn spawn(size: ScreenSize, cmd: CommandBuilder) -> anyhow::Result<Self> {
+        // Producers on Windows wait for each milestone to be seen while
+        // holding a lock shared by the processes in this terminal.
+        #[cfg(windows)]
+        let cmd = {
+            use std::sync::atomic::{AtomicU64, Ordering};
+
+            static NEXT_TERMINAL: AtomicU64 = AtomicU64::new(0);
+            let mut cmd = cmd;
+            let terminal = NEXT_TERMINAL.fetch_add(1, Ordering::Relaxed);
+            cmd.env(
+                vt_pty_terminal_test_client::MILESTONE_LOCK_ENV,
+                format!("{}-{terminal}", std::process::id()),
+            );
+            cmd
+        };
         let Terminal { pty_reader, pty_writer, child_handle, .. } = Terminal::spawn(size, cmd)?;
         Ok(Self {
             writer: pty_writer,
@@ -61,6 +76,8 @@ impl Reader {
     ///
     /// Milestones use a uniform title token across platforms.
     ///
+    /// Every milestone read before the named one is skipped.
+    ///
     /// # Panics
     ///
     /// Panics if the child process exits (EOF) before the named milestone is received,
@@ -70,17 +87,28 @@ impl Reader {
         let mut buf = [0u8; 4096];
 
         loop {
-            while let Some(title) = self.pty.get_ref().take_window_title() {
-                if vt_pty_terminal_test_client::decode_milestone_title(&title)
-                    .is_some_and(|milestone| milestone == name)
-                {
-                    return self.screen_contents();
-                }
+            if self.take_milestones().any(|milestone| milestone == name) {
+                return self.screen_contents();
             }
 
             let n = self.pty.read(&mut buf).expect("PTY read failed");
             assert!(n > 0, "EOF reached before milestone '{name}'");
         }
+    }
+
+    /// Takes the names of the milestones read so far, letting each producer
+    /// continue once its milestone is taken.
+    fn take_milestones(&self) -> impl Iterator<Item = String> {
+        std::iter::from_fn(|| {
+            loop {
+                let title = self.pty.get_ref().take_window_title()?;
+                if let Some(milestone) = vt_pty_terminal_test_client::decode_milestone_title(&title)
+                {
+                    acknowledge(milestone.id);
+                    return Some(milestone.name);
+                }
+            }
+        })
     }
 
     /// Reads all remaining PTY output until the child exits, then returns the exit status.
@@ -93,8 +121,41 @@ impl Reader {
     ///
     /// Panics if reading from the PTY fails.
     pub fn wait_for_exit(&mut self) -> anyhow::Result<ExitStatus> {
-        let mut discard = Vec::new();
-        self.pty.read_to_end(&mut discard).expect("PTY read_to_end failed");
+        let mut buf = [0u8; 4096];
+        loop {
+            self.take_milestones().for_each(drop);
+            if self.pty.read(&mut buf).expect("PTY read failed") == 0 {
+                break;
+            }
+        }
         self.child_handle.wait()
     }
 }
+
+/// Signals the producer of milestone `id` that the milestone was seen.
+///
+/// See `vt_pty_terminal_test_client::mark_milestone` for why it waits.
+#[cfg(windows)]
+fn acknowledge(id: u128) {
+    use winapi::um::{handleapi, synchapi, winnt};
+
+    let name = vt_pty_terminal_test_client::milestone_ack_event_name(id)
+        .encode_utf16()
+        .chain([0])
+        .collect::<Vec<_>>();
+    // SAFETY: `name` is a valid NUL-terminated UTF-16 name.
+    let event = unsafe { synchapi::OpenEventW(winnt::EVENT_MODIFY_STATE, 0, name.as_ptr()) };
+    // The producer doesn't wait if it didn't inherit the lock environment
+    // variable, and closes the event once it is signaled.
+    if event.is_null() {
+        return;
+    }
+    // SAFETY: `event` is a valid event handle owned here.
+    unsafe {
+        synchapi::SetEvent(event);
+        handleapi::CloseHandle(event);
+    }
+}
+
+#[cfg(not(windows))]
+const fn acknowledge(_id: u128) {}
