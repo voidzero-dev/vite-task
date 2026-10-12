@@ -1,7 +1,5 @@
-# Windows is skipped because the PTY launcher cannot execute pnpm command shims.
 [[e2e]]
 name = "entries_and_associations"
-cfg = "not(windows)"
 ignore = true
 steps = [
   [
@@ -96,7 +94,6 @@ steps = [
 
 [[e2e]]
 name = "blob_replacement"
-cfg = "not(windows)"
 ignore = true
 steps = [
   [
@@ -209,7 +206,6 @@ steps = [
 
 [[e2e]]
 name = "opaque_binary_data"
-cfg = "not(windows)"
 ignore = true
 steps = [
   [
@@ -264,7 +260,6 @@ steps = [
 
 [[e2e]]
 name = "invalid_requests"
-cfg = "not(windows)"
 ignore = true
 steps = [
   [
@@ -433,7 +428,6 @@ steps = [
 
 [[e2e]]
 name = "state_across_invocations"
-cfg = "not(windows)"
 ignore = true
 steps = [
   [

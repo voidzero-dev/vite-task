@@ -1,12 +1,10 @@
 # Cases that use the remote cache backend are ignored because it runs on
-# Node.js. Windows is skipped because the PTY launcher cannot execute pnpm
-# command shims. Whether an upload to the backend is still running when the
-# tasks finish depends on timing, so steps that upload hide the message about
+# Node.js. Whether an upload to the backend is still running when the tasks
+# finish depends on timing, so steps that upload hide the message about
 # pending uploads. The cases that test it stall the uploads instead, with
 # stalled-remote-cache in front of the backend.
 [[e2e]]
 name = "read_write"
-cfg = "not(windows)"
 ignore = true
 steps = [
   { argv = [
@@ -39,7 +37,6 @@ steps = [
 
 [[e2e]]
 name = "read"
-cfg = "not(windows)"
 ignore = true
 steps = [
   { argv = [
@@ -73,7 +70,6 @@ steps = [
 
 [[e2e]]
 name = "restore"
-cfg = "not(windows)"
 ignore = true
 steps = [
   { argv = [
@@ -145,7 +141,6 @@ steps = [
 
 [[e2e]]
 name = "local_and_remote_hits"
-cfg = "not(windows)"
 ignore = true
 steps = [
   { argv = [
@@ -188,7 +183,6 @@ steps = [
 
 [[e2e]]
 name = "fallback"
-cfg = "not(windows)"
 ignore = true
 steps = [
   { argv = [
@@ -228,7 +222,6 @@ steps = [
 
 [[e2e]]
 name = "corrupt_archive"
-cfg = "not(windows)"
 ignore = true
 steps = [
   { argv = [
@@ -280,7 +273,6 @@ steps = [
 
 [[e2e]]
 name = "restore_failure"
-cfg = "not(windows)"
 ignore = true
 steps = [
   { argv = [
@@ -349,7 +341,6 @@ steps = [
 
 [[e2e]]
 name = "pending_uploads"
-cfg = "not(windows)"
 ignore = true
 steps = [
   { argv = [
@@ -562,7 +553,6 @@ steps = [
 
 [[e2e]]
 name = "ctrl_c_during_upload"
-cfg = "not(windows)"
 ignore = true
 steps = [
   { argv = [
@@ -597,7 +587,6 @@ steps = [
 
 [[e2e]]
 name = "fast_fail_during_upload"
-cfg = "not(windows)"
 ignore = true
 steps = [
   { argv = [
@@ -622,7 +611,6 @@ steps = [
 
 [[e2e]]
 name = "hide_pending_uploads"
-cfg = "not(windows)"
 ignore = true
 steps = [
   { argv = [
