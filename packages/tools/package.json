@@ -27,6 +27,7 @@
     "oxlint-tsgolint": "catalog:",
     "playwright": "catalog:",
     "pnpm": "catalog:",
+    "postject": "catalog:",
     "typescript": "7.1.0-dev.20261001.1",
     "vite": "catalog:",
     "vitest": "catalog:"
