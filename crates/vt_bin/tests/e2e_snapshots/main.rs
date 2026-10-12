@@ -473,15 +473,20 @@ fn run_case(
             // prefers an exact name over `PATHEXT` extensions, so it would
             // pick an extensionless shell shim such as `node_modules/.bin/pnpm`
             // over `pnpm.cmd`, which Windows can't execute.
+            //
+            // `canonicalize` gives the staged workspace a verbatim (`\\?\`)
+            // path on Windows. `cmd.exe`, which runs npm-style `.cmd` shims
+            // such as pnpm's, rejects that as a working directory, so other
+            // programs start in its simplified form.
             let (mut cmd, spawn_cwd) = if matches!(program, "vt" | "vtt") {
                 let exe_env = vt_str::format!("CARGO_BIN_EXE_{program}");
                 let resolved =
                     env::var_os(exe_env.as_str()).unwrap_or_else(|| panic!("{exe_env} not set"));
-                (CommandBuilder::new(resolved), step_cwd.clone())
+                (CommandBuilder::new(resolved), step_cwd.as_path())
             } else {
                 let resolved = which::which_in(program, Some(&e2e_env_path), step_cwd.as_path())
                     .unwrap_or_else(|err| panic!("failed to resolve {program}: {err}"));
-                (CommandBuilder::new(resolved), without_verbatim_prefix(&step_cwd))
+                (CommandBuilder::new(resolved), dunce::simplified(step_cwd.as_path()))
             };
             for arg in &argv[1..] {
                 cmd.arg(arg.as_str());
@@ -533,7 +538,7 @@ fn run_case(
                 let resolved = resolve_env_placeholder(v.as_str());
                 cmd.env(k.as_str(), AsRef::<OsStr>::as_ref(&resolved));
             }
-            cmd.cwd(spawn_cwd.as_path());
+            cmd.cwd(spawn_cwd);
 
             let terminal = TestTerminal::spawn(SCREEN_SIZE, cmd).unwrap();
             let mut killer = terminal.child_handle.clone();
@@ -657,22 +662,6 @@ fn run_case(
     }
     snapshots.check_snapshot(vt_str::format!("{}.md", e2e.name).as_str(), &e2e_outputs)?;
     Ok(())
-}
-
-/// `canonicalize` gives verbatim (`\\?\`) paths on Windows, which `cmd.exe`
-/// rejects as a working directory. npm-style `.cmd` shims, such as pnpm's,
-/// run through it.
-fn without_verbatim_prefix(path: &AbsolutePath) -> AbsolutePathBuf {
-    #[cfg(windows)]
-    {
-        if let Some(stripped) = path.as_path().to_str().and_then(|path| path.strip_prefix(r"\\?\"))
-            && !stripped.starts_with(r"UNC\")
-            && let Some(stripped) = AbsolutePath::new(stripped)
-        {
-            return stripped.to_absolute_path_buf();
-        }
-    }
-    path.to_absolute_path_buf()
 }
 
 #[expect(clippy::disallowed_types, reason = "Path required for CARGO_MANIFEST_DIR path traversal")]

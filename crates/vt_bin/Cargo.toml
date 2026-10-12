@@ -38,6 +38,7 @@ nix = { workspace = true, features = ["mount", "sched", "user"] }
 cargo-platform = { workspace = true }
 cow-utils = { workspace = true }
 cp_r = { workspace = true }
+dunce = { workspace = true }
 libtest-mimic = { workspace = true }
 vt_snapshot_test = { workspace = true }
 vt_pty_terminal = { workspace = true }
