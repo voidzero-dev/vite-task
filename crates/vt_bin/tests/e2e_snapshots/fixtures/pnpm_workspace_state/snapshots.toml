@@ -6,10 +6,10 @@ A task that runs `pnpm run` reads pnpm's `node_modules/.pnpm-workspace-state-v1.
 ignore = true
 steps = [
   { argv = [
-    "vt",
-    "run",
-    "--no-cache",
-    "pnpm-install",
+    "pnpm",
+    "install",
+    "--frozen-lockfile",
+    "--silent",
   ], comment = "install, recording pnpm's dependency check" },
   { argv = [
     "vtt",
@@ -42,11 +42,11 @@ steps = [
     "vtt print hello",
   ], comment = "switch back: package.json is unchanged but newer than pnpm's last check" },
   { argv = [
-    "vt",
+    "pnpm",
+    "--silent",
     "run",
-    "--no-cache",
-    "pnpm-greet",
-  ], comment = "an uncached run: pnpm rechecks dependencies and rewrites the state file" },
+    "greet",
+  ], comment = "pnpm rechecks dependencies and rewrites the state file" },
   { argv = [
     "node",
     "compare-state.mjs",

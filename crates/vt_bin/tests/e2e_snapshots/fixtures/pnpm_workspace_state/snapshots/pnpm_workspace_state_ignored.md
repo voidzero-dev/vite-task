@@ -2,12 +2,11 @@
 
 A task that runs `pnpm run` reads pnpm's `node_modules/.pnpm-workspace-state-v1.json`, which pnpm rewrites with a new timestamp whenever it rechecks dependencies. The file is not part of the fingerprint, so the task keeps its cache hit after another pnpm command rechecks.
 
-## `vt run --no-cache pnpm-install`
+## `pnpm install --frozen-lockfile --silent`
 
 install, recording pnpm's dependency check
 
 ```
-$ pnpm install --frozen-lockfile --silent ⊘ cache disabled
 ```
 
 ## `vtt cp node_modules/.pnpm-workspace-state-v1.json state-after-install.json`
@@ -52,12 +51,11 @@ switch back: package.json is unchanged but newer than pnpm's last check
 ```
 ```
 
-## `vt run --no-cache pnpm-greet`
+## `pnpm --silent run greet`
 
-an uncached run: pnpm rechecks dependencies and rewrites the state file
+pnpm rechecks dependencies and rewrites the state file
 
 ```
-$ pnpm --silent run greet ⊘ cache disabled
 hello
 ```
 
