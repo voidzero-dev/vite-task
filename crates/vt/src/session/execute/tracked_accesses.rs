@@ -26,8 +26,9 @@ pub struct TrackedPathAccesses {
 
 impl TrackedPathAccesses {
     /// Build from fspy's raw iterable by stripping the workspace prefix and
-    /// normalizing `..` components. `.git/*` paths are skipped. User-configured
-    /// negatives are applied by the caller (see module docs).
+    /// normalizing `..` components. `.git/*` paths and pnpm's workspace state
+    /// files are skipped. User-configured negatives are applied by the caller
+    /// (see module docs).
     pub fn from_raw(raw: &PathAccessIterable, workspace_root: &AbsolutePath) -> Self {
         let mut accesses = Self::default();
         for access in raw.iter() {
@@ -88,13 +89,45 @@ fn normalize_tracked_workspace_path(stripped_path: &std::path::Path) -> Option<R
         return None;
     }
 
+    if is_pnpm_workspace_state(&relative) {
+        return None;
+    }
+
     Some(relative)
+}
+
+/// Whether `relative` is a `node_modules/.pnpm-workspace-state-*.json` file,
+/// pnpm's record of its dependency check before `pnpm run` and `pnpm exec`.
+/// pnpm rewrites it with a new timestamp whenever it rechecks dependencies,
+/// and it holds absolute project paths. Whether the check passes doesn't
+/// change what a cached task outputs.
+fn is_pnpm_workspace_state(relative: &RelativePathBuf) -> bool {
+    let path = relative.as_str();
+    let (dir, file_name) = path.rsplit_once('/').unwrap_or(("", path));
+    (dir == "node_modules" || dir.ends_with("/node_modules"))
+        && file_name
+            .strip_prefix(".pnpm-workspace-state-")
+            .is_some_and(|rest| rest.strip_suffix(".json").is_some())
 }
 
 #[cfg(test)]
 mod tests {
-    #[cfg(windows)]
     use super::*;
+
+    #[test]
+    fn pnpm_workspace_state_is_ignored() {
+        #[expect(
+            clippy::disallowed_types,
+            reason = "normalize_tracked_workspace_path requires std::path::Path for fspy strip_path_prefix output"
+        )]
+        let normalize = |path: &str| normalize_tracked_workspace_path(std::path::Path::new(path));
+        assert!(normalize("node_modules/.pnpm-workspace-state-v1.json").is_none());
+        assert!(normalize("node_modules/.pnpm-workspace-state-v2.json").is_none());
+        assert!(normalize("packages/a/node_modules/.pnpm-workspace-state-v1.json").is_none());
+        assert!(normalize("node_modules/.modules.yaml").is_some());
+        assert!(normalize(".pnpm-workspace-state-v1.json").is_some());
+        assert!(normalize("node_modules/a/.pnpm-workspace-state-v1.json").is_some());
+    }
 
     #[cfg(windows)]
     #[test]

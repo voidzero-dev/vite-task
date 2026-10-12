@@ -1,0 +1,7 @@
+{
+  "name": "pnpm-workspace-state",
+  "private": true,
+  "scripts": {
+    "greet": "vtt print hello"
+  }
+}

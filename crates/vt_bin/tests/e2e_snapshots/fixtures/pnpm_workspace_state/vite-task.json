@@ -1,0 +1,11 @@
+{
+  "tasks": {
+    "pnpm-install": {
+      "command": "pnpm install --frozen-lockfile --silent"
+    },
+    "pnpm-greet": {
+      "command": "pnpm --silent run greet",
+      "cache": true
+    }
+  }
+}

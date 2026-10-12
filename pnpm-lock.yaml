@@ -51,6 +51,9 @@ catalogs:
     oxlint-tsgolint:
       specifier: ^7.0.0
       version: 7.0.2004
+    pnpm:
+      specifier: 11.24.0
+      version: 11.24.0
     typescript:
       specifier: ^6.0.3
       version: 6.0.3
@@ -133,6 +136,9 @@ importers:
       playwright:
         specifier: 1.63.0
         version: 1.63.0
+      pnpm:
+        specifier: 'catalog:'
+        version: 11.24.0
       typescript:
         specifier: 7.1.0-dev.20261001.1
         version: 7.1.0-dev.20261001.1
@@ -1410,6 +1416,11 @@ packages:
     resolution: {integrity: sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==}
     engines: {node: '>=14.19.0'}
 
+  pnpm@11.24.0:
+    resolution: {integrity: sha512-vSfjRel23LC+C3oSKCF7BJqBfiGx81XJDb59xGZxiVqLwebQbCRVRQXqk+oLRfSJon7Bv7yN5qlln8oPFvoAAA==}
+    engines: {node: '>=22.13'}
+    hasBin: true
+
   postcss@8.5.28:
     resolution: {integrity: sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==}
     engines: {node: ^10 || ^12 || >=14}
@@ -2622,6 +2633,8 @@ snapshots:
       playwright-core: 1.63.0
 
   pngjs@7.0.0: {}
+
+  pnpm@11.24.0: {}
 
   postcss@8.5.28:
     dependencies:

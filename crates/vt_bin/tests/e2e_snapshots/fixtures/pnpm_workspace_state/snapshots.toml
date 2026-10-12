@@ -1,0 +1,59 @@
+[[e2e]]
+name = "pnpm_workspace_state_ignored"
+comment = """
+A task that runs `pnpm run` reads pnpm's `node_modules/.pnpm-workspace-state-v1.json`, which pnpm rewrites with a new timestamp whenever it rechecks dependencies. The file is not part of the fingerprint, so the task keeps its cache hit after another pnpm command rechecks.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--no-cache",
+    "pnpm-install",
+  ], comment = "install, recording pnpm's dependency check" },
+  { argv = [
+    "vtt",
+    "cp",
+    "node_modules/.pnpm-workspace-state-v1.json",
+    "state-after-install.json",
+  ], comment = "save the state file" },
+  { argv = [
+    "vt",
+    "run",
+    "pnpm-greet",
+  ], comment = "cache miss" },
+  { argv = [
+    "vt",
+    "run",
+    "pnpm-greet",
+  ], comment = "cache hit" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "package.json",
+    "vtt print hello",
+    "vtt print goodbye",
+  ], comment = "switch branches" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "package.json",
+    "vtt print goodbye",
+    "vtt print hello",
+  ], comment = "switch back: package.json is unchanged but newer than pnpm's last check" },
+  { argv = [
+    "vt",
+    "run",
+    "--no-cache",
+    "pnpm-greet",
+  ], comment = "an uncached run: pnpm rechecks dependencies and rewrites the state file" },
+  { argv = [
+    "node",
+    "compare-state.mjs",
+  ], comment = "the state file changed" },
+  { argv = [
+    "vt",
+    "run",
+    "pnpm-greet",
+  ], comment = "cache hit" },
+]
