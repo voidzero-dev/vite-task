@@ -4,31 +4,42 @@ use std::{
     sync::Arc,
 };
 
-/// stalled-remote-cache \[`--stall` `<route>`\]... `<command>` \[`<args>`...\]
+/// stalled-remote-cache \[`--stall` `<route>`\]... \[`--milestone`\] `<command>` \[`<args>`...\]
 ///
 /// Runs `<command>` with `VP_REMOTE_CACHE_URL` set to a loopback proxy for the
 /// endpoint in `VP_REMOTE_CACHE_URL`, which must be
 /// `http://<host>:<port>/<path>`, then exits with the command's exit code.
 /// Requests to a stalled route below the endpoint, such as `/store`, are never
-/// forwarded or answered: each emits a "stalled" milestone when it arrives,
-/// and its connection is held until the client closes it. Other requests are
-/// forwarded, each on its own connection. Ctrl-C is left to the command.
+/// forwarded or answered: their connections are held until the client closes
+/// them. Other requests are forwarded, each on its own connection. Ctrl-C is
+/// left to the command.
 ///
-/// On Windows a milestone is the console title, which `ConPTY` sends when it
+/// With `--milestone`, each stalled request emits a "stalled" milestone when it
+/// arrives. Leave it out when the test waits for a milestone from the command:
+/// on Windows a milestone is the console title, which `ConPTY` sends when it
 /// next renders, so if the command sets one at about the same time, the
 /// earlier title can be lost.
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut args = args;
     let mut stalled_routes = Vec::new();
-    while let [flag, route, rest @ ..] = args
-        && flag == "--stall"
-    {
-        stalled_routes.push(route.clone());
-        args = rest;
+    let mut milestone = false;
+    loop {
+        match args {
+            [flag, route, rest @ ..] if flag == "--stall" => {
+                stalled_routes.push(route.clone());
+                args = rest;
+            }
+            [flag, rest @ ..] if flag == "--milestone" => {
+                milestone = true;
+                args = rest;
+            }
+            _ => break,
+        }
     }
     let [program, args @ ..] = args else {
         return Err(
-            "Usage: vtt stalled-remote-cache [--stall <route>]... <command> [args...]".into()
+            "Usage: vtt stalled-remote-cache [--stall <route>]... [--milestone] <command> [args...]"
+                .into(),
         );
     };
     let upstream = std::env::var("VP_REMOTE_CACHE_URL")
@@ -41,6 +52,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         upstream: authority.to_owned(),
         base_path: std::format!("/{}", path.trim_end_matches('/')),
         stalled_routes,
+        milestone,
     });
     ctrlc::set_handler(|| {})?;
 
@@ -67,6 +79,8 @@ struct Proxy {
     base_path: String,
     /// Routes below `base_path` whose requests stall.
     stalled_routes: Vec<String>,
+    /// Whether a stalled request emits a "stalled" milestone.
+    milestone: bool,
 }
 
 impl Proxy {
@@ -83,7 +97,9 @@ impl Proxy {
             .strip_prefix(self.base_path.as_str())
             .is_some_and(|route| self.stalled_routes.iter().any(|stalled| stalled == route))
         {
-            vt_pty_terminal_test_client::mark_milestone("stalled");
+            if self.milestone {
+                vt_pty_terminal_test_client::mark_milestone("stalled");
+            }
             let mut buf = [0; 4096];
             while client.read(&mut buf).is_ok_and(|n| n > 0) {}
             return;
