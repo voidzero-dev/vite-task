@@ -17,6 +17,7 @@ catalog:
   '@fastify/busboy': 3.2.2
   '@openai/codex': 0.160.0
   '@tsconfig/strictest': ^2.0.8
+  '@types/cross-spawn': 6.0.6
   '@types/node': 25.0.3
   '@playwright/browser-chromium': 1.63.0
   '@vitest/browser-playwright': 5.0.3
@@ -24,6 +25,7 @@ catalog:
   cbor-edn: 0.2.2
   cbor2: 1.12.0
   cross-env: ^10.1.0
+  cross-spawn: 7.0.6
   deno: 2.9.6
   husky: ^9.1.7
   lint-staged: ^17.0.0

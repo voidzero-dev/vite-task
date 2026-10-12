@@ -21,6 +21,7 @@
     "cbor-edn": "catalog:",
     "cbor2": "catalog:",
     "cross-env": "catalog:",
+    "cross-spawn": "catalog:",
     "deno": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
@@ -33,6 +34,7 @@
     "vitest": "catalog:"
   },
   "devDependencies": {
+    "@types/cross-spawn": "catalog:",
     "vite-task-tools": "workspace:*"
   }
 }

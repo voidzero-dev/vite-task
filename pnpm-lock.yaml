@@ -21,6 +21,9 @@ catalogs:
     '@tsconfig/strictest':
       specifier: ^2.0.8
       version: 2.0.8
+    '@types/cross-spawn':
+      specifier: 6.0.6
+      version: 6.0.6
     '@types/node':
       specifier: 25.0.3
       version: 25.0.3
@@ -39,6 +42,9 @@ catalogs:
     cross-env:
       specifier: ^10.1.0
       version: 10.1.0
+    cross-spawn:
+      specifier: 7.0.6
+      version: 7.0.6
     deno:
       specifier: 2.9.6
       version: 2.9.6
@@ -124,6 +130,9 @@ importers:
       cross-env:
         specifier: 'catalog:'
         version: 10.1.0
+      cross-spawn:
+        specifier: 'catalog:'
+        version: 7.0.6
       deno:
         specifier: 'catalog:'
         version: 2.9.6
@@ -155,6 +164,9 @@ importers:
         specifier: 'catalog:'
         version: 5.0.3(@types/node@25.0.3)(@vitest/browser-playwright@5.0.3)(@vitest/browser-preview@5.0.3)(@vitest/ui@5.0.3)(vite@8.3.2(@types/node@25.0.3))
     devDependencies:
+      '@types/cross-spawn':
+        specifier: 'catalog:'
+        version: 6.0.6
       vite-task-tools:
         specifier: workspace:*
         version: 'link:'
@@ -781,6 +793,9 @@ packages:
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
+
+  '@types/cross-spawn@6.0.6':
+    resolution: {integrity: sha512-fXRhhUkG4H3TQk5dBhQ7m/JDdSNHKwR2BBia62lhwEIq9xGiQKLxd6LymNhn47SjXhsUEPmxi+PKw2OkW4LLjA==}
 
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
@@ -1993,6 +2008,10 @@ snapshots:
     dependencies:
       '@types/deep-eql': 4.0.2
       assertion-error: 2.0.1
+
+  '@types/cross-spawn@6.0.6':
+    dependencies:
+      '@types/node': 25.0.3
 
   '@types/deep-eql@4.0.2': {}
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
+import spawn from 'cross-spawn';
 import { createCacheServer } from './server.ts';
 
 const basePath = '/projects/test';
@@ -18,6 +18,7 @@ await once(server, 'listening');
 const { port } = server.address() as AddressInfo;
 // Ctrl-C is left to the command.
 process.on('SIGINT', () => {});
+// cross-spawn runs pnpm's `.cmd` shims, such as `cbor-http`, on Windows.
 const child = spawn(command!, args, {
   stdio: 'inherit',
   env: { ...process.env, VP_REMOTE_CACHE_URL: `http://127.0.0.1:${port}${basePath}` },
