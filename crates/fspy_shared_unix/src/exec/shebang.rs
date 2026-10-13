@@ -63,10 +63,8 @@ impl Default for ParseShebangOptions {
 
 /// Parses the shebang line of the executable at `path` the way the kernel does.
 ///
-/// # Errors
-///
 /// Returns `ENOEXEC` where the kernel would refuse the script instead of
-/// running a truncated interpreter path, and errors from `peek_executable`.
+/// running a truncated interpreter path.
 ///
 /// # Panics
 ///

@@ -42,21 +42,21 @@ async fn spawn_sh_shebang() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Skipped on musl: fspy tracks only through seccomp there, which doesn't
+// record the interpreter, because the kernel opens it without a syscall.
+#[cfg(not(target_env = "musl"))]
 #[test(tokio::test)]
 async fn spawn_shebang_with_long_interpreter_path() -> anyhow::Result<()> {
     let tmp_dir = tempfile::TempDir::new()?;
 
     // Kernels read 256 (Linux) or 512 (macOS) bytes of the shebang line, so a
-    // 200-byte interpreter path must be kept whole. It ends in `sh` because
-    // BusyBox, which is `/bin/sh` on Alpine, picks its applet by the name it's
-    // run by.
+    // 200-byte interpreter path must be kept whole.
     let mut interpreter = tmp_dir.path().to_path_buf();
     while interpreter.as_os_str().len() < 150 {
         interpreter.push("d".repeat(40));
     }
-    interpreter.push("d".repeat(200 - interpreter.as_os_str().len() - "/sh".len() - 1));
     fs::create_dir_all(&interpreter).await?;
-    interpreter.push("sh");
+    interpreter.push("x".repeat(200 - interpreter.as_os_str().len() - 1));
     assert_eq!(interpreter.as_os_str().len(), 200);
     fs::symlink("/bin/sh", &interpreter).await?;
 
