@@ -7,7 +7,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use fspy::AccessMode;
+use fspy::PathAccess;
 use test_log::test;
 use test_utils::assert_contains;
 use tokio::fs;
@@ -36,8 +36,8 @@ async fn spawn_sh_shebang() -> anyhow::Result<()> {
     })
     .await?;
 
-    assert_contains(&accesses, Path::new(&shebang_script_path), AccessMode::Read);
-    assert_contains(&accesses, Path::new("/hello"), AccessMode::Read);
+    assert_contains(&accesses, Path::new(&shebang_script_path), PathAccess::Read);
+    assert_contains(&accesses, Path::new("/hello"), PathAccess::Read);
 
     Ok(())
 }
@@ -80,7 +80,7 @@ async fn spawn_shebang_with_long_interpreter_path() -> anyhow::Result<()> {
     })
     .await?;
 
-    assert_contains(&accesses, &interpreter, AccessMode::Read);
+    assert_contains(&accesses, &interpreter, PathAccess::Read);
 
     Ok(())
 }

@@ -21,9 +21,7 @@ impl Default for PathAccessArena {
 impl PathAccessArena {
     pub fn add(&mut self, access: PathAccess<'_>) {
         self.with_mut(|fields| {
-            let path = access.path.clone_in(fields.bump);
-            let path_access = PathAccess { mode: access.mode, path };
-            fields.accesses.push(path_access);
+            fields.accesses.push(access.clone_in(fields.bump));
         });
     }
 }

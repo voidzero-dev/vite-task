@@ -376,7 +376,7 @@ mod tests {
     use vt_subprocess_test::command_for_fn;
 
     use super::*;
-    use crate::ipc::{AccessMode, IpcPath, PathAccess};
+    use crate::ipc::{IpcPath, PathAccess};
 
     /// A gibibyte, which clears the table's half of sparse address space
     /// and leaves the rest for payloads. None of it costs real memory
@@ -449,7 +449,7 @@ mod tests {
         let paths = [IpcPath::from_wide(&owned[0]), IpcPath::from_wide(&owned[1])];
 
         for path in paths {
-            sender.send(&PathAccess::read(path));
+            sender.send(&PathAccess::Read(path));
         }
         drop(sender);
 
@@ -457,8 +457,7 @@ mod tests {
         let mut iter = frames.iter();
         for path in paths {
             let access: PathAccess<'_> = wincode::deserialize_exact(iter.next().unwrap()).unwrap();
-            assert!(access.path == path);
-            assert!(access.mode == AccessMode::Read);
+            assert!(access == PathAccess::Read(path));
         }
         assert!(iter.next().is_none());
     }

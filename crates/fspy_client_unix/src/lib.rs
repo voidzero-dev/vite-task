@@ -12,7 +12,7 @@ use std::{ffi::OsStr, fmt::Debug, os::unix::ffi::OsStrExt as _, path::Path};
 
 use allocator_api2::alloc::Allocator;
 use convert::{ToAbsolutePath, ToAccessMode};
-use fspy_shared::ipc::{PathAccess, channel::Sender};
+use fspy_shared::ipc::channel::Sender;
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::{EncodedPayload, decode_payload_from_env},
@@ -84,7 +84,7 @@ impl<'a> Client<'a> {
         }
         // The interception proceeds whether or not the record could be
         // sent — a preload library can never panic its host process.
-        ipc_sender.send(&PathAccess { mode, path: path.into() });
+        ipc_sender.send(&mode.with_path(path.into()));
     }
 
     /// Resolves and reports an exec before forwarding its transformed arguments.

@@ -7,7 +7,7 @@ use std::{
     process::Command,
 };
 
-use fspy::AccessMode;
+use fspy::PathAccess;
 use test_log::test;
 use test_utils::assert_contains;
 
@@ -87,6 +87,6 @@ async fn node_sea() -> anyhow::Result<()> {
         command.spawn(tokio_util::sync::CancellationToken::new()).await?.wait_handle.await?;
     assert!(termination.status.success(), "{:?}", termination.status);
     let accesses = termination.path_accesses.expect("the test region holds every record");
-    assert_contains(&accesses, &input, AccessMode::Read);
+    assert_contains(&accesses, &input, PathAccess::Read);
     Ok(())
 }

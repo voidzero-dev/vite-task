@@ -2,7 +2,7 @@ mod test_utils;
 
 use std::{env::current_dir, process::Stdio};
 
-use fspy::AccessMode;
+use fspy::PathAccess;
 use test_log::test;
 use test_utils::assert_contains;
 use tokio::fs::OpenOptions;
@@ -17,7 +17,7 @@ async fn open_read() -> anyhow::Result<()> {
         );
     })
     .await?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), PathAccess::Read);
 
     Ok(())
 }
@@ -35,7 +35,7 @@ async fn open_write() -> anyhow::Result<()> {
         );
     })
     .await?;
-    assert_contains(&accesses, tmp_path.as_path(), AccessMode::Write);
+    assert_contains(&accesses, tmp_path.as_path(), PathAccess::Write);
 
     Ok(())
 }
@@ -56,7 +56,7 @@ async fn readdir() -> anyhow::Result<()> {
         );
     })
     .await?;
-    assert_contains(&accesses, tmpdir_path.join("hello_dir").as_path(), AccessMode::ReadDir);
+    assert_contains(&accesses, tmpdir_path.join("hello_dir").as_path(), PathAccess::ReadDir);
 
     Ok(())
 }
@@ -88,7 +88,7 @@ async fn subprocess() -> anyhow::Result<()> {
         );
     })
     .await?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), PathAccess::Read);
 
     Ok(())
 }

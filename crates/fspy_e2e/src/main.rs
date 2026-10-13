@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     env::{self, args},
     fs::{File, read},
     io::{BufWriter, Write as _, stderr},
@@ -7,7 +7,7 @@ use std::{
     process::{self, Stdio},
 };
 
-use fspy::{AccessMode, PathAccess};
+use fspy::{IpcPath, PathAccess};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
@@ -25,25 +25,32 @@ struct Case {
 
 struct AccessCollector {
     dir: PathBuf,
-    accesses: BTreeMap<String, BTreeSet<AccessMode>>,
+    /// One line per distinct access, with paths relative to `dir`.
+    accesses: BTreeSet<String>,
 }
 
 impl AccessCollector {
     pub const fn new(dir: PathBuf) -> Self {
-        Self { dir, accesses: BTreeMap::new() }
+        Self { dir, accesses: BTreeSet::new() }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &BTreeSet<AccessMode>)> {
-        self.accesses.iter().map(|(k, v)| (k.as_str(), v))
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.accesses.iter().map(String::as_str)
     }
 
     pub fn add(&mut self, access: PathAccess) {
-        let Some(relative_path) = access.path.strip_path_prefix(&self.dir, |result| {
-            result.ok().and_then(|p| p.to_str().map(str::to_owned))
-        }) else {
-            return;
+        let relative = |path: &IpcPath| {
+            path.strip_path_prefix(&self.dir, |result| {
+                result.ok().and_then(|p| p.to_str().map(str::to_owned))
+            })
         };
-        self.accesses.entry(relative_path).or_default().insert(access.mode);
+        let line = match access {
+            PathAccess::Read(path) => relative(path).map(|path| format!("{path}: Read")),
+            PathAccess::Write(path) => relative(path).map(|path| format!("{path}: Write")),
+            PathAccess::ReadWrite(path) => relative(path).map(|path| format!("{path}: ReadWrite")),
+            PathAccess::ReadDir(path) => relative(path).map(|path| format!("{path}: ReadDir")),
+        };
+        self.accesses.extend(line);
     }
 }
 
@@ -109,8 +116,8 @@ async fn main() {
         }
         let snap_file = File::create(manifest_dir.join(format!("snaps/{name}.txt"))).unwrap();
         let mut snap_writer = BufWriter::new(snap_file);
-        for (path, modes) in collector.iter() {
-            writeln!(snap_writer, "{path}: {modes:?}").unwrap();
+        for line in collector.iter() {
+            writeln!(snap_writer, "{line}").unwrap();
         }
     }
 }

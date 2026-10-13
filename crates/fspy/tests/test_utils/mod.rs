@@ -1,9 +1,6 @@
-use std::{
-    collections::BTreeSet,
-    path::{Path, PathBuf, StripPrefixError},
-};
+use std::path::Path;
 
-use fspy::{AccessMode, PathAccessIterable};
+use fspy::{IpcPath, PathAccess, PathAccessIterable};
 // Used by the track_child! macro; not all test files use this macro
 #[doc(hidden)]
 #[expect(
@@ -20,41 +17,42 @@ use fspy::{AccessMode, PathAccessIterable};
 )]
 pub use vt_subprocess_test::command_for_fn;
 
+/// Asserts that `expected_path` was accessed, and only as `expected` (a
+/// variant such as `PathAccess::Read`).
+///
 /// # Panics
 ///
-/// Panics if the expected path access is not found or has the wrong mode.
+/// Panics if the path was not accessed, or was accessed in another way.
 #[track_caller]
-pub fn assert_contains(
-    accesses: &PathAccessIterable,
+pub fn assert_contains<'a>(
+    accesses: &'a PathAccessIterable,
     expected_path: &Path,
-    expected_mode: AccessMode,
+    expected: fn(&'a IpcPath) -> PathAccess<'a>,
 ) {
-    let mut actual_modes = BTreeSet::new();
+    // Each access to the path, paired with what it was expected to be.
+    let mut path_accesses = Vec::new();
     for access in accesses.iter() {
-        let Ok(stripped) =
-            access.path.strip_path_prefix::<_, Result<PathBuf, StripPrefixError>, _>(
-                expected_path,
-                |strip_result| strip_result.map(Path::to_path_buf),
-            )
-        else {
-            continue;
-        };
-        if stripped.as_os_str().is_empty() {
-            actual_modes.insert(access.mode);
+        for path in access.paths() {
+            let is_expected_path = path.strip_path_prefix(expected_path, |strip_result| {
+                strip_result.is_ok_and(|stripped| stripped.as_os_str().is_empty())
+            });
+            if is_expected_path {
+                path_accesses.push((access, expected(path)));
+            }
         }
     }
 
-    if actual_modes.contains(&AccessMode::ReadDir) {
+    if path_accesses.iter().any(|(access, _)| matches!(access, PathAccess::ReadDir(_))) {
         // ReadDir already implies Read.
-        actual_modes.remove(&AccessMode::Read);
+        path_accesses.retain(|(access, _)| !matches!(access, PathAccess::Read(_)));
     }
 
-    assert_eq!(
-        BTreeSet::from([expected_mode]),
-        actual_modes,
-        "Expected to find access to path {} with mode {:?}, but it was not found in: {:?}",
+    assert!(
+        !path_accesses.is_empty()
+            && path_accesses.iter().all(|(access, expected)| access == expected),
+        "Expected accesses to {} to match, as (actual, expected): {:?}. All accesses: {:?}",
         expected_path.display(),
-        expected_mode,
+        path_accesses,
         accesses.iter().collect::<Vec<_>>()
     );
 }

@@ -99,8 +99,7 @@ unsafe fn handle_process_image(attribute_list: PPS_ATTRIBUTE_LIST) {
         // Sender serialization completes before this call returns, so IpcPath does not retain
         // the borrowed PS_ATTRIBUTE_IMAGE_NAME buffer past the NtCreateUserProcess call.
         // SAFETY: accessing the global client which was initialized during DLL_PROCESS_ATTACH
-        unsafe { global_client() }
-            .send(PathAccess { mode: AccessMode::Read, path: IpcPath::from_wide(image_path) });
+        unsafe { global_client() }.send(PathAccess::Read(IpcPath::from_wide(image_path)));
     }
 }
 
@@ -294,10 +293,7 @@ unsafe fn handle_open(access_mode: impl ToAccessMode, path: impl ToAbsolutePath)
             let path_access = path.iter().rposition(|c| *c == u16::from(b'*')).map_or_else(
                 || {
                     // SAFETY: converting access mask to AccessMode via FFI-aware trait
-                    PathAccess {
-                        mode: access_mode.to_access_mode(),
-                        path: IpcPath::from_wide(path),
-                    }
+                    access_mode.to_access_mode().with_path(IpcPath::from_wide(path))
                 },
                 |wildcard_pos| {
                     let path_before_wildcard = &path[..wildcard_pos];
@@ -305,10 +301,7 @@ unsafe fn handle_open(access_mode: impl ToAccessMode, path: impl ToAbsolutePath)
                         .iter()
                         .rposition(|c| *c == u16::from(b'\\') || *c == u16::from(b'/'))
                         .unwrap_or(0);
-                    PathAccess {
-                        mode: AccessMode::ReadDir,
-                        path: IpcPath::from_wide(&path[..slash_pos]),
-                    }
+                    PathAccess::ReadDir(IpcPath::from_wide(&path[..slash_pos]))
                 },
             );
             client.send(path_access);

@@ -16,7 +16,7 @@ use fspy_seccomp_unotify::{
     impl_handler,
     supervisor::handler::arg::{CStrPtr, Caller, Fd},
 };
-use fspy_shared::ipc::{AccessMode, PathAccess, channel::Sender};
+use fspy_shared::ipc::{PathAccess, channel::Sender};
 
 const PATH_MAX: usize = libc::PATH_MAX as usize;
 
@@ -54,13 +54,11 @@ impl SyscallHandler {
             }
             path = Cow::Owned(resolved_path);
         }
-        self.ipc_sender.send(&PathAccess {
-            mode: match flags & libc::O_ACCMODE {
-                libc::O_RDWR => AccessMode::ReadWrite,
-                libc::O_WRONLY => AccessMode::Write,
-                _ => AccessMode::Read,
-            },
-            path: path.as_os_str().into(),
+        let path = path.as_os_str().into();
+        self.ipc_sender.send(&match flags & libc::O_ACCMODE {
+            libc::O_RDWR => PathAccess::ReadWrite(path),
+            libc::O_WRONLY => PathAccess::Write(path),
+            _ => PathAccess::Read(path),
         });
         Ok(())
     }
@@ -71,10 +69,7 @@ impl SyscallHandler {
     )]
     fn handle_open_dir(&mut self, caller: Caller, fd: Fd) -> io::Result<()> {
         let path = fd.get_path(caller)?;
-        self.ipc_sender.send(&PathAccess {
-            mode: AccessMode::ReadDir,
-            path: OsStr::from_bytes(path.as_bytes()).into(),
-        });
+        self.ipc_sender.send(&PathAccess::ReadDir(OsStr::from_bytes(path.as_bytes()).into()));
         Ok(())
     }
 }

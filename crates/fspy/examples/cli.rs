@@ -21,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
     let child = command.spawn(tokio_util::sync::CancellationToken::new()).await?;
     let termination = child.wait_handle.await?;
 
-    let mut path_count = 0usize;
+    let mut access_count = 0usize;
     let out_file: Pin<Box<dyn AsyncWrite>> =
         if out_path == "-" { Box::pin(stdout()) } else { Box::pin(File::create(out_path).await?) };
 
@@ -32,10 +32,9 @@ async fn main() -> anyhow::Result<()> {
         .expect("the tracking region holds every record this run makes")
         .iter()
     {
-        path_count += 1;
-        let path_str = format!("{:?}", acc.path);
-        let mode_str = format!("{:?}", acc.mode);
-        csv_writer.write_record(&[path_str.as_bytes(), mode_str.as_bytes()]).await?;
+        access_count += 1;
+        let access_str = format!("{acc:?}");
+        csv_writer.write_record(&[access_str.as_bytes()]).await?;
     }
     csv_writer.flush().await?;
 
@@ -44,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
         reason = "CLI example: stderr output is intentional for user feedback"
     )]
     {
-        eprintln!("\nfspy: {path_count} paths accessed. status: {}", termination.status);
+        eprintln!("\nfspy: {access_count} accesses. status: {}", termination.status);
     }
     Ok(())
 }

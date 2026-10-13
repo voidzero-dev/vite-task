@@ -5,7 +5,7 @@
 //! two configs are independent.
 #![cfg(fspy)]
 
-use fspy::{AccessMode, PathAccessIterable};
+use fspy::{IpcPath, PathAccess, PathAccessIterable};
 use rustc_hash::FxHashSet;
 use vt_path::{AbsolutePath, RelativePathBuf};
 
@@ -28,48 +28,45 @@ impl TrackedPathAccesses {
     /// files are skipped. User-configured negatives are applied by the caller
     /// (see module docs).
     pub fn from_raw(raw: &PathAccessIterable, workspace_root: &AbsolutePath) -> Self {
+        // Strip workspace root and clean `..` components in one pass.
+        // fspy may report paths like `packages/sub-pkg/../shared/dist/output.js`.
+        let relative_path = |path: &IpcPath| {
+            path.strip_path_prefix(workspace_root, |strip_result| {
+                normalize_tracked_workspace_path(strip_result.ok()?)
+            })
+        };
+
         let mut accesses = Self::default();
         for access in raw.iter() {
-            // Strip workspace root and clean `..` components in one pass.
-            // fspy may report paths like `packages/sub-pkg/../shared/dist/output.js`.
-            let relative_path = access.path.strip_path_prefix(workspace_root, |strip_result| {
-                let Ok(stripped_path) = strip_result else {
-                    return None;
-                };
-                normalize_tracked_workspace_path(stripped_path)
-            });
-
-            let Some(relative_path) = relative_path else {
-                continue;
-            };
-
-            match access.mode {
-                AccessMode::Read => {
-                    accesses
-                        .path_reads
-                        .entry(relative_path)
-                        .or_insert(PathRead { read_dir_entries: false });
+            match access {
+                PathAccess::Read(path) => {
+                    if let Some(path) = relative_path(path) {
+                        accesses.add_read(path);
+                    }
                 }
-                AccessMode::Write => {
-                    accesses.path_writes.insert(relative_path);
+                PathAccess::Write(path) => {
+                    if let Some(path) = relative_path(path) {
+                        accesses.path_writes.insert(path);
+                    }
                 }
-                AccessMode::ReadWrite => {
-                    accesses
-                        .path_reads
-                        .entry(relative_path.clone())
-                        .or_insert(PathRead { read_dir_entries: false });
-                    accesses.path_writes.insert(relative_path);
+                PathAccess::ReadWrite(path) => {
+                    if let Some(path) = relative_path(path) {
+                        accesses.add_read(path.clone());
+                        accesses.path_writes.insert(path);
+                    }
                 }
-                AccessMode::ReadDir => {
-                    accesses
-                        .path_reads
-                        .entry(relative_path)
-                        .or_insert(PathRead { read_dir_entries: false })
-                        .read_dir_entries = true;
+                PathAccess::ReadDir(path) => {
+                    if let Some(path) = relative_path(path) {
+                        accesses.add_read(path).read_dir_entries = true;
+                    }
                 }
             }
         }
         accesses
+    }
+
+    fn add_read(&mut self, path: RelativePathBuf) -> &mut PathRead {
+        self.path_reads.entry(path).or_insert(PathRead { read_dir_entries: false })
     }
 }
 

@@ -184,8 +184,10 @@ async fn validate(target: &OsString, target_args: &[OsString], relative: bool) {
         .expect("failed to wait for tracked target");
     assert!(termination.status.success(), "benchmark target failed: {}", termination.status);
     let captured_missing_access = termination.path_accesses.tracked().iter().any(|access| {
-        access.path.strip_path_prefix(MISSING_PATH, |result| {
-            result.is_ok_and(|path| path.as_os_str().is_empty())
+        access.paths().any(|path| {
+            path.strip_path_prefix(MISSING_PATH, |result| {
+                result.is_ok_and(|path| path.as_os_str().is_empty())
+            })
         })
     });
     assert!(captured_missing_access, "failed to capture access to {MISSING_PATH}");

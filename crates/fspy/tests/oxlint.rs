@@ -2,7 +2,7 @@ mod test_utils;
 
 use std::{env::vars_os, ffi::OsString};
 
-use fspy::{AccessMode, PathAccessIterable};
+use fspy::{PathAccess, PathAccessIterable};
 use test_log::test;
 
 /// Get the packages/tools/.bin directory path
@@ -63,7 +63,7 @@ async fn oxlint_reads_js_file() -> anyhow::Result<()> {
     let accesses = track_oxlint(&tmpdir_path, &[]).await?;
 
     // Check that oxlint read the JS file
-    test_utils::assert_contains(&accesses, &js_file, AccessMode::Read);
+    test_utils::assert_contains(&accesses, &js_file, PathAccess::Read);
 
     Ok(())
 }
@@ -80,7 +80,7 @@ async fn oxlint_reads_directory() -> anyhow::Result<()> {
 
     // Check that oxlint read the directory to find JS files
     // This is the key check - if READ_DIR is not tracked, cache won't detect new files
-    test_utils::assert_contains(&accesses, &tmpdir_path, AccessMode::ReadDir);
+    test_utils::assert_contains(&accesses, &tmpdir_path, PathAccess::ReadDir);
     Ok(())
 }
 
@@ -104,9 +104,11 @@ declare const _foo: Foo;
     // Run oxlint without --type-aware first
     let accesses = track_oxlint(&tmpdir_path, &[""]).await?;
     let access_to_types_ts = accesses.iter().find(|access| {
-        access
-            .path
-            .strip_path_prefix(&tmpdir_path, |result| result.is_ok_and(|p| p.ends_with("types.ts")))
+        access.paths().any(|path| {
+            path.strip_path_prefix(&tmpdir_path, |result| {
+                result.is_ok_and(|p| p.ends_with("types.ts"))
+            })
+        })
     });
     assert_eq!(access_to_types_ts, None, "oxlint should not read types.ts without --type-aware");
 
@@ -114,7 +116,7 @@ declare const _foo: Foo;
     let accesses = track_oxlint(&tmpdir_path, &["--type-aware"]).await?;
 
     // Check that oxlint read types.ts
-    test_utils::assert_contains(&accesses, &tmpdir_path.join("types.ts"), AccessMode::Read);
+    test_utils::assert_contains(&accesses, &tmpdir_path.join("types.ts"), PathAccess::Read);
 
     Ok(())
 }

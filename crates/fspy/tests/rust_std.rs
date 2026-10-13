@@ -6,7 +6,7 @@ use std::{
     process::Stdio,
 };
 
-use fspy::AccessMode;
+use fspy::PathAccess;
 use test_log::test;
 use test_utils::assert_contains;
 
@@ -16,7 +16,7 @@ async fn open_read() -> anyhow::Result<()> {
         let _ = File::open("hello");
     })
     .await?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), PathAccess::Read);
 
     Ok(())
 }
@@ -30,7 +30,7 @@ async fn open_write() -> anyhow::Result<()> {
         let _ = OpenOptions::new().write(true).open(tmp_path_str);
     })
     .await?;
-    assert_contains(&accesses, tmp_path.as_path(), AccessMode::Write);
+    assert_contains(&accesses, tmp_path.as_path(), PathAccess::Write);
 
     Ok(())
 }
@@ -46,7 +46,7 @@ async fn metadata() -> anyhow::Result<()> {
         let _ = fs::metadata(tmp_path_str);
     })
     .await?;
-    assert_contains(&accesses, tmp_path.as_path(), AccessMode::Read);
+    assert_contains(&accesses, tmp_path.as_path(), PathAccess::Read);
 
     Ok(())
 }
@@ -72,7 +72,7 @@ async fn readdir() -> anyhow::Result<()> {
         let _ = std::fs::read_dir("hello_dir").unwrap().next();
     })
     .await?;
-    assert_contains(&accesses, tmpdir_path.join("hello_dir").as_path(), AccessMode::ReadDir);
+    assert_contains(&accesses, tmpdir_path.join("hello_dir").as_path(), PathAccess::ReadDir);
 
     Ok(())
 }
@@ -99,7 +99,7 @@ async fn read_in_subprocess() -> anyhow::Result<()> {
             .unwrap();
     })
     .await?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), PathAccess::Read);
 
     Ok(())
 }
@@ -113,7 +113,7 @@ async fn read_program() -> anyhow::Result<()> {
     assert_contains(
         &accesses,
         current_dir().unwrap().join("not_exist.exe").as_path(),
-        AccessMode::Read,
+        PathAccess::Read,
     );
 
     Ok(())
