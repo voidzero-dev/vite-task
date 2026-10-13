@@ -8,7 +8,6 @@ mod os_specific;
 
 use std::{ffi::OsStr, os::unix::ffi::OsStrExt, path::Path};
 
-use fspy_shared::ipc::AccessMode;
 #[doc(hidden)]
 #[cfg(target_os = "macos")]
 pub use os_specific::COREUTILS_FUNCTIONS as COREUTILS_FUNCTIONS_FOR_TEST;
@@ -38,19 +37,19 @@ pub fn handle_exec(
     command: &mut Exec,
     config: ExecResolveConfig,
     encoded_payload: &EncodedPayload,
-    mut on_path_access: impl FnMut(AccessMode, &Path),
+    mut on_path_read: impl FnMut(&Path),
 ) -> nix::Result<Option<PreExec>> {
-    let mut on_path_access = |mode: AccessMode, path: &Path| {
+    let mut on_path_read = |path: &Path| {
         if path.is_absolute() {
-            on_path_access(mode, path);
+            on_path_read(path);
         } else {
             let path = std::path::absolute(path).expect("Failed to get cwd");
-            on_path_access(mode, &path);
+            on_path_read(&path);
         }
     };
 
-    command.resolve(&mut on_path_access, config)?;
-    on_path_access(AccessMode::Read, Path::new(OsStr::from_bytes(&command.program)));
+    command.resolve(&mut on_path_read, config)?;
+    on_path_read(Path::new(OsStr::from_bytes(&command.program)));
 
     os_specific::handle_exec(command, encoded_payload)
 }

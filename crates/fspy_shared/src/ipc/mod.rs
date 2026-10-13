@@ -7,8 +7,13 @@ pub use ipc_path::IpcPath;
 pub use vt_ipc_str::IpcStr;
 use wincode::{SchemaRead, SchemaWrite};
 
-/// How a single path is accessed. Interceptions decide it before resolving
-/// the path, then record it with [`AccessMode::with_path`].
+/// The kind of a single-path access, for building a record before its path
+/// is resolved.
+///
+/// The clients choose it from an intercepted call's arguments, resolve the
+/// path, then build the record with [`AccessMode::with_path`]. It is never
+/// sent: [`PathAccess`] is the record, and accesses that touch more than one
+/// path build it directly.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum AccessMode {
     Read,

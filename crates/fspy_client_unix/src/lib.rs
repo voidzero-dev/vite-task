@@ -12,7 +12,7 @@ use std::{ffi::OsStr, fmt::Debug, os::unix::ffi::OsStrExt as _, path::Path};
 
 use allocator_api2::alloc::Allocator;
 use convert::{ToAbsolutePath, ToAccessMode};
-use fspy_shared::ipc::channel::Sender;
+use fspy_shared::ipc::{AccessMode, channel::Sender};
 use fspy_shared_unix::{
     exec::ExecResolveConfig,
     payload::{EncodedPayload, decode_payload_from_env},
@@ -71,7 +71,7 @@ impl<'a> Client<'a> {
         Self { encoded_payload, ipc_sender }
     }
 
-    fn send(&self, mode: fspy_shared::ipc::AccessMode, path: &Path) {
+    fn send(&self, mode: AccessMode, path: &Path) {
         let Some(ipc_sender) = &self.ipc_sender else {
             return;
         };
@@ -109,8 +109,8 @@ impl<'a> Client<'a> {
         // SAFETY: raw_exec contains valid pointers to C strings and
         // null-terminated arrays, as provided by the caller.
         let mut exec = unsafe { raw_exec.to_exec() };
-        let pre_exec = handle_exec(&mut exec, config, &self.encoded_payload, |mode, path| {
-            self.send(mode, path);
+        let pre_exec = handle_exec(&mut exec, config, &self.encoded_payload, |path| {
+            self.send(AccessMode::Read, path);
         })?;
         RawExec::from_exec(exec, allocator, |raw_command| f(raw_command, pre_exec))
     }
