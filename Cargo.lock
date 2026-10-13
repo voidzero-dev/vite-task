@@ -4939,7 +4939,6 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
- "serde_norway",
  "supports-color 3.0.2",
  "tar",
  "tempfile",

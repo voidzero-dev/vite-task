@@ -1,7 +1,7 @@
 [[e2e]]
-name = "pnpm_modules_manifest_unstable_fields"
+name = "pnpm_modules_manifest_content_ignored"
 comment = """
-Fields of pnpm's `node_modules/.modules.yaml` that vary with time or with the machine are left out of its fingerprint, so changing them keeps the cache hit. Changing any other field is a cache miss.
+Only whether pnpm's `node_modules/.modules.yaml` exists is part of the fingerprint, so changing its content keeps the cache hit. Removing it is a cache miss.
 """
 steps = [
   [
@@ -32,23 +32,9 @@ steps = [
     "vtt",
     "replace-file-content",
     "node_modules/.modules.yaml",
-    "/home/alice/.local/share/pnpm/store/v11",
-    "/home/bob/.local/share/pnpm/store/v11",
-  ], comment = "another machine: new storeDir" },
-  { argv = [
-    "vtt",
-    "replace-file-content",
-    "node_modules/.modules.yaml",
-    "\".pnpm\"",
-    "\"../../home/bob/.local/share/pnpm/store/v11/links\"",
-  ], comment = "global virtual store: new virtualStoreDir" },
-  { argv = [
-    "vtt",
-    "replace-file-content",
-    "node_modules/.modules.yaml",
-    "\".claude/skills/a\"",
-    "\"/home/bob/skills/a\"",
-  ], comment = "skill outside the workspace: new linkedSkills" },
+    "pnpm@11.24.0",
+    "pnpm@11.25.0",
+  ], comment = "install with another pnpm version: new packageManager" },
   { argv = [
     "vt",
     "run",
@@ -56,14 +42,12 @@ steps = [
   ], comment = "cache hit" },
   { argv = [
     "vtt",
-    "replace-file-content",
+    "rm",
     "node_modules/.modules.yaml",
-    "pnpm@11.24.0",
-    "pnpm@11.25.0",
-  ], comment = "new packageManager" },
+  ], comment = "remove the manifest" },
   { argv = [
     "vt",
     "run",
     "read-manifest",
-  ], comment = "cache miss: 'node_modules/.modules.yaml' modified" },
+  ], comment = "cache miss: input removed" },
 ]
