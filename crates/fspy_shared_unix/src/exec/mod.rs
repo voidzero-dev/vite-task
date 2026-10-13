@@ -11,7 +11,7 @@ use std::{
 
 use bstr::{BStr, BString, ByteSlice};
 use nix::unistd::{AccessFlags, access};
-use shebang::{ParseShebangOptions, parse_shebang};
+pub use shebang::{ParseShebangOptions, Shebang, parse_shebang};
 
 use crate::open_exec::open_executable;
 

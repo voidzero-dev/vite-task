@@ -20,6 +20,29 @@ use fspy_shared::ipc::{PathAccess, channel::Sender};
 
 const PATH_MAX: usize = libc::PATH_MAX as usize;
 
+/// Reads the path argument of a syscall, made absolute against `dir_fd`.
+///
+/// Returns `None` for paths that are too long to fit in `PATH_MAX`.
+fn read_path<'a>(
+    buf: &'a mut [u8; PATH_MAX],
+    caller: Caller,
+    dir_fd: Fd,
+    path_ptr: CStrPtr,
+) -> io::Result<Option<Cow<'a, Path>>> {
+    let Some(path_len) = path_ptr.read(caller, buf)? else {
+        return Ok(None);
+    };
+    let path = Path::new(OsStr::from_bytes(&buf[..path_len]));
+    if path.is_absolute() {
+        return Ok(Some(Cow::Borrowed(path)));
+    }
+    let mut resolved_path = PathBuf::from(dir_fd.get_path(caller)?);
+    if !nix::NixPath::is_empty(path) {
+        resolved_path.push(path);
+    }
+    Ok(Some(Cow::Owned(resolved_path)))
+}
+
 /// Records the accesses of intercepted syscalls into the IPC channel.
 ///
 /// The supervisor lets a syscall continue only after its handler returns, so
@@ -42,18 +65,10 @@ impl SyscallHandler {
         path_ptr: CStrPtr,
         flags: c_int,
     ) -> io::Result<()> {
-        let Some(path_len) = path_ptr.read(caller, &mut self.path_read_buf)? else {
+        let Some(path) = read_path(&mut self.path_read_buf, caller, dir_fd, path_ptr)? else {
             // Ignore paths that are too long to fit in PATH_MAX
             return Ok(());
         };
-        let mut path = Cow::Borrowed(Path::new(OsStr::from_bytes(&self.path_read_buf[..path_len])));
-        if !path.is_absolute() {
-            let mut resolved_path = PathBuf::from(dir_fd.get_path(caller)?);
-            if !nix::NixPath::is_empty(path.as_ref()) {
-                resolved_path.push(&path);
-            }
-            path = Cow::Owned(resolved_path);
-        }
         let path = path.as_os_str().into();
         self.ipc_sender.send(&match flags & libc::O_ACCMODE {
             libc::O_RDWR => PathAccess::ReadWrite(path),

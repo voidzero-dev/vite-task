@@ -112,3 +112,14 @@ async fn execve() {
     let accesses = track_test_bin(&["execve", "/hello"], None).await;
     assert_contains(&accesses, Path::new("/hello"), fspy::PathAccess::Read);
 }
+
+#[test(tokio::test)]
+async fn execve_shebang() {
+    let tmp_dir = tempfile::TempDir::new().unwrap();
+    let script_path = tmp_dir.path().join("script.sh");
+    fs::write(&script_path, "#!/bin/sh\n").unwrap();
+    fs::set_permissions(&script_path, Permissions::from_mode(0o755)).unwrap();
+
+    let accesses = track_test_bin(&["execve", script_path.to_str().unwrap()], None).await;
+    assert_contains(&accesses, Path::new("/bin/sh"), fspy::PathAccess::Read);
+}
