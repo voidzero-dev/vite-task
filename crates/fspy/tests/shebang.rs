@@ -36,8 +36,8 @@ async fn spawn_sh_shebang() -> anyhow::Result<()> {
     })
     .await?;
 
-    assert_contains(&accesses, Path::new(&shebang_script_path), AccessMode::READ);
-    assert_contains(&accesses, Path::new("/hello"), AccessMode::READ);
+    assert_contains(&accesses, Path::new(&shebang_script_path), AccessMode::Read);
+    assert_contains(&accesses, Path::new("/hello"), AccessMode::Read);
 
     Ok(())
 }
@@ -80,7 +80,7 @@ async fn spawn_shebang_with_long_interpreter_path() -> anyhow::Result<()> {
     })
     .await?;
 
-    assert_contains(&accesses, &interpreter, AccessMode::READ);
+    assert_contains(&accesses, &interpreter, AccessMode::Read);
 
     Ok(())
 }

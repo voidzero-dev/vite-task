@@ -50,7 +50,7 @@ pub fn handle_exec(
     };
 
     command.resolve(&mut on_path_access, config)?;
-    on_path_access(AccessMode::READ, Path::new(OsStr::from_bytes(&command.program)));
+    on_path_access(AccessMode::Read, Path::new(OsStr::from_bytes(&command.program)));
 
     os_specific::handle_exec(command, encoded_payload)
 }

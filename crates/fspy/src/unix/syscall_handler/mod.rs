@@ -56,9 +56,9 @@ impl SyscallHandler {
         }
         self.ipc_sender.send(&PathAccess {
             mode: match flags & libc::O_ACCMODE {
-                libc::O_RDWR => AccessMode::READ | AccessMode::WRITE,
-                libc::O_WRONLY => AccessMode::WRITE,
-                _ => AccessMode::READ,
+                libc::O_RDWR => AccessMode::ReadWrite,
+                libc::O_WRONLY => AccessMode::Write,
+                _ => AccessMode::Read,
             },
             path: path.as_os_str().into(),
         });
@@ -72,7 +72,7 @@ impl SyscallHandler {
     fn handle_open_dir(&mut self, caller: Caller, fd: Fd) -> io::Result<()> {
         let path = fd.get_path(caller)?;
         self.ipc_sender.send(&PathAccess {
-            mode: AccessMode::READ_DIR,
+            mode: AccessMode::ReadDir,
             path: OsStr::from_bytes(path.as_bytes()).into(),
         });
         Ok(())

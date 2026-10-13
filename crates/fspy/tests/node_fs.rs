@@ -64,7 +64,7 @@ fn track_script(
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn read_sync(runtime: &str) -> anyhow::Result<()> {
     let accesses = track_script(runtime, "try { fs.readFileSync('hello') } catch {}", &[])?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
     Ok(())
 }
 
@@ -76,7 +76,7 @@ fn read_sync(runtime: &str) -> anyhow::Result<()> {
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn exist_sync(runtime: &str) -> anyhow::Result<()> {
     let accesses = track_script(runtime, "try { fs.existsSync('hello') } catch {}", &[])?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
     Ok(())
 }
 
@@ -88,7 +88,7 @@ fn exist_sync(runtime: &str) -> anyhow::Result<()> {
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn stat_sync(runtime: &str) -> anyhow::Result<()> {
     let accesses = track_script(runtime, "try { fs.statSync('hello') } catch {}", &[])?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
     Ok(())
 }
 
@@ -104,7 +104,7 @@ fn create_read_stream(runtime: &str) -> anyhow::Result<()> {
         "try { fs.createReadStream('hello').on('error', () => {}) } catch {}",
         &[],
     )?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
     Ok(())
 }
 
@@ -122,7 +122,7 @@ fn create_write_stream(runtime: &str) -> anyhow::Result<()> {
         "try { fs.createWriteStream(process.argv.at(-1)).on('error', () => {}) } catch {}",
         &[file_path.as_os_str()],
     )?;
-    assert_contains(&accesses, file_path.as_path(), AccessMode::WRITE);
+    assert_contains(&accesses, file_path.as_path(), AccessMode::Write);
     Ok(())
 }
 
@@ -140,7 +140,7 @@ fn write_sync(runtime: &str) -> anyhow::Result<()> {
         "try { fs.writeFileSync(process.argv.at(-1), '') } catch {}",
         &[file_path.as_os_str()],
     )?;
-    assert_contains(&accesses, &file_path, AccessMode::WRITE);
+    assert_contains(&accesses, &file_path, AccessMode::Write);
     Ok(())
 }
 
@@ -152,7 +152,7 @@ fn write_sync(runtime: &str) -> anyhow::Result<()> {
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn read_dir_sync(runtime: &str) -> anyhow::Result<()> {
     let accesses = track_script(runtime, "try { fs.readdirSync('.') } catch {}", &[])?;
-    assert_contains(&accesses, &current_dir().unwrap(), AccessMode::READ_DIR);
+    assert_contains(&accesses, &current_dir().unwrap(), AccessMode::ReadDir);
     Ok(())
 }
 
@@ -173,6 +173,6 @@ fn subprocess(runtime: &str) -> anyhow::Result<()> {
         &format!("try {{ child_process.spawnSync({cmd}, {{ stdio: 'ignore' }}) }} catch {{}}"),
         &[],
     )?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::READ);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), AccessMode::Read);
     Ok(())
 }

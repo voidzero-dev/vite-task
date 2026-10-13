@@ -36,7 +36,7 @@ async fn create_process_a() -> anyhow::Result<()> {
         };
     })
     .await?;
-    assert_contains(&accesses, Path::new("C:\\fspy_test_not_exist_program.exe"), AccessMode::READ);
+    assert_contains(&accesses, Path::new("C:\\fspy_test_not_exist_program.exe"), AccessMode::Read);
 
     Ok(())
 }
@@ -69,7 +69,7 @@ async fn create_process_w() -> anyhow::Result<()> {
         };
     })
     .await?;
-    assert_contains(&accesses, Path::new("C:\\fspy_test_not_exist_program.exe"), AccessMode::READ);
+    assert_contains(&accesses, Path::new("C:\\fspy_test_not_exist_program.exe"), AccessMode::Read);
 
     Ok(())
 }

@@ -119,7 +119,7 @@ impl Exec {
                 self.program.as_ref(),
                 path,
                 |path| {
-                    on_path_access(AccessMode::READ, Path::new(OsStr::from_bytes(path)));
+                    on_path_access(AccessMode::Read, Path::new(OsStr::from_bytes(path)));
                     access(OsStr::from_bytes(path), AccessFlags::X_OK)
                 },
                 |program| Ok(program.to_owned()),
@@ -139,7 +139,7 @@ impl Exec {
     ) -> nix::Result<()> {
         if let Some(shebang) = parse_shebang(
             |path, buf| {
-                on_path_access(AccessMode::READ, path);
+                on_path_access(AccessMode::Read, path);
                 peek_executable(path, buf)
             },
             Path::new(OsStr::from_bytes(&self.program)),

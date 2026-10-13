@@ -1525,7 +1525,6 @@ version = "0.0.0"
 dependencies = [
  "allocator-api2",
  "assert2",
- "bitflags 2.13.2",
  "bstr",
  "bumpalo",
  "bytemuck",

@@ -87,6 +87,6 @@ async fn node_sea() -> anyhow::Result<()> {
         command.spawn(tokio_util::sync::CancellationToken::new()).await?.wait_handle.await?;
     assert!(termination.status.success(), "{:?}", termination.status);
     let accesses = termination.path_accesses.expect("the test region holds every record");
-    assert_contains(&accesses, &input, AccessMode::READ);
+    assert_contains(&accesses, &input, AccessMode::Read);
     Ok(())
 }

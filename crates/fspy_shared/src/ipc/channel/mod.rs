@@ -458,7 +458,7 @@ mod tests {
         for path in paths {
             let access: PathAccess<'_> = wincode::deserialize_exact(iter.next().unwrap()).unwrap();
             assert!(access.path == path);
-            assert!(access.mode == AccessMode::READ);
+            assert!(access.mode == AccessMode::Read);
         }
         assert!(iter.next().is_none());
     }

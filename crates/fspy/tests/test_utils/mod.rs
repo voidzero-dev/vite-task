@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf, StripPrefixError};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf, StripPrefixError},
+};
 
 use fspy::{AccessMode, PathAccessIterable};
 // Used by the track_child! macro; not all test files use this macro
@@ -26,7 +29,7 @@ pub fn assert_contains(
     expected_path: &Path,
     expected_mode: AccessMode,
 ) {
-    let mut actual_mode: AccessMode = AccessMode::empty();
+    let mut actual_modes = BTreeSet::new();
     for access in accesses.iter() {
         let Ok(stripped) =
             access.path.strip_path_prefix::<_, Result<PathBuf, StripPrefixError>, _>(
@@ -37,18 +40,18 @@ pub fn assert_contains(
             continue;
         };
         if stripped.as_os_str().is_empty() {
-            actual_mode.insert(access.mode);
+            actual_modes.insert(access.mode);
         }
     }
 
-    if actual_mode.contains(AccessMode::READ_DIR) {
-        // READ_DIR already implies READ.
-        actual_mode.remove(AccessMode::READ);
+    if actual_modes.contains(&AccessMode::ReadDir) {
+        // ReadDir already implies Read.
+        actual_modes.remove(&AccessMode::Read);
     }
 
     assert_eq!(
-        expected_mode,
-        actual_mode,
+        BTreeSet::from([expected_mode]),
+        actual_modes,
         "Expected to find access to path {} with mode {:?}, but it was not found in: {:?}",
         expected_path.display(),
         expected_mode,

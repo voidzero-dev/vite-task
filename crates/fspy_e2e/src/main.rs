@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{BTreeMap, BTreeSet},
     env::{self, args},
     fs::{File, read},
     io::{BufWriter, Write as _, stderr},
@@ -25,7 +25,7 @@ struct Case {
 
 struct AccessCollector {
     dir: PathBuf,
-    accesses: BTreeMap<String, AccessMode>,
+    accesses: BTreeMap<String, BTreeSet<AccessMode>>,
 }
 
 impl AccessCollector {
@@ -33,8 +33,8 @@ impl AccessCollector {
         Self { dir, accesses: BTreeMap::new() }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&str, AccessMode)> {
-        self.accesses.iter().map(|(k, v)| (k.as_str(), *v))
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &BTreeSet<AccessMode>)> {
+        self.accesses.iter().map(|(k, v)| (k.as_str(), v))
     }
 
     pub fn add(&mut self, access: PathAccess) {
@@ -43,15 +43,7 @@ impl AccessCollector {
         }) else {
             return;
         };
-        match self.accesses.entry(relative_path) {
-            Entry::Vacant(vacant) => {
-                vacant.insert(access.mode);
-            }
-            Entry::Occupied(mut occupied) => {
-                let occupied_mode = occupied.get_mut();
-                occupied_mode.insert(access.mode);
-            }
-        }
+        self.accesses.entry(relative_path).or_default().insert(access.mode);
     }
 }
 
@@ -117,8 +109,8 @@ async fn main() {
         }
         let snap_file = File::create(manifest_dir.join(format!("snaps/{name}.txt"))).unwrap();
         let mut snap_writer = BufWriter::new(snap_file);
-        for (path, mode) in collector.iter() {
-            writeln!(snap_writer, "{path}: {mode:?}").unwrap();
+        for (path, modes) in collector.iter() {
+            writeln!(snap_writer, "{path}: {modes:?}").unwrap();
         }
     }
 }

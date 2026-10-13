@@ -5,8 +5,6 @@
 //! two configs are independent.
 #![cfg(fspy)]
 
-use std::collections::hash_map::Entry;
-
 use fspy::{AccessMode, PathAccessIterable};
 use rustc_hash::FxHashSet;
 use vt_path::{AbsolutePath, RelativePathBuf};
@@ -45,23 +43,29 @@ impl TrackedPathAccesses {
                 continue;
             };
 
-            if access.mode.contains(AccessMode::READ) {
-                accesses
-                    .path_reads
-                    .entry(relative_path.clone())
-                    .or_insert(PathRead { read_dir_entries: false });
-            }
-            if access.mode.contains(AccessMode::WRITE) {
-                accesses.path_writes.insert(relative_path.clone());
-            }
-            if access.mode.contains(AccessMode::READ_DIR) {
-                match accesses.path_reads.entry(relative_path) {
-                    Entry::Occupied(mut occupied) => {
-                        occupied.get_mut().read_dir_entries = true;
-                    }
-                    Entry::Vacant(vacant) => {
-                        vacant.insert(PathRead { read_dir_entries: true });
-                    }
+            match access.mode {
+                AccessMode::Read => {
+                    accesses
+                        .path_reads
+                        .entry(relative_path)
+                        .or_insert(PathRead { read_dir_entries: false });
+                }
+                AccessMode::Write => {
+                    accesses.path_writes.insert(relative_path);
+                }
+                AccessMode::ReadWrite => {
+                    accesses
+                        .path_reads
+                        .entry(relative_path.clone())
+                        .or_insert(PathRead { read_dir_entries: false });
+                    accesses.path_writes.insert(relative_path);
+                }
+                AccessMode::ReadDir => {
+                    accesses
+                        .path_reads
+                        .entry(relative_path)
+                        .or_insert(PathRead { read_dir_entries: false })
+                        .read_dir_entries = true;
                 }
             }
         }
