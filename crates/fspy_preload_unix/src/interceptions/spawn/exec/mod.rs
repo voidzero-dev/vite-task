@@ -6,7 +6,7 @@ use libc::{c_char, c_int};
 use with_argv::with_argv;
 
 use crate::{
-    client::{global_client, raw_exec::RawExec},
+    client::{ExecInjectionError, global_client, raw_exec::RawExec},
     macros::intercept,
 };
 
@@ -25,12 +25,19 @@ pub unsafe fn environ() -> *const *const c_char {
     unsafe { environ }
 }
 
+/// Resolves, reports, and performs a tracked exec.
+///
+/// `untracked` performs the interposed call as the caller made it, through
+/// that function's own original: `execvp` keeps its `PATH` search,
+/// `execveat` its `dirfd` and flags, `fexecve` its descriptor. It runs when
+/// the injection machinery fails, so the process still execs, untracked.
 fn handle_exec(
     allocator: impl Allocator,
     config: ExecResolveConfig,
     prog: *const libc::c_char,
     argv: *const *const libc::c_char,
     envp: *const *const libc::c_char,
+    untracked: impl FnOnce() -> libc::c_int,
 ) -> libc::c_int {
     let client =
         global_client().expect("exec unexpectedly called before client initialized in ctor");
@@ -50,9 +57,21 @@ fn handle_exec(
     };
     match result {
         Ok(ret) => ret,
-        Err(errno) => {
+        Err(ExecInjectionError::Resolution(errno)) => {
+            // Resolution failed the way the real exec would have; the errno
+            // is authentic.
             errno.set();
             -1
+        }
+        Err(ExecInjectionError::Injection(_)) => {
+            // The injection machinery failed (e.g. the seccomp filter cannot
+            // be installed under a restrictive sandbox). Mark the run's trace
+            // incomplete so it is not cached, then run the interposed call
+            // untracked. Its envp still carries LD_PRELOAD/FSPY_PAYLOAD, so
+            // each generation independently attempts tracking and
+            // independently degrades.
+            client.report_loss();
+            untracked()
         }
     }
 }
@@ -73,6 +92,8 @@ unsafe extern "C" fn execve(
         prog,
         argv,
         envp,
+        // SAFETY: the interposed execve's own arguments.
+        || unsafe { execve::original()(prog, argv, envp) },
     )
 }
 
@@ -92,6 +113,9 @@ unsafe extern "C" fn execl(path: *const c_char, arg0: *const c_char, valist: ...
                 path,
                 args.as_ptr(),
                 environ(),
+                // A variadic original cannot be forwarded a collected argv;
+                // execl is execv over the same argv.
+                || execv::original()(path, args.as_ptr()),
             )
         })
     }
@@ -113,6 +137,8 @@ unsafe extern "C" fn execlp(path: *const c_char, arg0: *const c_char, valist: ..
                 path,
                 args.as_ptr(),
                 environ(),
+                // execlp is execvp over the same argv, PATH search included.
+                || execvp::original()(path, args.as_ptr()),
             )
         })
     }
@@ -135,6 +161,8 @@ unsafe extern "C" fn execle(path: *const c_char, arg0: *const c_char, valist: ..
                 path,
                 args.as_ptr(),
                 envp,
+                // execle is execve over the same argv and envp.
+                || execve::original()(path, args.as_ptr(), envp),
             )
         })
     }
@@ -142,11 +170,6 @@ unsafe extern "C" fn execle(path: *const c_char, arg0: *const c_char, valist: ..
 
 intercept!(execv(64): unsafe extern "C" fn(path: *const c_char, argv: *const *const c_char) -> c_int);
 unsafe extern "C" fn execv(path: *const c_char, argv: *const *const c_char) -> c_int {
-    #[expect(
-        clippy::no_effect_underscore_binding,
-        reason = "suppresses unused warning on *::original"
-    )]
-    let _unused = execv::original;
     // SAFETY: path, argv are valid pointers forwarded from the interposed function; environ() returns the process environment
     unsafe {
         handle_exec(
@@ -155,6 +178,7 @@ unsafe extern "C" fn execv(path: *const c_char, argv: *const *const c_char) -> c
             path,
             argv,
             environ(),
+            || execv::original()(path, argv),
         )
     }
 }
@@ -164,18 +188,15 @@ intercept!(execvp(64): unsafe extern "C" fn(
     argv: *const *const libc::c_char,
 ) -> c_int);
 unsafe extern "C" fn execvp(prog: *const c_char, argv: *const *const c_char) -> c_int {
-    #[expect(
-        clippy::no_effect_underscore_binding,
-        reason = "suppresses unused warning on *::original"
-    )]
-    let _unused = execvp::original;
-    // SAFETY: environ() returns the valid process environment pointer
     handle_exec(
         fspy_nostd_alloc::pooled_bump(),
         ExecResolveConfig::search_path_enabled(None),
         prog,
         argv,
+        // SAFETY: environ() returns the valid process environment pointer
         unsafe { environ() },
+        // SAFETY: the interposed execvp's own arguments.
+        || unsafe { execvp::original()(prog, argv) },
     )
 }
 
@@ -206,17 +227,14 @@ mod linux_only {
         argv: *const *const libc::c_char,
         envp: *const *const libc::c_char,
     ) -> c_int {
-        #[expect(
-            clippy::no_effect_underscore_binding,
-            reason = "suppresses unused warning on *::original"
-        )]
-        let _unused = execvpe::original;
         handle_exec(
             fspy_nostd_alloc::pooled_bump(),
             ExecResolveConfig::search_path_enabled(None),
             file,
             argv,
             envp,
+            // SAFETY: the interposed execvpe's own arguments.
+            || unsafe { execvpe::original()(file, argv, envp) },
         )
     }
     intercept!(execveat(64): unsafe extern "C" fn(
@@ -233,11 +251,6 @@ mod linux_only {
         envp: *const *mut libc::c_char,
         flags: c_int, // TODO: conform to semantics of flags
     ) -> libc::c_int {
-        #[expect(
-            clippy::no_effect_underscore_binding,
-            reason = "suppresses unused warning on *::original"
-        )]
-        let _unused = execveat::original;
         let arena = fspy_nostd_alloc::pooled_bump();
 
         // SAFETY: dirfd and pathname are valid arguments from the interposed execveat call.
@@ -262,6 +275,8 @@ mod linux_only {
             abs_path.as_ptr().cast(),
             argv.cast(),
             envp.cast(),
+            // SAFETY: the interposed execveat's own arguments.
+            || unsafe { execveat::original()(dirfd, pathname, argv, envp, flags) },
         )
     }
 
@@ -275,11 +290,6 @@ mod linux_only {
         argv: *const *const libc::c_char,
         envp: *const *const libc::c_char,
     ) -> libc::c_int {
-        #[expect(
-            clippy::no_effect_underscore_binding,
-            reason = "suppresses unused warning on *::original"
-        )]
-        let _unused = fexecve::original;
         let prog = format!("/proc/self/fd/{fd}\0");
         let prog = prog.as_ptr();
         handle_exec(
@@ -288,6 +298,10 @@ mod linux_only {
             prog.cast(),
             argv,
             envp,
+            // The descriptor itself, not its /proc path: a sandbox without
+            // /proc can still fexecve.
+            // SAFETY: the interposed fexecve's own arguments.
+            || unsafe { fexecve::original()(fd, argv, envp) },
         )
     }
 }

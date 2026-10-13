@@ -216,6 +216,18 @@ pub struct Sender {
 }
 
 impl Sender {
+    /// Reports that this process went on to perform an operation it could
+    /// not record, sealing the channel as incomplete.
+    ///
+    /// Used when a traced process escapes tracing — e.g. a preload that
+    /// could not install its injection machinery and forwards the operation
+    /// to the OS untracked. The receiver's close then reports
+    /// [`RecordsLost`], so the run is treated as untracked rather than
+    /// cached from a partial trace.
+    pub fn report_loss(&self) {
+        self.writer.report_loss();
+    }
+
     /// Serializes one record into a committed frame.
     ///
     /// A claim the channel refuses is skipped, because that is all a sender
