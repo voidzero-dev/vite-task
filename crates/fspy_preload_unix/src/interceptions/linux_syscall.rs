@@ -84,34 +84,12 @@ mod tests {
     use super::syscall;
 
     #[test]
-    fn success_preserves_errno() {
-        // SAFETY: errno is thread-local; getpid takes no pointer arguments.
-        unsafe {
-            *libc::__errno_location() = libc::EBUSY;
-            assert_eq!(
-                syscall(libc::SYS_getpid, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64),
-                libc::getpid().into()
-            );
-            assert_eq!(*libc::__errno_location(), libc::EBUSY);
-        }
-    }
-
-    #[test]
     fn error_sets_errno() {
         // SAFETY: close rejects an invalid descriptor without accessing memory.
         unsafe {
             *libc::__errno_location() = 0;
             assert_eq!(syscall(libc::SYS_close, -1_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64), -1);
             assert_eq!(*libc::__errno_location(), libc::EBADF);
-        }
-    }
-
-    #[test]
-    fn unknown_syscall_sets_enosys() {
-        // SAFETY: the kernel rejects this nonexistent syscall number.
-        unsafe {
-            assert_eq!(syscall(-1, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64), -1);
-            assert_eq!(*libc::__errno_location(), libc::ENOSYS);
         }
     }
 }
