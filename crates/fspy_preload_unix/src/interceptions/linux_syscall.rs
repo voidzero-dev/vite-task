@@ -48,6 +48,70 @@ unsafe extern "C" fn syscall(syscall_no: c_long, mut args: ...) -> c_long {
             };
         }
     }
-    // SAFETY: forwarding the syscall to the original libc syscall function with the extracted arguments
-    unsafe { syscall::original()(syscall_no, a0, a1, a2, a3, a4, a5) }
+    // Do not resolve libc's syscall through LazyLock: concurrent first calls
+    // wait through futex, which calls this interposer again before the lock
+    // is initialized. Forward directly to the kernel instead.
+    #[expect(
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation,
+        reason = "c_long and usize have the same width on supported Linux targets; preserve their bit patterns"
+    )]
+    // SAFETY: forward the syscall number and arguments supplied by the caller.
+    let result = unsafe {
+        syscalls::raw::syscall6(
+            syscall_no as usize,
+            a0 as usize,
+            a1 as usize,
+            a2 as usize,
+            a3 as usize,
+            a4 as usize,
+            a5 as usize,
+        )
+    };
+    match syscalls::Errno::from_ret(result) {
+        #[expect(clippy::cast_possible_wrap, reason = "preserve the syscall result's bit pattern")]
+        Ok(value) => value as c_long,
+        Err(errno) => {
+            // SAFETY: __errno_location returns this thread's errno storage.
+            unsafe { *libc::__errno_location() = errno.into_raw() };
+            -1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::syscall;
+
+    #[test]
+    fn success_preserves_errno() {
+        // SAFETY: errno is thread-local; getpid takes no pointer arguments.
+        unsafe {
+            *libc::__errno_location() = libc::EBUSY;
+            assert_eq!(
+                syscall(libc::SYS_getpid, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64),
+                libc::getpid().into()
+            );
+            assert_eq!(*libc::__errno_location(), libc::EBUSY);
+        }
+    }
+
+    #[test]
+    fn error_sets_errno() {
+        // SAFETY: close rejects an invalid descriptor without accessing memory.
+        unsafe {
+            *libc::__errno_location() = 0;
+            assert_eq!(syscall(libc::SYS_close, -1_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64), -1);
+            assert_eq!(*libc::__errno_location(), libc::EBADF);
+        }
+    }
+
+    #[test]
+    fn unknown_syscall_sets_enosys() {
+        // SAFETY: the kernel rejects this nonexistent syscall number.
+        unsafe {
+            assert_eq!(syscall(-1, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64), -1);
+            assert_eq!(*libc::__errno_location(), libc::ENOSYS);
+        }
+    }
 }

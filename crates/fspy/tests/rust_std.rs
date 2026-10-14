@@ -52,6 +52,41 @@ async fn metadata() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+async fn concurrent_metadata() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let tmp_path = tmp_dir.path().join("hello");
+    fs::write(&tmp_path, b"hello")?;
+    let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
+
+    let accesses = track_fn!(tmp_path_str, |tmp_path_str: String| {
+        // Release the workers together without calling futex before the file
+        // accesses. On Linux, concurrent first calls to the syscall interposer
+        // used to recurse through LazyLock's own futex wait and overflow.
+        let start = std::sync::atomic::AtomicBool::new(false);
+        let ready = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..32 {
+                scope.spawn(|| {
+                    ready.fetch_add(1, std::sync::atomic::Ordering::Release);
+                    while !start.load(std::sync::atomic::Ordering::Acquire) {
+                        std::hint::spin_loop();
+                    }
+                    assert_eq!(fs::metadata(&tmp_path_str).unwrap().len(), 5);
+                });
+            }
+            while ready.load(std::sync::atomic::Ordering::Acquire) != 32 {
+                std::hint::spin_loop();
+            }
+            start.store(true, std::sync::atomic::Ordering::Release);
+        });
+    })
+    .await?;
+    assert_contains(&accesses, tmp_path.as_path(), PathAccess::Read);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
 async fn readdir() -> anyhow::Result<()> {
     let tmpdir = tempfile::tempdir()?;
     let tmpdir_path = std::fs::canonicalize(tmpdir.path())?;

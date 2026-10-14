@@ -19,5 +19,8 @@ allocator-api2 = { workspace = true }
 fspy_nostd_alloc = { workspace = true }
 static_cell = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+syscalls = { workspace = true }
+
 [lints]
 workspace = true
