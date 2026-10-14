@@ -51,39 +51,38 @@ async fn metadata() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(all(target_os = "linux", not(target_env = "musl")))]
 #[test(tokio::test)]
-async fn concurrent_metadata() -> anyhow::Result<()> {
-    let tmp_dir = tempfile::tempdir()?;
-    let tmp_path = tmp_dir.path().join("hello");
-    fs::write(&tmp_path, b"hello")?;
-    let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
+async fn syscall_during_dlopen() {
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let fifo_path = tmp_dir.path().join("fifo").to_str().unwrap().to_owned();
+    nix::unistd::mkfifo(fifo_path.as_str(), nix::sys::stat::Mode::S_IRWXU).unwrap();
 
-    let accesses = track_fn!(tmp_path_str, |tmp_path_str: String| {
-        // Release the workers together without calling futex before the file
-        // accesses. On Linux, concurrent first calls to the syscall interposer
-        // used to recurse through LazyLock's own futex wait and overflow.
-        let start = std::sync::atomic::AtomicBool::new(false);
-        let ready = std::sync::atomic::AtomicUsize::new(0);
-        std::thread::scope(|scope| {
-            for _ in 0..32 {
-                scope.spawn(|| {
-                    ready.fetch_add(1, std::sync::atomic::Ordering::Release);
-                    while !start.load(std::sync::atomic::Ordering::Acquire) {
-                        std::hint::spin_loop();
-                    }
-                    assert_eq!(fs::metadata(&tmp_path_str).unwrap().len(), 5);
-                });
-            }
-            while ready.load(std::sync::atomic::Ordering::Acquire) != 32 {
-                std::hint::spin_loop();
-            }
-            start.store(true, std::sync::atomic::Ordering::Release);
+    track_fn!(fifo_path, |fifo_path: String| {
+        // The interposer used to resolve libc's syscall with dlsym, which waits for dlopen,
+        // so a second thread calling syscall waited for the first through futex, re-entering
+        // the interposer until its stack overflowed.
+        fn call_syscall_during_dlopen(fifo_path: &str) {
+            // This waits for dlopen to open the FIFO, which it reads until writers close.
+            let _writer = OpenOptions::new().write(true).open(fifo_path).unwrap();
+            // SAFETY: getpid takes no arguments.
+            unsafe { libc::syscall(libc::SYS_getpid) };
+        }
+        // Opening files and spawning threads can also wait for dlopen, so do both first.
+        File::open("/").unwrap();
+        let path = fifo_path.clone();
+        std::thread::spawn(move || {
+            let c = std::ffi::CString::new(path.as_str()).unwrap();
+            // SAFETY: dlopen fails on the FIFO's empty contents.
+            std::thread::spawn(move || unsafe {
+                libc::dlopen(c.as_ptr(), libc::RTLD_NOW);
+            });
+            call_syscall_during_dlopen(&path);
         });
+        call_syscall_during_dlopen(&fifo_path);
     })
-    .await?;
-    assert_contains(&accesses, tmp_path.as_path(), PathAccess::Read);
-
-    Ok(())
+    .await
+    .unwrap();
 }
 
 #[test(tokio::test)]
