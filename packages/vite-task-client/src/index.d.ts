@@ -30,6 +30,9 @@ export function disableCache(): void;
  *
  * With `tracked: true` (the default) the runner records `name` as a
  * dependency, so a change to its value invalidates this run's cache entry.
+ * An explicit task `cache.untrackedEnv` pattern overrides this tracking;
+ * built-in passthrough defaults do not. Values declared in `cache.env`
+ * remain cache dependencies.
  *
  * Has no effect on `process.env`; the caller decides what to do with the
  * returned value. Returns `undefined` when not running inside a runner.
@@ -49,7 +52,11 @@ export function getEnv(name: string, options?: {
  *
  * With `tracked: true` (the default) the runner records the pattern as a
  * dependency, so adding, removing, or changing a matching env invalidates
- * this run's cache entry.
+ * this run's cache entry. Names matching the task's `cache.untrackedEnv`
+ * patterns explicitly configured by the user are still returned, but their
+ * addition, removal, or value changes do not invalidate the cache. Built-in
+ * passthrough defaults do not override tracking. Values declared in
+ * `cache.env` remain cache dependencies.
  *
  * Has no effect on `process.env`; the caller decides what to do with the
  * returned values. Returns an empty object when not running inside a runner.

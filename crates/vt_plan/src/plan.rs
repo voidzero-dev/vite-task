@@ -485,7 +485,12 @@ fn resolve_synthetic_cache_config(
                 workspace_path,
             )
             .map_err(Error::ResolveTaskConfig)?
-            .cache_config)
+            .cache_config
+            .map(|mut config| {
+                // Handler defaults pass envs through without overriding tracked reads.
+                config.env_config.explicit_untracked_env = Arc::from([]);
+                config
+            }))
         }
         ParentCacheConfig::Disabled => Ok(Option::None),
         ParentCacheConfig::Inherited(mut parent_config) => {
@@ -697,6 +702,7 @@ fn plan_spawn_execution(
                     None
                 },
                 unfiltered_envs: Arc::clone(envs),
+                explicit_untracked_env: Arc::clone(&cache_config.env_config.explicit_untracked_env),
             });
         }
     }
@@ -951,7 +957,7 @@ fn concurrency_limit_from_env(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::{collections::BTreeSet, sync::Arc};
 
     use rustc_hash::FxHashSet;
     use vt_graph::config::{
@@ -983,6 +989,7 @@ mod tests {
             env_config: EnvConfig {
                 fingerprinted_envs: FxHashSet::default(),
                 untracked_env: FxHashSet::default(),
+                explicit_untracked_env: Arc::from([]),
             },
             input_config: ResolvedGlobConfig {
                 includes_auto,
@@ -999,6 +1006,41 @@ mod tests {
 
     fn globs(items: &[&str]) -> BTreeSet<Str> {
         items.iter().map(|s| Str::from(*s)).collect()
+    }
+
+    #[test]
+    fn synthetic_untracked_env_preserves_user_policy() {
+        let (pkg, ws) = test_paths();
+        let synthetic = || {
+            UserCacheConfig::with_config(EnabledCacheConfig {
+                env: None,
+                untracked_env: Some(vec!["HANDLER_*".into()]),
+                input: None,
+                output: None,
+                remote: None,
+            })
+        };
+        let top_level =
+            resolve_synthetic_cache_config(ParentCacheConfig::None, synthetic(), &pkg, &ws)
+                .unwrap()
+                .unwrap();
+        assert!(top_level.env_config.untracked_env.contains("HANDLER_*"));
+        assert!(top_level.env_config.explicit_untracked_env.is_empty());
+
+        let mut parent = parent_config(true, &[]);
+        parent.env_config.untracked_env.insert("USER_*".into());
+        parent.env_config.explicit_untracked_env = Arc::from([Str::from("USER_*")]);
+        let inherited = resolve_synthetic_cache_config(
+            ParentCacheConfig::Inherited(parent),
+            synthetic(),
+            &pkg,
+            &ws,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(inherited.env_config.untracked_env.contains("HANDLER_*"));
+        assert!(inherited.env_config.untracked_env.contains("USER_*"));
+        assert_eq!(inherited.env_config.explicit_untracked_env, Arc::from([Str::from("USER_*")]));
     }
 
     #[test]

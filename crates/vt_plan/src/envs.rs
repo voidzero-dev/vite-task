@@ -190,6 +190,7 @@ mod tests {
         EnvConfig {
             fingerprinted_envs: fingerprinted.iter().map(|s| Str::from(*s)).collect(),
             untracked_env: untracked.iter().map(|s| Str::from(*s)).collect(),
+            explicit_untracked_env: untracked.iter().map(|s| Str::from(*s)).collect(),
         }
     }
 

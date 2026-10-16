@@ -206,6 +206,8 @@ pub struct EnabledCacheConfig {
     pub env: Option<Box<[Str]>>,
 
     /// Environment variable names to be passed to the task without fingerprinting.
+    /// Explicit patterns also override tool-reported env dependencies, unless
+    /// the value is fingerprinted by `env` or a command-prefix assignment.
     pub untracked_env: Option<Vec<Str>>,
 
     /// Files to include in the cache fingerprint.

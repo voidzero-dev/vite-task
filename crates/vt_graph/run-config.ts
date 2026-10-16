@@ -64,6 +64,8 @@ export type TaskCacheConfig = {
 env?: Array<string>,
 /**
  * Environment variable names to be passed to the task without fingerprinting.
+ * Explicit patterns also override tool-reported env dependencies, unless
+ * the value is fingerprinted by `env` or a command-prefix assignment.
  */
 untrackedEnv?: Array<string>,
 /**

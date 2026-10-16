@@ -346,7 +346,8 @@ fn collect_tracked_envs(
 }
 
 /// Select tool-reported bulk env query records to embed in the post-run
-/// fingerprint. The full match-set is stored as value hashes.
+/// fingerprint. Keep complete observations so removing an `untrackedEnv`
+/// override can revalidate previously ignored dependencies.
 fn collect_tracked_env_queries(reports: &Reports) -> anyhow::Result<TrackedEnvQueryValues> {
     let mut tracked_env_queries = BTreeMap::new();
 

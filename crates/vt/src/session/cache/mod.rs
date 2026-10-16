@@ -398,6 +398,7 @@ impl ExecutionCache {
         if let Some(cache_value) = self.get_by_cache_key(cache_key).await? {
             if let Some(mismatch) = cache_value.validate(
                 &cache_metadata.unfiltered_envs,
+                &cache_metadata.explicit_untracked_env,
                 globbed_inputs,
                 workspace_root,
             )? {
@@ -445,7 +446,12 @@ impl ExecutionCache {
             .fetch(remote_config, cache_key, &cache_metadata.execution_cache_key, cancel_token)
             .await;
         let validate = |cache_value: &CacheEntryValue| {
-            cache_value.validate(&cache_metadata.unfiltered_envs, globbed_inputs, workspace_root)
+            cache_value.validate(
+                &cache_metadata.unfiltered_envs,
+                &cache_metadata.explicit_untracked_env,
+                globbed_inputs,
+                workspace_root,
+            )
         };
         let Restore { value: cache_value, blob_id } =
             match remote::resolve(fetched, cache_key, validate) {

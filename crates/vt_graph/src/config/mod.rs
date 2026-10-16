@@ -65,8 +65,10 @@ impl ResolvedTaskOptions {
         let cache_config = match user_options.cache_config.unwrap_or_default().into_enabled() {
             None => None,
             Some(enabled_cache_config) => {
+                let explicit_untracked_env: Arc<[Str]> =
+                    enabled_cache_config.untracked_env.unwrap_or_default().into();
                 let mut untracked_env: FxHashSet<Str> =
-                    enabled_cache_config.untracked_env.unwrap_or_default().into_iter().collect();
+                    explicit_untracked_env.iter().cloned().collect();
                 untracked_env.extend(DEFAULT_UNTRACKED_ENV.iter().copied().map(Str::from));
 
                 let input_config = ResolvedGlobConfig::from_user_config(
@@ -89,6 +91,7 @@ impl ResolvedTaskOptions {
                             .map(|e| e.into_vec().into_iter().collect())
                             .unwrap_or_default(),
                         untracked_env,
+                        explicit_untracked_env,
                     },
                     input_config,
                     output_config,
@@ -327,6 +330,10 @@ pub struct EnvConfig {
     pub fingerprinted_envs: FxHashSet<Str>,
     /// environment variable names to be passed to the task without fingerprinting, with defaults populated
     pub untracked_env: FxHashSet<Str>,
+    /// User-declared overrides for tool-reported dependencies. Built-in
+    /// passthrough defaults must not suppress values consumed by tools.
+    #[serde(skip)]
+    pub explicit_untracked_env: Arc<[Str]>,
 }
 
 #[derive(Debug, thiserror::Error)]

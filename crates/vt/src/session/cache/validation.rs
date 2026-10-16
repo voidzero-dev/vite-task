@@ -20,6 +20,7 @@ impl CacheEntryValue {
     pub(crate) fn validate(
         &self,
         unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
+        explicit_untracked_env: &[vt_str::Str],
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         workspace_root: &AbsolutePath,
     ) -> anyhow::Result<Option<FingerprintMismatch>> {
@@ -28,7 +29,7 @@ impl CacheEntryValue {
         }
 
         self.post_run_fingerprint
-            .validate(workspace_root, unfiltered_envs)
+            .validate(workspace_root, unfiltered_envs, explicit_untracked_env)
             .map(|mismatch| mismatch.map(FingerprintMismatch::from))
     }
 }

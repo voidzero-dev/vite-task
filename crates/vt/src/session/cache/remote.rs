@@ -502,7 +502,7 @@ mod tests {
     ) -> impl FnOnce(&CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>> {
         move |value| {
             let workspace_root = vt_path::current_dir().unwrap();
-            value.validate(&FxHashMap::default(), &globbed_inputs, &workspace_root)
+            value.validate(&FxHashMap::default(), &[], &globbed_inputs, &workspace_root)
         }
     }
 

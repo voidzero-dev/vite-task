@@ -89,6 +89,51 @@
       "command": "node scripts/fetch_envs.mjs --prefix PROBE_*",
       "cache": true
     },
+    "fetch-envs-untracked-noise": {
+      "command": "node scripts/fetch_envs.mjs --glob \"{PROBE_*,ACTIONS_ORCHESTRATION_ID}\"",
+      "cache": {
+        "untrackedEnv": ["PROBE_NOISE_*", "ACTIONS_ORCHESTRATION_ID"]
+      }
+    },
+    "fetch-envs-prefix-untracked-noise": {
+      "command": "node scripts/fetch_envs.mjs --prefix",
+      "cache": {
+        "untrackedEnv": ["PROBE_NOISE_*"]
+      }
+    },
+    "fetch-envs-all-untracked-except-vite": {
+      "command": "node scripts/fetch_envs.mjs --prefix \"\" --print-prefix VITE_",
+      "cache": {
+        "untrackedEnv": ["*", "!VITE_*"]
+      }
+    },
+    "fetch-env-explicitly-untracked": {
+      "command": "node scripts/fetch_env.mjs PROBE_ENV",
+      "cache": {
+        "untrackedEnv": ["PROBE_ENV"]
+      }
+    },
+    "fetch-envs-exact-explicitly-untracked": {
+      "command": "node scripts/fetch_envs.mjs --glob PROBE_ENV",
+      "cache": {
+        "untrackedEnv": ["PROBE_ENV"]
+      }
+    },
+    "fetch-env-declared-and-untracked": {
+      "command": "node scripts/fetch_env.mjs PROBE_ENV",
+      "cache": {
+        "env": ["PROBE_ENV"],
+        "untrackedEnv": ["PROBE_ENV"]
+      }
+    },
+    "fetch-envs-removed-ignore": {
+      "command": "node scripts/fetch_envs.mjs --prefix NEXT_PUBLIC_",
+      "cache": {
+        "input": [],
+        "output": [],
+        "untrackedEnv": ["NEXT_*"]
+      }
+    },
     "fetch-env-untracked": {
       "command": "node scripts/fetch_env.mjs --untracked PROBE_ENV",
       "cache": true

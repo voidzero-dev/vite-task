@@ -68,6 +68,12 @@ pub struct CacheMetadata {
     /// mirrors the ambient environment and would make snapshots noisy.
     #[serde(skip)]
     pub unfiltered_envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
+
+    /// User-declared overrides for tool-reported env dependencies. Kept out
+    /// of the cache key: complete observations are stored and revalidated
+    /// under the current policy, including when an override is removed.
+    #[serde(skip)]
+    pub explicit_untracked_env: Arc<[Str]>,
 }
 
 /// Fingerprint for spawn execution that affects caching.

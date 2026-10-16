@@ -670,3 +670,253 @@ steps = [
     ],
   ], comment = "cache hit: changed match set was requested with tracked: false" },
 ]
+
+[[e2e]]
+name = "fetch_envs_queries_ignore_untracked_names"
+comment = """
+Bulk glob and literal-prefix queries still serve explicitly ignored variables, but changing those values replays the cached result.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-untracked-noise",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_NOISE_ID",
+      "run-1",
+    ],
+    [
+      "ACTIONS_ORCHESTRATION_ID",
+      "run-1",
+    ],
+  ], comment = "populate: the glob serves both tracked values and untracked noise" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-untracked-noise",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_NOISE_ID",
+      "run-2",
+    ],
+    [
+      "ACTIONS_ORCHESTRATION_ID",
+      "run-2",
+    ],
+  ], comment = "cache hit: both explicitly ignored values changed" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-prefix-untracked-noise",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_NOISE_ID",
+      "run-1",
+    ],
+  ], comment = "populate: the literal-prefix query serves its untracked match too" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-prefix-untracked-noise",
+  ], envs = [
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_NOISE_ID",
+      "run-2",
+    ],
+  ], comment = "cache hit: literal-prefix queries honor the same exclusion" },
+]
+
+[[e2e]]
+name = "fetch_envs_empty_prefix_preserves_negated_dependencies"
+comment = """
+An empty prefix queries every ambient variable. Negating VITE_* from untrackedEnv keeps its values, additions and removals as cache dependencies. Only VITE_* results are printed so platform-specific ambient values stay out of the snapshot.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-all-untracked-except-vite",
+  ], envs = [
+    [
+      "VITE_FEATURE",
+      "first",
+    ],
+  ], comment = "populate: VITE_FEATURE is excluded from the untracked wildcard" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-all-untracked-except-vite",
+  ], envs = [
+    [
+      "VITE_FEATURE",
+      "second",
+    ],
+  ], comment = "cache miss: a negated dependency changed" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-all-untracked-except-vite",
+  ], envs = [
+    [
+      "VITE_FEATURE",
+      "second",
+    ],
+    [
+      "VITE_ADDED",
+      "added",
+    ],
+  ], comment = "cache miss: a negated dependency was added" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-all-untracked-except-vite",
+  ], envs = [
+    [
+      "VITE_FEATURE",
+      "second",
+    ],
+  ], comment = "cache miss: a negated dependency was removed" },
+]
+
+[[e2e]]
+name = "fetch_env_reads_honor_explicit_untracked_config"
+comment = """
+Explicit untrackedEnv applies equally to getEnv and an exact-name getEnvs query.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-explicitly-untracked",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "first",
+    ],
+  ], comment = "populate: getEnv serves the explicitly ignored value" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-explicitly-untracked",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "second",
+    ],
+  ], comment = "cache hit: explicit untrackedEnv suppresses the scalar dependency" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-exact-explicitly-untracked",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "first",
+    ],
+  ], comment = "populate: getEnvs serves the same exact-name query" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-exact-explicitly-untracked",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "second",
+    ],
+  ], comment = "cache hit: the bulk query honors the same explicit policy" },
+]
+
+[[e2e]]
+name = "fetch_env_declared_input_overrides_untracked_config"
+comment = """
+A declared cache.env input still invalidates when the same name is explicitly listed in untrackedEnv.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-declared-and-untracked",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "first",
+    ],
+  ], comment = "populate: cache.env explicitly fingerprints the value" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-declared-and-untracked",
+  ], envs = [
+    [
+      "PROBE_ENV",
+      "second",
+    ],
+  ], comment = "cache miss: declared cache.env takes precedence over untrackedEnv" },
+]
+
+[[e2e]]
+name = "fetch_envs_removed_ignore_uses_original_observation"
+comment = """
+Removing an explicit NEXT_* ignore leaves the merged built-in passthrough policy unchanged. The original observed value must survive an ignored cache hit so the next run detects its change. Explicit empty file inputs and outputs isolate the environment policy change.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-removed-ignore",
+  ], envs = [
+    [
+      "NEXT_PUBLIC_API_URL",
+      "first",
+    ],
+  ], comment = "populate: record the first value even though it is explicitly ignored" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-removed-ignore",
+  ], envs = [
+    [
+      "NEXT_PUBLIC_API_URL",
+      "second",
+    ],
+  ], comment = "cache hit: explicit ignore permits the changed value" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    '"untrackedEnv": ["NEXT_*"]',
+    '"untrackedEnv": []',
+  ], comment = "remove the explicit ignore without changing the merged passthrough policy" },
+  { argv = [
+    "vt",
+    "run",
+    "fetch-envs-removed-ignore",
+  ], envs = [
+    [
+      "NEXT_PUBLIC_API_URL",
+      "second",
+    ],
+  ], comment = "cache miss: the original observation is now a dependency" },
+]
