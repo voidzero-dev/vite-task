@@ -1,0 +1,6 @@
+{
+  "name": "app",
+  "scripts": {
+    "build": "vt tool print app"
+  }
+}

@@ -1,5 +1,6 @@
 # Changelog
 
+- **Fixed** Running `vp run` in a package that sits inside a workspace folder but isn't listed in its `pnpm-workspace.yaml` `packages` or `package.json` `workspaces` now runs that package's own tasks, instead of treating the enclosing workspace as its root ([#859](https://github.com/voidzero-dev/vite-task/pull/859)).
 - **Fixed** On Linux, concurrent system calls in tracked programs, such as `pnpm dlx`, no longer cause a stack overflow ([#854](https://github.com/voidzero-dev/vite-task/pull/854)).
 - **Fixed** Cached tasks can now run scripts whose shebang names an interpreter path longer than 126 bytes. Before, the path was cut short and the script failed to start or ran the wrong program. On macOS, text after a `#` in the shebang line is now ignored, as it is when the script runs on its own ([#788](https://github.com/voidzero-dev/vite-task/pull/788)).
 - **Fixed** On macOS, tasks with automatic file-access tracking can now run Node.js single executable applications, such as pnpm 11's standalone `pnpm` binary, which previously aborted with `Assertion failed: (magic) == (kMagic)`, and `deno compile` outputs, which previously failed with `Did not find magic bytes` ([#840](https://github.com/voidzero-dev/vite-task/pull/840)).
