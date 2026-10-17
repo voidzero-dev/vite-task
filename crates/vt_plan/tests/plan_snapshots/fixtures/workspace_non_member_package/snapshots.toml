@@ -1,0 +1,10 @@
+# Tests that a package not matched by `packages` in pnpm-workspace.yaml is its own workspace root
+
+[fields]
+key = true
+execution_item_display = { command = true }
+
+[[plan]]
+name = "non_member_package_is_its_own_workspace"
+args = ["run", "build"]
+cwd = "examples/demo"

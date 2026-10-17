@@ -11,7 +11,7 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::Deserialize;
 use vec1::smallvec_v1::SmallVec1;
 use vt_glob::path::PathGlobSet;
-use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
+use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePath, RelativePathBuf};
 use vt_str::Str;
 use wax::{
     Glob,
@@ -88,20 +88,29 @@ struct WorkspaceMemberGlobs {
     workspaces: Vec<Str>,
 }
 impl WorkspaceMemberGlobs {
-    const fn new(workspaces: Vec<Str>) -> Self {
-        Self { workspaces }
+    fn from_pnpm_workspace_yaml(file_with_path: &FileWithPath) -> Result<Self, Error> {
+        let workspace: PnpmWorkspace =
+            serde_norway::from_slice(strip_bom(file_with_path.content())).map_err(|e| {
+                Error::SerdeYaml {
+                    file_path: Arc::clone(file_with_path.path()),
+                    serde_yaml_error: e,
+                }
+            })?;
+        Ok(Self { workspaces: workspace.packages })
     }
 
-    fn get_package_json_paths(
-        self,
-        workspace_root: impl AsRef<AbsolutePath>,
-    ) -> Result<impl IntoIterator<Item = AbsolutePathBuf>, Error> {
-        let workspace_root = workspace_root.as_ref();
-        let mut package_json_paths = HashSet::<AbsolutePathBuf>::default();
-        let mut has_negated = false;
-        let mut inclusions = Vec::<Str>::new();
-        let mut all = Vec::<Str>::new();
-        for pattern in self.workspaces {
+    fn from_npm_workspace_json(file_with_path: &FileWithPath) -> Result<Self, Error> {
+        let workspace: NpmWorkspace = serde_json::from_slice(strip_bom(file_with_path.content()))
+            .map_err(|e| Error::SerdeJson {
+            file_path: Arc::clone(file_with_path.path()),
+            serde_json_error: e,
+        })?;
+        Ok(Self { workspaces: workspace.workspaces.into_packages() })
+    }
+
+    /// Converts each member glob into a glob of `package.json` files, paired with whether it is negated.
+    fn package_json_patterns(&self) -> impl Iterator<Item = (Str, bool)> + '_ {
+        self.workspaces.iter().map(|pattern| {
             // Ported from npm's workspace pattern normalization:
             // https://github.com/npm/map-workspaces/blob/76ea3c852171790e245052e006329de15b09e60e/lib/index.js#L17
             let exclusion_count = pattern.bytes().take_while(|byte| *byte == b'!').count();
@@ -124,7 +133,31 @@ impl WorkspaceMemberGlobs {
             } else {
                 "/package.json"
             });
+            (pattern, is_negated)
+        })
+    }
 
+    /// Checks whether the package at `package_path`, relative to the workspace root, is a member.
+    fn includes(&self, package_path: &RelativePath) -> Result<bool, Error> {
+        // `get_package_json_paths` never walks into `node_modules`.
+        if package_path.as_str().split('/').any(|component| component == "node_modules") {
+            return Ok(false);
+        }
+        let patterns = self.package_json_patterns().map(|(pattern, _)| pattern).collect::<Vec<_>>();
+        let package_json_path = vt_str::format!("{}/package.json", package_path.as_str());
+        Ok(PathGlobSet::new(&patterns)?.is_match(package_json_path.as_str()))
+    }
+
+    fn get_package_json_paths(
+        self,
+        workspace_root: impl AsRef<AbsolutePath>,
+    ) -> Result<impl IntoIterator<Item = AbsolutePathBuf>, Error> {
+        let workspace_root = workspace_root.as_ref();
+        let mut package_json_paths = HashSet::<AbsolutePathBuf>::default();
+        let mut has_negated = false;
+        let mut inclusions = Vec::<Str>::new();
+        let mut all = Vec::<Str>::new();
+        for (pattern, is_negated) in self.package_json_patterns() {
             if is_negated {
                 has_negated = true;
             } else {
@@ -283,26 +316,12 @@ pub fn load_package_graph(
     workspace_root: &WorkspaceRoot,
 ) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {
     let mut graph_builder = PackageGraphBuilder::default();
-    let workspaces = match &workspace_root.workspace_file {
+    let member_globs = match &workspace_root.workspace_file {
         WorkspaceFile::PnpmWorkspaceYaml(file_with_path) => {
-            let workspace: PnpmWorkspace =
-                serde_norway::from_slice(strip_bom(file_with_path.content())).map_err(|e| {
-                    Error::SerdeYaml {
-                        file_path: Arc::clone(file_with_path.path()),
-                        serde_yaml_error: e,
-                    }
-                })?;
-            workspace.packages
+            WorkspaceMemberGlobs::from_pnpm_workspace_yaml(file_with_path)?
         }
         WorkspaceFile::NpmWorkspaceJson(file_with_path) => {
-            let workspace: NpmWorkspace =
-                serde_json::from_slice(strip_bom(file_with_path.content())).map_err(|e| {
-                    Error::SerdeJson {
-                        file_path: Arc::clone(file_with_path.path()),
-                        serde_json_error: e,
-                    }
-                })?;
-            workspace.workspaces.into_packages()
+            WorkspaceMemberGlobs::from_npm_workspace_json(file_with_path)?
         }
         WorkspaceFile::NonWorkspacePackage(file_with_path) => {
             // For non-workspace packages, add the package.json to the graph as a root package
@@ -323,7 +342,6 @@ pub fn load_package_graph(
         }
     };
 
-    let member_globs = WorkspaceMemberGlobs::new(workspaces);
     let mut has_root_package = false;
     for package_json_path in member_globs.get_package_json_paths(&*workspace_root.path)? {
         let package_json_path: Arc<AbsolutePath> = package_json_path.clone().into();

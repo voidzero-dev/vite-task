@@ -1,0 +1,6 @@
+{
+  "name": "root",
+  "scripts": {
+    "build": "vt tool print root"
+  }
+}
