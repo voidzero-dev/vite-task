@@ -1,0 +1,36 @@
+[[e2e]]
+name = "sigterm_terminates_running_task"
+comment = """
+SIGTERM sent to the runner alone (as `kill <pid>`, a supervisor, or a container
+runtime would) must reach the running task: the task receives SIGTERM, exits,
+and the runner waits for it instead of exiting immediately and orphaning it.
+"""
+cfg = "unix"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--no-cache",
+    "@signal-forwarding/a#dev",
+  ], interactions = [
+    { "expect-milestone" = "ready" },
+    { signal = "sigterm" },
+  ] },
+]
+
+[[e2e]]
+name = "sigterm_terminates_running_task__cached_"
+comment = """
+Same as above, but under the cached execution path (piped stdio + fspy tracking).
+"""
+cfg = "unix"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "@signal-forwarding/a#dev",
+  ], interactions = [
+    { "expect-milestone" = "ready" },
+    { signal = "sigterm" },
+  ] },
+]

@@ -157,6 +157,7 @@ impl SpyImpl {
             .map_err(SpawnError::OsSpawn)?;
 
         Ok(TrackedChild {
+            pid: child.id(),
             stdin: child.stdin.take(),
             stdout: child.stdout.take(),
             stderr: child.stderr.take(),

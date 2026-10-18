@@ -49,6 +49,10 @@ pub struct TrackedChild {
     /// The future that resolves to exit status and path accesses when the process exits.
     pub wait_handle: BoxFuture<'static, io::Result<ChildTermination>>,
 
+    /// The child's process id, so callers can forward termination signals to
+    /// it. `None` until the platform reports it.
+    pub pid: Option<u32>,
+
     /// A duplicated process handle of the child, captured before the tokio `Child`
     /// is moved into the background wait task. This is an independently owned handle
     /// (via `DuplicateHandle`) so it remains valid even after tokio closes its copy.

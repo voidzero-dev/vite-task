@@ -2,6 +2,7 @@ mod cache;
 mod event;
 mod execute;
 pub(crate) mod reporter;
+mod signals;
 
 // Re-export types that are part of the public API
 use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, sync::Arc};
@@ -379,40 +380,18 @@ impl<'a> Session<'a> {
                     self.program_name.clone(),
                     color_support,
                 ));
-                // Don't let SIGINT/CTRL_C kill the runner. Child tasks receive
-                // the signal directly from the terminal driver and handle it
-                // themselves. Cancelling the cancel token prevents scheduling
-                // new tasks and caching results of in-flight tasks, and stops
-                // remote cache lookups. It's a child of the fast-fail token,
-                // so fast-fail cancels it too. Only Ctrl-C cancels the
-                // interrupt token, which cancels remote cache uploads.
-                //
-                // On Windows, an ancestor process (e.g. cargo) may have been
-                // created with CREATE_NEW_PROCESS_GROUP, which sets a per-process
-                // flag that silently drops CTRL_C_EVENT before it reaches
-                // registered handlers. Clear it so our handler fires.
-                //
-                // SAFETY: Passing (None, FALSE) clears the inherited
-                // CTRL_C ignore flag.
-                #[cfg(windows)]
-                unsafe {
-                    unsafe extern "system" {
-                        fn SetConsoleCtrlHandler(
-                            handler: Option<unsafe extern "system" fn(u32) -> i32>,
-                            add: i32,
-                        ) -> i32;
-                    }
-                    SetConsoleCtrlHandler(None, 0);
-                }
+                // Termination signals are forwarded to the running task
+                // processes, and cancel the cancel token: see `signals`. As
+                // before, an in-terminal Ctrl-C is delivered to the tasks by
+                // the terminal driver, and cancelling the cancel token
+                // prevents scheduling new tasks and caching results of
+                // in-flight tasks, and stops remote cache lookups. The
+                // interrupt token, which only this handler cancels, cancels
+                // remote cache uploads.
                 let fast_fail_token = tokio_util::sync::CancellationToken::new();
                 let cancel_token = fast_fail_token.child_token();
                 let interrupt_token = tokio_util::sync::CancellationToken::new();
-                let ct = cancel_token.clone();
-                let it = interrupt_token.clone();
-                ctrlc::set_handler(move || {
-                    ct.cancel();
-                    it.cancel();
-                })?;
+                signals::install(cancel_token.clone(), interrupt_token.clone())?;
 
                 self.execute_graph(graph, builder, fast_fail_token, cancel_token, interrupt_token)
                     .await

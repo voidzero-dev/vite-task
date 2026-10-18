@@ -152,6 +152,7 @@ impl SpyImpl {
         })?;
 
         Ok(TrackedChild {
+            pid: child.id(),
             stdin: child.stdin.take(),
             stdout: child.stdout.take(),
             stderr: child.stderr.take(),

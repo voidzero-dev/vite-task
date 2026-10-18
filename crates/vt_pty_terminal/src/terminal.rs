@@ -35,6 +35,7 @@ pub struct PtyWriter {
 pub struct ChildHandle {
     child_killer: Box<dyn ChildKiller + Send + Sync>,
     exit_status: Arc<OnceLock<ChildWaitResult>>,
+    pid: Option<u32>,
 }
 
 impl Clone for ChildHandle {
@@ -42,6 +43,7 @@ impl Clone for ChildHandle {
         Self {
             child_killer: self.child_killer.clone_killer(),
             exit_status: Arc::clone(&self.exit_status),
+            pid: self.pid,
         }
     }
 }
@@ -291,6 +293,13 @@ impl ChildHandle {
         self.child_killer.kill()?;
         Ok(())
     }
+
+    /// Returns the process id of the child process, when the platform reports
+    /// one.
+    #[must_use]
+    pub const fn pid(&self) -> Option<u32> {
+        self.pid
+    }
 }
 
 impl Terminal {
@@ -322,6 +331,7 @@ impl Terminal {
             Arc::new(Mutex::new(Some(pty_pair.master.take_writer()?)));
         let mut child = pty_pair.slave.spawn_command(cmd)?;
         let child_killer = child.clone_killer();
+        let pid = child.process_id();
         let master = Arc::new(Mutex::new(Some(pty_pair.master)));
         let exit_status: Arc<OnceLock<ChildWaitResult>> = Arc::new(OnceLock::new());
 
@@ -373,7 +383,7 @@ impl Terminal {
         Ok(Self {
             pty_reader: PtyReader { reader, parser: Arc::clone(&parser) },
             pty_writer: PtyWriter { writer, parser, master },
-            child_handle: ChildHandle { child_killer, exit_status },
+            child_handle: ChildHandle { child_killer, exit_status, pid },
         })
     }
 }
