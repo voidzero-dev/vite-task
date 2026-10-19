@@ -1,5 +1,9 @@
 {
   "name": "root",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
   "scripts": {
     "build": "vt tool print root"
   }

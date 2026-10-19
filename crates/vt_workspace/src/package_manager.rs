@@ -144,7 +144,9 @@ pub fn find_workspace_root(
     loop {
         // Check for pnpm-workspace.yaml for pnpm workspace
         let pnpm_workspace_path: Arc<AbsolutePath> = cwd.join("pnpm-workspace.yaml").into();
-        if let Some(file_with_path) = FileWithPath::open_if_exists(pnpm_workspace_path)?
+        let pnpm_workspace = FileWithPath::open_if_exists(pnpm_workspace_path)?;
+        let is_pnpm_workspace = pnpm_workspace.is_some();
+        if let Some(file_with_path) = pnpm_workspace
             && includes_package(cwd, nearest_package, || {
                 WorkspaceMemberGlobs::from_pnpm_workspace_yaml(&file_with_path)
             })?
@@ -170,7 +172,9 @@ pub fn find_workspace_root(
                 file_path: Arc::clone(file_with_path.path()),
                 serde_json_error: e,
             })?;
-            if package_json.get("workspaces").is_some()
+            // pnpm defines membership even when its globs exclude the current package.
+            if !is_pnpm_workspace
+                && package_json.get("workspaces").is_some()
                 && includes_package(cwd, nearest_package, || {
                     WorkspaceMemberGlobs::from_npm_workspace_json(&file_with_path)
                 })?
