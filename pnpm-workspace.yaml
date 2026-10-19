@@ -37,7 +37,7 @@ catalog:
   # The e2e tests run this pnpm; keep it in sync with `packageManager`.
   pnpm: 11.24.0
   postject: 1.0.0-alpha.6
-  typescript: ^6.0.3
+  typescript: ^7.0.0
   vite: npm:@voidzero-dev/vite-plus-core@1.1.0
   vite-plus: 1.1.0
   vitest: 5.0.3
