@@ -107,19 +107,38 @@ impl ToAbsolutePath for BorrowedFd<'_> {
     }
 }
 
-pub struct PathAt<'fd, 'path>(pub BorrowedFd<'fd>, pub fspy_nostd::CStr<'path, fspy_nostd::Thin>);
+impl<T: ToAbsolutePath> ToAbsolutePath for Option<T> {
+    fn to_absolute_path<'a, A: Allocator>(
+        self,
+        allocator: &'a A,
+    ) -> nix::Result<Option<fspy_nostd::CStr<'a, fspy_nostd::Fat>>>
+    where
+        Self: 'a,
+    {
+        self.map_or(Ok(None), |path| path.to_absolute_path(allocator))
+    }
+}
+
+/// A pathname resolved against a directory descriptor, as in `openat`.
+///
+/// The descriptor is `None` when the caller passed `-1`. The kernel ignores
+/// it for an absolute pathname and fails a relative one with `EBADF`.
+pub struct PathAt<'fd, 'path>(
+    pub Option<BorrowedFd<'fd>>,
+    pub fspy_nostd::CStr<'path, fspy_nostd::Thin>,
+);
 
 impl PathAt<'_, '_> {
     /// Borrows raw directory-descriptor and pathname arguments.
     ///
     /// # Safety
     ///
-    /// `fd` must remain valid while the returned value is used, and `path`
-    /// must point to a valid NUL-terminated string.
+    /// `fd` must be `-1` or remain valid while the returned value is used,
+    /// and `path` must point to a valid NUL-terminated string.
     #[must_use]
     pub const unsafe fn borrow_raw(fd: c_int, path: *const c_char) -> Self {
         // SAFETY: both invariants are upheld by the caller.
-        Self(unsafe { BorrowedFd::borrow_raw(fd) }, unsafe {
+        Self(unsafe { BorrowedFd::try_borrow_raw(fd) }, unsafe {
             fspy_nostd::CStr::from_ptr(path.cast())
         })
     }
@@ -140,7 +159,11 @@ impl ToAbsolutePath for PathAt<'_, '_> {
             // Already absolute, and already NUL-terminated by the caller.
             Ok(Some(counted))
         } else {
-            let Some(mut base) = get_fd_path(allocator, self.0)? else {
+            // A relative pathname at `-1` accesses nothing: the call fails.
+            let Some(dirfd) = self.0 else {
+                return Ok(None);
+            };
+            let Some(mut base) = get_fd_path(allocator, dirfd)? else {
                 return Ok(None);
             };
             if !pathname.is_empty() {
@@ -167,7 +190,7 @@ impl ToAbsolutePath for fspy_nostd::CStr<'_, fspy_nostd::Thin> {
     where
         Self: 'a,
     {
-        PathAt(CWD, self).to_absolute_path(allocator)
+        PathAt(Some(CWD), self).to_absolute_path(allocator)
     }
 }
 

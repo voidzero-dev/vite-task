@@ -240,7 +240,7 @@ mod linux_only {
         let _unused = execveat::original;
         let arena = fspy_nostd_alloc::pooled_bump();
 
-        // SAFETY: dirfd and pathname are valid arguments from the interposed execveat call.
+        // SAFETY: dirfd is -1 or a valid file descriptor, and pathname is a valid C string, from the interposed execveat call.
         let path = unsafe { PathAt::borrow_raw(dirfd, pathname) };
         let abs_path = match path.to_absolute_path(&arena) {
             Ok(None) => {

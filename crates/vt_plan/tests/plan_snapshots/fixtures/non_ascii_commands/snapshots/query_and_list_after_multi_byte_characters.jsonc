@@ -1,0 +1,25 @@
+// run greet-and-done
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "greet-and-done"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "echo 你好"
+            }
+          },
+          {
+            "execution_item_display": {
+              "command": "FOO=é echo 🎉 done"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -38,11 +38,11 @@ unsafe extern "C" fn syscall(syscall_no: c_long, mut args: ...) -> c_long {
         let flags = a2 as c_int;
         if pathname.is_null() {
             if flags & libc::AT_EMPTY_PATH != 0 {
-                // SAFETY: dirfd is provided by the statx syscall caller.
-                unsafe { handle_open(BorrowedFd::borrow_raw(dirfd), AccessMode::Read) };
+                // SAFETY: dirfd is -1 or a valid file descriptor provided by the statx syscall caller.
+                unsafe { handle_open(BorrowedFd::try_borrow_raw(dirfd), AccessMode::Read) };
             }
         } else {
-            // SAFETY: pathname is a non-null C string pointer provided by the statx syscall caller.
+            // SAFETY: dirfd is -1 or a valid file descriptor, and pathname is a non-null C string pointer, provided by the statx syscall caller.
             unsafe {
                 handle_open(PathAt::borrow_raw(dirfd, pathname), AccessMode::Read);
             };

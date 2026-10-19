@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use serde_untagged::UntaggedEnumVisitor;
 #[cfg(all(test, not(clippy)))]
 use ts_rs::TS;
 use vec1::Vec1;
@@ -154,15 +155,25 @@ pub enum UserOutputEntry {
 }
 
 /// The value of a task's `cache` field.
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "TaskCache"))]
-#[serde(untagged)]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "TaskCache", untagged))]
 pub enum UserCacheConfig {
     /// `true` enables caching with default settings; `false` disables caching.
     Bool(bool),
     /// Enables caching with the given settings.
     Config(EnabledCacheConfig),
+}
+
+// Not `#[serde(untagged)]`, which replaces each variant's error with a generic one.
+impl<'de> Deserialize<'de> for UserCacheConfig {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        UntaggedEnumVisitor::new()
+            .expecting("a boolean or an object of cache settings")
+            .bool(|enabled| Ok(Self::Bool(enabled)))
+            .map(|map| map.deserialize().map(Self::Config))
+            .deserialize(deserializer)
+    }
 }
 
 impl Default for UserCacheConfig {
@@ -321,15 +332,28 @@ pub struct UserTaskConfig {
 }
 
 /// User-defined task configuration or command-only shorthand in `vite.config.*`.
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, PartialEq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "TaskDefinition"))]
-#[serde(untagged)]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "TaskDefinition", untagged))]
 pub enum UserTaskDefinition {
     /// Full task object form.
     Object(UserTaskConfig),
     /// Command-only shorthand form using default task options.
     CommandShorthand(Command),
+}
+
+// Not `#[serde(untagged)]`, which replaces each variant's error with a generic one.
+impl<'de> Deserialize<'de> for UserTaskDefinition {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        UntaggedEnumVisitor::new()
+            .expecting("a command string, an array of command strings, or a task object")
+            .string(|command| Ok(Self::CommandShorthand(Command::Single(command.into()))))
+            .seq(|seq| {
+                seq.deserialize().map(|commands| Self::CommandShorthand(Command::Array(commands)))
+            })
+            .map(|map| map.deserialize().map(Self::Object))
+            .deserialize(deserializer)
+    }
 }
 
 /// Root-level cache configuration.
@@ -1067,5 +1091,33 @@ mod tests {
             serde_json::from_value::<UserTaskConfig>(json!({ "command": "echo", "unknown": true }))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn test_invalid_task_error_names_the_problem() {
+        let cases = [
+            (json!({ "command": "echo", "outputs": [] }), "unknown field `outputs`"),
+            (
+                json!({ "command": "echo", "cache": { "outputs": [] } }),
+                "unknown field `outputs`, expected one of `env`, `untrackedEnv`, `input`, \
+                 `output`, `remote`",
+            ),
+            (
+                json!({ "command": "echo", "cache": "yes" }),
+                "invalid type: string \"yes\", expected a boolean or an object of cache settings",
+            ),
+            (json!({ "cache": false }), "missing field `command`"),
+            (json!(["echo one", 2]), "invalid type: integer `2`, expected a string"),
+            (
+                json!(123),
+                "invalid type: integer `123`, expected a command string, an array of command \
+                 strings, or a task object",
+            ),
+        ];
+        for (task, expected) in cases {
+            let user_config_json = json!({ "tasks": { "build": task } });
+            let error = serde_json::from_value::<UserRunConfig>(user_config_json).unwrap_err();
+            assert_eq!(error.to_string(), expected);
+        }
     }
 }

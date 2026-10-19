@@ -92,9 +92,28 @@ fn flatten_pieces(pieces: &[WordPieceWithSource], result: &mut Str) -> Option<()
     Some(())
 }
 
-fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<usize>)> {
+/// Converts a character index reported by `brush_parser` into a byte index
+/// into `source`.
+///
+/// `brush_parser::SourcePosition::index` counts characters, while the spans
+/// returned by [`try_parse_as_and_list`] slice the `&str` by bytes.
+///
+/// Remove this conversion when `brush_parser` reports byte offsets. The open
+/// <https://github.com/reubeno/brush/pull/1144> plans this change and also
+/// renames `index`, which would fail to compile here. If a release changes
+/// the unit without the rename, this conversion applies twice, and the test
+/// `command_ranges_are_byte_ranges_after_multi_byte_characters` fails.
+fn char_index_to_byte_index(source: &str, char_index: usize) -> Option<usize> {
+    source.char_indices().map(|(byte_index, _)| byte_index).chain([source.len()]).nth(char_index)
+}
+
+fn pipeline_to_command(
+    source: &str,
+    pipeline: &Pipeline,
+) -> Option<(TaskParsedCommand, Range<usize>)> {
     let location = pipeline.location()?;
-    let range = location.start.index..location.end.index;
+    let range = char_index_to_byte_index(source, location.start.index)?
+        ..char_index_to_byte_index(source, location.end.index)?;
 
     let Pipeline { timed: None, bang: false, seq } = pipeline else {
         return None;
@@ -137,6 +156,9 @@ fn pipeline_to_command(pipeline: &Pipeline) -> Option<(TaskParsedCommand, Range<
     Some((TaskParsedCommand { envs, program: unquote(program)?, args }, range))
 }
 
+/// Parses `cmd` as simple commands joined by `&&`.
+///
+/// Each command is returned with its byte range in `cmd`.
 #[must_use]
 pub fn try_parse_as_and_list(cmd: &str) -> Option<Vec<(TaskParsedCommand, Range<usize>)>> {
     let mut parser = Parser::new(cmd.as_bytes(), &PARSER_OPTIONS);
@@ -150,12 +172,12 @@ pub fn try_parse_as_and_list(cmd: &str) -> Option<Vec<(TaskParsedCommand, Range<
     };
 
     let mut commands = Vec::<(TaskParsedCommand, Range<usize>)>::new();
-    commands.push(pipeline_to_command(&and_or_list.first)?);
+    commands.push(pipeline_to_command(cmd, &and_or_list.first)?);
     for and_or in &and_or_list.additional {
         let AndOr::And(pipeline) = and_or else {
             return None;
         };
-        commands.push(pipeline_to_command(pipeline)?);
+        commands.push(pipeline_to_command(cmd, pipeline)?);
     }
     Some(commands)
 }
@@ -214,6 +236,17 @@ mod tests {
             substrs,
             vec!["A=B hello world", r#"FOO="BE\"R" program "arg1" "arg\"2""#, "zzz"]
         );
+    }
+
+    #[test]
+    fn command_ranges_are_byte_ranges_after_multi_byte_characters() {
+        // `あ` is 3 bytes, `é` is 2 bytes, and `🎉` is 4 bytes in UTF-8, so
+        // character and byte positions diverge after each of them.
+        let source = "echo ああ && FOO=é echo 🎉 && echo done";
+        let list = try_parse_as_and_list(source).unwrap();
+
+        let substrs = list.iter().map(|(_, range)| source.get(range.clone())).collect::<Vec<_>>();
+        assert_eq!(substrs, [Some("echo ああ"), Some("FOO=é echo 🎉"), Some("echo done")]);
     }
 
     #[test]

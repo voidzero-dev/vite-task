@@ -1,0 +1,27 @@
+# Tests that commands containing multi-byte UTF-8 characters are displayed in full.
+# A character position used as a byte position either lands inside a character
+# (`greet`) or truncates the command (`greet-long`).
+
+[fields]
+key = true
+execution_item_display = { command = true }
+
+[[plan]]
+name = "command_ending_with_multi_byte_characters"
+args = ["run", "greet"]
+
+[[plan]]
+name = "command_ending_on_a_character_boundary"
+args = ["run", "greet-long"]
+
+[[plan]]
+name = "and_list_after_multi_byte_characters"
+args = ["run", "greet-and-done"]
+
+[[plan]]
+name = "extra_args_after_multi_byte_characters"
+args = ["run", "greet", "🎉"]
+
+[[plan]]
+name = "nested_error_after_multi_byte_characters"
+args = ["run", "greet-and-missing"]

@@ -1,0 +1,20 @@
+// run greet 🎉
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "greet"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "echo ああ '🎉'"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

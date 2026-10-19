@@ -51,8 +51,8 @@ mod macos_only {
         buf_len: usize,
         basep: *mut i64,
     ) -> isize {
-        // SAFETY: fd is a valid file descriptor provided by the caller of __getdirentries64
-        unsafe { handle_open(BorrowedFd::borrow_raw(fd), AccessMode::ReadDir) };
+        // SAFETY: fd is -1 or a valid file descriptor provided by the caller of __getdirentries64
+        unsafe { handle_open(BorrowedFd::try_borrow_raw(fd), AccessMode::ReadDir) };
         // SAFETY: calling the original libc __getdirentries64() with the same arguments forwarded from the interposed function
         unsafe { __getdirentries64::original()(fd, buf, buf_len, basep) }
     }
@@ -65,16 +65,16 @@ unsafe extern "C" fn getdirentries(
     nbytes: c_int,
     basep: *mut c_long,
 ) -> c_int {
-    // SAFETY: fd is a valid file descriptor provided by the caller of the interposed function
-    unsafe { handle_open(BorrowedFd::borrow_raw(fd), AccessMode::ReadDir) };
+    // SAFETY: fd is -1 or a valid file descriptor provided by the caller of the interposed function
+    unsafe { handle_open(BorrowedFd::try_borrow_raw(fd), AccessMode::ReadDir) };
     // SAFETY: calling the original libc getdirentries() with the same arguments forwarded from the interposed function
     unsafe { getdirentries::original()(fd, buf, nbytes, basep) }
 }
 
 intercept!(fdopendir(64): unsafe extern "C" fn (fd: c_int) -> *mut DIR);
 unsafe extern "C" fn fdopendir(fd: c_int) -> *mut DIR {
-    // SAFETY: fd is a valid file descriptor provided by the caller of the interposed function
-    unsafe { handle_open(BorrowedFd::borrow_raw(fd), AccessMode::ReadDir) };
+    // SAFETY: fd is -1 or a valid file descriptor provided by the caller of the interposed function
+    unsafe { handle_open(BorrowedFd::try_borrow_raw(fd), AccessMode::ReadDir) };
     // SAFETY: calling the original libc fdopendir() with the same arguments forwarded from the interposed function
     unsafe { fdopendir::original()(fd) }
 }
