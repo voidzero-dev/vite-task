@@ -142,7 +142,7 @@ smallvec = "2.0.0-alpha.12"
 static_cell = "2"
 stackalloc = "1.2.1"
 supports-color = "3.0.1"
-syn = "2"
+syn = "3"
 syscalls = { version = "0.8.0", default-features = false }
 tar = "0.4.45"
 tempfile = "3.14.0"
