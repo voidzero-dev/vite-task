@@ -27,6 +27,7 @@ use vt_graph::{
 use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf, relative::InvalidPathDataError};
 use vt_shell::try_parse_as_and_list;
 use vt_str::Str;
+use vt_workspace::find_workspace_root;
 
 use crate::{
     ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind, PlanContext,
@@ -44,6 +45,13 @@ use crate::{
     remote_cache::{self, ResolvedRemoteCacheConfig},
     resolve_cache_with_override,
 };
+
+/// Whether `cwd` belongs to a workspace other than the one rooted at `workspace_path`.
+///
+/// Directories without any discoverable workspace root are treated as part of `workspace_path`.
+fn is_in_other_workspace(cwd: &AbsolutePath, workspace_path: &AbsolutePath) -> bool {
+    find_workspace_root(cwd).is_ok_and(|(root, _)| &*root.path != workspace_path)
+}
 
 /// Locate the executable path for a given program name in the provided envs and cwd.
 fn which(
@@ -229,7 +237,10 @@ async fn plan_task_as_execution_node(
                     envs,
                     cwd: Arc::clone(&cwd),
                 };
-                let plan_request =
+                // The command as written, before the callback rewrites it (e.g. `vpr` -> `vt run`).
+                let original_program = script_command.program.clone();
+                let original_args = Arc::clone(&script_command.args);
+                let mut plan_request =
                     context.callbacks().get_plan_request(&mut script_command).await.map_err(
                         |error| Error::ParsePlanRequest {
                             program: script_command.program.clone(),
@@ -238,6 +249,19 @@ async fn plan_task_as_execution_node(
                             error,
                         },
                     )?;
+
+                // After a `cd` into a project that is not part of this workspace (it has its own
+                // workspace root), this workspace's task graph cannot resolve the nested run:
+                // it would fall back to the enclosing package. Run the command as written
+                // instead, so it discovers its own workspace like it does in a shell.
+                if matches!(plan_request, Some(PlanRequest::Query(_)))
+                    && *cwd != *task_node.resolved_config.resolved_options.cwd
+                    && is_in_other_workspace(&cwd, context.workspace_path())
+                {
+                    plan_request = None;
+                    script_command.program = original_program;
+                    script_command.args = original_args;
+                }
 
                 let execution_item_kind: ExecutionItemKind = match plan_request {
                     // Expand task query like `vp run -r build`
