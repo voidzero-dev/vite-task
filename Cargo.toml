@@ -136,6 +136,7 @@ serde_json = "1.0.140"
 serde_norway = "0.9.42"
 sha2 = "0.11.0"
 shell-escape = "0.1.5"
+signal-hook = "0.3.18"
 fspy_nostd = { path = "crates/fspy_nostd" }
 fspy_nostd_alloc = { path = "crates/fspy_nostd_alloc" }
 similar = "3.0.0"

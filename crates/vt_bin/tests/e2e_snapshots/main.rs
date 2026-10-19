@@ -157,6 +157,7 @@ enum Interaction {
     Write(WriteInteraction),
     WriteLine(WriteLineInteraction),
     WriteKey(WriteKeyInteraction),
+    Signal(SignalInteraction),
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]
@@ -184,6 +185,64 @@ struct WriteLineInteraction {
 struct WriteKeyInteraction {
     #[serde(rename = "write-key")]
     write_key: WriteKey,
+}
+
+/// Sends `signal` directly to the PTY child process (the runner under test),
+/// as `kill <pid>`, a supervisor, or a container runtime would. Unlike
+/// `write-key = "ctrl-c"`, which the terminal driver turns into a
+/// process-group-wide SIGINT, this targets only the runner, so task processes
+/// observe the signal only if the runner forwards it.
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct SignalInteraction {
+    signal: SignalName,
+}
+
+#[derive(serde::Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+enum SignalName {
+    Sigint,
+    Sigterm,
+    Sighup,
+}
+
+impl SignalName {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sigint => "sigint",
+            Self::Sigterm => "sigterm",
+            Self::Sighup => "sighup",
+        }
+    }
+
+    #[cfg(unix)]
+    const fn number(self) -> i32 {
+        match self {
+            Self::Sigint => libc::SIGINT,
+            Self::Sigterm => libc::SIGTERM,
+            Self::Sighup => libc::SIGHUP,
+        }
+    }
+}
+
+/// Delivers `signal` to `pid`, the PTY child spawned by the harness.
+#[cfg(unix)]
+fn send_signal(pid: u32, signal: SignalName) {
+    // SAFETY: `pid` identifies a live process spawned by the harness that has
+    // not been waited on yet, and `kill` only posts a signal to it.
+    let result = unsafe { libc::kill(pid.cast_signed(), signal.number()) };
+    assert_eq!(
+        result,
+        0,
+        "kill({pid}, {}) failed: {}",
+        signal.as_str(),
+        std::io::Error::last_os_error()
+    );
+}
+
+#[cfg(not(unix))]
+fn send_signal(_pid: u32, signal: SignalName) {
+    panic!("the 'signal: {}' interaction is only supported on Unix", signal.as_str());
 }
 
 #[derive(serde::Deserialize, Debug, Clone, Copy)]
@@ -593,6 +652,17 @@ fn run_case(
                             );
                             terminal.writer.write_all(write_key.write_key.bytes()).unwrap();
                             terminal.writer.flush().unwrap();
+                        }
+                        Interaction::Signal(signal) => {
+                            output_for_thread.lock().unwrap().push_str(
+                                vt_str::format!("**← signal:** `{}`\n\n", signal.signal.as_str())
+                                    .as_str(),
+                            );
+                            let pid = terminal
+                                .child_handle
+                                .pid()
+                                .expect("the child process reports no pid to signal");
+                            send_signal(pid, signal.signal);
                         }
                     }
                 }

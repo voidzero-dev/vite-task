@@ -1,0 +1,6 @@
+{
+  "name": "@signal-forwarding/a",
+  "scripts": {
+    "dev": "vtt exit-on-sigterm"
+  }
+}

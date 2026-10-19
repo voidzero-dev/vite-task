@@ -14,6 +14,8 @@ use tokio::process::{ChildStderr, ChildStdout};
 use tokio_util::sync::CancellationToken;
 use vt_plan::SpawnCommand;
 
+use crate::session::signals::register_child;
+
 /// How the child's stdin/stdout/stderr are configured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpawnStdio {
@@ -125,6 +127,10 @@ where
     }
 
     let mut tracked = fspy_cmd.spawn(cancellation_token).await?;
+    // Forward termination signals received by the runner to the task process
+    // (see `crate::session::signals`). The registration lives until the wait
+    // future completes.
+    let registration = register_child(tracked.pid);
 
     // On Windows, assign the child to a Job Object so that killing the child
     // also kills all descendant processes (e.g., node.exe via a .cmd shim).
@@ -139,6 +145,9 @@ where
     let wait_handle = tracked.wait_handle;
 
     let wait = async move {
+        // Keep the task process registered for signal forwarding until it has
+        // exited, so a termination signal received meanwhile reaches it.
+        let _registration = registration;
         let termination = wait_handle.await?;
         // Drop order: `job` drops here, KILL_ON_JOB_CLOSE kills any descendants
         // still alive. fspy's wait handle already watched the cancellation
@@ -160,6 +169,10 @@ fn spawn_tokio(
     cancellation_token: CancellationToken,
 ) -> anyhow::Result<ChildHandle> {
     let mut child = cmd.spawn()?;
+    // Forward termination signals received by the runner to the task process
+    // (see `crate::session::signals`). The registration lives until the wait
+    // future completes.
+    let registration = register_child(child.id());
 
     #[cfg(windows)]
     let job = {
@@ -175,6 +188,9 @@ fn spawn_tokio(
     let stderr = child.stderr.take();
 
     let wait = async move {
+        // Keep the task process registered for signal forwarding until it has
+        // exited, so a termination signal received meanwhile reaches it.
+        let _registration = registration;
         let exit_status = tokio::select! {
             status = child.wait() => status?,
             () = cancellation_token.cancelled() => {
