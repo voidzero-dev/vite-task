@@ -76,7 +76,7 @@ fn read_sync(runtime: &str) -> anyhow::Result<()> {
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn exist_sync(runtime: &str) -> anyhow::Result<()> {
     let accesses = track_script(runtime, "try { fs.existsSync('hello') } catch {}", &[])?;
-    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), PathAccess::Read);
+    assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), PathAccess::Probe);
     Ok(())
 }
 

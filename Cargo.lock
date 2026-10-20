@@ -5044,6 +5044,7 @@ dependencies = [
  "vt_str",
  "vt_workspace",
  "which",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

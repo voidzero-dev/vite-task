@@ -40,6 +40,9 @@ fn main() {
         "stat" => {
             let _ = std::fs::metadata(path);
         }
+        "access" => {
+            let _ = nix::unistd::access(path, nix::unistd::AccessFlags::F_OK);
+        }
         "execve" => {
             let _ = std::process::Command::new(path).spawn();
         }

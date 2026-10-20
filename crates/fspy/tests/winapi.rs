@@ -6,8 +6,11 @@ use std::{ffi::OsStr, os::windows::ffi::OsStrExt, path::Path, ptr::null_mut};
 use fspy::PathAccess;
 use test_log::test;
 use test_utils::assert_contains;
-use winapi::um::processthreadsapi::{
-    CreateProcessA, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOA, STARTUPINFOW,
+use winapi::um::{
+    fileapi::GetFileAttributesW,
+    processthreadsapi::{
+        CreateProcessA, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOA, STARTUPINFOW,
+    },
 };
 
 #[test(tokio::test)]
@@ -70,6 +73,19 @@ async fn create_process_w() -> anyhow::Result<()> {
     })
     .await?;
     assert_contains(&accesses, Path::new("C:\\fspy_test_not_exist_program.exe"), PathAccess::Read);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn get_file_attributes_w() -> anyhow::Result<()> {
+    let accesses = track_fn!((), |(): ()| {
+        let path = OsStr::new("C:\\fspy_test_not_exist_file\0").encode_wide().collect::<Vec<u16>>();
+        // SAFETY: `path` is a valid NUL-terminated wide string
+        unsafe { GetFileAttributesW(path.as_ptr()) };
+    })
+    .await?;
+    assert_contains(&accesses, Path::new("C:\\fspy_test_not_exist_file"), PathAccess::Probe);
 
     Ok(())
 }

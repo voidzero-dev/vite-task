@@ -37,6 +37,9 @@ pub enum TrackedEnvQuery {
 #[derive(Debug, Clone, Copy)]
 pub struct PathRead {
     pub read_dir_entries: bool,
+    /// The task only checked whether the path exists, so neither its content
+    /// nor its directory entries are inputs.
+    pub exists_only: bool,
 }
 
 /// Post-run fingerprint capturing file state after execution.
@@ -86,6 +89,9 @@ pub enum PathFingerprint {
     NotFound,
     /// File content hash using `xxHash3_64`
     FileContentHash(u64),
+    /// File that exists, for a path the task only checked the existence of.
+    /// An existing directory checked this way is `Folder(None)`.
+    FileExists,
     /// Directory with optional entry listing.
     /// `Folder(None)` means the directory was opened but entries were not read
     /// (e.g., for `openat` calls).
@@ -158,6 +164,7 @@ impl PostRunFingerprint {
                 let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
                 let path_read = PathRead {
                     read_dir_entries: matches!(path_fingerprint, PathFingerprint::Folder(Some(_))),
+                    exists_only: matches!(path_fingerprint, PathFingerprint::FileExists),
                 };
                 let current_path_fingerprint = match fingerprint_path(&input_full_path, path_read) {
                     Ok(ok) => ok,
@@ -374,6 +381,15 @@ pub fn fingerprint_path(
 ) -> anyhow::Result<PathFingerprint> {
     let std_path = path.as_path();
 
+    if path_read.exists_only {
+        // Like the open below, any error counts as the path not existing.
+        return Ok(match std::fs::metadata(std_path) {
+            Ok(metadata) if metadata.is_dir() => PathFingerprint::Folder(None),
+            Ok(_) => PathFingerprint::FileExists,
+            Err(_) => PathFingerprint::NotFound,
+        });
+    }
+
     let file = match File::open(std_path) {
         Ok(file) => file,
         Err(err) => {
@@ -500,7 +516,31 @@ fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<Pa
 mod tests {
     use std::ffi::{OsStr, OsString};
 
+    use vt_path::AbsolutePathBuf;
+
     use super::*;
+
+    #[test]
+    fn probed_path_fingerprints_only_existence() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = AbsolutePathBuf::new(dir.path().to_path_buf()).unwrap();
+        let probe = |name: &str| {
+            let path = Arc::<AbsolutePath>::from(dir.join(name));
+            fingerprint_path(&path, PathRead { read_dir_entries: false, exists_only: true })
+                .unwrap()
+        };
+
+        std::fs::write(dir.join("file"), "a").unwrap();
+        assert_eq!(probe("file"), PathFingerprint::FileExists);
+        std::fs::write(dir.join("file"), "b").unwrap();
+        assert_eq!(probe("file"), PathFingerprint::FileExists);
+
+        std::fs::create_dir(dir.join("dir")).unwrap();
+        std::fs::write(dir.join("dir/entry"), "").unwrap();
+        assert_eq!(probe("dir"), PathFingerprint::Folder(None));
+
+        assert_eq!(probe("missing"), PathFingerprint::NotFound);
+    }
 
     #[cfg(unix)]
     fn non_utf8_os_string() -> OsString {

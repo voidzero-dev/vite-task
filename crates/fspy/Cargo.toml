@@ -51,7 +51,7 @@ fspy_preload_unix = { workspace = true }
 fspy_detours_sys = { workspace = true }
 fspy_preload_windows = { workspace = true }
 ntapi = { workspace = true }
-winapi = { workspace = true, features = ["winbase", "securitybaseapi", "handleapi"] }
+winapi = { workspace = true, features = ["winbase", "securitybaseapi", "handleapi", "fileapi"] }
 winsafe = { workspace = true, features = ["kernel"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
