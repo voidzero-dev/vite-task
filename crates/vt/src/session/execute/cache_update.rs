@@ -205,6 +205,7 @@ pub(super) async fn update_cache(
 /// user-configured input negatives, and by tool-reported `ignoreInput` paths.
 /// `path_writes` is filtered by user-configured output negatives and
 /// tool-reported `ignoreOutput` paths before read-write overlap detection.
+/// `path_reads` also drops paths inside directories tagged with `CACHEDIR.TAG`.
 #[cfg_attr(
     not(fspy),
     expect(clippy::missing_const_for_fn, reason = "the body is a no-op without fspy")
@@ -223,6 +224,11 @@ fn observe_fspy(
 
         path_accesses.map(|raw| {
             let tracked = TrackedPathAccesses::from_raw(raw, workspace_root);
+            // Reads inside directories tagged with `CACHEDIR.TAG` aren't
+            // inputs, like `ignoreInput`. Writes there stay outputs, so a
+            // cache hit still restores them (e.g. Cargo tags `target/`).
+            let tagged_cache_dirs =
+                super::cachedir_tag::find_tagged_dirs(tracked.path_reads.keys(), workspace_root);
             let filtered_path_reads: HashMap<RelativePathBuf, PathRead> =
                 // fspy can be attached for auto-output-only tasks. In that
                 // mode reads must not become inferred inputs.
@@ -235,6 +241,7 @@ fn observe_fspy(
                         .filter(|(path, _)| {
                             !fspy.input_negative_globs.is_match(path.as_str())
                                 && !is_ignored(path, ignored_input_rels)
+                                && !is_ignored(path, &tagged_cache_dirs)
                         })
                         .map(|(path, read)| (path.clone(), *read))
                         .collect()

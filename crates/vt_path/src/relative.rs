@@ -98,6 +98,19 @@ impl RelativePath {
         // it remains valid UTF-8 and contains no backslash separators.
         Some(unsafe { Self::assume_portable(stripped_path.to_str().unwrap()) })
     }
+
+    /// Returns the path without its final component, or [`None`] if the path
+    /// is empty. The parent of a single-component path is the empty path.
+    #[must_use]
+    pub fn parent(&self) -> Option<&Self> {
+        if self.0.is_empty() {
+            return None;
+        }
+        let parent = self.0.rfind('/').map_or("", |index| &self.0[..index]);
+        // SAFETY: A prefix of a portable path that ends before a `/` separator
+        // is still portable.
+        Some(unsafe { Self::assume_portable(parent) })
+    }
 }
 
 /// A owned relative path buf with the same guarantees as `RelativePath`
@@ -447,6 +460,15 @@ mod tests {
         let rel_path = RelativePathBuf::new("").unwrap();
         let joined_path = rel_path.as_relative_path().join(RelativePathBuf::new("baz").unwrap());
         assert_eq!(joined_path.as_str(), "baz");
+    }
+
+    #[test]
+    fn parent() {
+        let rel_path = RelativePathBuf::new("foo/bar/baz").unwrap();
+        let parents: Vec<&str> = std::iter::successors(rel_path.parent(), |p| p.parent())
+            .map(RelativePath::as_str)
+            .collect();
+        assert_eq!(parents, ["foo/bar", "foo", ""]);
     }
 
     #[test]
