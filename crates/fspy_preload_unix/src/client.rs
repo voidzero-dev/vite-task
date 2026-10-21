@@ -1,7 +1,7 @@
 use std::sync::OnceLock;
 
 use convert::{ToAbsolutePath, ToAccessMode};
-pub use fspy_client_unix::{Client, convert, raw_exec};
+pub use fspy_client_unix::{Client, ExecInjectionError, convert, raw_exec};
 
 static CLIENT: OnceLock<Client<'static>> = OnceLock::new();
 
