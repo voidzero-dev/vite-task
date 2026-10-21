@@ -819,24 +819,23 @@ mod tests {
         assert_eq!(count_b, 0);
     }
 
-    /// `PRAGMA journal_mode` and `PRAGMA synchronous` (1 = NORMAL, 2 = FULL) of `conn`.
-    fn journal_and_sync(conn: &Connection) -> (Box<str>, u32) {
-        let mode = conn.query_one("PRAGMA journal_mode", (), |r| r.get(0)).unwrap();
-        let sync = conn.query_one("PRAGMA synchronous", (), |r| r.get(0)).unwrap();
-        (mode, sync)
-    }
-
     /// `synchronous` is `NORMAL` only when the database is in WAL mode (see `enable_wal` for why).
     #[test]
     fn sync_is_relaxed_only_in_wal_mode() {
         let (_tmp, dir) = temp_dir();
         let cache = ExecutionCache::load_from_path(&dir).unwrap();
-        assert_eq!(journal_and_sync(&cache.conn.try_lock().unwrap()), ("wal".into(), 1));
+        let conn = cache.conn.try_lock().unwrap();
+        let mode: Box<str> = conn.query_one("PRAGMA journal_mode", (), |r| r.get(0)).unwrap();
+        let sync: u32 = conn.query_one("PRAGMA synchronous", (), |r| r.get(0)).unwrap();
+        drop(conn);
+        assert_eq!((&*mode, sync), ("wal", 1)); // 1 = NORMAL
 
         // An in-memory database can't use WAL: `journal_mode=WAL` leaves it in `memory` mode,
         // and `synchronous` keeps the SQLite default, FULL.
-        let conn = Connection::open_in_memory().unwrap();
-        enable_wal(&conn).unwrap();
-        assert_eq!(journal_and_sync(&conn), ("memory".into(), 2));
+        let memory = Connection::open_in_memory().unwrap();
+        enable_wal(&memory).unwrap();
+        let mode: Box<str> = memory.query_one("PRAGMA journal_mode", (), |r| r.get(0)).unwrap();
+        let sync: u32 = memory.query_one("PRAGMA synchronous", (), |r| r.get(0)).unwrap();
+        assert_eq!((&*mode, sync), ("memory", 2)); // 2 = FULL
     }
 }
