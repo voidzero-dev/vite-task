@@ -285,12 +285,16 @@ pub fn cache_schema_dir_name() -> Str {
     vt_str::format!("v{CACHE_SCHEMA_VERSION}")
 }
 
-/// Switches `conn` to WAL mode and, only if that worked, sets `synchronous=NORMAL`.
+/// Switches `conn` to WAL mode and, if that worked, sets `synchronous=NORMAL`.
 ///
 /// With `NORMAL`, commits don't wait for a sync; SQLite syncs the WAL at checkpoints instead.
 /// In WAL mode, a power loss can roll back the latest commits (their entries become cache
-/// misses) but can't corrupt the database. If SQLite can't use WAL, it keeps the old journal
-/// mode without an error, and `NORMAL` with that journal can corrupt the database.
+/// misses) but can't corrupt the database.
+///
+/// `PRAGMA journal_mode=WAL` doesn't return an error when SQLite can't use WAL. It keeps the
+/// current mode, usually a rollback journal, and returns that mode's name. With a rollback
+/// journal, `NORMAL` has a small chance of corrupting the database after a power loss, so
+/// `synchronous` stays `FULL` unless the result is `wal`.
 fn enable_wal(conn: &Connection) -> rusqlite::Result<()> {
     let is_wal = conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| {
         Ok(row.get_ref(0)?.as_str()?.eq_ignore_ascii_case("wal"))
@@ -822,9 +826,7 @@ mod tests {
         (mode, sync)
     }
 
-    /// The cache database syncs the WAL only at checkpoints (`synchronous=NORMAL`). When SQLite
-    /// can't use WAL, `synchronous` must stay `FULL`: `NORMAL` with a rollback journal can
-    /// corrupt the database after a power loss.
+    /// `synchronous` is `NORMAL` only when the database is in WAL mode (see `enable_wal` for why).
     #[test]
     fn sync_is_relaxed_only_in_wal_mode() {
         let (_tmp, dir) = temp_dir();
