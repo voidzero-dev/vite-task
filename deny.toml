@@ -70,8 +70,6 @@ exceptions = [
   # Each entry is the crate and version constraint, and its specific allow
   # list
   # { allow = ["Zlib"], name = "adler32", version = "*" },
-  # Mozilla's root certificates, used by rustls-platform-verifier on wasm32 only.
-  { allow = ["CDLA-Permissive-2.0"], name = "webpki-root-certs" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
@@ -145,6 +143,13 @@ deny = [
   # Wrapper crates can optionally be specified to allow the crate when it
   # is a direct dependency of the otherwise banned crate
   # { name = "ansi_term", version = "=0.11.0", wrappers = [] },
+  #
+  # Compiled-in Mozilla root certificates. HTTPS verification uses the
+  # operating system's trust store. The vendored rustls-platform-verifier
+  # does not depend on these crates, so they stay out of Cargo.lock. This
+  # ban fails if any target starts depending on an embedded trust store.
+  { name = "webpki-roots" },
+  { name = "webpki-root-certs" },
 ]
 
 # List of features to allow/deny

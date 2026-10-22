@@ -232,3 +232,7 @@ panic = "abort" # Let it crash and force ourselves to write safe Rust.
 # would compile them with the build-override profile (opt-level 0) even in
 # release builds, in this workspace and in every downstream workspace. See
 # https://github.com/rust-lang/cargo/issues/16719.
+
+# Drops the wasm32 dependency on webpki-root-certs. See the vendored Cargo.toml.
+[patch.crates-io]
+rustls-platform-verifier = { path = "third_party/rustls-platform-verifier" }

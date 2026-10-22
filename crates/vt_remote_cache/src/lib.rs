@@ -155,9 +155,10 @@ impl Client {
         let fetch_url = route_url(&endpoint, "fetch")?;
         let store_url = route_url(&endpoint, "store")?;
         let blob_url = route_url(&endpoint, "blob")?;
-        // reqwest configures TLS with the process's default crypto provider.
-        // Installing fails if one is already installed; vite-plus installs
-        // ring too.
+        // reqwest configures TLS with the process's default crypto provider
+        // and verifies certificates with the operating system's trust store.
+        // Installing the provider fails if one is already installed; vite-plus
+        // installs ring too.
         let _ = rustls::crypto::ring::default_provider().install_default();
         // A redirect fails like any other status. Following one could turn a
         // store into a GET of a login page that responds with 200. HTTPS

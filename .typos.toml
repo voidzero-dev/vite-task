@@ -8,6 +8,7 @@ EXCED = "EXCED"
 [files]
 extend-exclude = [
   "crates/fspy_detours_sys/detours",
+  "third_party/rustls-platform-verifier",
   "crates/fspy_detours_sys/src/generated_bindings.rs",
   # Intentional typos for testing fuzzy matching and "did you mean" suggestions
   "crates/vt_select/src/fuzzy.rs",

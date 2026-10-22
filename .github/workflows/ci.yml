@@ -409,6 +409,12 @@ jobs:
       - run: pnpm exec vp fmt --check
       - run: cargo autoinherit && git diff --exit-code
       - run: cargo shear --deny-warnings
+      # Bans webpki-roots and webpki-root-certs for the platforms CI builds.
+      # The security workflow's cargo-deny uses that action's own config.
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        with:
+          tool: cargo-deny@0.20.2
+      - run: cargo deny check bans
       - run: cargo fmt --check
       # --exclude fspy_benchmark: documenting it would build its musl artifact
       # dependency, which needs a rust-std this job otherwise has no use for.
