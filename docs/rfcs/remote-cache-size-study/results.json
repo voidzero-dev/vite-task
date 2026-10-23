@@ -1,0 +1,355 @@
+{
+  "measurement_date": "2026-09-07",
+  "zstd_version": "1.5.7",
+  "method": "Sorted GNU tar regular files; outputs/ prefix; mode 0644; uid/gid/mtime 0; zstd -3 -T1 stream",
+  "samples": [
+    {
+      "id": "directus",
+      "source_sha256": "aeb56c7f70c6ba09782a5b649d0ab2cdf9cd746ab6dcaaa80bb3db9490f64f94",
+      "source_download_bytes": 7521159,
+      "prefix": "package/dist/",
+      "files": 401,
+      "output_bytes": 20806766,
+      "tar_zstd": {
+        "bytes": 6967198,
+        "sha256": "bf7b16909bfb430f6c31605e2026b5ae0b6f458040943fcdf9b3a60178cd51ae"
+      },
+      "without_maps": {
+        "files": 401,
+        "output_bytes": 20806766,
+        "tar_zstd": {
+          "bytes": 6967198,
+          "sha256": "bf7b16909bfb430f6c31605e2026b5ae0b6f458040943fcdf9b3a60178cd51ae"
+        }
+      },
+      "by_extension": {
+        ".css": {
+          "files": 5,
+          "bytes": 719721
+        },
+        ".html": {
+          "files": 1,
+          "bytes": 1694
+        },
+        ".ico": {
+          "files": 1,
+          "bytes": 1150
+        },
+        ".js": {
+          "files": 369,
+          "bytes": 17819785
+        },
+        ".png": {
+          "files": 1,
+          "bytes": 14915
+        },
+        ".svg": {
+          "files": 1,
+          "bytes": 155481
+        },
+        ".woff": {
+          "files": 11,
+          "bytes": 972248
+        },
+        ".woff2": {
+          "files": 12,
+          "bytes": 1121772
+        }
+      },
+      "largest_files": [
+        {
+          "path": "assets/index.C9zFwJTK.entry.js",
+          "bytes": 6724943
+        },
+        {
+          "path": "assets/shader-background-B-taT_fk.js",
+          "bytes": 1449199
+        },
+        {
+          "path": "assets/index-BMHQmbsG.css",
+          "bytes": 699610
+        },
+        {
+          "path": "assets/dist-chJWdeb_.js",
+          "bytes": 657240
+        },
+        {
+          "path": "assets/social-icon-Dxox5INO.js",
+          "bytes": 570996
+        }
+      ]
+    },
+    {
+      "id": "docmost",
+      "source_sha256": "4e7fffb4a1e8feb4e7213d2e8701c09df286de364177860e1c230e2374a25190",
+      "source_download_bytes": 5015721,
+      "prefix": "app/apps/client/dist/",
+      "files": 230,
+      "output_bytes": 14828770,
+      "tar_zstd": {
+        "bytes": 4769432,
+        "sha256": "cad27b93f705537b0abf7cfe7cc47dbb416c6e2120bd91dfce7316cc54a00157"
+      },
+      "without_maps": {
+        "files": 230,
+        "output_bytes": 14828770,
+        "tar_zstd": {
+          "bytes": 4769432,
+          "sha256": "cad27b93f705537b0abf7cfe7cc47dbb416c6e2120bd91dfce7316cc54a00157"
+        }
+      },
+      "by_extension": {
+        ".css": {
+          "files": 3,
+          "bytes": 660300
+        },
+        ".html": {
+          "files": 1,
+          "bytes": 1504
+        },
+        ".js": {
+          "files": 145,
+          "bytes": 11997158
+        },
+        ".json": {
+          "files": 13,
+          "bytes": 994411
+        },
+        ".png": {
+          "files": 4,
+          "bytes": 19808
+        },
+        ".svg": {
+          "files": 1,
+          "bytes": 1497
+        },
+        ".ttf": {
+          "files": 20,
+          "bytes": 513664
+        },
+        ".woff": {
+          "files": 20,
+          "bytes": 303116
+        },
+        ".woff2": {
+          "files": 23,
+          "bytes": 337312
+        }
+      },
+      "largest_files": [
+        {
+          "path": "assets/index-BgC9hh6t.js",
+          "bytes": 3469981
+        },
+        {
+          "path": "assets/chunk-Z5NKEFVG-B3tsbN9K.js",
+          "bytes": 1821041
+        },
+        {
+          "path": "assets/excalidraw-utils-DacaKd1Y.js",
+          "bytes": 1350729
+        },
+        {
+          "path": "assets/chunk-NNHCCRGN-DlpIbxXb.js",
+          "bytes": 593667
+        },
+        {
+          "path": "assets/chunk-LZXEDZCA-4GiMzlKw.js",
+          "bytes": 536756
+        }
+      ]
+    },
+    {
+      "id": "hoppscotch",
+      "source_sha256": "9823634d487dac47140c008685e31f548e33644ba890c8bba66ba8b776aea98e",
+      "source_download_bytes": 33455805,
+      "prefix": "site/selfhost-web/",
+      "files": 471,
+      "output_bytes": 127526484,
+      "tar_zstd": {
+        "bytes": 32182975,
+        "sha256": "958a98d1aba6d70f315d593c6549898c803670d995513fb242d3958405bad2e0"
+      },
+      "without_maps": {
+        "files": 279,
+        "output_bytes": 37709018,
+        "tar_zstd": {
+          "bytes": 12175754,
+          "sha256": "ed31d530071727007670fbd42e1009091cea063f0df6dc44ad0b82e7a8740c0c"
+        }
+      },
+      "by_extension": {
+        "(none)": {
+          "files": 1,
+          "bytes": 13
+        },
+        ".css": {
+          "files": 13,
+          "bytes": 305947
+        },
+        ".html": {
+          "files": 1,
+          "bytes": 5219
+        },
+        ".ico": {
+          "files": 1,
+          "bytes": 15086
+        },
+        ".js": {
+          "files": 192,
+          "bytes": 33464992
+        },
+        ".map": {
+          "files": 192,
+          "bytes": 89817466
+        },
+        ".png": {
+          "files": 12,
+          "bytes": 2105842
+        },
+        ".svg": {
+          "files": 41,
+          "bytes": 372789
+        },
+        ".ttf": {
+          "files": 1,
+          "bytes": 121972
+        },
+        ".txt": {
+          "files": 1,
+          "bytes": 66
+        },
+        ".webmanifest": {
+          "files": 1,
+          "bytes": 845
+        },
+        ".woff2": {
+          "files": 14,
+          "bytes": 1313348
+        },
+        ".xml": {
+          "files": 1,
+          "bytes": 2899
+        }
+      },
+      "largest_files": [
+        {
+          "path": "assets/index-DSckl1TP.js.map",
+          "bytes": 37094987
+        },
+        {
+          "path": "assets/ts.worker-BAgXcSxE.js.map",
+          "bytes": 18859801
+        },
+        {
+          "path": "assets/index-DSckl1TP.js",
+          "bytes": 12071781
+        },
+        {
+          "path": "assets/har-DRQ_daXH.js.map",
+          "bytes": 8016993
+        },
+        {
+          "path": "assets/ts.worker-BAgXcSxE.js",
+          "bytes": 7091224
+        }
+      ]
+    },
+    {
+      "id": "n8n",
+      "source_sha256": "14636be99659fca25eaa19ed20ec52c5286745eb3e1cef80b699adb23144eb1f",
+      "source_download_bytes": 37936612,
+      "prefix": "package/dist/",
+      "files": 1477,
+      "output_bytes": 162756849,
+      "tar_zstd": {
+        "bytes": 34705298,
+        "sha256": "7c916ddcdbb090123824840e55669de6500e294d9d419a6cb91cba5c7dc77cac"
+      },
+      "without_maps": {
+        "files": 875,
+        "output_bytes": 44092939,
+        "tar_zstd": {
+          "bytes": 13146351,
+          "sha256": "4c1473f0d932be64dd7ee412b7ef1aa9ec0921a02010dc82a61bda7e9ebef21f"
+        }
+      },
+      "by_extension": {
+        ".css": {
+          "files": 149,
+          "bytes": 1098799
+        },
+        ".gif": {
+          "files": 1,
+          "bytes": 158971
+        },
+        ".html": {
+          "files": 1,
+          "bytes": 18822
+        },
+        ".ico": {
+          "files": 1,
+          "bytes": 15086
+        },
+        ".js": {
+          "files": 626,
+          "bytes": 35334179
+        },
+        ".map": {
+          "files": 602,
+          "bytes": 118663910
+        },
+        ".png": {
+          "files": 24,
+          "bytes": 820355
+        },
+        ".svg": {
+          "files": 3,
+          "bytes": 367325
+        },
+        ".ttf": {
+          "files": 21,
+          "bytes": 569620
+        },
+        ".wasm": {
+          "files": 5,
+          "bytes": 3980250
+        },
+        ".webp": {
+          "files": 1,
+          "bytes": 315064
+        },
+        ".woff": {
+          "files": 21,
+          "bytes": 331316
+        },
+        ".woff2": {
+          "files": 22,
+          "bytes": 1083152
+        }
+      },
+      "largest_files": [
+        {
+          "path": "assets/typescript.worker-C3GNzKj8.js.map",
+          "bytes": 18592487
+        },
+        {
+          "path": "assets/constants-j6z_fOkc.js.map",
+          "bytes": 5567385
+        },
+        {
+          "path": "assets/worker-FLvH_Wit.js.map",
+          "bytes": 5457892
+        },
+        {
+          "path": "assets/constants-legacy-i87_3HzL.js.map",
+          "bytes": 5432841
+        },
+        {
+          "path": "assets/typescript.worker-C3GNzKj8.js",
+          "bytes": 5049634
+        }
+      ]
+    }
+  ]
+}
