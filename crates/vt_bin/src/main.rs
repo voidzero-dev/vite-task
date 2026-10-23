@@ -3,9 +3,12 @@ use vt::{Command, ExitStatus, Session};
 use vt_bin::OwnedSessionConfig;
 
 fn main() -> ! {
-    let status: ExitStatus =
-        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(run());
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    let status: ExitStatus = runtime.block_on(run());
 
+    // Exit without dropping the runtime: dropping it waits for its blocking
+    // threads, and one can be stuck reading an IPC connection that a process
+    // a task left running still holds open.
     std::process::exit(i32::from(status.0));
 }
 

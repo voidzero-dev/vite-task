@@ -5035,6 +5035,7 @@ dependencies = [
  "toml",
  "vec1",
  "vt",
+ "vt_client",
  "vt_path",
  "vt_preload_test_lib",
  "vt_pty_terminal",

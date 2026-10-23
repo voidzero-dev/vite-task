@@ -1,0 +1,47 @@
+[[e2e]]
+name = "leftover_process_holding_stdout"
+comment = """
+The task exits but leaves a process that holds its stdout and stderr for 30 s. The runner reads them for a grace period after the task exits and then stops waiting, so the run ends long before the step timeout. The run isn't cached, since the captured output may be incomplete. On Windows the task's job object ends such processes when the task exits.
+"""
+cfg = 'not(windows)'
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "leave-stdout",
+  ], comment = "ends after the grace period, not after 30 s" },
+  [
+    "vt",
+    "run",
+    "--last-details",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "leave-stdout",
+  ], comment = "runs again: the first run wasn't cached" },
+]
+
+[[e2e]]
+name = "leftover_process_holding_runner_connection"
+comment = """
+The task exits but leaves a process connected to the runner's IPC server for 30 s. The runner lets the connection drain for a grace period after the task exits and then stops waiting, so the run ends long before the step timeout. The run isn't cached, since that process could still report inputs or disable caching. On Windows the task's job object ends such processes when the task exits.
+"""
+cfg = 'not(windows)'
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "leave-connection",
+  ], comment = "ends after the grace period, not after 30 s" },
+  [
+    "vt",
+    "run",
+    "--last-details",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "leave-connection",
+  ], comment = "runs again: the first run wasn't cached" },
+]

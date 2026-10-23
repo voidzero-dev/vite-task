@@ -134,6 +134,11 @@ pub enum SpawnOutcome {
         /// Set when a runner-aware tool called `disableCache()`, skipping
         /// cache update.
         tool_disabled_cache: bool,
+        /// `true` when the task exited but a process it started still held
+        /// its stdout, stderr or runner connection, so the runner stopped
+        /// waiting for it and didn't update the cache.
+        #[serde(default)]
+        process_left_running: bool,
         /// Why uploading the entry to the remote cache failed, if it did.
         /// The local cache was still updated.
         upload_error: Option<SavedError>,
@@ -359,6 +364,10 @@ impl TaskResult {
             cache_update_status,
             CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete)
         );
+        let process_left_running = matches!(
+            cache_update_status,
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ProcessLeftRunning)
+        );
 
         match cache_status {
             // The only error a cache hit can have is a failed restore.
@@ -380,6 +389,7 @@ impl TaskResult {
                     ipc_server_error,
                     tool_disabled_cache,
                     tracking_incomplete,
+                    process_left_running,
                 ),
             },
             CacheStatus::Miss(cache_miss) => Self::Spawned {
@@ -394,6 +404,7 @@ impl TaskResult {
                     ipc_server_error,
                     tool_disabled_cache,
                     tracking_incomplete,
+                    process_left_running,
                 ),
             },
         }
@@ -412,6 +423,11 @@ impl TaskResult {
 
 /// Build a [`SpawnOutcome`] from process exit status and optional pre-converted error.
 /// A failed upload is set later, with [`TaskResult::set_upload_error`].
+#[expect(
+    clippy::too_many_arguments,
+    clippy::fn_params_excessive_bools,
+    reason = "one parameter per reason the cache wasn't updated, copied into `SpawnOutcome::Success`"
+)]
 fn spawn_outcome_from_execution(
     exit_status: Option<std::process::ExitStatus>,
     saved_error: Option<&SavedError>,
@@ -420,6 +436,7 @@ fn spawn_outcome_from_execution(
     ipc_server_error: Option<SavedError>,
     tool_disabled_cache: bool,
     tracking_incomplete: bool,
+    process_left_running: bool,
 ) -> SpawnOutcome {
     match (exit_status, saved_error) {
         // Spawn error — process never ran
@@ -432,6 +449,7 @@ fn spawn_outcome_from_execution(
             ipc_server_error,
             tool_disabled_cache,
             tracking_incomplete,
+            process_left_running,
             upload_error: None,
         },
         // Process exited with non-zero code
@@ -454,6 +472,7 @@ fn spawn_outcome_from_execution(
             ipc_server_error: None,
             tool_disabled_cache: false,
             tracking_incomplete: false,
+            process_left_running: false,
             upload_error: None,
         },
     }
@@ -595,6 +614,19 @@ impl TaskResult {
             return (
                 Str::from(
                     "→ Not cached: this task used more files than automatic tracking can record. Configure `input` and `output` manually to enable caching.",
+                ),
+                &[],
+            );
+        }
+        // The runner stopped waiting for a process the task left running.
+        if let Self::Spawned {
+            outcome: SpawnOutcome::Success { process_left_running: true, .. },
+            ..
+        } = self
+        {
+            return (
+                Str::from(
+                    "→ Not cached: the task exited, but a process it started kept its output or runner connection open",
                 ),
                 &[],
             );
@@ -1210,6 +1242,7 @@ mod tests {
                     ipc_server_error: None,
                     tracking_incomplete: false,
                     tool_disabled_cache: false,
+                    process_left_running: false,
                     upload_error: Some(error),
                 },
             },
@@ -1245,6 +1278,7 @@ mod tests {
                     ipc_server_error: None,
                     tracking_incomplete: false,
                     tool_disabled_cache: false,
+                    process_left_running: false,
                     upload_error: None,
                 },
             },

@@ -40,6 +40,7 @@ tokio = { workspace = true, features = [
   "macros",
   "process",
   "sync",
+  "time",
 ] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }

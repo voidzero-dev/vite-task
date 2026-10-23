@@ -125,6 +125,11 @@ pub enum CacheNotUpdatedReason {
     /// inputs and outputs that are not all of them.
     #[cfg_attr(not(fspy), expect(dead_code, reason = "only fspy tracking can be incomplete"))]
     TrackingIncomplete,
+    /// The task exited, but a process it started still held its stdout,
+    /// stderr or runner connection open after the grace period, so the
+    /// runner stopped waiting for it. Its output or its reports to the
+    /// runner may be incomplete.
+    ProcessLeftRunning,
 }
 
 #[derive(Debug)]
