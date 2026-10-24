@@ -1,8 +1,11 @@
 pub mod user;
 
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, LazyLock, Mutex, PoisonError},
+};
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 pub use user::{
     AutoTracking, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
@@ -291,13 +294,9 @@ fn resolve_glob_to_workspace_relative(
         pattern
     };
 
-    let glob = wax::Glob::new(pattern).map_err(|source| ResolveTaskConfigError::InvalidGlob {
-        pattern: Str::from(pattern),
-        source: Box::new(source),
-    })?;
-    let (invariant_prefix, variant) = glob.partition();
+    let partitioned = partition_glob(pattern)?;
 
-    let joined = package_dir.join(&invariant_prefix).clean();
+    let joined = package_dir.join(partitioned.invariant_prefix.as_str()).clean();
     let stripped = joined.strip_prefix(workspace_root).map_err(|_| {
         ResolveTaskConfigError::GlobOutsideWorkspace { pattern: Str::from(pattern) }
     })?;
@@ -309,16 +308,53 @@ fn resolve_glob_to_workspace_relative(
 
     let escaped_prefix = wax::escape(stripped.as_str());
 
-    let result = match variant {
-        Some(variant_glob) if escaped_prefix.is_empty() => {
-            Str::from(variant_glob.to_string().as_str())
-        }
+    let result = match &partitioned.variant {
+        Some(variant_glob) if escaped_prefix.is_empty() => variant_glob.clone(),
         Some(variant_glob) => vt_str::format!("{escaped_prefix}/{variant_glob}"),
         None if escaped_prefix.is_empty() => Str::from("**"),
         None => Str::from(escaped_prefix.as_ref()),
     };
 
     Ok(result)
+}
+
+/// A glob pattern split into its literal prefix and the glob that follows it.
+struct PartitionedGlob {
+    invariant_prefix: Str,
+    variant: Option<Str>,
+}
+
+/// Parse and partition `pattern`, at most once per distinct pattern in the process.
+///
+/// `wax` compiles a regular expression both when it parses a glob and when it partitions one,
+/// and only the partition's text is kept here. The result depends on the pattern alone, while
+/// workspaces repeat the same patterns across packages and tasks, so loading a task graph would
+/// otherwise compile the same expressions thousands of times.
+fn partition_glob(pattern: &str) -> Result<Arc<PartitionedGlob>, ResolveTaskConfigError> {
+    static PARTITIONED: LazyLock<Mutex<FxHashMap<Str, Arc<PartitionedGlob>>>> =
+        LazyLock::new(Mutex::default);
+
+    if let Some(partitioned) =
+        PARTITIONED.lock().unwrap_or_else(PoisonError::into_inner).get(pattern)
+    {
+        return Ok(Arc::clone(partitioned));
+    }
+
+    let invalid = |source| ResolveTaskConfigError::InvalidGlob {
+        pattern: Str::from(pattern),
+        source: Box::new(source),
+    };
+    let (invariant_prefix, variant) = wax::Glob::new(pattern).map_err(invalid)?.partition();
+    let partitioned = Arc::new(PartitionedGlob {
+        // The prefix is made of the pattern's own literal components, so this is lossless.
+        invariant_prefix: Str::from(invariant_prefix.to_string_lossy().as_ref()),
+        variant: variant.map(|glob| Str::from(glob.to_string().as_str())),
+    });
+    PARTITIONED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(Str::from(pattern), Arc::clone(&partitioned));
+    Ok(partitioned)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -622,6 +658,27 @@ mod tests {
             "expected 'packages/shared/src/**', got {:?}",
             config.positive_globs
         );
+    }
+
+    #[test]
+    fn test_resolved_input_config_same_pattern_in_two_packages() {
+        // A pattern is parsed once per process; each package still resolves it against its own
+        // directory, and the workspace check still applies to each use.
+        let (pkg, ws) = test_paths();
+        let other = pkg.parent().unwrap().join("other-pkg");
+        let user_inputs = vec![UserInputEntry::Glob("src/**".into())];
+        let own = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let from_other =
+            ResolvedGlobConfig::from_user_config(Some(&user_inputs), &other, &ws).unwrap();
+        assert!(own.positive_globs.contains("packages/my-pkg/src/**"), "{:?}", own.positive_globs);
+        assert!(
+            from_other.positive_globs.contains("packages/other-pkg/src/**"),
+            "{:?}",
+            from_other.positive_globs
+        );
+        let user_inputs = vec![UserInputEntry::Glob("../../../outside/**".into())];
+        assert!(ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).is_err());
+        assert!(ResolvedGlobConfig::from_user_config(Some(&user_inputs), &other, &ws).is_err());
     }
 
     #[test]
