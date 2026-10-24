@@ -1,0 +1,13 @@
+{
+  "tasks": {
+    "lint": {
+      "command": "echo lint",
+      "cache": false
+    },
+    "build": {
+      "command": "echo build",
+      "dependsOn": ["lint"],
+      "cache": false
+    }
+  }
+}

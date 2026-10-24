@@ -18,7 +18,7 @@ The flag goes before the task name. Anything after the task name is passed to th
 
 ### Examples
 
-In `interleaved` mode, task names are omitted from the command line to keep output clean. In `labeled` and `grouped` modes, the `[pkg#task]` prefix is necessary to identify which task produced each line.
+In `interleaved` mode, task names are omitted from the command line to keep output clean. In `labeled` and `grouped` modes, the `[pkg#task]` prefix is necessary to identify which task produced each line. In a workspace with a single package, the prefix is just `[task]`, since every task belongs to that package.
 
 #### `interleaved`
 

@@ -257,11 +257,16 @@ fn format_cwd_relative(display: &ExecutionItemDisplay, workspace_path: &Absolute
 }
 
 /// Format the task label for labeled/grouped modes (e.g., `[pkg#task]`).
-fn format_task_label(display: &ExecutionItemDisplay) -> Str {
-    vt_str::format!(
-        "{}",
-        vt_str::format!("[{}]", display.task_display).style(Style::new().bright_black())
-    )
+///
+/// With `include_package_name` set to `false`, the label is just `[task]`.
+/// Used for single-package workspaces, where every task is in the same package.
+fn format_task_label(display: &ExecutionItemDisplay, include_package_name: bool) -> Str {
+    let label = if include_package_name {
+        vt_str::format!("[{}]", display.task_display)
+    } else {
+        vt_str::format!("[{}]", display.task_display.task_name)
+    };
+    vt_str::format!("{}", label.style(Style::new().bright_black()))
 }
 
 /// Format the command string with cwd prefix for display (e.g., `~/packages/lib$ vitest run`).

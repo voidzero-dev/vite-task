@@ -4,6 +4,7 @@ use std::{cell::RefCell, io::Write, process::ExitStatus as StdExitStatus, rc::Rc
 
 use vt_path::AbsolutePath;
 use vt_plan::{ExecutionItemDisplay, LeafExecutionKind};
+use vt_str::Str;
 
 use super::{
     ColorSupport, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
@@ -21,6 +22,7 @@ pub struct LabeledReporterBuilder {
     workspace_path: Arc<AbsolutePath>,
     writer: Box<dyn Write>,
     color_support: ColorSupport,
+    include_package_name: bool,
 }
 
 impl LabeledReporterBuilder {
@@ -31,8 +33,9 @@ impl LabeledReporterBuilder {
         workspace_path: Arc<AbsolutePath>,
         writer: Box<dyn Write>,
         color_support: ColorSupport,
+        include_package_name: bool,
     ) -> Self {
-        Self { workspace_path, writer, color_support }
+        Self { workspace_path, writer, color_support, include_package_name }
     }
 }
 
@@ -42,6 +45,7 @@ impl GraphExecutionReporterBuilder for LabeledReporterBuilder {
             writer: Rc::new(RefCell::new(self.writer)),
             workspace_path: self.workspace_path,
             color_support: self.color_support,
+            include_package_name: self.include_package_name,
         })
     }
 }
@@ -50,6 +54,7 @@ struct LabeledGraphReporter {
     writer: Rc<RefCell<Box<dyn Write>>>,
     workspace_path: Arc<AbsolutePath>,
     color_support: ColorSupport,
+    include_package_name: bool,
 }
 
 impl GraphExecutionReporter for LabeledGraphReporter {
@@ -62,6 +67,7 @@ impl GraphExecutionReporter for LabeledGraphReporter {
             writer: Rc::clone(&self.writer),
             display: display.clone(),
             workspace_path: Arc::clone(&self.workspace_path),
+            label: format_task_label(display, self.include_package_name),
             started: false,
             color_support: self.color_support,
         })
@@ -78,13 +84,14 @@ struct LabeledLeafReporter {
     writer: Rc<RefCell<Box<dyn Write>>>,
     display: ExecutionItemDisplay,
     workspace_path: Arc<AbsolutePath>,
+    label: Str,
     started: bool,
     color_support: ColorSupport,
 }
 
 impl LeafExecutionReporter for LabeledLeafReporter {
     fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
-        let label = format_task_label(&self.display);
+        let label = &self.label;
         let line =
             format_command_with_cache_status(&self.display, &self.workspace_path, &cache_status);
 
@@ -157,6 +164,7 @@ mod tests {
             test_path(),
             Box::new(std::io::sink()),
             ColorSupport::uniform(false),
+            true,
         ));
         let mut reporter = builder.build();
         let mut leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind(item));

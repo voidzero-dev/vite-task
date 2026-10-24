@@ -22,6 +22,7 @@ pub struct GroupedReporterBuilder {
     workspace_path: Arc<AbsolutePath>,
     writer: Box<dyn Write>,
     color_support: ColorSupport,
+    include_package_name: bool,
 }
 
 impl GroupedReporterBuilder {
@@ -34,8 +35,9 @@ impl GroupedReporterBuilder {
         workspace_path: Arc<AbsolutePath>,
         writer: Box<dyn Write>,
         color_support: ColorSupport,
+        include_package_name: bool,
     ) -> Self {
-        Self { workspace_path, writer, color_support }
+        Self { workspace_path, writer, color_support, include_package_name }
     }
 }
 
@@ -45,6 +47,7 @@ impl GraphExecutionReporterBuilder for GroupedReporterBuilder {
             writer: Rc::new(RefCell::new(self.writer)),
             workspace_path: self.workspace_path,
             color_support: self.color_support,
+            include_package_name: self.include_package_name,
         })
     }
 }
@@ -53,6 +56,7 @@ struct GroupedGraphReporter {
     writer: Rc<RefCell<Box<dyn Write>>>,
     workspace_path: Arc<AbsolutePath>,
     color_support: ColorSupport,
+    include_package_name: bool,
 }
 
 impl GraphExecutionReporter for GroupedGraphReporter {
@@ -61,7 +65,7 @@ impl GraphExecutionReporter for GroupedGraphReporter {
         display: &ExecutionItemDisplay,
         _leaf_kind: &LeafExecutionKind,
     ) -> Box<dyn LeafExecutionReporter> {
-        let label = format_task_label(display);
+        let label = format_task_label(display, self.include_package_name);
         Box::new(GroupedLeafReporter {
             writer: Rc::clone(&self.writer),
             display: display.clone(),
@@ -177,6 +181,7 @@ mod tests {
             test_path(),
             Box::new(std::io::sink()),
             ColorSupport::uniform(false),
+            true,
         ));
         let mut reporter = builder.build();
         let mut leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind(item));

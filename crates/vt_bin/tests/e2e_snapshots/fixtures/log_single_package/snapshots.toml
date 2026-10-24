@@ -1,0 +1,13 @@
+[[e2e]]
+name = "labeled"
+comment = """
+In a single-package workspace, `--log=labeled` prefixes lines with `[task]` instead of `[pkg#task]`.
+"""
+steps = [["vt", "run", "--log=labeled", "build"]]
+
+[[e2e]]
+name = "grouped"
+comment = """
+In a single-package workspace, `--log=grouped` labels each block with `[task]` instead of `[pkg#task]`.
+"""
+steps = [["vt", "run", "--log=grouped", "build"]]

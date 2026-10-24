@@ -337,7 +337,6 @@ impl<'a> Session<'a> {
                 };
 
                 let workspace_path = self.workspace_path();
-                let writer: Box<dyn std::io::Write> = Box::new(std::io::stdout());
 
                 // Detect color support once at the point where reporters are
                 // constructed. The reporters and their pipe writers then strip
@@ -349,26 +348,7 @@ impl<'a> Session<'a> {
                     stderr: stderr_supports_color(),
                 };
 
-                let inner: Box<dyn reporter::GraphExecutionReporterBuilder> = match run_command
-                    .flags
-                    .log
-                {
-                    crate::cli::LogMode::Interleaved => Box::new(InterleavedReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                    )),
-                    crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                    )),
-                    crate::cli::LogMode::Grouped => Box::new(GroupedReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                    )),
-                };
+                let inner = self.make_mode_reporter(run_command.flags.log, color_support);
 
                 let builder = Box::new(SummaryReporterBuilder::new(
                     inner,
@@ -666,6 +646,39 @@ impl<'a> Session<'a> {
                 Err(SessionError::EarlyExit(ExitStatus::FAILURE))
             }
             Err(ReadSummaryError::Io(err)) => Err(err.into()),
+        }
+    }
+
+    /// Create the reporter for the `--log` mode, writing to stdout.
+    fn make_mode_reporter(
+        &self,
+        log_mode: crate::cli::LogMode,
+        color_support: ColorSupport,
+    ) -> Box<dyn reporter::GraphExecutionReporterBuilder> {
+        let workspace_path = self.workspace_path();
+        let writer: Box<dyn std::io::Write> = Box::new(std::io::stdout());
+        // In a single-package workspace every task belongs to the same package,
+        // so `labeled` and `grouped` label tasks as `[task]` instead of `[pkg#task]`.
+        let include_package_name = !matches!(
+            &self.lazy_task_graph,
+            LazyTaskGraph::Initialized(graph) if graph.is_single_package()
+        );
+        match log_mode {
+            crate::cli::LogMode::Interleaved => {
+                Box::new(InterleavedReporterBuilder::new(workspace_path, writer, color_support))
+            }
+            crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
+                workspace_path,
+                writer,
+                color_support,
+                include_package_name,
+            )),
+            crate::cli::LogMode::Grouped => Box::new(GroupedReporterBuilder::new(
+                workspace_path,
+                writer,
+                color_support,
+                include_package_name,
+            )),
         }
     }
 

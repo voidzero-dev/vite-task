@@ -572,6 +572,12 @@ impl IndexedTaskGraph {
         &self.task_graph
     }
 
+    /// Whether the workspace has only one package, i.e. it is not a monorepo.
+    #[must_use]
+    pub fn is_single_package(&self) -> bool {
+        self.indexed_package_graph.package_graph().node_count() == 1
+    }
+
     #[must_use]
     pub fn get_package_name(&self, package_index: PackageNodeIndex) -> &str {
         self.indexed_package_graph.package_graph()[package_index].package_json.name.as_str()
