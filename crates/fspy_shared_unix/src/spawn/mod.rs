@@ -32,8 +32,11 @@ use crate::{
 /// <https://github.com/rust-lang/rust/blob/73dc9167f1cd099e525c9ade2e068d1907b78564/library/std/src/sys/path/unix.rs#L19-L58>,
 /// with the empty-path check from its public wrapper:
 /// <https://github.com/rust-lang/rust/blob/73dc9167f1cd099e525c9ade2e068d1907b78564/library/std/src/path.rs#L4144-L4151>.
-/// Unlike `env::current_dir`, which grows its buffer, the current directory
-/// must fit in `PATH_MAX`.
+/// Unlike `env::current_dir`, the current directory must fit in `PATH_MAX`:
+/// without libc's heap, the only ways to read it are the kernel's — the
+/// `getcwd` syscall on Linux, `fcntl(F_GETPATH)` on macOS — and both stop
+/// there. libc's `getcwd` gets further by walking up through `..`, which
+/// allocates.
 ///
 /// # Errors
 ///
@@ -84,11 +87,13 @@ pub fn handle_exec<A: Allocator + Clone>(
     mut on_path_read: impl FnMut(&Path),
 ) -> nix::Result<Option<PreExec>> {
     let allocator = command.allocator().clone();
+    // A relative path that can't be made absolute, such as when the current
+    // directory is longer than `PATH_MAX`, goes unreported rather than
+    // aborting the program.
     let mut on_path_read = |path: &Path| {
         if path.is_absolute() {
             on_path_read(path);
-        } else {
-            let path = absolute(path, &allocator).expect("Failed to get cwd");
+        } else if let Ok(path) = absolute(path, &allocator) {
             on_path_read(Path::new(OsStr::from_bytes(&path)));
         }
     };

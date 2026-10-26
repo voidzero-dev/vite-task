@@ -19,9 +19,12 @@ pub fn global_client() -> Option<&'static Client<'static>> {
 pub unsafe fn handle_open(path: impl ToAbsolutePath, mode: impl ToAccessMode) {
     if let Some(client) = global_client() {
         let allocator = fspy_nostd_alloc::pooled_bump();
+        // A path that can't be resolved, such as one relative to a current
+        // directory longer than `PATH_MAX`, goes unreported rather than
+        // aborting the program.
         // SAFETY: path and mode contain valid pointers/values forwarded
         // from the interposed function's caller.
-        unsafe { client.try_handle_open(path, mode, allocator) }.unwrap();
+        let _handle_result = unsafe { client.try_handle_open(path, mode, allocator) };
     }
 }
 
