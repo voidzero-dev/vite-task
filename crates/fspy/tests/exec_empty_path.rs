@@ -51,14 +51,39 @@ fn exec_empty_path() -> Vec<c_int> {
             #[cfg(target_os = "linux")]
             errno(libc::execvpe(c"".as_ptr(), argv.as_ptr(), envp.as_ptr())),
             #[cfg(all(target_os = "linux", target_env = "gnu"))]
-            errno(libc::execveat(
-                libc::AT_FDCWD,
-                c"".as_ptr(),
-                argv.as_ptr().cast(),
-                envp.as_ptr().cast(),
-                0,
-            )),
+            errno(execveat(libc::AT_FDCWD, c"".as_ptr(), argv.as_ptr(), envp.as_ptr(), 0)),
         ]
+    }
+}
+
+/// Calls `execveat`, looked up at run time: CI links against glibc 2.17,
+/// and `execveat` arrived in glibc 2.34. The lookup finds the same function
+/// a direct call would, fspy's interposer when traced.
+///
+/// # Safety
+///
+/// The arguments must be valid for `execveat`.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+unsafe fn execveat(
+    dirfd: c_int,
+    path: *const c_char,
+    argv: *const *const c_char,
+    envp: *const *const c_char,
+    flags: c_int,
+) -> c_int {
+    type Execveat = unsafe extern "C" fn(
+        c_int,
+        *const c_char,
+        *const *const c_char,
+        *const *const c_char,
+        c_int,
+    ) -> c_int;
+    // SAFETY: the name is a valid C string.
+    let execveat = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"execveat".as_ptr()) };
+    assert!(!execveat.is_null(), "libc has no execveat");
+    // SAFETY: `execveat` has this signature, and the caller passes valid arguments.
+    unsafe {
+        std::mem::transmute::<*mut libc::c_void, Execveat>(execveat)(dirfd, path, argv, envp, flags)
     }
 }
 
