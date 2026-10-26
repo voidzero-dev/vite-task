@@ -1,9 +1,8 @@
-mod with_argv;
+use std::{ffi::VaList, ptr::null};
 
-use allocator_api2::alloc::Allocator;
+use allocator_api2::{alloc::Allocator, vec::Vec};
 use fspy_shared_unix::exec::ExecResolveConfig;
 use libc::{c_char, c_int};
-use with_argv::with_argv;
 
 use crate::{
     client::{global_client, raw_exec::RawExec},
@@ -23,6 +22,32 @@ pub unsafe fn environ() -> *const *const c_char {
     }
     // SAFETY: environ is a valid global pointer to the process environment, as defined by POSIX
     unsafe { environ }
+}
+
+/// Collects `arg` and the variadic arguments after it into the
+/// NULL-terminated argv array that `execl`, `execlp` and `execle` take as a
+/// list. The array lives in `allocator`, not libc's heap: exec may run in
+/// the child of `fork()`, where malloc's lock may be held by a thread that
+/// no longer exists. `va` is left past the terminator, where `execle` finds
+/// `envp`.
+///
+/// # Safety
+///
+/// Unless `arg` is NULL, `va` must hold `*const c_char` arguments up to a
+/// NULL pointer.
+unsafe fn collect_argv<A: Allocator>(
+    allocator: A,
+    mut arg: *const c_char,
+    va: &mut VaList<'_>,
+) -> Vec<*const c_char, A> {
+    let mut argv = Vec::new_in(allocator);
+    while !arg.is_null() {
+        argv.push(arg);
+        // SAFETY: the caller guarantees the arguments continue up to a NULL pointer.
+        arg = unsafe { va.next_arg() };
+    }
+    argv.push(null());
+    argv
 }
 
 fn handle_exec(
@@ -77,67 +102,48 @@ unsafe extern "C" fn execve(
 }
 
 intercept!(execl(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
-unsafe extern "C" fn execl(path: *const c_char, arg0: *const c_char, valist: ...) -> c_int {
+unsafe extern "C" fn execl(path: *const c_char, arg: *const c_char, mut valist: ...) -> c_int {
     #[expect(
         clippy::no_effect_underscore_binding,
         reason = "suppresses unused warning on *::original"
     )]
     let _unused = execl::original;
-    // SAFETY: valist and arg0 are valid variadic arguments forwarded from the interposed execl function
-    unsafe {
-        with_argv(valist, arg0, |args, _remaining| {
-            handle_exec(
-                fspy_nostd_alloc::pooled_bump(),
-                ExecResolveConfig::search_path_disabled(),
-                path,
-                args.as_ptr(),
-                environ(),
-            )
-        })
-    }
+    let arena = fspy_nostd_alloc::pooled_bump();
+    // SAFETY: valist holds execl's NULL-terminated argument list after arg,
+    // and environ() returns the valid process environment pointer
+    let (argv, envp) = unsafe { (collect_argv(&arena, arg, &mut valist), environ()) };
+    handle_exec(&arena, ExecResolveConfig::search_path_disabled(), path, argv.as_ptr(), envp)
 }
 
 intercept!(execlp(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
-unsafe extern "C" fn execlp(path: *const c_char, arg0: *const c_char, valist: ...) -> c_int {
+unsafe extern "C" fn execlp(path: *const c_char, arg: *const c_char, mut valist: ...) -> c_int {
     #[expect(
         clippy::no_effect_underscore_binding,
         reason = "suppresses unused warning on *::original"
     )]
     let _unused = execlp::original;
-    // SAFETY: valist and arg0 are valid variadic arguments forwarded from the interposed execlp function
-    unsafe {
-        with_argv(valist, arg0, |args, _remaining| {
-            handle_exec(
-                fspy_nostd_alloc::pooled_bump(),
-                ExecResolveConfig::search_path_enabled(None),
-                path,
-                args.as_ptr(),
-                environ(),
-            )
-        })
-    }
+    let arena = fspy_nostd_alloc::pooled_bump();
+    // SAFETY: valist holds execlp's NULL-terminated argument list after arg,
+    // and environ() returns the valid process environment pointer
+    let (argv, envp) = unsafe { (collect_argv(&arena, arg, &mut valist), environ()) };
+    handle_exec(&arena, ExecResolveConfig::search_path_enabled(None), path, argv.as_ptr(), envp)
 }
 
 intercept!(execle(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
-unsafe extern "C" fn execle(path: *const c_char, arg0: *const c_char, valist: ...) -> c_int {
+unsafe extern "C" fn execle(path: *const c_char, arg: *const c_char, mut valist: ...) -> c_int {
     #[expect(
         clippy::no_effect_underscore_binding,
         reason = "suppresses unused warning on *::original"
     )]
     let _unused = execle::original;
-    // SAFETY: valist and arg0 are valid variadic arguments forwarded from the interposed execle function
-    unsafe {
-        with_argv(valist, arg0, |args, mut remaining| {
-            let envp = remaining.next_arg::<*const *const c_char>();
-            handle_exec(
-                fspy_nostd_alloc::pooled_bump(),
-                ExecResolveConfig::search_path_disabled(),
-                path,
-                args.as_ptr(),
-                envp,
-            )
-        })
-    }
+    let arena = fspy_nostd_alloc::pooled_bump();
+    // SAFETY: valist holds execle's NULL-terminated argument list after arg,
+    // followed by envp
+    let (argv, envp) = unsafe {
+        let argv = collect_argv(&arena, arg, &mut valist);
+        (argv, valist.next_arg::<*const *const c_char>())
+    };
+    handle_exec(&arena, ExecResolveConfig::search_path_disabled(), path, argv.as_ptr(), envp)
 }
 
 intercept!(execv(64): unsafe extern "C" fn(path: *const c_char, argv: *const *const c_char) -> c_int);
