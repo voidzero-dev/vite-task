@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+hashbrown = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
 petgraph = { workspace = true }
 rustc-hash = { workspace = true }

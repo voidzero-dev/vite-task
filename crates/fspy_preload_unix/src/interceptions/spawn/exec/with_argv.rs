@@ -31,14 +31,14 @@ pub unsafe fn with_argv(
         stack.as_mut_slice()
     } else if argc < 4096 {
         // TODO: Use ARG_MAX, not this hardcoded constant
-        // SAFETY: requesting a heap allocation of the correct size for argc pointers
-        let ptr = unsafe { libc::malloc(argc * mem::size_of::<*const c_char>()) };
+        // SAFETY: requesting a heap allocation of the correct size for argc + 1 pointers, including the NULL terminator
+        let ptr = unsafe { libc::malloc((argc + 1) * mem::size_of::<*const c_char>()) };
         if ptr.is_null() {
             Error::ENOMEM.set();
             return -1;
         }
-        // SAFETY: ptr is non-null (checked above), properly aligned, and points to argc elements worth of allocated memory
-        unsafe { slice::from_raw_parts_mut(ptr.cast::<MaybeUninit<*const c_char>>(), argc) }
+        // SAFETY: ptr is non-null (checked above), properly aligned, and points to argc + 1 elements worth of allocated memory
+        unsafe { slice::from_raw_parts_mut(ptr.cast::<MaybeUninit<*const c_char>>(), argc + 1) }
     } else {
         Error::E2BIG.set();
         return -1;

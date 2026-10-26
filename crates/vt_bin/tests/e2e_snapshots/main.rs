@@ -46,7 +46,7 @@ struct StepConfig {
     /// Defaults to the case-level `cwd`.
     #[serde(default)]
     cwd: Option<RelativePathBuf>,
-    /// Appended as `# comment` in the snapshot display line.
+    /// Shown under the step's heading in the snapshot.
     #[serde(default)]
     comment: Option<Str>,
     /// Extra environment variables set for this step.

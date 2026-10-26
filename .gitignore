@@ -10,3 +10,4 @@ dist
 /.vscode/settings.json
 *.snap.new
 *.md.new
+*.jsonc.new

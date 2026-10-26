@@ -103,39 +103,26 @@ mod tests {
         }
     }
 
-    #[test]
-    fn single_complete_line() {
-        let result = labeled_output("[app] ", &[b"hello\n"]);
-        assert_eq!(result, b"[app] hello\n");
-    }
+    /// (case, prefix, chunks written and flushed in order, expected output)
+    type LabeledCase<'a> = (&'a str, &'a str, &'a [&'a [u8]], &'a [u8]);
 
     #[test]
-    fn multiple_lines_in_one_chunk() {
-        let result = labeled_output("[a] ", &[b"line1\nline2\n"]);
-        assert_eq!(result, b"[a] line1\n[a] line2\n");
-    }
-
-    #[test]
-    fn partial_line_flushed_on_drop() {
-        let result = labeled_output("[x] ", &[b"no newline"]);
-        assert_eq!(result, b"[x] no newline");
-    }
-
-    #[test]
-    fn split_across_chunks() {
-        let result = labeled_output("[p] ", &[b"split ", b"line\n"]);
-        assert_eq!(result, b"[p] split line\n");
-    }
-
-    #[test]
-    fn empty_line() {
-        let result = labeled_output("[e] ", &[b"\n"]);
-        assert_eq!(result, b"[e] \n");
-    }
-
-    #[test]
-    fn multiple_flushes_with_partial() {
-        let result = labeled_output("[m] ", &[b"a\nb", b"c\n"]);
-        assert_eq!(result, b"[m] a\n[m] bc\n");
+    fn prefixes_each_line() {
+        let cases: &[LabeledCase<'_>] = &[
+            ("single complete line", "[app] ", &[b"hello\n"], b"[app] hello\n"),
+            (
+                "multiple lines in one chunk",
+                "[a] ",
+                &[b"line1\nline2\n"],
+                b"[a] line1\n[a] line2\n",
+            ),
+            ("partial line flushed on drop", "[x] ", &[b"no newline"], b"[x] no newline"),
+            ("split across chunks", "[p] ", &[b"split ", b"line\n"], b"[p] split line\n"),
+            ("empty line", "[e] ", &[b"\n"], b"[e] \n"),
+            ("multiple flushes with partial", "[m] ", &[b"a\nb", b"c\n"], b"[m] a\n[m] bc\n"),
+        ];
+        for &(case, prefix, chunks, expected) in cases {
+            assert_eq!(labeled_output(prefix, chunks), expected, "{case}");
+        }
     }
 }

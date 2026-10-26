@@ -231,39 +231,52 @@ mod tests {
             .and_then(|(_, v)| v.as_ref().map(|v| AsRef::<[u8]>::as_ref(v).to_vec()))
     }
 
-    #[test]
-    fn inserts_when_absent() {
-        let mut envs: Vec<(BString, Option<BString>)> = vec![];
-        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
-        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/a.so".to_vec()));
-    }
+    /// (case, envs before the call, appended `LD_PRELOAD` value, expected value)
+    type AppendCase<'a> = (&'a str, &'a [(&'a str, Option<&'a str>)], &'a str, &'a [u8]);
 
     #[test]
-    fn noop_when_equal() {
-        let mut envs = vec![(BString::from("LD_PRELOAD"), Some(BString::from("/a.so")))];
-        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
-        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/a.so".to_vec()));
-    }
-
-    #[test]
-    fn noop_when_value_is_last_entry() {
-        let mut envs = vec![(BString::from("LD_PRELOAD"), Some(BString::from("/user.so:/a.so")))];
-        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
-        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/user.so:/a.so".to_vec()));
-    }
-
-    #[test]
-    fn appends_with_colon_when_present_and_different() {
-        let mut envs = vec![(BString::from("LD_PRELOAD"), Some(BString::from("/user.so")))];
-        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
-        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/user.so:/a.so".to_vec()));
-    }
-
-    #[test]
-    fn sets_without_leading_colon_when_existing_is_empty() {
-        let mut envs = vec![(BString::from("LD_PRELOAD"), Some(BString::from("")))];
-        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
-        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/a.so".to_vec()));
+    fn appends_value_to_the_env_list() {
+        let cases: &[AppendCase<'_>] = &[
+            ("inserts when absent", &[], "/a.so", b"/a.so"),
+            ("noop when equal", &[("LD_PRELOAD", Some("/a.so"))], "/a.so", b"/a.so"),
+            (
+                "noop when value is last entry",
+                &[("LD_PRELOAD", Some("/user.so:/a.so"))],
+                "/a.so",
+                b"/user.so:/a.so",
+            ),
+            (
+                "appends with colon when present and different",
+                &[("LD_PRELOAD", Some("/user.so"))],
+                "/a.so",
+                b"/user.so:/a.so",
+            ),
+            (
+                "sets without leading colon when existing is empty",
+                &[("LD_PRELOAD", Some(""))],
+                "/a.so",
+                b"/a.so",
+            ),
+            // `lib/a.so` ends with `/a.so` as bytes, but the preceding byte is
+            // `b` not `:`, so it must NOT be treated as already-present.
+            (
+                "does not false match prefix without preceding colon",
+                &[("LD_PRELOAD", Some("/lib/a.so"))],
+                "a.so",
+                b"/lib/a.so:a.so",
+            ),
+            // An env var present in the list but with `None` value (name without
+            // `=`) should be rewritten to `Some(value)`.
+            ("inserts when present with none value", &[("LD_PRELOAD", None)], "/a.so", b"/a.so"),
+        ];
+        for &(case, existing, value, expected) in cases {
+            let mut envs: Vec<(BString, Option<BString>)> = existing
+                .iter()
+                .map(|&(name, value)| (BString::from(name), value.map(BString::from)))
+                .collect();
+            append_path_env(&mut envs, "LD_PRELOAD", value);
+            assert_eq!(env(&envs, b"LD_PRELOAD"), Some(expected.to_vec()), "{case}");
+        }
     }
 
     #[test]
@@ -271,24 +284,6 @@ mod tests {
         let mut envs: Vec<(BString, Option<BString>)> = vec![];
         append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
         append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
-        append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
-        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/a.so".to_vec()));
-    }
-
-    #[test]
-    fn does_not_false_match_prefix_without_preceding_colon() {
-        // `lib/a.so` ends with `/a.so` as bytes, but the preceding byte is
-        // `b` not `:`, so it must NOT be treated as already-present.
-        let mut envs = vec![(BString::from("LD_PRELOAD"), Some(BString::from("/lib/a.so")))];
-        append_path_env(&mut envs, "LD_PRELOAD", "a.so");
-        assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/lib/a.so:a.so".to_vec()));
-    }
-
-    #[test]
-    fn inserts_when_present_with_none_value() {
-        // An env var present in the list but with `None` value (name without
-        // `=`) should be rewritten to `Some(value)`.
-        let mut envs = vec![(BString::from("LD_PRELOAD"), None)];
         append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
         assert_eq!(env(&envs, b"LD_PRELOAD"), Some(b"/a.so".to_vec()));
     }

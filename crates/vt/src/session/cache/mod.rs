@@ -285,6 +285,26 @@ pub fn cache_schema_dir_name() -> Str {
     vt_str::format!("v{CACHE_SCHEMA_VERSION}")
 }
 
+/// Switches `conn` to WAL mode and, if that worked, sets `synchronous=NORMAL`.
+///
+/// With `NORMAL`, commits don't wait for a sync; SQLite syncs the WAL at checkpoints instead.
+/// In WAL mode, a power loss can roll back the latest commits (their entries become cache
+/// misses) but can't corrupt the database.
+///
+/// `PRAGMA journal_mode=WAL` doesn't return an error when SQLite can't use WAL. It keeps the
+/// current mode, usually a rollback journal, and returns that mode's name. With a rollback
+/// journal, `NORMAL` has a small chance of corrupting the database after a power loss, so
+/// `synchronous` stays `FULL` unless the result is `wal`.
+fn enable_wal(conn: &Connection) -> rusqlite::Result<()> {
+    let is_wal = conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| {
+        Ok(row.get_ref(0)?.as_str()?.eq_ignore_ascii_case("wal"))
+    })?;
+    if is_wal {
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+    }
+    Ok(())
+}
+
 impl ExecutionCache {
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
@@ -298,16 +318,16 @@ impl ExecutionCache {
 
         let db_path = path.join("cache.db");
         let conn = Connection::open(db_path.as_path())?;
+        enable_wal(&conn)?;
         // The schema version is encoded in the directory name (see
         // `cache_schema_dir_name`), so any database in this directory already has
-        // the current schema: there is nothing to migrate or version-check. Set
-        // WAL mode and ensure the tables exist in a single round-trip. On an
-        // existing database the `IF NOT EXISTS` creates are near-free no-ops (a
-        // schema lookup, no write); on a fresh one they create the tables. This
-        // runs once per process (the cache is `OnceCell`-initialized).
+        // the current schema: there is nothing to migrate or version-check. Ensure
+        // the tables exist in a single round-trip. On an existing database the
+        // `IF NOT EXISTS` creates are near-free no-ops (a schema lookup, no write);
+        // on a fresh one they create the tables. This runs once per process (the
+        // cache is `OnceCell`-initialized).
         conn.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             CREATE TABLE IF NOT EXISTS cache_entries (key BLOB PRIMARY KEY, value BLOB);
+            "CREATE TABLE IF NOT EXISTS cache_entries (key BLOB PRIMARY KEY, value BLOB);
              CREATE TABLE IF NOT EXISTS task_fingerprints (key BLOB PRIMARY KEY, value BLOB);",
         )?;
         // Lock is released when lock_file is dropped
@@ -797,5 +817,28 @@ mod tests {
             .query_one("SELECT COUNT(*) FROM cache_entries", (), |r| r.get(0))
             .unwrap();
         assert_eq!(count_b, 0);
+    }
+
+    /// `synchronous` is `NORMAL` only when the database is in WAL mode (see `enable_wal` for why).
+    #[test]
+    fn sync_is_relaxed_only_in_wal_mode() {
+        let (_tmp, dir) = temp_dir();
+        let cache = ExecutionCache::load_from_path(&dir).unwrap();
+        let (mode, sync): (Box<str>, _) = {
+            let conn = cache.conn.try_lock().unwrap();
+            (
+                conn.query_one("PRAGMA journal_mode", (), |r| r.get(0)).unwrap(),
+                conn.query_one("PRAGMA synchronous", (), |r| r.get(0)).unwrap(),
+            )
+        };
+        assert_eq!((&*mode, sync), ("wal", 1)); // 1 = NORMAL
+
+        // An in-memory database can't use WAL: `journal_mode=WAL` leaves it in `memory` mode,
+        // and `synchronous` keeps the SQLite default, FULL.
+        let memory = Connection::open_in_memory().unwrap();
+        enable_wal(&memory).unwrap();
+        let mode: Box<str> = memory.query_one("PRAGMA journal_mode", (), |r| r.get(0)).unwrap();
+        let sync = memory.query_one("PRAGMA synchronous", (), |r| r.get(0)).unwrap();
+        assert_eq!((&*mode, sync), ("memory", 2)); // 2 = FULL
     }
 }

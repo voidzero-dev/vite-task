@@ -4,7 +4,7 @@ mod execute;
 pub(crate) mod reporter;
 
 // Re-export types that are part of the public API
-use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, sync::Arc};
+use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, rc::Rc, sync::Arc};
 
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
@@ -19,8 +19,10 @@ use reporter::{
 use rustc_hash::FxHashMap;
 use vt_casefold::EnvName;
 use vt_graph::{
-    IndexedTaskGraph, TaskGraph, TaskGraphLoadError, config::user::UserCacheConfig,
-    loader::UserConfigLoader, query::TaskQuery,
+    IndexedTaskGraph, TaskGraph, TaskGraphLoadError,
+    config::{GlobResolver, user::UserCacheConfig},
+    loader::UserConfigLoader,
+    query::TaskQuery,
 };
 use vt_path::{AbsolutePath, AbsolutePathBuf};
 use vt_plan::{
@@ -57,7 +59,11 @@ where
 
 #[derive(Debug)]
 enum LazyTaskGraph<'a> {
-    Uninitialized { workspace_root: WorkspaceRoot, config_loader: &'a dyn UserConfigLoader },
+    Uninitialized {
+        workspace_root: WorkspaceRoot,
+        config_loader: &'a dyn UserConfigLoader,
+        glob_resolver: Rc<GlobResolver>,
+    },
     Initialized(IndexedTaskGraph),
 }
 
@@ -66,8 +72,9 @@ impl TaskGraphLoader for LazyTaskGraph<'_> {
     async fn load_task_graph(&mut self) -> Result<&vt_graph::IndexedTaskGraph, TaskGraphLoadError> {
         let _span = tracing::debug_span!("load_task_graph").entered();
         Ok(match self {
-            Self::Uninitialized { workspace_root, config_loader } => {
-                let graph = IndexedTaskGraph::load(workspace_root, *config_loader).await?;
+            Self::Uninitialized { workspace_root, config_loader, glob_resolver } => {
+                let graph =
+                    IndexedTaskGraph::load(workspace_root, *config_loader, glob_resolver).await?;
                 *self = Self::Initialized(graph);
                 match self {
                     Self::Initialized(graph) => &*graph,
@@ -158,6 +165,9 @@ pub struct Session<'a> {
     /// The task graph is loaded on-demand and cached for future use.
     lazy_task_graph: LazyTaskGraph<'a>,
 
+    /// Shared by task graph loading and every plan, so each cache glob pattern is parsed once.
+    glob_resolver: Rc<GlobResolver>,
+
     envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
     cwd: Arc<AbsolutePath>,
 
@@ -240,13 +250,17 @@ impl<'a> Session<'a> {
         let workspace_node_modules_bin = workspace_root.path.join("node_modules").join(".bin");
         prepend_path_env(&mut envs, &workspace_node_modules_bin)?;
 
+        let glob_resolver = Rc::new(GlobResolver::default());
+
         // Cache is lazily initialized on first access to avoid SQLite race conditions
         Ok(Self {
             workspace_path: Arc::clone(&workspace_root.path),
             lazy_task_graph: LazyTaskGraph::Uninitialized {
                 workspace_root,
                 config_loader: config.user_config_loader,
+                glob_resolver: Rc::clone(&glob_resolver),
             },
+            glob_resolver,
             envs: Arc::new(envs),
             cwd,
             plan_request_parser: PlanRequestParser { command_handler: config.command_handler },
@@ -713,6 +727,7 @@ impl<'a> Session<'a> {
             &self.cwd,
             synthetic_plan_request,
             cache_key,
+            &self.glob_resolver,
         )?;
 
         // Initialize cache (needed for cache-aware execution)
@@ -808,6 +823,7 @@ impl<'a> Session<'a> {
             &self.envs,
             &mut self.plan_request_parser,
             &mut self.lazy_task_graph,
+            &self.glob_resolver,
         )
         .await?;
         Ok((plan_result, is_cwd_only))
@@ -829,6 +845,7 @@ impl<'a> Session<'a> {
             &self.envs,
             &mut self.plan_request_parser,
             &mut self.lazy_task_graph,
+            &self.glob_resolver,
         )
         .await?;
         Ok(plan_result.graph)

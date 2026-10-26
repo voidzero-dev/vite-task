@@ -18,8 +18,8 @@ use vt_casefold::EnvName;
 use vt_graph::{
     TaskNodeIndex, TaskSource,
     config::{
-        CacheConfig, EnabledCacheConfig, ResolvedGlobConfig, ResolvedGlobalCacheConfig,
-        ResolvedTaskOptions,
+        CacheConfig, EnabledCacheConfig, GlobResolver, ResolvedGlobConfig,
+        ResolvedGlobalCacheConfig, ResolvedTaskOptions,
         user::{UserCacheConfig, UserTaskOptions},
     },
     query::TaskQuery,
@@ -307,6 +307,7 @@ async fn plan_task_as_execution_node(
                             package_path,
                             parent_cache_config,
                             context.resolved_remote_cache(),
+                            context.glob_resolver(),
                         )?;
                         ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                     }
@@ -471,6 +472,7 @@ fn resolve_synthetic_cache_config(
     synthetic_cache_config: UserCacheConfig,
     package_dir: &AbsolutePath,
     workspace_path: &AbsolutePath,
+    glob_resolver: &GlobResolver,
 ) -> Result<Option<CacheConfig>, Error> {
     match parent {
         ParentCacheConfig::None => {
@@ -483,6 +485,7 @@ fn resolve_synthetic_cache_config(
                 },
                 &package_dir.into(),
                 workspace_path,
+                glob_resolver,
             )
             .map_err(Error::ResolveTaskConfig)?
             .cache_config)
@@ -508,6 +511,7 @@ fn resolve_synthetic_cache_config(
                             Some(&input),
                             package_dir,
                             workspace_path,
+                            glob_resolver,
                         )
                         .map_err(Error::ResolveTaskConfig)?;
                         // Merge globs but preserve the parent's includes_auto —
@@ -528,6 +532,7 @@ fn resolve_synthetic_cache_config(
                             Some(&output),
                             package_dir,
                             workspace_path,
+                            glob_resolver,
                         )
                         .map_err(Error::ResolveTaskConfig)?;
                         parent_config
@@ -560,6 +565,7 @@ pub fn plan_synthetic_request(
     package_dir: &AbsolutePath,
     parent_cache_config: ParentCacheConfig,
     resolved_remote_cache: Option<&ResolvedRemoteCacheConfig>,
+    glob_resolver: &GlobResolver,
 ) -> Result<SpawnExecution, Error> {
     let SyntheticPlanRequest { program, args, cache_config, envs } = synthetic_plan_request;
 
@@ -571,6 +577,7 @@ pub fn plan_synthetic_request(
         cache_config,
         package_dir,
         workspace_path,
+        glob_resolver,
     )?;
     let resolved_options =
         ResolvedTaskOptions { cwd: Arc::clone(cwd), cache_config: resolved_cache_config };
@@ -955,7 +962,7 @@ mod tests {
 
     use rustc_hash::FxHashSet;
     use vt_graph::config::{
-        CacheConfig, EnabledCacheConfig, EnvConfig, ResolvedGlobConfig,
+        CacheConfig, EnabledCacheConfig, EnvConfig, GlobResolver, ResolvedGlobConfig,
         user::{UserCacheConfig, UserInputEntry},
     };
     use vt_path::AbsolutePathBuf;
@@ -1016,6 +1023,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1039,6 +1047,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1062,6 +1071,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1091,6 +1101,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1118,6 +1129,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1143,6 +1155,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap();
         assert!(result.is_none());
@@ -1157,6 +1170,7 @@ mod tests {
             UserCacheConfig::disabled(),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap();
         assert!(result.is_none());
@@ -1177,6 +1191,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1198,6 +1213,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();

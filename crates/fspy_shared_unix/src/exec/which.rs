@@ -86,8 +86,6 @@ pub fn which<R>(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-
     use bstr::{B, BStr};
 
     use super::*;
@@ -117,91 +115,52 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_which_found() {
-        let called = RefCell::new(None);
-        let file: &BStr = B("foo").as_bstr();
-        let path: &BStr = B("/bin:/usr/bin").as_bstr();
-        let access = mock_access(&["/bin/foo"], &[], &[]);
-        let res = which(file, path, access, |found| {
-            *called.borrow_mut() = Some(found.to_owned());
-            Ok(())
-        });
-        assert!(res.is_ok());
-        assert_eq!(called.borrow().as_ref().unwrap(), b"/bin/foo".as_bstr());
-    }
+    /// (case, file, PATH, executable paths, EACCES paths, ENOTDIR paths,
+    /// the executable found or the error); any other path fails with ENOENT.
+    type WhichCase<'a> = (
+        &'a str,
+        &'a [u8],
+        &'a str,
+        &'a [&'a str],
+        &'a [&'a str],
+        &'a [&'a str],
+        Result<&'a str, nix::Error>,
+    );
 
     #[test]
-    fn test_which_not_found() {
-        let file: &BStr = B("foo").as_bstr();
-        let path: &BStr = B("/bin:/usr/bin").as_bstr();
-        let access = mock_access(&[], &[], &[]);
-        let res = which(file, path, access, |_| Ok(()));
-        assert_eq!(res.unwrap_err(), nix::Error::ENOENT);
-    }
-
-    #[test]
-    fn test_which_eacces() {
-        let file: &BStr = B("foo").as_bstr();
-        let path: &BStr = B("/bin:/usr/bin").as_bstr();
-        let access = mock_access(&[], &["/bin/foo", "/usr/bin/foo"], &[]);
-        let res = which(file, path, access, |_| Ok(()));
-        assert_eq!(res.unwrap_err(), nix::Error::EACCES);
-    }
-
-    #[test]
-    fn test_which_enotdir() {
-        let file: &BStr = B("foo").as_bstr();
-        let path: &BStr = B("/usr/bin:/bin").as_bstr();
-        let access = mock_access(&[], &[], &["/bin/foo"]);
-        let res = which(file, path, access, |_| Ok(()));
-        assert_eq!(res.unwrap_err(), nix::Error::ENOTDIR);
-    }
-
-    #[test]
-    fn test_which_slash_in_file() {
-        let called = RefCell::new(None);
-        let file: &BStr = B("/usr/bin/foo").as_bstr();
-        let path: &BStr = B("").as_bstr();
-        let access = mock_access(&["/usr/bin/foo"], &[], &[]);
-        let res = which(file, path, access, |found| {
-            *called.borrow_mut() = Some(found.to_owned());
-            Ok(())
-        });
-        assert!(res.is_ok());
-        assert_eq!(called.borrow().as_ref().unwrap(), b"/usr/bin/foo".as_bstr());
-    }
-
-    #[test]
-    fn test_which_empty_file() {
-        let file: &BStr = B("").as_bstr();
-        let path: &BStr = B("/bin:/usr/bin").as_bstr();
-        let access = mock_access(&[], &[], &[]);
-        let res = which(file, path, access, |_| Ok(()));
-        assert_eq!(res.unwrap_err(), nix::Error::ENOENT);
-    }
-
-    #[test]
-    fn test_which_file_too_long() {
+    fn test_which() {
         let long_name = vec![b'a'; NAME_MAX + 1];
-        let file: &BStr = B(&long_name).as_bstr();
-        let path: &BStr = B("/bin:/usr/bin").as_bstr();
-        let access = mock_access(&[], &[], &[]);
-        let res = which(file, path, access, |_| Ok(()));
-        assert_eq!(res.unwrap_err(), nix::Error::ENAMETOOLONG);
-    }
-
-    #[test]
-    fn test_which_empty_path_entry() {
-        let called = RefCell::new(None);
-        let file: &BStr = B("foo").as_bstr();
-        let path: &BStr = B(":/bin").as_bstr();
-        let access = mock_access(&["foo"], &[], &[]);
-        let res = which(file, path, access, |found| {
-            *called.borrow_mut() = Some(found.to_owned());
-            Ok(())
-        });
-        assert!(res.is_ok());
-        assert_eq!(called.borrow().as_ref().unwrap(), b"foo".as_bstr());
+        let cases: &[WhichCase<'_>] = &[
+            ("found", b"foo", "/bin:/usr/bin", &["/bin/foo"], &[], &[], Ok("/bin/foo")),
+            ("not found", b"foo", "/bin:/usr/bin", &[], &[], &[], Err(nix::Error::ENOENT)),
+            (
+                "eacces",
+                b"foo",
+                "/bin:/usr/bin",
+                &[],
+                &["/bin/foo", "/usr/bin/foo"],
+                &[],
+                Err(nix::Error::EACCES),
+            ),
+            ("enotdir", b"foo", "/usr/bin:/bin", &[], &[], &["/bin/foo"], Err(nix::Error::ENOTDIR)),
+            ("slash in file", b"/usr/bin/foo", "", &["/usr/bin/foo"], &[], &[], Ok("/usr/bin/foo")),
+            ("empty file", b"", "/bin:/usr/bin", &[], &[], &[], Err(nix::Error::ENOENT)),
+            (
+                "file too long",
+                &long_name,
+                "/bin:/usr/bin",
+                &[],
+                &[],
+                &[],
+                Err(nix::Error::ENAMETOOLONG),
+            ),
+            ("empty path entry", b"foo", ":/bin", &["foo"], &[], &[], Ok("foo")),
+        ];
+        for &(case, file, path, executable, fail_eacces, fail_enotdir, expected) in cases {
+            let access = mock_access(executable, fail_eacces, fail_enotdir);
+            let res =
+                which(B(file).as_bstr(), B(path).as_bstr(), access, |found| Ok(found.to_owned()));
+            assert_eq!(res, expected.map(|found| B(found).as_bstr().to_owned()), "{case}");
+        }
     }
 }
