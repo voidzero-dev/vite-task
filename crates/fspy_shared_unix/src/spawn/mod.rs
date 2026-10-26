@@ -8,6 +8,7 @@ mod os_specific;
 
 use std::{ffi::OsStr, os::unix::ffi::OsStrExt, path::Path};
 
+use allocator_api2::alloc::Allocator;
 #[doc(hidden)]
 #[cfg(target_os = "macos")]
 pub use os_specific::COREUTILS_FUNCTIONS as COREUTILS_FUNCTIONS_FOR_TEST;
@@ -33,8 +34,8 @@ use crate::{
 /// # Panics
 ///
 /// Panics if the current working directory cannot be determined when converting a relative path to absolute.
-pub fn handle_exec(
-    command: &mut Exec,
+pub fn handle_exec<A: Allocator + Clone>(
+    command: &mut Exec<A>,
     config: ExecResolveConfig,
     encoded_payload: &EncodedPayload,
     mut on_path_read: impl FnMut(&Path),

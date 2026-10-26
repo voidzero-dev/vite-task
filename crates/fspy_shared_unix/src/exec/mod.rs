@@ -9,7 +9,8 @@ use std::{
     path::Path,
 };
 
-use bstr::{BStr, BString, ByteSlice};
+use allocator_api2::{alloc::Allocator, vec::Vec};
+use bstr::{BStr, ByteSlice};
 use nix::unistd::{AccessFlags, access};
 use shebang::{ParseShebangOptions, parse_shebang};
 
@@ -49,12 +50,28 @@ impl<'a> ExecResolveConfig<'a> {
     }
 }
 
+/// An environment entry: (name, value). value is None when the entry in
+/// environ doesn't contain a `=` character.
+pub type Env<A> = (Vec<u8, A>, Option<Vec<u8, A>>);
+
+/// An exec call's program, arguments and environment.
+///
+/// The strings live in `A`, so the preload can keep them in the
+/// interception's bump rather than libc's heap: exec may run in the child of
+/// `fork()`, where malloc's lock may be held by a thread that no longer
+/// exists.
+/// Copies `bytes` into a `Vec` in `allocator`.
+pub fn to_vec_in<A: Allocator>(bytes: &[u8], allocator: A) -> Vec<u8, A> {
+    let mut vec = Vec::with_capacity_in(bytes.len(), allocator);
+    vec.extend_from_slice(bytes);
+    vec
+}
+
 #[derive(Debug)]
-pub struct Exec {
-    pub program: BString,
-    pub args: Vec<BString>,
-    /// vec of (name, value). value is None when the entry in environ doesn't contain a `=` character.
-    pub envs: Vec<(BString, Option<BString>)>,
+pub struct Exec<A: Allocator> {
+    pub program: Vec<u8, A>,
+    pub args: Vec<Vec<u8, A>, A>,
+    pub envs: Vec<Env<A>, A>,
 }
 
 fn getenv(name: &CStr) -> Option<&'static CStr> {
@@ -82,7 +99,12 @@ fn peek_executable(path: &Path, buf: &mut [u8]) -> nix::Result<usize> {
     Ok(total_read_size)
 }
 
-impl Exec {
+impl<A: Allocator + Clone> Exec<A> {
+    /// The allocator the strings live in.
+    pub fn allocator(&self) -> &A {
+        self.args.allocator()
+    }
+
     /// Resolve the program path according to exec family semantics
     ///
     /// This method replicates the behavior of execve/execvp/execvP/execvpe for program resolution,
@@ -115,13 +137,13 @@ impl Exec {
                 )
             });
             let program = which::which(
-                self.program.as_ref(),
+                self.program.as_bstr(),
                 path,
                 |path| {
                     on_path_read(Path::new(OsStr::from_bytes(path)));
                     access(OsStr::from_bytes(path), AccessFlags::X_OK)
                 },
-                |program| Ok(program.to_owned()),
+                |program| Ok(to_vec_in(program, self.allocator().clone())),
             )?;
             self.program = program;
         }
@@ -143,8 +165,9 @@ impl Exec {
             },
             Path::new(OsStr::from_bytes(&self.program)),
             options,
+            self.allocator().clone(),
         )? {
-            self.args[0] = shebang.interpreter.clone();
+            self.args[0].clone_from(&shebang.interpreter);
             let old_program = replace(&mut self.program, shebang.interpreter);
             self.args.splice(1..1, shebang.arguments.into_iter().chain(once(old_program)));
         }
@@ -160,18 +183,20 @@ impl Exec {
 /// # Errors
 ///
 /// Returns `Err(nix::Error::EINVAL)` if the environment variable already exists with a different value.
-pub fn ensure_env(
-    envs: &mut Vec<(BString, Option<BString>)>,
+pub fn ensure_env<A: Allocator + Clone>(
+    envs: &mut Vec<Env<A>, A>,
     name: impl AsRef<BStr>,
     value: impl AsRef<BStr>,
 ) -> nix::Result<()> {
     let name = name.as_ref();
     let value = value.as_ref();
-    let existing_value = envs.iter().find_map(|(n, v)| if n == name { v.as_ref() } else { None });
+    let existing_value =
+        envs.iter().find_map(|(n, v)| if n.as_bstr() == name { v.as_ref() } else { None });
     if let Some(existing_value) = existing_value {
-        return if existing_value == value { Ok(()) } else { Err(nix::Error::EINVAL) };
+        return if existing_value.as_bstr() == value { Ok(()) } else { Err(nix::Error::EINVAL) };
     }
-    envs.push((name.to_owned(), Some(value.to_owned())));
+    let allocator = envs.allocator().clone();
+    envs.push((to_vec_in(name, allocator.clone()), Some(to_vec_in(value, allocator))));
     Ok(())
 }
 
@@ -190,15 +215,16 @@ pub fn ensure_env(
 /// - Present otherwise: rewrites to `{existing}:{value}`. If `existing` is
 ///   empty, sets to `value` alone to avoid a leading `:` (which glibc's
 ///   `ld.so` interprets as the current directory).
-pub fn append_path_env(
-    envs: &mut Vec<(BString, Option<BString>)>,
+pub fn append_path_env<A: Allocator + Clone>(
+    envs: &mut Vec<Env<A>, A>,
     name: impl AsRef<BStr>,
     value: impl AsRef<BStr>,
 ) {
     let name = name.as_ref();
     let value = value.as_ref();
-    if let Some(entry) = envs.iter_mut().find(|(n, _)| n == name) {
-        let existing: &[u8] = entry.1.as_deref().map_or(&[][..], |v| v.as_ref());
+    let allocator = envs.allocator().clone();
+    if let Some(entry) = envs.iter_mut().find(|(n, _)| n.as_bstr() == name) {
+        let existing: &[u8] = entry.1.as_deref().unwrap_or_default();
         let value_bytes: &[u8] = value.as_ref();
         let already_last = existing == value_bytes
             || (existing.len() > value_bytes.len()
@@ -207,28 +233,29 @@ pub fn append_path_env(
         if already_last {
             return;
         }
-        let mut new_value = Vec::with_capacity(existing.len() + 1 + value_bytes.len());
+        let mut new_value =
+            Vec::with_capacity_in(existing.len() + 1 + value_bytes.len(), allocator);
         if !existing.is_empty() {
             new_value.extend_from_slice(existing);
             new_value.push(b':');
         }
         new_value.extend_from_slice(value_bytes);
-        entry.1 = Some(BString::from(new_value));
+        entry.1 = Some(new_value);
     } else {
-        envs.push((name.to_owned(), Some(value.to_owned())));
+        envs.push((to_vec_in(name, allocator.clone()), Some(to_vec_in(value, allocator))));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bstr::BString;
+    use allocator_api2::{alloc::Global, vec::Vec};
 
-    use super::append_path_env;
+    use super::{append_path_env, to_vec_in};
 
-    fn env(envs: &[(BString, Option<BString>)], name: &[u8]) -> Option<Vec<u8>> {
-        envs.iter()
-            .find(|(n, _)| AsRef::<[u8]>::as_ref(n) == name)
-            .and_then(|(_, v)| v.as_ref().map(|v| AsRef::<[u8]>::as_ref(v).to_vec()))
+    type Envs = Vec<(Vec<u8>, Option<Vec<u8>>)>;
+
+    fn env(envs: &Envs, name: &[u8]) -> Option<std::vec::Vec<u8>> {
+        envs.iter().find(|(n, _)| n == name).and_then(|(_, v)| v.as_ref().map(|v| v.to_vec()))
     }
 
     /// (case, envs before the call, appended `LD_PRELOAD` value, expected value)
@@ -270,9 +297,14 @@ mod tests {
             ("inserts when present with none value", &[("LD_PRELOAD", None)], "/a.so", b"/a.so"),
         ];
         for &(case, existing, value, expected) in cases {
-            let mut envs: Vec<(BString, Option<BString>)> = existing
+            let mut envs: Envs = existing
                 .iter()
-                .map(|&(name, value)| (BString::from(name), value.map(BString::from)))
+                .map(|&(name, value)| {
+                    (
+                        to_vec_in(name.as_bytes(), Global),
+                        value.map(|v| to_vec_in(v.as_bytes(), Global)),
+                    )
+                })
                 .collect();
             append_path_env(&mut envs, "LD_PRELOAD", value);
             assert_eq!(env(&envs, b"LD_PRELOAD"), Some(expected.to_vec()), "{case}");
@@ -281,7 +313,7 @@ mod tests {
 
     #[test]
     fn idempotent_on_repeat() {
-        let mut envs: Vec<(BString, Option<BString>)> = vec![];
+        let mut envs = Envs::new();
         append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
         append_path_env(&mut envs, "LD_PRELOAD", "/a.so");
         append_path_env(&mut envs, "LD_PRELOAD", "/a.so");

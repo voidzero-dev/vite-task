@@ -1354,7 +1354,6 @@ version = "0.1.0"
 dependencies = [
  "allocator-api2",
  "anyhow",
- "bstr",
  "bumpalo",
  "csv-async",
  "ctor",

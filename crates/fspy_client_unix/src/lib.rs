@@ -108,11 +108,11 @@ impl<'a> Client<'a> {
     ) -> nix::Result<R> {
         // SAFETY: raw_exec contains valid pointers to C strings and
         // null-terminated arrays, as provided by the caller.
-        let mut exec = unsafe { raw_exec.to_exec() };
+        let mut exec = unsafe { raw_exec.to_exec(&allocator) };
         let pre_exec = handle_exec(&mut exec, config, &self.encoded_payload, |path| {
             self.send(AccessMode::Read, path);
         })?;
-        RawExec::from_exec(exec, allocator, |raw_command| f(raw_command, pre_exec))
+        RawExec::from_exec(exec, |raw_command| f(raw_command, pre_exec))
     }
 
     /// Resolves and reports one intercepted file access.
