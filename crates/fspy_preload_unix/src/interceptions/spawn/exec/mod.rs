@@ -200,7 +200,7 @@ mod linux_only {
         reason = "macro-generated code requires types from parent scope"
     )]
     use super::*;
-    use crate::client::convert::{PathAt, ToAbsolutePath};
+    use crate::client::convert::{PROC_FD_PATH_CAPACITY, PathAt, ToAbsolutePath, proc_fd_path};
 
     intercept!(execvpe(64): unsafe extern "C" fn(
         prog: *const libc::c_char,
@@ -286,12 +286,12 @@ mod linux_only {
             reason = "suppresses unused warning on *::original"
         )]
         let _unused = fexecve::original;
-        let prog = format!("/proc/self/fd/{fd}\0");
-        let prog = prog.as_ptr();
+        let mut prog = [0; PROC_FD_PATH_CAPACITY];
+        let prog = proc_fd_path(fd, &mut prog);
         handle_exec(
             fspy_nostd_alloc::pooled_bump(),
             ExecResolveConfig::search_path_disabled(),
-            prog.cast(),
+            prog.as_ptr().cast(),
             argv,
             envp,
         )
