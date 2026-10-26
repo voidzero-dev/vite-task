@@ -1,13 +1,9 @@
-use std::{
-    convert::Infallible,
-    ffi::OsStr,
-    os::unix::ffi::OsStrExt,
-    path::{Path, absolute},
-};
+use std::{convert::Infallible, ffi::OsStr, os::unix::ffi::OsStrExt, path::Path};
 
 use allocator_api2::alloc::Allocator;
 use phf::{Set, phf_set};
 
+use super::absolute;
 use crate::{
     exec::{Exec, append_path_env, ensure_env, to_vec_in},
     payload::{EncodedPayload, PAYLOAD_ENV_NAME},
@@ -32,9 +28,9 @@ pub fn handle_exec<A: Allocator + Clone>(
     const DYLD_INSERT_LIBRARIES: &[u8] = b"DYLD_INSERT_LIBRARIES";
 
     if command.program.first() != Some(&b'/') {
-        let program =
-            absolute(OsStr::from_bytes(&command.program)).expect("Failed to get absolute path");
-        command.program = to_vec_in(program.as_os_str().as_bytes(), command.allocator().clone());
+        command.program =
+            absolute(Path::new(OsStr::from_bytes(&command.program)), command.allocator().clone())
+                .expect("Failed to get absolute path");
     }
 
     let program_path = Path::new(OsStr::from_bytes(&command.program));

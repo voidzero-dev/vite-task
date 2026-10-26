@@ -14,6 +14,7 @@ bstr = { workspace = true, features = ["alloc", "std"] }
 fspy_shared = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
 fspy_nostd = { workspace = true }
+fspy_nostd_alloc = { workspace = true }
 
 [dev-dependencies]
 

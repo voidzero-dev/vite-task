@@ -1565,6 +1565,7 @@ dependencies = [
  "bstr",
  "elf",
  "fspy_nostd",
+ "fspy_nostd_alloc",
  "fspy_seccomp_unotify",
  "fspy_shared",
  "memmap2",
