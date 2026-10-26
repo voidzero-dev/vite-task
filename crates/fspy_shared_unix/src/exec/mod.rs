@@ -118,7 +118,7 @@ impl<A: Allocator + Clone> Exec<A> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The program is not found in PATH (`ENOENT`)
+    /// - The program is empty, or is not found in PATH (`ENOENT`)
     /// - The program file cannot be accessed or read (`EACCES`, `EISDIR`, `EIO`)
     /// - Shebang parsing fails due to I/O errors (`EIO`)
     pub fn resolve(
@@ -126,6 +126,11 @@ impl<A: Allocator + Clone> Exec<A> {
         mut on_path_read: impl FnMut(&Path),
         config: ExecResolveConfig,
     ) -> nix::Result<()> {
+        // execve and libc's PATH search both fail an empty program with
+        // ENOENT before looking anything up, so nothing is read.
+        if self.program.is_empty() {
+            return Err(nix::Error::ENOENT);
+        }
         if let Some(search_path) = config.search_path {
             let path = search_path.custom_path.unwrap_or_else(|| {
                 getenv(c"PATH").map_or_else(

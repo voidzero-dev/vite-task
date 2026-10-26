@@ -240,6 +240,15 @@ mod linux_only {
             reason = "suppresses unused warning on *::original"
         )]
         let _unused = execveat::original;
+        // Without `AT_EMPTY_PATH`, an empty pathname fails with `ENOENT`
+        // before the kernel looks anything up, while resolving it against
+        // `dirfd` would run whatever `dirfd` refers to. Let the real call
+        // fail.
+        // SAFETY: pathname is a valid C string from the interposed execveat call.
+        if unsafe { *pathname } == 0 && flags & libc::AT_EMPTY_PATH == 0 {
+            // SAFETY: forwarding the original arguments to the real execveat syscall
+            return unsafe { execveat::original()(dirfd, pathname, argv, envp, flags) };
+        }
         let arena = fspy_nostd_alloc::pooled_bump();
 
         // SAFETY: dirfd is -1 or a valid file descriptor, and pathname is a valid C string, from the interposed execveat call.
