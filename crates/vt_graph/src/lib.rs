@@ -7,7 +7,7 @@ mod specifier;
 use std::{convert::Infallible, sync::Arc};
 
 use config::{
-    ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
+    GlobResolver, ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
     UserTaskDefinition, user::TopLevelCacheFieldsCollector,
 };
 use petgraph::{
@@ -319,6 +319,7 @@ impl IndexedTaskGraph {
         let resolved_global_cache = ResolvedGlobalCacheConfig::resolve_from(root_cache.as_ref());
 
         let mut top_level_cache_fields = TopLevelCacheFieldsCollector::default();
+        let glob_resolver = GlobResolver::default();
 
         // Second pass: create task nodes (cache is NOT applied here; it's applied at plan time)
         for (package_index, package_dir, user_config) in package_configs {
@@ -369,6 +370,7 @@ impl IndexedTaskGraph {
                     task_user_config,
                     &package_dir,
                     &workspace_root.path,
+                    &glob_resolver,
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,
@@ -402,6 +404,7 @@ impl IndexedTaskGraph {
                     &package_dir,
                     package_json_script,
                     &workspace_root.path,
+                    &glob_resolver,
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,

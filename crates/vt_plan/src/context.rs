@@ -1,9 +1,11 @@
-use std::{env::JoinPathsError, ffi::OsStr, ops::Range, sync::Arc};
+use std::{env::JoinPathsError, ffi::OsStr, ops::Range, rc::Rc, sync::Arc};
 
 use rustc_hash::FxHashMap;
 use vt_casefold::EnvName;
 use vt_graph::{
-    IndexedTaskGraph, TaskNodeIndex, config::ResolvedGlobalCacheConfig, query::TaskQuery,
+    IndexedTaskGraph, TaskNodeIndex,
+    config::{GlobResolver, ResolvedGlobalCacheConfig},
+    query::TaskQuery,
 };
 use vt_path::AbsolutePath;
 use vt_str::Str;
@@ -51,6 +53,10 @@ pub struct PlanContext<'a> {
 
     indexed_task_graph: &'a IndexedTaskGraph,
 
+    /// Shared with every nested context, so each glob in synthetic commands' cache configs is
+    /// parsed once per plan.
+    glob_resolver: Rc<GlobResolver>,
+
     /// Final resolved global cache config, combining the graph's config with any CLI override.
     resolved_global_cache: ResolvedGlobalCacheConfig,
 
@@ -91,6 +97,7 @@ impl<'a> PlanContext<'a> {
             callbacks,
             task_call_stack: Vec::new(),
             indexed_task_graph,
+            glob_resolver: Rc::default(),
             extra_args: Arc::default(),
             resolved_global_cache,
             resolved_remote_cache: None,
@@ -121,6 +128,10 @@ impl<'a> PlanContext<'a> {
 
     pub const fn workspace_path(&self) -> &Arc<AbsolutePath> {
         self.workspace_path
+    }
+
+    pub fn glob_resolver(&self) -> &GlobResolver {
+        &self.glob_resolver
     }
 
     /// Push a new frame onto the task call stack.
@@ -198,6 +209,7 @@ impl<'a> PlanContext<'a> {
             callbacks: self.callbacks,
             task_call_stack: self.task_call_stack.clone(),
             indexed_task_graph: self.indexed_task_graph,
+            glob_resolver: Rc::clone(&self.glob_resolver),
             extra_args: Arc::clone(&self.extra_args),
             resolved_global_cache: self.resolved_global_cache.clone(),
             resolved_remote_cache: self.resolved_remote_cache.clone(),

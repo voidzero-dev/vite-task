@@ -23,7 +23,7 @@ use plan_request::{CacheOverride, PlanRequest, QueryPlanRequest, SyntheticPlanRe
 use rustc_hash::FxHashMap;
 use serde::{Serialize, ser::SerializeMap as _};
 use vt_casefold::EnvName;
-use vt_graph::{TaskGraphLoadError, display::TaskDisplay};
+use vt_graph::{TaskGraphLoadError, config::GlobResolver, display::TaskDisplay};
 use vt_path::AbsolutePath;
 use vt_str::Str;
 
@@ -269,5 +269,6 @@ pub fn plan_synthetic(
         cwd,
         ParentCacheConfig::None,
         None,
+        &GlobResolver::default(),
     )
 }
