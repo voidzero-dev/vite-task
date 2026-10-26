@@ -60,26 +60,22 @@ fn handle_exec(
     let client =
         global_client().expect("exec unexpectedly called before client initialized in ctor");
     // SAFETY: prog, argv, and envp are valid pointers to C strings/arrays forwarded from the interposed exec function
-    let result = unsafe {
-        client.handle_exec(
-            config,
-            RawExec { prog, argv, envp },
-            allocator,
-            |raw_command, pre_exec| {
-                if let Some(pre_exec) = pre_exec {
-                    pre_exec.run()?;
-                }
-                Ok(execve::original()(raw_command.prog, raw_command.argv, raw_command.envp))
-            },
-        )
-    };
-    match result {
-        Ok(ret) => ret,
+    let handled = unsafe { client.handle_exec(config, RawExec { prog, argv, envp }, &allocator) };
+    let (raw_command, pre_exec) = match handled {
+        Ok(handled) => handled,
         Err(errno) => {
             errno.set();
-            -1
+            return -1;
         }
+    };
+    if let Some(pre_exec) = pre_exec
+        && let Err(errno) = pre_exec.run()
+    {
+        errno.set();
+        return -1;
     }
+    // SAFETY: raw_command's strings and arrays live in `allocator`, which outlives the call
+    unsafe { execve::original()(raw_command.prog, raw_command.argv, raw_command.envp) }
 }
 
 intercept!(execve(64): unsafe extern "C" fn(

@@ -39,29 +39,21 @@ impl RawExec {
         str_vec
     }
 
-    fn to_c_str<R, A: Allocator>(mut s: Vec<u8, A>, f: impl FnOnce(*const libc::c_char) -> R) -> R {
+    /// NUL-terminates `s` and leaks it into its allocator.
+    fn into_c_str<A: Allocator>(mut s: Vec<u8, A>) -> *const libc::c_char {
         s.push(0);
-        f(s.as_ptr().cast())
+        s.leak().as_ptr().cast()
     }
 
-    fn to_c_str_array<R, A: Allocator + Clone>(
-        mut strs: Vec<Vec<u8, A>, A>,
-        f: impl FnOnce(*const *const libc::c_char) -> R,
-    ) -> R {
-        // The pointer array exists only for the `f` call below, and building
-        // it must not go through libc malloc: exec runs in the child of
-        // `fork()` in multithreaded programs (`posix_spawn` forks then
-        // execs), where malloc's lock may be held by a thread that no longer
-        // exists. The strings' allocator — the interception's per-call bump
-        // in the preload — has exactly this lifetime, and hands back the
-        // memory when the call ends.
-        let mut ptr_vec = Vec::with_capacity_in(strs.len() + 1, strs.allocator().clone());
-        for s in &mut strs {
-            s.push(0);
-            ptr_vec.push(s.as_ptr().cast::<libc::c_char>());
-        }
-        ptr_vec.push(null());
-        f(ptr_vec.as_ptr())
+    /// Builds a NULL-terminated array of C strings, leaked into the strings'
+    /// allocator.
+    fn into_c_str_array<A: Allocator + Clone>(
+        strs: Vec<Vec<u8, A>, A>,
+    ) -> *const *const libc::c_char {
+        let mut ptrs = Vec::with_capacity_in(strs.len() + 1, strs.allocator().clone());
+        ptrs.extend(strs.into_iter().map(Self::into_c_str));
+        ptrs.push(null());
+        ptrs.leak().as_ptr()
     }
 
     /// Copies the raw exec arguments into `allocator`.
@@ -102,9 +94,15 @@ impl RawExec {
         Exec { program, args, envs }
     }
 
-    /// Builds the C strings and pointer arrays for `cmd` in its own
-    /// allocator, and calls `f` with them.
-    pub fn from_exec<R, A: Allocator + Clone>(cmd: Exec<A>, f: impl FnOnce(Self) -> R) -> R {
+    /// Builds the C strings and pointer arrays for `cmd` in its allocator.
+    ///
+    /// They are leaked there rather than freed, so the pointers stay valid
+    /// until the allocator itself goes away. In the preload that is the
+    /// interception's per-call bump: exec runs in the child of `fork()` in
+    /// multithreaded programs, where libc malloc's lock may be held by a
+    /// thread that no longer exists, and the bump hands everything back
+    /// when the call ends.
+    pub fn from_exec<A: Allocator + Clone>(cmd: Exec<A>) -> Self {
         let mut envs = Vec::with_capacity_in(cmd.envs.len(), cmd.allocator().clone());
         for (name, value) in cmd.envs {
             let mut env = name;
@@ -115,10 +113,10 @@ impl RawExec {
             envs.push(env);
         }
 
-        Self::to_c_str(cmd.program, |prog| {
-            Self::to_c_str_array(cmd.args, |argv| {
-                Self::to_c_str_array(envs, |envp| f(Self { prog, argv, envp }))
-            })
-        })
+        Self {
+            prog: Self::into_c_str(cmd.program),
+            argv: Self::into_c_str_array(cmd.args),
+            envp: Self::into_c_str_array(envs),
+        }
     }
 }

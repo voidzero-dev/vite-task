@@ -136,16 +136,15 @@ impl<A: Allocator + Clone> Exec<A> {
                     |path| path.to_bytes().as_bstr(),
                 )
             });
-            let program = which::which(
+            self.program = which::which(
                 self.program.as_bstr(),
                 path,
                 |path| {
                     on_path_read(Path::new(OsStr::from_bytes(path)));
                     access(OsStr::from_bytes(path), AccessFlags::X_OK)
                 },
-                |program| Ok(to_vec_in(program, self.allocator().clone())),
+                self.allocator().clone(),
             )?;
-            self.program = program;
         }
 
         self.parse_shebang(on_path_read, config.shebang_options)?;
