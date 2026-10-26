@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "leave-stdout": {
+      "command": "vtt linger 30000 stdio",
+      "cache": true
+    },
+    "leave-connection": {
+      "command": "vtt linger 30000 ipc",
+      "cache": true
+    }
+  }
+}

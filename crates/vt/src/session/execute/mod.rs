@@ -15,7 +15,7 @@ use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use futures_util::future::LocalBoxFuture;
@@ -468,20 +468,13 @@ async fn run(
     //    pipe_stdio alone makes the combined future large enough to trip
     //    clippy::large_futures in every caller otherwise.
     let RunHandles { sinks, ipc } = mode.run_handles();
-    let (wait_result, ipc_server_result) = if let Some(IpcHandles { stop_accepting, driver }) = ipc
-    {
-        let child_work =
-            Box::pin(run_child(child, sinks, Some(stop_accepting), fast_fail_token.clone()));
-        let (wait_result, join_result) = tokio::join!(child_work, driver);
-        if let Err(e) = &join_result {
-            tracing::warn!(?e, "IPC server failed; cache will not be updated");
-        }
-        (wait_result, Some(join_result.map(Recorder::into_reports)))
+    let (wait_result, ipc_server_result) = if let Some(ipc) = ipc {
+        run_child_with_ipc(child, sinks, ipc, fast_fail_token.clone()).await
     } else {
         let child_work = Box::pin(run_child(child, sinks, None, fast_fail_token.clone()));
         (child_work.await, None)
     };
-    let outcome = wait_result.map_err(Report::failed)?;
+    let ChildRun { outcome, left_running, .. } = wait_result.map_err(Report::failed)?;
     let duration = start.elapsed();
 
     // Extract reports, or short-circuit when the IPC server failed. An Err
@@ -516,6 +509,7 @@ async fn run(
                 state,
                 &outcome,
                 reports.as_ref(),
+                left_running,
                 duration,
                 &cancel_token,
             )
@@ -623,44 +617,107 @@ async fn replay_cache_hit(
     Report::CacheHit
 }
 
+/// How long the runner keeps reading a task's stdout and stderr after the
+/// task's own process has exited, and then how long it keeps serving the
+/// task's runner connections. A pipe or connection still open after that is
+/// held by a process the task left running, so the runner stops waiting
+/// instead of waiting for that process to exit.
+const LEFTOVER_GRACE: Duration = Duration::from_secs(2);
+
+/// What [`run_child`] observed.
+struct ChildRun {
+    outcome: ChildOutcome,
+    /// `true` when a process the child started still held its stdout, stderr
+    /// or runner connection after [`LEFTOVER_GRACE`], so the runner stopped
+    /// waiting. Output or reports may be incomplete.
+    left_running: bool,
+}
+
+/// [`run_child`] with the IPC server's driver polled alongside it, which must
+/// make progress during the pipe drain (see step 6 in [`run`]).
+///
+/// Once the child has exited, the driver drains for at most
+/// [`LEFTOVER_GRACE`]. A client still connected then belongs to a process the
+/// task left running: the driver isn't polled again (dropping it with the
+/// run's state closes the connection), the reports are `None`, and
+/// [`ChildRun::left_running`] is set.
+async fn run_child_with_ipc(
+    child: ChildHandle,
+    sinks: Option<PipeSinks<'_>>,
+    IpcHandles { stop_accepting, driver }: IpcHandles<'_>,
+    fast_fail_token: CancellationToken,
+) -> (Result<ChildRun, ExecutionError>, Option<Result<Reports, vt_server::Error>>) {
+    let mut child_work = Box::pin(run_child(child, sinks, Some(stop_accepting), fast_fail_token));
+    let mut join_result = None;
+    let mut wait_result = loop {
+        tokio::select! {
+            wait_result = &mut child_work => break wait_result,
+            result = &mut *driver, if join_result.is_none() => join_result = Some(result),
+        }
+    };
+    if join_result.is_none() {
+        join_result = tokio::time::timeout(LEFTOVER_GRACE, driver).await.ok();
+        if join_result.is_none()
+            && let Ok(run) = &mut wait_result
+        {
+            run.left_running = true;
+        }
+    }
+    if let Some(Err(e)) = &join_result {
+        tracing::warn!(?e, "IPC server failed; cache will not be updated");
+    }
+    (wait_result, join_result.map(|result| result.map(Recorder::into_reports)))
+}
+
 /// Phase 6: drain the child's pipes (if piped) and wait for exit. A pipe
 /// failure cancels the child so the wait future kills it instead of orphaning
 /// it. After the child exits (on every path), `stop_accepting` is signalled so
 /// the IPC server stops accepting and starts draining.
+///
+/// The pipes usually close when the child exits, but a process the child
+/// started can inherit them and keep them open. Once the child has exited,
+/// they're read for [`LEFTOVER_GRACE`] at most.
 async fn run_child(
     mut child: ChildHandle,
     sinks: Option<PipeSinks<'_>>,
     stop_accepting: Option<&StopAccepting>,
     fast_fail_token: CancellationToken,
-) -> Result<ChildOutcome, ExecutionError> {
-    let pipe_result: Result<(), ExecutionError> = if let Some(sinks) = sinks {
+) -> Result<ChildRun, ExecutionError> {
+    let mut wait = child.wait;
+    let mut left_running = false;
+    let (pipe_result, wait_result) = if let Some(sinks) = sinks {
         let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
         let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-        #[expect(
-            clippy::large_futures,
-            reason = "pipe_stdio streams child I/O and creates a large future"
-        )]
-        let r = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
-        r.map_err(|err| ExecutionError::ForwardTaskProcessOutput(err.into()))
+        let mut pipes = Box::pin(pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()));
+        tokio::select! {
+            pipe_result = &mut pipes => {
+                if pipe_result.is_err() {
+                    // Pipe failed — cancel so `child.wait` kills the child
+                    // instead of orphaning it.
+                    fast_fail_token.cancel();
+                }
+                (pipe_result, wait.await)
+            }
+            wait_result = &mut wait => {
+                let pipe_result = match tokio::time::timeout(LEFTOVER_GRACE, &mut pipes).await {
+                    Ok(pipe_result) => pipe_result,
+                    Err(_elapsed) => {
+                        left_running = true;
+                        Ok(())
+                    }
+                };
+                (pipe_result, wait_result)
+            }
+        }
     } else {
-        Ok(())
+        (Ok(()), wait.await)
     };
 
-    let wait_result = match pipe_result {
-        Ok(()) => {
-            child.wait.await.map_err(|err| ExecutionError::WaitForTaskProcessExit(err.into()))
-        }
-        Err(err) => {
-            // Pipe failed — cancel so `child.wait` kills the child instead of
-            // orphaning it. Still signal the server below so it can drain.
-            fast_fail_token.cancel();
-            let _ = child.wait.await;
-            Err(err)
-        }
-    };
-
+    // Signal on every path, so the server can drain.
     if let Some(stop_accepting) = stop_accepting {
         stop_accepting.signal();
     }
-    wait_result
+    pipe_result.map_err(|err| ExecutionError::ForwardTaskProcessOutput(err.into()))?;
+    let outcome = wait_result.map_err(|err| ExecutionError::WaitForTaskProcessExit(err.into()))?;
+    Ok(ChildRun { outcome, left_running })
 }

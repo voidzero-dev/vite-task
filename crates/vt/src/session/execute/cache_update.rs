@@ -46,10 +46,15 @@ type TrackedEnvQueryValues = BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHas
 /// `finish()` call; this function never reports by itself. The guard clauses
 /// run in priority order — each names the reason the run is *not* cached, and
 /// only a run that passes them all is stored. A run cancelled by Ctrl-C or
-/// fast-fail (`cancel_token`) isn't cached.
+/// fast-fail (`cancel_token`) isn't cached, and neither is one that left a
+/// process holding its pipes or runner connection (`left_running`).
 #[expect(
     clippy::too_many_arguments,
     reason = "the run's full context is genuinely needed to decide and store the cache entry"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the guard clauses are listed in priority order in one place"
 )]
 pub(super) async fn update_cache(
     cache: &ExecutionCache,
@@ -58,6 +63,7 @@ pub(super) async fn update_cache(
     state: CacheState<'_>,
     outcome: &ChildOutcome,
     reports: Option<&Reports>,
+    left_running: bool,
     duration: Duration,
     cancel_token: &CancellationToken,
 ) -> (CacheUpdateStatus, Option<ExecutionError>) {
@@ -89,6 +95,13 @@ pub(super) async fn update_cache(
     if !outcome.exit_status.success() {
         // Execution failed with non-zero exit status — don't update cache.
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None);
+    }
+
+    if left_running {
+        // The runner stopped waiting for a process the task left running,
+        // which still held its stdout, stderr or runner connection. Output
+        // and reports from that process may be missing.
+        return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ProcessLeftRunning), None);
     }
 
     // The accesses, or `None` when the task was not tracked at all. An
