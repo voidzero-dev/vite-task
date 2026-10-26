@@ -53,8 +53,7 @@ pub struct PlanContext<'a> {
 
     indexed_task_graph: &'a IndexedTaskGraph,
 
-    /// Shared with every nested context, so each glob in synthetic commands' cache configs is
-    /// parsed once per plan.
+    /// The session's glob resolver, shared with task graph loading and every nested context.
     glob_resolver: Rc<GlobResolver>,
 
     /// Final resolved global cache config, combining the graph's config with any CLI override.
@@ -81,12 +80,17 @@ pub struct PlanContext<'a> {
 }
 
 impl<'a> PlanContext<'a> {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each argument initializes its own context field"
+    )]
     pub fn new(
         workspace_path: &'a Arc<AbsolutePath>,
         cwd: Arc<AbsolutePath>,
         envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
         callbacks: &'a mut (dyn PlanRequestParser + 'a),
         indexed_task_graph: &'a IndexedTaskGraph,
+        glob_resolver: Rc<GlobResolver>,
         resolved_global_cache: ResolvedGlobalCacheConfig,
         parent_query: Arc<TaskQuery>,
     ) -> Self {
@@ -97,7 +101,7 @@ impl<'a> PlanContext<'a> {
             callbacks,
             task_call_stack: Vec::new(),
             indexed_task_graph,
-            glob_resolver: Rc::default(),
+            glob_resolver,
             extra_args: Arc::default(),
             resolved_global_cache,
             resolved_remote_cache: None,

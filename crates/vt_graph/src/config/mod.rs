@@ -288,7 +288,7 @@ impl ResolvedGlobConfig {
 /// workspaces repeat the same patterns across packages and tasks, so loading a task graph would
 /// otherwise compile the same expressions thousands of times.
 ///
-/// Create one for each task graph load or plan and pass it by reference. It is neither `Send` nor
+/// Pass one by reference to every resolve that should share the cache. It is neither `Send` nor
 /// `Sync`, so its cache needs no lock.
 #[derive(Debug, Default)]
 pub struct GlobResolver {

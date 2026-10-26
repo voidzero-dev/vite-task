@@ -258,6 +258,7 @@ impl IndexedTaskGraph {
     pub async fn load(
         workspace_root: &WorkspaceRoot,
         config_loader: &dyn loader::UserConfigLoader,
+        glob_resolver: &GlobResolver,
     ) -> Result<Self, TaskGraphLoadError> {
         let mut task_graph = DiGraph::<TaskNode, TaskDependencyType, TaskIx>::default();
 
@@ -319,7 +320,6 @@ impl IndexedTaskGraph {
         let resolved_global_cache = ResolvedGlobalCacheConfig::resolve_from(root_cache.as_ref());
 
         let mut top_level_cache_fields = TopLevelCacheFieldsCollector::default();
-        let glob_resolver = GlobResolver::default();
 
         // Second pass: create task nodes (cache is NOT applied here; it's applied at plan time)
         for (package_index, package_dir, user_config) in package_configs {
@@ -370,7 +370,7 @@ impl IndexedTaskGraph {
                     task_user_config,
                     &package_dir,
                     &workspace_root.path,
-                    &glob_resolver,
+                    glob_resolver,
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,
@@ -404,7 +404,7 @@ impl IndexedTaskGraph {
                     &package_dir,
                     package_json_script,
                     &workspace_root.path,
-                    &glob_resolver,
+                    glob_resolver,
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,

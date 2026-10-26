@@ -10,7 +10,7 @@ pub mod plan_request;
 mod ps1_shim;
 pub mod remote_cache;
 
-use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, sync::Arc};
+use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, rc::Rc, sync::Arc};
 
 use context::PlanContext;
 pub use envs::MARKER_ENV_NAME;
@@ -206,6 +206,7 @@ pub async fn plan_query(
     envs: &Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
     plan_request_parser: &mut (dyn PlanRequestParser + '_),
     task_graph_loader: &mut (dyn TaskGraphLoader + '_),
+    glob_resolver: &Rc<GlobResolver>,
 ) -> Result<PlanResult, Error> {
     let indexed_task_graph = task_graph_loader.load_task_graph().await?;
 
@@ -219,6 +220,7 @@ pub async fn plan_query(
         Arc::clone(envs),
         plan_request_parser,
         indexed_task_graph,
+        Rc::clone(glob_resolver),
         resolved_global_cache,
         Arc::clone(&query),
     );
@@ -258,6 +260,7 @@ pub fn plan_synthetic(
     cwd: &Arc<AbsolutePath>,
     synthetic_plan_request: SyntheticPlanRequest,
     cache_key: Arc<[Str]>,
+    glob_resolver: &GlobResolver,
 ) -> Result<SpawnExecution, Error> {
     let execution_cache_key = cache_metadata::ExecutionCacheKey::ExecAPI(cache_key);
     plan_synthetic_request(
@@ -269,6 +272,6 @@ pub fn plan_synthetic(
         cwd,
         ParentCacheConfig::None,
         None,
-        &GlobResolver::default(),
+        glob_resolver,
     )
 }
