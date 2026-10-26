@@ -28,10 +28,17 @@ use crate::{
 /// exec may run in the child of `fork()`, where malloc's lock may be held by
 /// a thread that no longer exists.
 ///
+/// Ported from std's Unix implementation, for relative paths only:
+/// <https://github.com/rust-lang/rust/blob/73dc9167f1cd099e525c9ade2e068d1907b78564/library/std/src/sys/path/unix.rs#L19-L58>,
+/// with the empty-path check from its public wrapper:
+/// <https://github.com/rust-lang/rust/blob/73dc9167f1cd099e525c9ade2e068d1907b78564/library/std/src/path.rs#L4144-L4151>.
+/// Unlike `env::current_dir`, which grows its buffer, the current directory
+/// must fit in `PATH_MAX`.
+///
 /// # Errors
 ///
-/// Like [`std::path::absolute`], returns `EINVAL` for an empty path, and
-/// the error from getting the current directory.
+/// Like [`std::path::absolute`], fails for an empty path, with `EINVAL`, and
+/// with the error from getting the current directory.
 pub(crate) fn absolute<A: Allocator>(path: &Path, allocator: A) -> nix::Result<Vec<u8, A>> {
     debug_assert!(path.is_relative());
     if path.as_os_str().is_empty() {
