@@ -27,10 +27,14 @@ pub fn handle_exec<A: Allocator + Clone>(
 ) -> nix::Result<Option<PreExec>> {
     const DYLD_INSERT_LIBRARIES: &[u8] = b"DYLD_INSERT_LIBRARIES";
 
-    if command.program.first() != Some(&b'/') {
-        command.program =
+    // When the current directory can't be read, keep the program relative:
+    // relative to a directory longer than `PATH_MAX`, it isn't in `/bin` or
+    // `/usr/bin` either, and the kernel resolves it.
+    if command.program.first() != Some(&b'/')
+        && let Ok(program) =
             absolute(Path::new(OsStr::from_bytes(&command.program)), command.allocator().clone())
-                .expect("Failed to get absolute path");
+    {
+        command.program = program;
     }
 
     let program_path = Path::new(OsStr::from_bytes(&command.program));
