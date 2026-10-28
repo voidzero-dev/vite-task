@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "list-root": {
+      "command": "vtt list-dir . --ext .json",
+      "cache": true
+    }
+  }
+}

@@ -1,0 +1,34 @@
+[[e2e]]
+name = "worktree_replays_checkout_entry"
+comment = """
+A task that lists the workspace root sees a `.git` entry, which is a directory in a checkout and a file in a `git worktree`. The entry is not part of the fingerprint, so a worktree replays the entry a checkout recorded.
+"""
+steps = [
+  { argv = [
+    "vtt",
+    "mkdir",
+    ".git",
+  ], comment = "a checkout: `.git` is a directory" },
+  { argv = [
+    "vt",
+    "run",
+    "list-root",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    ".git",
+  ], comment = "remove the checkout's `.git` directory" },
+  { argv = [
+    "vtt",
+    "write-file",
+    ".git",
+    "gitdir: ../checkout/.git/worktrees/feature",
+  ], comment = "a worktree: `.git` is a file" },
+  { argv = [
+    "vt",
+    "run",
+    "list-root",
+  ], comment = "cache hit" },
+]

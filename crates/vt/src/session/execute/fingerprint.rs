@@ -363,8 +363,13 @@ fn determine_folder_change_kind<'a>(
 }
 
 /// Check if a directory entry should be ignored in fingerprinting
+///
+/// `.git` is skipped like the `.git/*` accesses dropped in
+/// [`super::tracked_accesses`]: it is a directory in a checkout and a file in a
+/// `git worktree`, so keeping it would stop either from replaying the other's
+/// cache entries.
 const fn should_ignore_entry(name: &[u8]) -> bool {
-    matches!(name, b"." | b".." | b".DS_Store") || name.eq_ignore_ascii_case(b"dist")
+    matches!(name, b"." | b".." | b".DS_Store" | b".git") || name.eq_ignore_ascii_case(b"dist")
 }
 
 /// Fingerprint a single path
