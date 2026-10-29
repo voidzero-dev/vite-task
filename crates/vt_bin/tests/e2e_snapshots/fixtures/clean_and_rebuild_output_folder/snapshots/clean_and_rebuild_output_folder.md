@@ -31,7 +31,10 @@ remove the output folder, as on a clean checkout
 ## `vt run build`
 
 ```
-$ vtt fs read src/a.txt list out rm out mkdir out write out/a.txt hi stat out ○ cache miss: 'out' removed from workspace root, executing
+$ vtt fs read src/a.txt list out rm out mkdir out write out/a.txt hi stat out ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `vtt stat-file out/a.txt`

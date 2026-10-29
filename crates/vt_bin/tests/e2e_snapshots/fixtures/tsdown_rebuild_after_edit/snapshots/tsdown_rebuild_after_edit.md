@@ -31,7 +31,10 @@ remove the output folder, as on a clean checkout
 ## `vt run build`
 
 ```
-$ tsdown --log-level error ○ cache miss: 'dist' removed from workspace root, executing
+$ tsdown --log-level error ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `vtt grep-file dist/index.mjs edited`
