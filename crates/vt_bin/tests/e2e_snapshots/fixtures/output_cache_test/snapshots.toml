@@ -155,3 +155,43 @@ steps = [
     "dist/skip.txt",
   ], comment = "skip.txt is NOT restored — it was excluded by the negative glob" },
 ]
+
+[[e2e]]
+name = "output_globs___symlinks_restored_on_cache_hit"
+comment = """
+A symbolic link matched by an output glob is archived as a link, so a cache hit restores it. Restoring also replaces a link that is already there. Not run on Windows, where a symbolic link in a task's outputs can't be cached.
+"""
+cfg = "unix"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build-with-symlink",
+  ], comment = "first run — cache miss, writes dist/store/pkg/index.js and links dist/pkg to store/pkg" },
+  { argv = [
+    "vtt",
+    "rm",
+    "-rf",
+    "dist",
+  ], comment = "delete dist/ to prove the restore is real" },
+  { argv = [
+    "vt",
+    "run",
+    "build-with-symlink",
+  ], comment = "second run — cache hit, restores the file and the link" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/pkg/index.js",
+  ], comment = "the file is reachable through the restored link" },
+  { argv = [
+    "vt",
+    "run",
+    "build-with-symlink",
+  ], comment = "third run — cache hit, restores over the link the second run left" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/pkg/index.js",
+  ], comment = "the file is still reachable through the link" },
+]

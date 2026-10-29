@@ -28,6 +28,8 @@ mod small_dev_shm;
 mod stalled_remote_cache;
 mod stat_file;
 mod stat_many;
+#[cfg(unix)]
+mod symlink;
 mod touch_file;
 mod write_file;
 
@@ -36,7 +38,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, touch-file, write-file"
+            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, symlink, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -78,6 +80,10 @@ fn main() {
             Ok(())
         }
         "stat-many" => stat_many::run(&args[2..]),
+        #[cfg(unix)]
+        "symlink" => symlink::run(&args[2..]),
+        #[cfg(not(unix))]
+        "symlink" => Err("vtt symlink is only supported on Unix".into()),
         "touch-file" => touch_file::run(&args[2..]),
         "write-file" => write_file::run(&args[2..]),
         other => {
