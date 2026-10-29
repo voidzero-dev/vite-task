@@ -418,7 +418,12 @@ fn collect_and_archive_outputs(
     let archive_name: Str = vt_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
     let archive_path = cache_dir.join(archive_name.as_str());
 
-    archive::create_output_archive(workspace_root, &sorted_files, &archive_path)?;
+    if let Err(err) = archive::create_output_archive(workspace_root, &sorted_files, &archive_path) {
+        // Best-effort: no cache entry refers to the partial archive, so
+        // nothing else would remove it.
+        let _ = std::fs::remove_file(archive_path.as_path());
+        return Err(err);
+    }
 
     Ok(Some(archive_name))
 }
