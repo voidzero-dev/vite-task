@@ -2,12 +2,16 @@
 //! bytes; the caller decides what they contain.
 
 pub mod auth;
+mod telemetry;
+#[cfg(test)]
+mod telemetry_tests;
 #[cfg(test)]
 mod test_server;
 
 use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
+use opentelemetry::{global::BoxedTracer, trace::Tracer};
 use reqwest::{
     Response, StatusCode,
     header::{CONTENT_TYPE, HeaderMap},
@@ -18,7 +22,10 @@ use url::{ParseError, Url};
 use vt_path::AbsolutePath;
 use vt_str::Str;
 
-use crate::auth::{Auth, AuthError, Operation};
+use crate::{
+    auth::{Auth, AuthError, Operation},
+    telemetry::RequestSpan,
+};
 
 /// Time allowed to establish a connection, including the TLS handshake.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -72,6 +79,7 @@ pub struct ServerMessage(Str);
 #[derive(Debug)]
 pub struct Download {
     response: Response,
+    span: Option<RequestSpan>,
 }
 
 impl Download {
@@ -82,7 +90,11 @@ impl Download {
     /// Returns an error if the rest of the blob can't be read, for example
     /// because the connection closes before it all arrives.
     pub async fn chunk(&mut self) -> Result<Option<Bytes>, Error> {
-        self.response.chunk().await.map_err(network_error)
+        let result = self.response.chunk().await.map_err(network_error);
+        if !matches!(&result, Ok(Some(_))) {
+            return RequestSpan::finish(self.span.take(), result);
+        }
+        result
     }
 }
 
@@ -135,6 +147,7 @@ pub enum Fetched {
 pub struct Client {
     http: reqwest::Client,
     auth: Arc<dyn Auth>,
+    tracer: Option<Arc<BoxedTracer>>,
     fetch_url: Url,
     store_url: Url,
     /// `{endpoint}/blob`, to which each download appends a blob ID.
@@ -168,7 +181,20 @@ impl Client {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(Error::HttpClient)?;
-        Ok(Self { http, auth, fetch_url, store_url, blob_url })
+        Ok(Self { http, auth, tracer: None, fetch_url, store_url, blob_url })
+    }
+
+    /// Export HTTP client spans through the supplied tracer and propagate
+    /// their W3C trace context to the cache server. The caller owns flushing
+    /// the tracer's provider before exiting.
+    #[must_use]
+    pub fn with_tracer<T>(mut self, tracer: T) -> Self
+    where
+        T: Tracer + Send + Sync + 'static,
+        T::Span: Send + Sync + 'static,
+    {
+        self.tracer = Some(Arc::new(BoxedTracer::new(Box::new(tracer))));
+        self
     }
 
     async fn auth_headers(&self, operation: Operation) -> Result<HeaderMap, Error> {
@@ -185,25 +211,39 @@ impl Client {
     /// fails, the server responds with a status other than 200 or 404, or the
     /// body of a 200 response isn't an exact or fallback match.
     pub async fn fetch(&self, key: &[u8], secondary_key: &[u8]) -> Result<Option<Fetched>, Error> {
-        let headers = self.auth_headers(Operation::Fetch).await?;
+        let mut headers = self.auth_headers(Operation::Fetch).await?;
         let body = encode_cbor(&FetchRequest { key, secondary_key });
-        let response = self
-            .http
-            .post(self.fetch_url.clone())
-            .headers(headers)
-            .header(CONTENT_TYPE, "application/cbor")
-            .body(body)
-            .send()
-            .await
-            .map_err(network_error)?;
-        if response.status() == StatusCode::NOT_FOUND {
-            // Read the body so the connection can be reused. It doesn't matter
-            // if that fails, because the status alone is the answer.
-            let _ = response.bytes().await;
-            return Ok(None);
+        let span = RequestSpan::start(
+            self.tracer.as_deref(),
+            "POST",
+            "fetch",
+            &self.fetch_url,
+            &mut headers,
+        );
+        let result = async {
+            let response = self
+                .http
+                .post(self.fetch_url.clone())
+                .headers(headers)
+                .header(CONTENT_TYPE, "application/cbor")
+                .body(body)
+                .send()
+                .await
+                .map_err(network_error)?;
+            if let Some(span) = &span {
+                span.response(&response);
+            }
+            if response.status() == StatusCode::NOT_FOUND {
+                // A cache miss is successful protocol behavior. Read the body
+                // for connection reuse, without marking the span as failed.
+                let _ = response.bytes().await;
+                return Ok(None);
+            }
+            let body = check_status(response).await?.bytes().await.map_err(network_error)?;
+            decode_fetched(&body).map(Some)
         }
-        let body = check_status(response).await?.bytes().await.map_err(network_error)?;
-        decode_fetched(&body).map(Some)
+        .await;
+        RequestSpan::finish(span, result)
     }
 
     /// Start downloading the blob `blob_id` with
@@ -217,9 +257,21 @@ impl Client {
     pub async fn download(&self, blob_id: &str) -> Result<Download, Error> {
         let mut url = self.blob_url.clone();
         url.path_segments_mut().map_err(|()| Error::InvalidEndpoint(None))?.push(blob_id);
-        let headers = self.auth_headers(Operation::Download).await?;
-        let response = self.http.get(url).headers(headers).send().await.map_err(network_error)?;
-        Ok(Download { response: check_status(response).await? })
+        let mut headers = self.auth_headers(Operation::Download).await?;
+        let span = RequestSpan::start(self.tracer.as_deref(), "GET", "blob", &url, &mut headers);
+        let result = async {
+            let response =
+                self.http.get(url).headers(headers).send().await.map_err(network_error)?;
+            if let Some(span) = &span {
+                span.response(&response);
+            }
+            check_status(response).await
+        }
+        .await;
+        match result {
+            Ok(response) => Ok(Download { response, span }),
+            Err(error) => RequestSpan::finish(span, Err(error)),
+        }
     }
 
     /// Store `value` under `key` with `POST {endpoint}/store`, uploading the
@@ -238,24 +290,38 @@ impl Client {
         value: &[u8],
         blob: Option<&AbsolutePath>,
     ) -> Result<(), Error> {
-        let headers = self.auth_headers(Operation::Store).await?;
+        let mut headers = self.auth_headers(Operation::Store).await?;
         let metadata = StoreMetadata { key, secondary_key, value };
         let mut form = Form::new().part("metadata", metadata_part(&metadata));
         if let Some(blob) = blob {
             form = form.part("blob", blob_part(blob).await?);
         }
-        let response = self
-            .http
-            .post(self.store_url.clone())
-            .headers(headers)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(network_error)?;
-        // The response's blob ID isn't needed. Read the body anyway, so the
-        // connection can be reused.
-        check_status(response).await?.bytes().await.map_err(network_error)?;
-        Ok(())
+        let span = RequestSpan::start(
+            self.tracer.as_deref(),
+            "POST",
+            "store",
+            &self.store_url,
+            &mut headers,
+        );
+        let result = async {
+            let response = self
+                .http
+                .post(self.store_url.clone())
+                .headers(headers)
+                .multipart(form)
+                .send()
+                .await
+                .map_err(network_error)?;
+            if let Some(span) = &span {
+                span.response(&response);
+            }
+            // The response's blob ID isn't needed. Read the body anyway, so
+            // the connection can be reused.
+            check_status(response).await?.bytes().await.map_err(network_error)?;
+            Ok(())
+        }
+        .await;
+        RequestSpan::finish(span, result)
     }
 }
 

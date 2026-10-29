@@ -2,6 +2,7 @@ mod cache;
 mod event;
 mod execute;
 pub(crate) mod reporter;
+mod telemetry;
 
 // Re-export types that are part of the public API
 use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, rc::Rc, sync::Arc};
@@ -17,6 +18,7 @@ use reporter::{
     summary::{LastRunSummary, ReadSummaryError, format_full_summary},
 };
 use rustc_hash::FxHashMap;
+use telemetry::Telemetry;
 use vt_casefold::EnvName;
 use vt_graph::{
     IndexedTaskGraph, TaskGraph, TaskGraphLoadError,
@@ -185,6 +187,7 @@ pub struct Session<'a> {
     /// Used by `cache clean` to remove every version's cache (and any leftover
     /// from a pre-versioned layout) in one shot.
     cache_root: AbsolutePathBuf,
+    telemetry: Option<Telemetry>,
 }
 
 fn get_cache_path_of_workspace(workspace_root: &AbsolutePath) -> AbsolutePathBuf {
@@ -268,6 +271,7 @@ impl<'a> Session<'a> {
             cache: OnceCell::new(),
             cache_path,
             cache_root,
+            telemetry: Telemetry::from_environment(),
         })
     }
 
@@ -279,14 +283,18 @@ impl<'a> Session<'a> {
     /// process with it.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn main(mut self, command: Command) -> ExitStatus {
-        match self.main_inner(command).await {
+        let status = match self.main_inner(command).await {
             Ok(()) => ExitStatus::SUCCESS,
             Err(SessionError::EarlyExit(status)) => status,
             Err(SessionError::Anyhow(err)) => {
                 print_error(&err);
                 ExitStatus::FAILURE
             }
+        };
+        if let Some(telemetry) = self.telemetry.take() {
+            telemetry.shutdown().await;
         }
+        status
     }
 
     /// # Panics
@@ -621,7 +629,11 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if the cache database cannot be loaded or created.
     pub fn cache(&self) -> anyhow::Result<&ExecutionCache> {
-        self.cache.get_or_try_init(|| ExecutionCache::load_from_path(&self.cache_path))
+        self.cache.get_or_try_init(|| {
+            ExecutionCache::load_from_path(&self.cache_path).map(|cache| {
+                cache.with_remote_tracer(self.telemetry.as_ref().map(Telemetry::tracer))
+            })
+        })
     }
 
     pub fn workspace_path(&self) -> Arc<AbsolutePath> {

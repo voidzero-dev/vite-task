@@ -14,6 +14,14 @@ Client for the [remote cache server API](https://github.com/voidzero-dev/vite-ta
 
 `Client::store` sends a multipart request: a CBOR `metadata` part with the key, secondary key, and value as byte strings, and an optional `blob` part streamed from a file. The response body isn't decoded.
 
+`Client::with_tracer` adds OpenTelemetry client spans and sends W3C trace
+context with each request. The supplied tracer's owner must flush its provider
+before exiting. Download spans remain open through the body stream and end
+when it is consumed, fails, or is dropped. A fetch's normal 404 miss is not an
+error. Spans omit endpoint paths, queries, credentials, keys, payloads and
+error response messages. The `vp run` session composes its optional SDK
+exporter through this capability; see [remote cache tracing](../vt/README.md#remote-cache-tracing).
+
 Only HTTP 200 counts as success for every operation, except that a fetch also accepts 404 as no match. Redirects aren't followed, so a redirect fails like any other status.
 
 reqwest configures TLS. It uses the process's default rustls crypto provider, which the client installs as ring unless one is already installed, and verifies certificates with the operating system's verifier. HTTPS requests use HTTP/2 if the server accepts it during the TLS handshake and HTTP/1.1 otherwise. HTTP endpoints always use HTTP/1.1. Requests go through the proxy set in `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY`, except for hosts in `NO_PROXY`. Without those variables, the system proxy settings are used on macOS and Windows. Connections time out after 10 seconds. Reads time out after 60 seconds, and until the response headers arrive, that limit also covers sending the request.

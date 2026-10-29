@@ -306,6 +306,14 @@ fn enable_wal(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 impl ExecutionCache {
+    pub(super) fn with_remote_tracer(
+        mut self,
+        tracer: Option<opentelemetry_sdk::trace::SdkTracer>,
+    ) -> Self {
+        self.remote_clients = self.remote_clients.with_tracer(tracer);
+        self
+    }
+
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
         tracing::info!("Creating task cache directory at {}", path.as_path().display());

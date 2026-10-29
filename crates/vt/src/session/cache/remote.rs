@@ -148,9 +148,18 @@ struct ClientKey {
 #[derive(Debug, Default)]
 pub struct RemoteClients {
     clients: Mutex<FxHashMap<ClientKey, Arc<Client>>>,
+    tracer: Option<opentelemetry_sdk::trace::SdkTracer>,
 }
 
 impl RemoteClients {
+    pub(super) fn with_tracer(
+        mut self,
+        tracer: Option<opentelemetry_sdk::trace::SdkTracer>,
+    ) -> Self {
+        self.tracer = tracer;
+        self
+    }
+
     fn client(
         &self,
         remote_config: &ResolvedRemoteCacheConfig,
@@ -161,7 +170,11 @@ impl RemoteClients {
         if let Some(client) = clients.get(&key) {
             return Ok(Arc::clone(client));
         }
-        let client = Arc::new(Client::new(&remote_config.url, build_auth(&remote_config.auth))?);
+        let client = Client::new(&remote_config.url, build_auth(&remote_config.auth))?;
+        let client = Arc::new(match &self.tracer {
+            Some(tracer) => client.with_tracer(tracer.clone()),
+            None => client,
+        });
         clients.insert(key, Arc::clone(&client));
         drop(clients);
         Ok(client)

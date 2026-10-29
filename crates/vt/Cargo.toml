@@ -22,6 +22,9 @@ ctrlc = { workspace = true }
 derive_more = { workspace = true, features = ["debug", "from"] }
 futures-util = { workspace = true }
 once_cell = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
 owo-colors = { workspace = true, features = ["supports-colors"] }
 petgraph = { workspace = true }
 vt_pty_terminal_test_client = { workspace = true }
