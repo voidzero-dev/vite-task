@@ -248,6 +248,18 @@ If the file is temporary or shouldn't affect caching, exclude it from both `inpu
 
 For a file outside the package directory, use the object form with `"base": "workspace"`.
 
+### Cache Directories (`CACHEDIR.TAG`)
+
+A directory that contains a `CACHEDIR.TAG` file following the [Cache Directory Tagging spec](https://bford.info/cachedir/) is treated as a cache directory. Reads of files anywhere inside it are left out of automatic input tracking, so a tool that reads and rewrites its own cache on every run (such as a test runner's results cache) doesn't stop the task from being cached. Files the task writes there are still outputs and are restored on a cache hit. Cargo already writes this tag in `target/`.
+
+The tag must be a regular file whose content starts with exactly:
+
+```text
+Signature: 8a477f597d28d172789f06886806bc55
+```
+
+Only directories inside the workspace are checked. Explicit `input` globs still match files inside a tagged directory.
+
 ### Cache Disabled
 
 `input` is part of the `cache` object, so it cannot be used when caching is disabled with `cache: false`.

@@ -1,4 +1,6 @@
 mod cache_update;
+#[cfg(fspy)]
+mod cachedir_tag;
 pub mod fingerprint;
 pub mod glob;
 mod hash;
