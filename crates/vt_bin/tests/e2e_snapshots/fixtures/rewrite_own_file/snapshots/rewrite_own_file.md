@@ -8,9 +8,6 @@ no state.txt yet: the task probes for it and writes it
 
 ```
 $ vtt fs read state.txt write state.txt v1
-
----
-vt run: rewrite-own-file#rewrite not cached because it modified its inputs. (Run `vt run --last-details` for full details)
 ```
 
 ## `vt run rewrite`
@@ -18,10 +15,10 @@ vt run: rewrite-own-file#rewrite not cached because it modified its inputs. (Run
 state.txt is as the task left it
 
 ```
-$ vtt fs read state.txt write state.txt v1
+$ vtt fs read state.txt write state.txt v1 ◉ cache hit, replaying
 
 ---
-vt run: rewrite-own-file#rewrite not cached because it modified its inputs. (Run `vt run --last-details` for full details)
+vt run: cache hit.
 ```
 
 ## `vtt rm state.txt`
@@ -34,10 +31,10 @@ remove the file the task wrote, as on a clean checkout
 ## `vt run rewrite`
 
 ```
-$ vtt fs read state.txt write state.txt v1
+$ vtt fs read state.txt write state.txt v1 ◉ cache hit, replaying
 
 ---
-vt run: rewrite-own-file#rewrite not cached because it modified its inputs. (Run `vt run --last-details` for full details)
+vt run: cache hit.
 ```
 
 ## `vtt print-file state.txt`
@@ -56,8 +53,5 @@ a file that is there must be as the task left it
 ## `vt run rewrite`
 
 ```
-$ vtt fs read state.txt write state.txt v1
-
----
-vt run: rewrite-own-file#rewrite not cached because it modified its inputs. (Run `vt run --last-details` for full details)
+$ vtt fs read state.txt write state.txt v1 ○ cache miss: 'state.txt' modified, executing
 ```

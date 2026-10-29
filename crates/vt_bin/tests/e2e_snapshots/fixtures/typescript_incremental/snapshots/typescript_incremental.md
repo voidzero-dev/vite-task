@@ -8,9 +8,6 @@ no tsconfig.tsbuildinfo yet: tsc probes for it and writes it
 
 ```
 $ tsc --incremental --noEmit
-
----
-vt run: typescript-incremental#typecheck not cached because it modified its inputs. (Run `vt run --last-details` for full details)
 ```
 
 ## `vt run typecheck`
@@ -18,7 +15,10 @@ vt run: typescript-incremental#typecheck not cached because it modified its inpu
 nothing changed
 
 ```
-$ tsc --incremental --noEmit
+$ tsc --incremental --noEmit ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `vtt rm tsconfig.tsbuildinfo`
@@ -31,10 +31,10 @@ remove the build info, as on a clean checkout
 ## `vt run typecheck`
 
 ```
-$ tsc --incremental --noEmit ○ cache miss: 'tsconfig.tsbuildinfo' removed from workspace root, executing
+$ tsc --incremental --noEmit ◉ cache hit, replaying
 
 ---
-vt run: typescript-incremental#typecheck not cached because it modified its inputs. (Run `vt run --last-details` for full details)
+vt run: cache hit.
 ```
 
 ## `vtt stat-file tsconfig.tsbuildinfo`
@@ -52,7 +52,4 @@ tsconfig.tsbuildinfo: exists
 
 ```
 $ tsc --incremental --noEmit ○ cache miss: 'src/main.ts' modified, executing
-
----
-vt run: typescript-incremental#typecheck not cached because it modified its inputs. (Run `vt run --last-details` for full details)
 ```
