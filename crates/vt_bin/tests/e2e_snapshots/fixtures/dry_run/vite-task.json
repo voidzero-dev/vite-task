@@ -1,0 +1,21 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt print-file src.txt",
+      "cache": { "input": ["src.txt"] }
+    },
+    "test": {
+      "command": "vtt print-file test.txt",
+      "dependsOn": ["build"],
+      "cache": { "input": ["test.txt"] }
+    },
+    "both": {
+      "command": "vtt print-file src.txt && vtt print-file test.txt",
+      "cache": { "input": ["*.txt"] }
+    },
+    "uncached": {
+      "command": "vtt print uncached",
+      "cache": false
+    }
+  }
+}

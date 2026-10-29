@@ -23,6 +23,7 @@
 //! Additionally, [`plain::PlainReporter`] is a standalone [`LeafExecutionReporter`] for
 //! single-leaf synthetic executions (e.g., `execute_synthetic`).
 
+pub mod dry_run;
 mod grouped;
 mod interleaved;
 mod labeled;
