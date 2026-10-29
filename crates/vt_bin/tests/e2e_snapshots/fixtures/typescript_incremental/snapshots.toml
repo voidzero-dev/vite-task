@@ -1,0 +1,48 @@
+[[e2e]]
+name = "typescript_incremental"
+comment = """
+TypeScript 7's `tsc --incremental` keeps what it learned in `tsconfig.tsbuildinfo`. A run without the file probes for it and writes it, a run after an edit reads and rewrites it, and a run with nothing changed only reads it.
+"""
+ignore = true
+# On Windows, tsc also lists the package root, so removing `tsconfig.tsbuildinfo` misses there
+# until listings leave out the files a task wrote.
+cfg = 'unix'
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "typecheck",
+  ], comment = "no tsconfig.tsbuildinfo yet: tsc probes for it and writes it" },
+  { argv = [
+    "vt",
+    "run",
+    "typecheck",
+  ], comment = "nothing changed" },
+  { argv = [
+    "vtt",
+    "rm",
+    "tsconfig.tsbuildinfo",
+  ], comment = "remove the build info, as on a clean checkout" },
+  [
+    "vt",
+    "run",
+    "typecheck",
+  ],
+  [
+    "vtt",
+    "stat-file",
+    "tsconfig.tsbuildinfo",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "src/main.ts",
+    "initial",
+    "modified",
+  ],
+  [
+    "vt",
+    "run",
+    "typecheck",
+  ],
+]
