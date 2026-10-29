@@ -3,6 +3,7 @@ node_modules
 # Fixture node_modules that stand in for real npm installs in snapshot tests.
 # `**` covers nested monorepo layouts (e.g. packages/foo/node_modules/.bin).
 !crates/vt_plan/tests/plan_snapshots/fixtures/*/**/node_modules
+!crates/vt_bin/tests/e2e_snapshots/fixtures/nitro_build_cache/**/node_modules
 dist
 .claude/settings.local.json
 *.tsbuildinfo
