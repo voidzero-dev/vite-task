@@ -23,6 +23,11 @@ pub use vt_subprocess_test::command_for_fn;
 /// # Panics
 ///
 /// Panics if the path was not accessed, or was accessed in another way.
+#[expect(
+    clippy::allow_attributes,
+    reason = "allow attribute required for conditionally-used helper"
+)]
+#[allow(dead_code, reason = "not all test files use this helper")]
 #[track_caller]
 pub fn assert_contains<'a>(
     accesses: &'a PathAccessIterable,

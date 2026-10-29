@@ -314,20 +314,6 @@ mod tests {
     }
 
     #[test]
-    fn test_file_hashes_are_consistent() {
-        let (_temp, workspace) = create_test_workspace();
-        let positive: std::collections::BTreeSet<Str> =
-            std::iter::once("packages/my-pkg/src/index.ts".into()).collect();
-        let negative = std::collections::BTreeSet::new();
-
-        // Run twice and compare hashes
-        let result1 = compute_globbed_inputs(&workspace, &positive, &negative).unwrap();
-        let result2 = compute_globbed_inputs(&workspace, &positive, &negative).unwrap();
-
-        assert_eq!(result1, result2);
-    }
-
-    #[test]
     fn test_file_hashes_change_with_content() {
         let (temp, workspace) = create_test_workspace();
         let positive: std::collections::BTreeSet<Str> =

@@ -7,7 +7,7 @@ mod specifier;
 use std::{convert::Infallible, sync::Arc};
 
 use config::{
-    ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
+    GlobResolver, ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
     UserTaskDefinition, user::TopLevelCacheFieldsCollector,
 };
 use petgraph::{
@@ -258,6 +258,7 @@ impl IndexedTaskGraph {
     pub async fn load(
         workspace_root: &WorkspaceRoot,
         config_loader: &dyn loader::UserConfigLoader,
+        glob_resolver: &GlobResolver,
     ) -> Result<Self, TaskGraphLoadError> {
         let mut task_graph = DiGraph::<TaskNode, TaskDependencyType, TaskIx>::default();
 
@@ -369,6 +370,7 @@ impl IndexedTaskGraph {
                     task_user_config,
                     &package_dir,
                     &workspace_root.path,
+                    glob_resolver,
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,
@@ -402,6 +404,7 @@ impl IndexedTaskGraph {
                     &package_dir,
                     package_json_script,
                     &workspace_root.path,
+                    glob_resolver,
                 )
                 .map_err(|err| TaskGraphLoadError::ResolveConfigError {
                     error: err,

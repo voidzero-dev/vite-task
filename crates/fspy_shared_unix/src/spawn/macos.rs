@@ -1,14 +1,11 @@
-use std::{
-    convert::Infallible,
-    ffi::OsStr,
-    os::unix::ffi::{OsStrExt, OsStringExt},
-    path::{Path, absolute},
-};
+use std::{convert::Infallible, ffi::OsStr, os::unix::ffi::OsStrExt, path::Path};
 
+use allocator_api2::alloc::Allocator;
 use phf::{Set, phf_set};
 
+use super::absolute;
 use crate::{
-    exec::{Exec, append_path_env, ensure_env},
+    exec::{Exec, append_path_env, ensure_env, to_vec_in},
     payload::{EncodedPayload, PAYLOAD_ENV_NAME},
 };
 
@@ -24,16 +21,16 @@ impl PreExec {
     }
 }
 
-pub fn handle_exec(
-    command: &mut Exec,
+pub fn handle_exec<A: Allocator + Clone>(
+    command: &mut Exec<A>,
     encoded_payload: &EncodedPayload,
 ) -> nix::Result<Option<PreExec>> {
     const DYLD_INSERT_LIBRARIES: &[u8] = b"DYLD_INSERT_LIBRARIES";
 
     if command.program.first() != Some(&b'/') {
-        let program =
-            absolute(OsStr::from_bytes(&command.program)).expect("Failed to get absolute path");
-        command.program = program.into_os_string().into_vec().into();
+        command.program =
+            absolute(Path::new(OsStr::from_bytes(&command.program)), command.allocator().clone())
+                .expect("Failed to get absolute path");
     }
 
     let program_path = Path::new(OsStr::from_bytes(&command.program));
@@ -44,10 +41,16 @@ pub fn handle_exec(
         if matches!(parent.as_os_str().as_bytes(), b"/bin" | b"/usr/bin") {
             let artifacts = &encoded_payload.payload.artifacts;
             if matches!(file_name.as_bytes(), b"sh" | b"bash") {
-                command.program = artifacts.bash_path.as_os_str().as_bytes().into();
+                command.program = to_vec_in(
+                    artifacts.bash_path.as_os_str().as_bytes(),
+                    command.allocator().clone(),
+                );
                 true
             } else if COREUTILS_FUNCTIONS.contains(file_name.as_bytes()) {
-                command.program = artifacts.coreutils_path.as_os_str().as_bytes().into();
+                command.program = to_vec_in(
+                    artifacts.coreutils_path.as_os_str().as_bytes(),
+                    command.allocator().clone(),
+                );
                 true
             } else {
                 false

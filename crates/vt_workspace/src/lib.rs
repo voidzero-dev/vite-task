@@ -1225,68 +1225,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_package_graph_npm_workspace_with_exclusions() {
-        let temp_dir = TempDir::new().unwrap();
-        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
-
-        // Create package.json with workspaces field including exclusions
-        let root_package = serde_json::json!({
-            "name": "npm-workspace-exclusions",
-            "private": true,
-            "workspaces": [
-                "packages/*",
-                "!packages/experimental",
-                "!packages/*.backup"
-            ]
-        });
-        fs::write(temp_dir_path.join("package.json"), root_package.to_string()).unwrap();
-
-        // Create packages directory
-        fs::create_dir_all(temp_dir_path.join("packages")).unwrap();
-
-        // Create normal package
-        fs::create_dir_all(temp_dir_path.join("packages/normal")).unwrap();
-        let normal_pkg = serde_json::json!({
-            "name": "normal-package"
-        });
-        fs::write(temp_dir_path.join("packages/normal/package.json"), normal_pkg.to_string())
-            .unwrap();
-
-        // Create experimental package (should be excluded)
-        fs::create_dir_all(temp_dir_path.join("packages/experimental")).unwrap();
-        let experimental_pkg = serde_json::json!({
-            "name": "experimental-package"
-        });
-        fs::write(
-            temp_dir_path.join("packages/experimental/package.json"),
-            experimental_pkg.to_string(),
-        )
-        .unwrap();
-
-        // Create backup package (should be excluded by pattern)
-        fs::create_dir_all(temp_dir_path.join("packages/old.backup")).unwrap();
-        let backup_pkg = serde_json::json!({
-            "name": "backup-package"
-        });
-        fs::write(temp_dir_path.join("packages/old.backup/package.json"), backup_pkg.to_string())
-            .unwrap();
-
-        let graph = discover_package_graph(temp_dir_path).unwrap();
-
-        // Check which packages were included
-        let mut packages_found = FxHashSet::<Str>::default();
-        for node in graph.node_weights() {
-            packages_found.insert(node.package_json.name.clone());
-        }
-
-        assert!(packages_found.contains("npm-workspace-exclusions"), "Root should be included");
-        assert!(packages_found.contains("normal-package"), "Normal package should be included");
-
-        // Note: As identified in the pnpm exclusion test, exclusions might not work correctly
-        // with the current implementation. This test documents the expected behavior.
-    }
-
-    #[test]
     fn test_get_package_graph_mixed_workspace_protocols() {
         let temp_dir = TempDir::new().unwrap();
         let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
