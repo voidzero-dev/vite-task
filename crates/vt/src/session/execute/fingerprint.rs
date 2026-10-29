@@ -117,8 +117,10 @@ impl PostRunFingerprint {
     /// Negative glob filtering is done upstream (see
     /// [`super::tracked_accesses::TrackedPathAccesses::from_raw`]).
     /// Paths already present in `globbed_inputs` are skipped — they are
-    /// already tracked by the prerun glob fingerprint. Every other path is
-    /// fingerprinted as the task left it, including a file the task rewrote.
+    /// already tracked by the prerun glob fingerprint. Folders holding only
+    /// what the task can rebuild are skipped too: a hit restores the files in
+    /// them. Every other path is fingerprinted as the task left it, including
+    /// a file the task rewrote.
     ///
     /// # Arguments
     /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
@@ -138,7 +140,9 @@ impl PostRunFingerprint {
     ) -> anyhow::Result<Self> {
         let inferred_inputs = inferred_path_reads
             .par_iter()
-            .filter(|(path, _)| !globbed_inputs.contains_key(*path))
+            .filter(|(path, _)| {
+                !globbed_inputs.contains_key(*path) && !rebuildable.is_rebuildable_folder(path)
+            })
             .map(|(relative_path, path_read)| {
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
                 let fingerprint = fingerprint_path(&full_path, *path_read)?;
@@ -681,7 +685,7 @@ mod tests {
         let create = |written| {
             PostRunFingerprint::create(
                 &path_reads,
-                &Rebuildable::new(written),
+                &Rebuildable::new(written, &workspace_root),
                 &workspace_root,
                 &BTreeMap::new(),
                 BTreeMap::new(),
@@ -707,5 +711,56 @@ mod tests {
             validate(&written),
             Some(PostRunMismatch::Input { kind: InputChangeKind::ContentModified, .. })
         ));
+    }
+
+    #[test]
+    fn create_skips_folders_holding_only_written_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        for dir in ["out/sub", "mixed", "holds_empty/empty"] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        let written = ["out/a.txt", "out/sub/b.txt", "mixed/a.txt", "holds_empty/a.txt"];
+        for file in written.iter().copied().chain(["out/.DS_Store", "mixed/notes.txt"]) {
+            std::fs::write(workspace_root.join(file).as_path(), "x").unwrap();
+        }
+
+        let path_reads = ["out", "out/sub", "mixed", "holds_empty"]
+            .into_iter()
+            .map(|dir| (rel(dir), PathRead { read_dir_entries: true }))
+            .collect();
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &Rebuildable::new(written.into_iter().map(rel).collect(), &workspace_root),
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+
+        let mut fingerprinted: Vec<&str> =
+            fingerprint.inferred_inputs.keys().map(|path| path.as_str()).collect();
+        fingerprinted.sort_unstable();
+        assert_eq!(fingerprinted, ["holds_empty", "mixed"]);
+    }
+
+    #[test]
+    fn folders_gone_after_the_run_play_no_part() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        std::fs::create_dir(workspace_root.join("out").as_path()).unwrap();
+        std::fs::write(workspace_root.join("out/a.txt").as_path(), "x").unwrap();
+
+        // `out/tmp` and the file the task wrote in it are gone after the run,
+        // like Astro's `dist/.prerender`.
+        let rebuildable = Rebuildable::new(
+            ["out/a.txt", "out/tmp/b.txt"].into_iter().map(rel).collect(),
+            &workspace_root,
+        );
+        assert!(rebuildable.is_rebuildable_folder(&rel("out")));
+        assert!(!rebuildable.is_rebuildable_folder(&rel("out/tmp")));
     }
 }

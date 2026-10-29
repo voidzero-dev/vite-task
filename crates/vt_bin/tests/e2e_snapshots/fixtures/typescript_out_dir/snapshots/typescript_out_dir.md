@@ -18,7 +18,10 @@ remove the output folder, as on a clean checkout
 ## `vt run build`
 
 ```
-$ tsc ○ cache miss: 'dist' removed from workspace root, executing
+$ tsc ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `vtt stat-file dist/main.js`
