@@ -18,5 +18,8 @@ remove the output folder, as on a clean checkout
 ## `vt run build`
 
 ```
-$ tsc ○ cache miss: 'lib' removed from workspace root, executing
+$ tsc ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
