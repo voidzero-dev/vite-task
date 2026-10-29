@@ -97,6 +97,11 @@ pub fn redact_e2e_output(
     let vitest_version_regex = regex::Regex::new(r"(?m)^ RUN  v\d+\.\d+\.\d+").unwrap();
     output = vitest_version_regex.replace_all(&output, " RUN  v<version>").into_owned();
 
+    // Redact SHA-1 hex digests, such as the names of Vitest's `fsModuleCache`
+    // entries, which hash the module's absolute path.
+    let sha1_regex = regex::Regex::new(r"\b[0-9a-f]{40}\b").unwrap();
+    output = sha1_regex.replace_all(&output, "<sha1>").into_owned();
+
     // Normalize the ", <duration> saved" suffix in cache hit summaries.
     // When tools are fast (e.g., Rust binaries), saved time may be 0ns and the
     // runner omits the suffix entirely. Stripping it ensures stable snapshots.

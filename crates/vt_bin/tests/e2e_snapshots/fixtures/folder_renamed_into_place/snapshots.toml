@@ -1,0 +1,28 @@
+[[e2e]]
+name = "folder_renamed_into_place"
+comment = """
+The task writes `tmp/a.js`, renames `tmp` to `deps` and reads `deps/a.js` back, like Vite's dependency optimizer renaming `deps_temp_*` to `deps`.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    "deps",
+  ], comment = "remove the renamed folder, as on a clean checkout" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "stat-file",
+    "deps/a.js",
+  ],
+]
