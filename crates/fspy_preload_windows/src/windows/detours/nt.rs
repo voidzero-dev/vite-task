@@ -269,8 +269,12 @@ static DETOUR_NT_QUERY_ATTRIBUTES_FILE: Detour<
                 object_attributes: POBJECT_ATTRIBUTES,
                 file_information: PFILE_BASIC_INFORMATION,
             ) -> HFILE {
-                // SAFETY: intercepting attribute query to record read access
-                unsafe { handle_open(AccessMode::Read, object_attributes) };
+                // NtQueryAttributesFile returns only attributes and timestamps, not
+                // the size, and backs `GetFileAttributesW`, which Node's
+                // `fs.existsSync` calls. NtQueryFullAttributesFile returns the size
+                // too, so it stays a read.
+                // SAFETY: intercepting attribute query to record the existence probe
+                unsafe { handle_open(AccessMode::Probe, object_attributes) };
                 // SAFETY: calling the original NtQueryAttributesFile with all original arguments
                 unsafe {
                     (DETOUR_NT_QUERY_ATTRIBUTES_FILE.real())(object_attributes, file_information)

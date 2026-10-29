@@ -18,6 +18,8 @@ When `input` is omitted, vite-task automatically tracks files that the command r
 
 Files read by `tsc` are automatically tracked. **In most cases, you don't need to configure `input` at all.**
 
+A file the command only checks the existence of, for example with `fs.existsSync` on Linux and macOS, is tracked by whether it exists, not by its content. Creating or removing it invalidates the cache, but editing it doesn't, unless the command also reads it.
+
 ## Input Types
 
 ### Glob Patterns

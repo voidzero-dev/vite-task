@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "find-root": {
+      "command": "vtt exists ../../pnpm-workspace.yaml ../../lerna.json",
+      "cache": true
+    },
+    "read-manifest": {
+      "command": "vtt print-file ../../pnpm-workspace.yaml",
+      "cache": true
+    }
+  }
+}

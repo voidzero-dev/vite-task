@@ -16,7 +16,7 @@ use fspy_seccomp_unotify::{
     impl_handler,
     supervisor::handler::arg::{CStrPtr, Caller, Fd},
 };
-use fspy_shared::ipc::{PathAccess, channel::Sender};
+use fspy_shared::ipc::{AccessMode, PathAccess, channel::Sender};
 
 const PATH_MAX: usize = libc::PATH_MAX as usize;
 
@@ -42,6 +42,27 @@ impl SyscallHandler {
         path_ptr: CStrPtr,
         flags: c_int,
     ) -> io::Result<()> {
+        let mode = match flags & libc::O_ACCMODE {
+            libc::O_RDWR => AccessMode::ReadWrite,
+            libc::O_WRONLY => AccessMode::Write,
+            _ => AccessMode::Read,
+        };
+        self.handle_path(caller, dir_fd, path_ptr, mode)
+    }
+
+    fn handle_probe(&mut self, caller: Caller, dir_fd: Fd, path_ptr: CStrPtr) -> io::Result<()> {
+        self.handle_path(caller, dir_fd, path_ptr, AccessMode::Probe)
+    }
+
+    /// Records a `mode` access to the path at `path_ptr`, resolved against
+    /// `dir_fd`.
+    fn handle_path(
+        &mut self,
+        caller: Caller,
+        dir_fd: Fd,
+        path_ptr: CStrPtr,
+        mode: AccessMode,
+    ) -> io::Result<()> {
         let Some(path_len) = path_ptr.read(caller, &mut self.path_read_buf)? else {
             // Ignore paths that are too long to fit in PATH_MAX
             return Ok(());
@@ -54,12 +75,7 @@ impl SyscallHandler {
             }
             path = Cow::Owned(resolved_path);
         }
-        let path = path.as_os_str().into();
-        self.ipc_sender.send(&match flags & libc::O_ACCMODE {
-            libc::O_RDWR => PathAccess::ReadWrite(path),
-            libc::O_WRONLY => PathAccess::Write(path),
-            _ => PathAccess::Read(path),
-        });
+        self.ipc_sender.send(&mode.with_path(path.as_os_str().into()));
         Ok(())
     }
 

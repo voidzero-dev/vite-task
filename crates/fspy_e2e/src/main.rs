@@ -49,6 +49,7 @@ impl AccessCollector {
             PathAccess::Write(path) => relative(path).map(|path| format!("{path}: Write")),
             PathAccess::ReadWrite(path) => relative(path).map(|path| format!("{path}: ReadWrite")),
             PathAccess::ReadDir(path) => relative(path).map(|path| format!("{path}: ReadDir")),
+            PathAccess::Probe(path) => relative(path).map(|path| format!("{path}: Probe")),
         };
         self.accesses.extend(line);
     }

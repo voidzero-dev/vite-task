@@ -60,13 +60,33 @@ impl TrackedPathAccesses {
                         accesses.add_read(path).read_dir_entries = true;
                     }
                 }
+                PathAccess::Probe(path) => {
+                    if let Some(path) = relative_path(path) {
+                        accesses.add_probe(path);
+                    }
+                }
             }
         }
         accesses
     }
 
+    /// Records that the task checked whether `path` exists. Only its
+    /// existence is an input, unless the task also reads it.
+    fn add_probe(&mut self, path: RelativePathBuf) {
+        self.path_reads
+            .entry(path)
+            .or_insert(PathRead { read_dir_entries: false, exists_only: true });
+    }
+
+    /// Records a read of `path`. A read of a path the task also probed makes
+    /// its content an input, whichever came first.
     fn add_read(&mut self, path: RelativePathBuf) -> &mut PathRead {
-        self.path_reads.entry(path).or_insert(PathRead { read_dir_entries: false })
+        let path_read = self
+            .path_reads
+            .entry(path)
+            .or_insert(PathRead { read_dir_entries: false, exists_only: false });
+        path_read.exists_only = false;
+        path_read
     }
 }
 
@@ -128,6 +148,25 @@ mod tests {
         assert!(normalize("node_modules/.modules.yaml").is_some());
         assert!(normalize(".pnpm-workspace-state-v1.json").is_some());
         assert!(normalize("node_modules/a/.pnpm-workspace-state-v1.json").is_some());
+    }
+
+    #[test]
+    fn read_of_probed_path_tracks_content() {
+        let path = || RelativePathBuf::new("pnpm-workspace.yaml").unwrap();
+
+        let mut probed = TrackedPathAccesses::default();
+        probed.add_probe(path());
+        assert!(probed.path_reads[&path()].exists_only);
+
+        let mut probe_then_read = TrackedPathAccesses::default();
+        probe_then_read.add_probe(path());
+        probe_then_read.add_read(path());
+        assert!(!probe_then_read.path_reads[&path()].exists_only);
+
+        let mut read_then_probe = TrackedPathAccesses::default();
+        read_then_probe.add_read(path());
+        read_then_probe.add_probe(path());
+        assert!(!read_then_probe.path_reads[&path()].exists_only);
     }
 
     #[cfg(windows)]

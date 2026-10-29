@@ -108,6 +108,12 @@ async fn stat() {
 }
 
 #[test(tokio::test)]
+async fn access() {
+    let accesses = track_test_bin(&["access", "/hello"], None).await;
+    assert_contains(&accesses, Path::new("/hello"), fspy::PathAccess::Probe);
+}
+
+#[test(tokio::test)]
 async fn execve() {
     let accesses = track_test_bin(&["execve", "/hello"], None).await;
     assert_contains(&accesses, Path::new("/hello"), fspy::PathAccess::Read);

@@ -1,0 +1,72 @@
+[[e2e]]
+name = "existence_probe_content_ignored"
+comment = """
+A task that only checks whether files exist, as Vite does while looking for the workspace root, depends on whether they exist and not on their content. Editing `pnpm-workspace.yaml` keeps the cache hit, and creating or removing `lerna.json` is a cache miss.
+"""
+cwd = "packages/app"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "find-root",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "../../pnpm-workspace.yaml",
+    "vite: 8.0.0",
+    "vite: 8.0.0\n  left-pad: 1.3.0",
+  ], comment = "add an unused catalog entry" },
+  { argv = [
+    "vt",
+    "run",
+    "find-root",
+  ], comment = "cache hit" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "../../lerna.json",
+    "{}",
+  ], comment = "create a root marker" },
+  { argv = [
+    "vt",
+    "run",
+    "find-root",
+  ], comment = "cache miss: input added" },
+  { argv = [
+    "vtt",
+    "rm",
+    "../../lerna.json",
+  ], comment = "remove the root marker" },
+  { argv = [
+    "vt",
+    "run",
+    "find-root",
+  ], comment = "cache miss: input removed" },
+]
+
+[[e2e]]
+name = "existence_probe_read_tracks_content"
+comment = """
+A task that reads `pnpm-workspace.yaml` still depends on its content, so editing it is a cache miss.
+"""
+cwd = "packages/app"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "read-manifest",
+  ], comment = "cache miss" },
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "../../pnpm-workspace.yaml",
+    "vite: 8.0.0",
+    "vite: 8.0.0\n  left-pad: 1.3.0",
+  ], comment = "add an unused catalog entry" },
+  { argv = [
+    "vt",
+    "run",
+    "read-manifest",
+  ], comment = "cache miss: input modified" },
+]

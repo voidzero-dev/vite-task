@@ -1,0 +1,5 @@
+packages:
+  - packages/*
+
+catalog:
+  vite: 8.0.0

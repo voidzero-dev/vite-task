@@ -9,6 +9,7 @@
 mod barrier;
 mod check_tty;
 mod cp;
+mod exists;
 mod exit;
 mod exit_on_ctrlc;
 mod grep_file;
@@ -36,7 +37,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, touch-file, write-file"
+            "Subcommands: barrier, check-tty, cp, exists, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -48,6 +49,7 @@ fn main() {
             Ok(())
         }
         "cp" => cp::run(&args[2..]),
+        "exists" => exists::run(&args[2..]),
         "exit" => exit::run(&args[2..]),
         "exit-on-ctrlc" => exit_on_ctrlc::run(),
         "grep-file" => {

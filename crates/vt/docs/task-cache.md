@@ -198,6 +198,8 @@ Vite Task uses `fspy` to monitor file system access during task execution:
 │    • If file: Hash contents with xxHash3                     │
 │    • If directory: Record structure                          │
 │    • If missing: Mark as NotFound                            │
+│    • If only checked to exist (`access`): Record whether it  │
+│      exists and is a directory, not its content              │
 │         │                                                    │
 │         ▼                                                    │
 │  Path Fingerprint Types:                                     │
@@ -205,6 +207,7 @@ Vite Task uses `fspy` to monitor file system access during task execution:
 │    enum PathFingerprint {                                    │
 │        NotFound,                   // File doesn't exist     │
 │        FileContentHash(u64),       // xxHash3 of content     │
+│        FileExists,                 // File only checked      │
 │        Folder(Option<BTreeMap<Str, DirEntryKind>>),          │
 │    }             ▲                                           │
 │                  │                                           │
