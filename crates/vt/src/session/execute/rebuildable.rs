@@ -13,7 +13,9 @@
 //! recreates it; explicit output config can leave them out. Such folders are
 //! found after the run by climbing from the written paths through their
 //! parent folders inside the workspace, listing each one in the real file
-//! system. A written path or folder that is gone by then plays no part.
+//! system. A written path or folder that is gone by then plays no part. A
+//! listing of any other folder leaves out its entries that the task can
+//! rebuild, which a later run may find missing too.
 //!
 //! The written paths are fspy's records before output exclusions and
 //! tool-reported `ignoreOutput` paths are applied: those decide what is
@@ -57,6 +59,20 @@ impl Rebuildable {
     /// Whether `path` is a folder holding only what the task can rebuild.
     pub fn is_rebuildable_folder(&self, path: &RelativePath) -> bool {
         self.folders.contains(path)
+    }
+
+    /// Whether the task can rebuild nothing, like most lint and test tasks, so
+    /// no entry of a listing is rebuildable.
+    pub fn is_empty(&self) -> bool {
+        self.written.is_empty() && self.folders.is_empty()
+    }
+
+    /// Whether the entry `name` of the folder `dir`, itself a folder if
+    /// `is_dir`, is something the task can rebuild, so a listing of `dir` may
+    /// lack it.
+    pub fn is_rebuildable_entry(&self, dir: &RelativePath, name: &str, is_dir: bool) -> bool {
+        RelativePathBuf::new(name)
+            .is_ok_and(|name| is_rebuildable(&dir.join(name), is_dir, &self.written, &self.folders))
     }
 }
 
@@ -143,13 +159,21 @@ fn holds_only_rebuildable(
         let Ok(name) = RelativePathBuf::new(name) else {
             return Some(false);
         };
-        let path = dir.join(name);
-        let rebuildable =
-            if file_type.is_dir() { folders.contains(&path) } else { written.contains(&path) };
-        if !rebuildable {
+        if !is_rebuildable(&dir.join(name), file_type.is_dir(), written, folders) {
             return Some(false);
         }
         is_empty = false;
     }
     Some(!is_empty)
+}
+
+/// Whether the entry at `path` is rebuildable: a folder in `folders`, or a
+/// file (or symlink) in `written`.
+fn is_rebuildable(
+    path: &RelativePath,
+    is_dir: bool,
+    written: &FxHashSet<RelativePathBuf>,
+    folders: &FxHashSet<RelativePathBuf>,
+) -> bool {
+    if is_dir { folders.contains(path) } else { written.contains(path) }
 }

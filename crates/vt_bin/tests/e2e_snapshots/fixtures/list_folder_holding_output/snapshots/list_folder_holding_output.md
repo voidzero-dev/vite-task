@@ -18,7 +18,10 @@ remove the output folder, as on a clean checkout
 ## `vt run build`
 
 ```
-$ vtt fs mkdir gen write gen/a.txt hi list . ○ cache miss: 'gen' removed from workspace root, executing
+$ vtt fs mkdir gen write gen/a.txt hi list . ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `vtt write-file notes.txt x`

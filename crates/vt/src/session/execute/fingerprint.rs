@@ -4,7 +4,7 @@
 //! fingerprints of file system state after task execution.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ffi::OsStr,
     fs::File,
     io::{self, BufRead},
@@ -99,8 +99,19 @@ pub enum PathFingerprint {
     /// Directory with optional entry listing.
     /// `Folder(None)` means the directory was opened but entries were not read
     /// (e.g., for `openat` calls).
-    /// `Folder(Some(_))` contains the directory entries sorted by name.
-    Folder(Option<BTreeMap<Str, DirEntryKind>>),
+    /// `Folder(Some(_))` contains the directory entries.
+    Folder(Option<DirListing>),
+}
+
+/// The entries of a listed directory.
+#[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+pub struct DirListing {
+    /// The entries sorted by name, without those in `ignored_entries`.
+    pub entries: BTreeMap<Str, DirEntryKind>,
+    /// Names of the entries the task can rebuild, left out of `entries`. A
+    /// later run may find them missing or present, so they're left out of the
+    /// current listing before comparing.
+    pub ignored_entries: BTreeSet<Str>,
 }
 
 /// Kind of directory entry
@@ -120,7 +131,9 @@ impl PostRunFingerprint {
     /// already tracked by the prerun glob fingerprint. Folders holding only
     /// what the task can rebuild are skipped too: a hit restores the files in
     /// them if they're among the task's outputs. Every other path is
-    /// fingerprinted as the task left it, including a file the task rewrote.
+    /// fingerprinted as the task left it, including a file the task rewrote,
+    /// except that a folder listing leaves out the entries the task can
+    /// rebuild and records their names.
     ///
     /// # Arguments
     /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
@@ -145,7 +158,20 @@ impl PostRunFingerprint {
             })
             .map(|(relative_path, path_read)| {
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
-                let fingerprint = fingerprint_path(&full_path, *path_read)?;
+                let mut fingerprint = fingerprint_path(&full_path, *path_read)?;
+                if let PathFingerprint::Folder(Some(DirListing { entries, ignored_entries })) =
+                    &mut fingerprint
+                    && !rebuildable.is_empty()
+                {
+                    entries.retain(|name, kind| {
+                        let is_dir = matches!(kind, DirEntryKind::Dir);
+                        let ignored = rebuildable.is_rebuildable_entry(relative_path, name, is_dir);
+                        if ignored {
+                            ignored_entries.insert(name.clone());
+                        }
+                        !ignored
+                    });
+                }
                 let may_be_missing = rebuildable.may_be_missing(relative_path);
                 Ok((relative_path.clone(), InferredInput { fingerprint, may_be_missing }))
             })
@@ -176,10 +202,21 @@ impl PostRunFingerprint {
                 let path_read = PathRead {
                     read_dir_entries: matches!(path_fingerprint, PathFingerprint::Folder(Some(_))),
                 };
-                let current_path_fingerprint = match fingerprint_path(&input_full_path, path_read) {
-                    Ok(ok) => ok,
-                    Err(err) => return Some(Err(err)),
-                };
+                let mut current_path_fingerprint =
+                    match fingerprint_path(&input_full_path, path_read) {
+                        Ok(ok) => ok,
+                        Err(err) => return Some(Err(err)),
+                    };
+                // The entries the task can rebuild may be missing or present, so
+                // the current listing leaves out and records the same names.
+                if let (
+                    PathFingerprint::Folder(Some(stored)),
+                    PathFingerprint::Folder(Some(current)),
+                ) = (path_fingerprint, &mut current_path_fingerprint)
+                {
+                    current.entries.retain(|name, _| !stored.ignored_entries.contains(name));
+                    current.ignored_entries.clone_from(&stored.ignored_entries);
+                }
                 if path_fingerprint == &current_path_fingerprint
                     || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound)
                 {
@@ -348,15 +385,15 @@ fn determine_change_kind<'a>(
 /// Both maps are `BTreeMap` so we iterate them in sorted lockstep.
 /// Returns the specific entry name that was added or removed, if identifiable.
 fn determine_folder_change_kind<'a>(
-    old: Option<&'a BTreeMap<Str, DirEntryKind>>,
-    new: Option<&'a BTreeMap<Str, DirEntryKind>>,
+    old: Option<&'a DirListing>,
+    new: Option<&'a DirListing>,
 ) -> (InputChangeKind, Option<&'a Str>) {
-    let (Some(old_entries), Some(new_entries)) = (old, new) else {
+    let (Some(old_listing), Some(new_listing)) = (old, new) else {
         return (InputChangeKind::Added, None);
     };
 
-    let mut old_iter = old_entries.iter();
-    let mut new_iter = new_entries.iter();
+    let mut old_iter = old_listing.entries.iter();
+    let mut new_iter = new_listing.entries.iter();
     let mut o = old_iter.next();
     let mut n = new_iter.next();
 
@@ -472,7 +509,7 @@ fn process_directory(
         entries.insert(Str::from(name_str.as_ref()), kind);
     }
 
-    Ok(PathFingerprint::Folder(Some(entries)))
+    Ok(PathFingerprint::Folder(Some(DirListing { entries, ignored_entries: BTreeSet::new() })))
 }
 
 /// Process a directory on Unix using nix for efficiency
@@ -500,7 +537,26 @@ fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<Pa
             Some(nix::dir::Type::Directory) => DirEntryKind::Dir,
             Some(nix::dir::Type::Symlink) => DirEntryKind::Symlink,
             // Treat files and other types as files for fingerprinting
-            _ => DirEntryKind::File,
+            Some(_) => DirEntryKind::File,
+            // The file system doesn't report entry types: stat the entry
+            // without following a symlink, as std does, so this agrees with
+            // `Rebuildable`'s folder climb.
+            None => {
+                use nix::{
+                    fcntl::AtFlags,
+                    sys::stat::{SFlag, fstatat},
+                };
+
+                let stat = fstatat(fd, entry.file_name(), AtFlags::AT_SYMLINK_NOFOLLOW)?;
+                let file_type = SFlag::from_bits_truncate(stat.st_mode) & SFlag::S_IFMT;
+                if file_type == SFlag::S_IFDIR {
+                    DirEntryKind::Dir
+                } else if file_type == SFlag::S_IFLNK {
+                    DirEntryKind::Symlink
+                } else {
+                    DirEntryKind::File
+                }
+            }
         };
 
         #[expect(
@@ -511,7 +567,7 @@ fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<Pa
         entries.insert(Str::from(name_str.as_ref()), kind);
     }
 
-    Ok(PathFingerprint::Folder(Some(entries)))
+    Ok(PathFingerprint::Folder(Some(DirListing { entries, ignored_entries: BTreeSet::new() })))
 }
 
 #[cfg(test)]
@@ -761,5 +817,51 @@ mod tests {
                 .with_folders(&workspace_root);
         assert!(rebuildable.is_rebuildable_folder(&rel("out")));
         assert!(!rebuildable.is_rebuildable_folder(&rel("out/tmp")));
+    }
+
+    #[test]
+    fn listings_leave_out_entries_the_task_can_rebuild() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        for dir in ["pkg/gen", "pkg/mixed"] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        let written = ["pkg/gen/a.txt", "pkg/out.txt", "pkg/mixed/a.txt"];
+        for file in written.iter().copied().chain(["pkg/mixed/notes.txt"]) {
+            std::fs::write(workspace_root.join(file).as_path(), "x").unwrap();
+        }
+
+        let path_reads = HashMap::from([(rel("pkg"), PathRead { read_dir_entries: true })]);
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &Rebuildable::new(written.into_iter().map(rel).collect()).with_folders(&workspace_root),
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            fingerprint.inferred_inputs[&rel("pkg")].fingerprint,
+            PathFingerprint::Folder(Some(DirListing {
+                entries: BTreeMap::from([("mixed".into(), DirEntryKind::Dir)]),
+                ignored_entries: BTreeSet::from(["gen".into(), "out.txt".into()]),
+            }))
+        );
+
+        let validate = || fingerprint.validate(&workspace_root, &FxHashMap::default()).unwrap();
+        assert!(validate().is_none());
+        std::fs::remove_dir_all(workspace_root.join("pkg/gen").as_path()).unwrap();
+        std::fs::remove_file(workspace_root.join("pkg/out.txt").as_path()).unwrap();
+        assert!(validate().is_none());
+
+        std::fs::write(workspace_root.join("pkg/notes.txt").as_path(), "x").unwrap();
+        match validate() {
+            Some(PostRunMismatch::Input { kind: InputChangeKind::Added, path }) => {
+                assert_eq!(path.as_str(), "pkg/notes.txt");
+            }
+            other => panic!("expected `pkg/notes.txt` added, got {other:?}"),
+        }
     }
 }
