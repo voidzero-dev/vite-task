@@ -20,6 +20,7 @@ pub enum AccessMode {
     Write,
     ReadWrite,
     ReadDir,
+    RenameTarget,
 }
 
 impl AccessMode {
@@ -30,6 +31,7 @@ impl AccessMode {
             Self::Write => PathAccess::Write(path),
             Self::ReadWrite => PathAccess::ReadWrite(path),
             Self::ReadDir => PathAccess::ReadDir(path),
+            Self::RenameTarget => PathAccess::RenameTarget(path),
         }
     }
 }
@@ -43,6 +45,9 @@ pub enum PathAccess<'a> {
     Write(&'a IpcPath),
     ReadWrite(&'a IpcPath),
     ReadDir(&'a IpcPath),
+    /// The new path of a rename. What is there after the call, a file or a
+    /// whole folder, was put there without being opened.
+    RenameTarget(&'a IpcPath),
 }
 
 impl<'a> PathAccess<'a> {
@@ -52,7 +57,8 @@ impl<'a> PathAccess<'a> {
             PathAccess::Read(path)
             | PathAccess::Write(path)
             | PathAccess::ReadWrite(path)
-            | PathAccess::ReadDir(path) => iter::once(path),
+            | PathAccess::ReadDir(path)
+            | PathAccess::RenameTarget(path) => iter::once(path),
         }
     }
 
@@ -63,6 +69,7 @@ impl<'a> PathAccess<'a> {
             PathAccess::Write(path) => PathAccess::Write(path.clone_in(bump)),
             PathAccess::ReadWrite(path) => PathAccess::ReadWrite(path.clone_in(bump)),
             PathAccess::ReadDir(path) => PathAccess::ReadDir(path.clone_in(bump)),
+            PathAccess::RenameTarget(path) => PathAccess::RenameTarget(path.clone_in(bump)),
         }
     }
 }

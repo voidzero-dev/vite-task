@@ -17,11 +17,11 @@ steps = [
     "node_modules/.vitest-cache",
     "node_modules/.vite/vitest",
   ], comment = "remove Vitest's caches, as on a clean checkout (vp's own cache is in `node_modules/.vite/task-cache`)" },
-  { argv = [
+  [
     "vt",
     "run",
     "test",
-  ], comment = "several inputs are missing and vt names whichever it finds first, so the miss reason is redacted", redact = { 'cache miss: .*, executing' = 'cache miss: <removed input>, executing' } },
+  ],
   { argv = [
     "vtt",
     "rm",

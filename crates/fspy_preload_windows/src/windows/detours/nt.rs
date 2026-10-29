@@ -1,11 +1,12 @@
-use std::mem::{offset_of, size_of};
+use std::mem::{offset_of, size_of, size_of_val};
 
 use fspy_shared::ipc::{AccessMode, IpcPath, PathAccess};
 use ntapi::{
     ntioapi::{
-        FILE_INFORMATION_CLASS, NtQueryDirectoryFile, NtQueryFullAttributesFile,
-        NtQueryInformationByName, PFILE_BASIC_INFORMATION, PFILE_NETWORK_OPEN_INFORMATION,
-        PIO_APC_ROUTINE, PIO_STATUS_BLOCK,
+        FILE_INFORMATION_CLASS, FILE_RENAME_INFORMATION, FileLinkInformation,
+        FileLinkInformationEx, FileRenameInformation, FileRenameInformationEx,
+        NtQueryDirectoryFile, NtQueryFullAttributesFile, NtQueryInformationByName,
+        PFILE_BASIC_INFORMATION, PFILE_NETWORK_OPEN_INFORMATION, PIO_APC_ROUTINE, PIO_STATUS_BLOCK,
     },
     ntpsapi::{
         NtCreateUserProcess, PPS_ATTRIBUTE_LIST, PPS_CREATE_INFO, PS_ATTRIBUTE,
@@ -16,8 +17,8 @@ use winapi::{
     shared::{
         minwindef::HFILE,
         ntdef::{
-            BOOLEAN, HANDLE, NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES,
-            PUNICODE_STRING, PVOID, ULONG,
+            BOOLEAN, HANDLE, NTSTATUS, OBJECT_ATTRIBUTES, PHANDLE, PLARGE_INTEGER,
+            POBJECT_ATTRIBUTES, PUNICODE_STRING, PVOID, ULONG, UNICODE_STRING,
         },
     },
     um::winnt::{ACCESS_MASK, GENERIC_READ},
@@ -27,6 +28,7 @@ use crate::windows::{
     client::global_client,
     convert::{ToAbsolutePath, ToAccessMode},
     detour::{Detour, DetourAny},
+    winapi_utils::get_path_name,
 };
 
 // CreateProcess ultimately asks NtCreateUserProcess to open the executable image. Some Windows
@@ -213,6 +215,144 @@ static DETOUR_NT_CREATE_FILE: Detour<
             new_nt_create_file
         })
     };
+
+// Rename and hard link destinations. `MoveFileExW`, `CreateHardLinkW` and
+// `SetFileInformationByHandle` with `FileRenameInfo(Ex)` all end here. The
+// destination is recorded before the call, so a failed call is recorded too:
+// as a rename target for a rename, which may move a whole folder, and as a
+// write for a hard link, always to a file. The source needs no record.
+static DETOUR_NT_SET_INFORMATION_FILE: Detour<
+    unsafe extern "system" fn(
+        file_handle: HANDLE,
+        io_status_block: PIO_STATUS_BLOCK,
+        file_information: PVOID,
+        length: ULONG,
+        file_information_class: FILE_INFORMATION_CLASS,
+    ) -> NTSTATUS,
+> =
+    // SAFETY: initializing Detour with the real NtSetInformationFile function pointer
+    unsafe {
+        Detour::new(c"NtSetInformationFile", ntapi::ntioapi::NtSetInformationFile, {
+            unsafe extern "system" fn new_fn(
+                file_handle: HANDLE,
+                io_status_block: PIO_STATUS_BLOCK,
+                file_information: PVOID,
+                length: ULONG,
+                file_information_class: FILE_INFORMATION_CLASS,
+            ) -> NTSTATUS {
+                let destination_mode = if [FileRenameInformation, FileRenameInformationEx]
+                    .contains(&file_information_class)
+                {
+                    Some(AccessMode::RenameTarget)
+                } else if [FileLinkInformation, FileLinkInformationEx]
+                    .contains(&file_information_class)
+                {
+                    Some(AccessMode::Write)
+                } else {
+                    None
+                };
+                if let Some(access_mode) = destination_mode {
+                    // SAFETY: the handle and the information buffer are the caller's,
+                    // and the buffer is valid for `length` bytes during this call
+                    unsafe {
+                        handle_destination(access_mode, file_handle, file_information, length);
+                    };
+                }
+                // SAFETY: calling the original NtSetInformationFile with all original arguments
+                unsafe {
+                    (DETOUR_NT_SET_INFORMATION_FILE.real())(
+                        file_handle,
+                        io_status_block,
+                        file_information,
+                        length,
+                        file_information_class,
+                    )
+                }
+            }
+            new_fn
+        })
+    };
+
+/// Records the destination of a rename or hard link, as `access_mode`, from
+/// its `FILE_RENAME_INFORMATION`. `FILE_LINK_INFORMATION` and the `Ex` variants
+/// (a `ULONG` of flags in place of the `BOOLEAN`) share its layout. The name
+/// is relative to `RootDirectory` when that handle is set. Otherwise Win32
+/// callers such as `MoveFileExW` pass a full NT path, and a bare name, with no
+/// `\`, renames the file within its own folder.
+///
+/// # Safety
+///
+/// `file_handle` must be the call's source handle, and `file_information`
+/// null or valid for `length` bytes, for the duration of the intercepted call.
+unsafe fn handle_destination(
+    access_mode: AccessMode,
+    file_handle: HANDLE,
+    file_information: PVOID,
+    length: ULONG,
+) {
+    #[expect(clippy::cast_possible_truncation, reason = "the structure is a few dozen bytes")]
+    const OBJECT_ATTRIBUTES_LENGTH: ULONG = size_of::<OBJECT_ATTRIBUTES>() as ULONG;
+
+    let name_offset = offset_of!(FILE_RENAME_INFORMATION, FileName);
+    let Ok(length) = usize::try_from(length) else {
+        return;
+    };
+    if file_information.is_null() || length < name_offset {
+        return;
+    }
+    let info = file_information.cast::<FILE_RENAME_INFORMATION>();
+    // SAFETY: the buffer holds at least the fixed part of the structure
+    let (root_directory, name_length) =
+        unsafe { ((*info).RootDirectory, usize::try_from((*info).FileNameLength).unwrap_or(0)) };
+    let name_length = name_length.min(length - name_offset);
+    // SAFETY: `FileName` is the trailing array, and `name_length` bytes of it
+    // are within the buffer
+    let file_name = unsafe {
+        std::slice::from_raw_parts(
+            std::ptr::addr_of!((*info).FileName).cast::<u16>(),
+            name_length / size_of::<u16>(),
+        )
+    };
+    // A bare name is a sibling of the source: resolve it against the source's
+    // folder, from the handle's path.
+    let sibling: Vec<u16>;
+    let file_name = if root_directory.is_null()
+        && !file_name.is_empty()
+        && !file_name.contains(&u16::from(b'\\'))
+    {
+        // SAFETY: the source handle is valid for the duration of the call
+        let Ok(source) = (unsafe { get_path_name(file_handle) }) else {
+            return;
+        };
+        let Some(folder_end) = source.iter().rposition(|c| *c == u16::from(b'\\')) else {
+            return;
+        };
+        sibling = [&source[..=folder_end], file_name].concat();
+        sibling.as_slice()
+    } else {
+        file_name
+    };
+    let Ok(name_bytes) = u16::try_from(size_of_val(file_name)) else {
+        return;
+    };
+
+    let mut object_name = UNICODE_STRING {
+        Length: name_bytes,
+        MaximumLength: name_bytes,
+        Buffer: file_name.as_ptr().cast_mut(),
+    };
+    let mut object_attributes = OBJECT_ATTRIBUTES {
+        Length: OBJECT_ATTRIBUTES_LENGTH,
+        RootDirectory: root_directory,
+        ObjectName: &raw mut object_name,
+        Attributes: 0,
+        SecurityDescriptor: std::ptr::null_mut(),
+        SecurityQualityOfService: std::ptr::null_mut(),
+    };
+
+    // SAFETY: the object attributes and the name they point to are valid for this call
+    unsafe { handle_open(access_mode, &raw mut object_attributes) };
+}
 
 static DETOUR_NT_OPEN_FILE: Detour<
     unsafe extern "system" fn(
@@ -515,6 +655,7 @@ pub const DETOURS: &[DetourAny] = &[
     DETOUR_NT_CREATE_USER_PROCESS.as_any(),
     DETOUR_NT_CREATE_FILE.as_any(),
     DETOUR_NT_OPEN_FILE.as_any(),
+    DETOUR_NT_SET_INFORMATION_FILE.as_any(),
     DETOUR_NT_QUERY_ATTRIBUTES_FILE.as_any(),
     DETOUR_NT_FULL_QUERY_ATTRIBUTES_FILE.as_any(),
     DETOUR_NT_OPEN_SYMBOLIC_LINK_OBJECT.as_any(),

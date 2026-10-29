@@ -30,11 +30,13 @@ use crate::{
 /// value is only ever `Some` when tracking happened (see [`observe_fspy`]).
 struct TrackingOutcome {
     path_reads: HashMap<RelativePathBuf, PathRead>,
-    /// Auto-output writes after output exclusions are applied. Empty when
-    /// `output_config.includes_auto` is false.
+    /// Auto-output writes, `rebuildable`'s written files after output
+    /// exclusions are applied. Empty when `output_config.includes_auto` is
+    /// false.
     path_writes: FxHashSet<RelativePathBuf>,
-    /// What the task can rebuild, from every write fspy recorded before output
-    /// exclusions and `ignoreOutput` paths are applied.
+    /// What the task can rebuild, from every write and rename target fspy
+    /// recorded before output exclusions and `ignoreOutput` paths are applied,
+    /// with the files under a renamed folder in place of the folder.
     rebuildable: Rebuildable,
 }
 
@@ -194,11 +196,13 @@ pub(super) async fn update_cache(
 ///
 /// `path_reads` is gated on `input_config.includes_auto`, filtered by
 /// user-configured input negatives, and by tool-reported `ignoreInput` paths.
-/// `path_writes` is filtered by user-configured output negatives and
-/// tool-reported `ignoreOutput` paths, which decide what is archived.
-/// `rebuildable` takes every write unfiltered, since what the task can
-/// rebuild doesn't depend on what is archived. Accesses in the task cache, the
-/// parent of the schema version folder `cache_dir`, are left out of all three.
+/// `rebuildable` takes every write and rename target unfiltered, since what
+/// the task can rebuild doesn't depend on what is archived, and expands
+/// renamed folders into the files under them. `path_writes` is its written
+/// files filtered by user-configured output negatives and tool-reported
+/// `ignoreOutput` paths, which decide what is archived. Accesses in the task
+/// cache, the parent of the schema version folder `cache_dir`, are left out of
+/// all three.
 #[cfg_attr(
     not(fspy),
     expect(clippy::missing_const_for_fn, reason = "the body is a no-op without fspy")
@@ -220,6 +224,8 @@ fn observe_fspy(
         let cache_root = cache_dir.parent().unwrap_or(cache_dir);
         path_accesses.map(|raw| {
             let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, cache_root);
+            let mut rebuildable =
+                Rebuildable::new(tracked.path_writes, tracked.rename_targets, workspace_root);
             let filtered_path_reads: HashMap<RelativePathBuf, PathRead> =
                 // fspy can be attached for auto-output-only tasks. In that
                 // mode reads must not become inferred inputs.
@@ -244,8 +250,8 @@ fn observe_fspy(
                 if metadata.output_config.includes_auto
                     && let Some(fspy) = fspy
                 {
-                    tracked
-                        .path_writes
+                    rebuildable
+                        .written()
                         .iter()
                         .filter(|path| {
                             !fspy.output_negative_globs.is_match(path.as_str())
@@ -256,7 +262,6 @@ fn observe_fspy(
                 } else {
                     FxHashSet::default()
                 };
-            let mut rebuildable = Rebuildable::new(tracked.path_writes);
             // Only fingerprints of the paths the task read ask about folders.
             if !filtered_path_reads.is_empty() {
                 rebuildable = rebuildable.with_folders(workspace_root);

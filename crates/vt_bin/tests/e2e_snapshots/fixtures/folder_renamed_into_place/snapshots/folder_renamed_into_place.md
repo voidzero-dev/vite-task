@@ -18,7 +18,10 @@ remove the renamed folder, as on a clean checkout
 ## `vt run build`
 
 ```
-$ vtt fs mkdir tmp write tmp/a.js x rename tmp deps read deps/a.js ○ cache miss: 'a.js' removed from 'deps', executing
+$ vtt fs mkdir tmp write tmp/a.js x rename tmp deps read deps/a.js ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `vtt stat-file deps/a.js`
