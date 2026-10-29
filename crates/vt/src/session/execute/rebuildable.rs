@@ -18,7 +18,12 @@
 //!
 //! The written paths are fspy's records before output exclusions and
 //! tool-reported `ignoreOutput` paths are applied: those decide what is
-//! archived, not what the task can rebuild.
+//! archived, not what the task can rebuild. A rename target that is a folder
+//! after the run, like Vite's `deps` folder renamed into place, stands for
+//! writes of every file (and symlink) under it; the folder itself and the
+//! folders in it don't count as written. The files are archived too. A write
+//! record on a path that is a folder, from opening it with write access, is
+//! ignored.
 
 use std::{cmp::Reverse, fs, io};
 
@@ -34,11 +39,24 @@ pub struct Rebuildable {
 }
 
 impl Rebuildable {
-    /// Finds the rebuildable folders above the `written` paths by listing them
-    /// under `workspace_root`, which must be done after the run.
-    pub fn new(written: FxHashSet<RelativePathBuf>, workspace_root: &AbsolutePath) -> Self {
+    /// Takes the `written` paths and the `rename_targets` as written, with the
+    /// files under a renamed folder in place of the folder and without written
+    /// paths that are folders, and finds the rebuildable folders above them,
+    /// by looking under `workspace_root`, which must be done after the run.
+    pub fn new(
+        written: FxHashSet<RelativePathBuf>,
+        rename_targets: FxHashSet<RelativePathBuf>,
+        workspace_root: &AbsolutePath,
+    ) -> Self {
+        let written = files_written(written, rename_targets, workspace_root);
         let folders = find_folders(&written, workspace_root);
         Self { written, folders }
+    }
+
+    /// The paths the task wrote or renamed a file to, and the files under the
+    /// folders it renamed.
+    pub const fn written(&self) -> &FxHashSet<RelativePathBuf> {
+        &self.written
     }
 
     /// Whether a later run may find `path` missing: the task wrote it.
@@ -57,6 +75,61 @@ impl Rebuildable {
     pub fn is_rebuildable_entry(&self, dir: &RelativePath, name: &str, is_dir: bool) -> bool {
         RelativePathBuf::new(name)
             .is_ok_and(|name| is_rebuildable(&dir.join(name), is_dir, &self.written, &self.folders))
+    }
+}
+
+/// The paths in `written`, the `rename_targets` that aren't folders under
+/// `workspace_root`, and every file (or symlink) under the rename targets that
+/// are, recursively. A symlink to a folder is a file here, as in
+/// [`holds_only_rebuildable`]. Entries that can't be read or named are left
+/// out. A written path that is a folder, from opening it with write access,
+/// stays without a stat: nothing under it counts, folder entries are checked
+/// against the rebuildable folders, and the archive skips folders, so only a
+/// read of it has to tell (see [`PostRunFingerprint::create`]).
+///
+/// [`PostRunFingerprint::create`]: super::fingerprint::PostRunFingerprint::create
+fn files_written(
+    mut written: FxHashSet<RelativePathBuf>,
+    rename_targets: FxHashSet<RelativePathBuf>,
+    workspace_root: &AbsolutePath,
+) -> FxHashSet<RelativePathBuf> {
+    for path in rename_targets {
+        if fs::symlink_metadata(workspace_root.join(&path)).is_ok_and(|meta| meta.is_dir()) {
+            add_files_under(&path, workspace_root, &mut written);
+        } else {
+            written.insert(path);
+        }
+    }
+    written
+}
+
+/// Adds every file (or symlink) under the folder `dir` to `files`. `.DS_Store`
+/// doesn't count, as in directory listing fingerprints.
+fn add_files_under(
+    dir: &RelativePath,
+    workspace_root: &AbsolutePath,
+    files: &mut FxHashSet<RelativePathBuf>,
+) {
+    let Ok(entries) = fs::read_dir(workspace_root.join(dir)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name == ".DS_Store" {
+            continue;
+        }
+        let (Some(name), Ok(file_type)) = (name.to_str(), entry.file_type()) else {
+            continue;
+        };
+        let Ok(name) = RelativePathBuf::new(name) else {
+            continue;
+        };
+        let path = dir.join(name);
+        if file_type.is_dir() {
+            add_files_under(&path, workspace_root, files);
+        } else {
+            files.insert(path);
+        }
     }
 }
 

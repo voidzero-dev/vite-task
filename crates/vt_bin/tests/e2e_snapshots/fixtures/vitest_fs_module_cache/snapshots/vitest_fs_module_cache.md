@@ -24,11 +24,14 @@ remove Vitest's caches, as on a clean checkout (vp's own cache is in `node_modul
 several inputs are missing and vt names whichever it finds first, so the miss reason is redacted
 
 ```
-$ vitest run ○ cache miss: <removed input>, executing
+$ vitest run ◉ cache hit, replaying
 
  RUN  v<version> <workspace>
 
  ✓ src/add.test.js (1 test) <duration>
+
+---
+vt run: cache hit.
 ```
 
 ## `vtt rm node_modules/.vitest-cache/_metadata.json`

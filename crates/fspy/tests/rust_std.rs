@@ -36,6 +36,40 @@ async fn open_write() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+async fn rename_destination() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    File::create(tmp_dir.path().join("source"))?;
+    let tmp_dir_str = tmp_dir.path().to_str().unwrap().to_owned();
+    let accesses = track_fn!(tmp_dir_str, |tmp_dir_str: String| {
+        let tmp_dir = std::path::Path::new(&tmp_dir_str);
+        fs::rename(tmp_dir.join("source"), tmp_dir.join("destination")).unwrap();
+    })
+    .await?;
+    assert_contains(
+        &accesses,
+        tmp_dir.path().join("destination").as_path(),
+        PathAccess::RenameTarget,
+    );
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn hard_link_destination() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    File::create(tmp_dir.path().join("original"))?;
+    let tmp_dir_str = tmp_dir.path().to_str().unwrap().to_owned();
+    let accesses = track_fn!(tmp_dir_str, |tmp_dir_str: String| {
+        let tmp_dir = std::path::Path::new(&tmp_dir_str);
+        fs::hard_link(tmp_dir.join("original"), tmp_dir.join("link")).unwrap();
+    })
+    .await?;
+    assert_contains(&accesses, tmp_dir.path().join("link").as_path(), PathAccess::Write);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
 async fn metadata() -> anyhow::Result<()> {
     let tmp_dir = tempfile::tempdir()?;
     let tmp_path = tmp_dir.path().join("hello");
