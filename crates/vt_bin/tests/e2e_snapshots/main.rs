@@ -1,6 +1,7 @@
 mod redact;
 
 use std::{
+    collections::BTreeMap,
     env::{self, join_paths, split_paths},
     ffi::OsStr,
     io::Write,
@@ -59,6 +60,10 @@ struct StepConfig {
     /// assertion. Default `false` keeps the plain-text behaviour.
     #[serde(default, rename = "formatted-snapshot")]
     formatted_snapshot: bool,
+    /// Regex → replacement pairs for output that varies between runs, applied
+    /// in key order after the global redactions.
+    #[serde(default, deserialize_with = "deserialize_redactions")]
+    redact: Vec<(regex::Regex, Str)>,
 }
 
 impl Step {
@@ -148,6 +153,13 @@ impl Step {
             Self::Simple(_) => false,
         }
     }
+
+    fn redactions(&self) -> &[(regex::Regex, Str)] {
+        match self {
+            Self::Detailed(config) => &config.redact,
+            Self::Simple(_) => &[],
+        }
+    }
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]
@@ -219,6 +231,22 @@ impl WriteKey {
             Self::CtrlC => b"\x03",
         }
     }
+}
+
+/// Compiles a step's `redact` table in key order, so an invalid regex fails
+/// when the fixtures load.
+fn deserialize_redactions<'de, D>(deserializer: D) -> Result<Vec<(regex::Regex, Str)>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let table = <BTreeMap<Str, Str> as serde::Deserialize>::deserialize(deserializer)?;
+    table
+        .into_iter()
+        .map(|(pattern, replacement)| {
+            let regex = regex::Regex::new(pattern.as_str()).map_err(serde::de::Error::custom)?;
+            Ok((regex, replacement))
+        })
+        .collect()
 }
 
 fn deserialize_cfg_expr<'de, D>(
@@ -652,7 +680,7 @@ fn run_case(
                 }
             }
 
-            e2e_outputs.push_str(&redact_e2e_output(output, e2e_stage_path_str));
+            e2e_outputs.push_str(&redact_e2e_output(output, e2e_stage_path_str, step.redactions()));
 
             // Skip remaining steps if timed out
             if matches!(termination_state, TerminationState::TimedOut) {

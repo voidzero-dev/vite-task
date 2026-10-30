@@ -36,7 +36,8 @@ steps = [
 Notes:
 
 - An array step is shorthand for `{ argv = [...] }`. A string step such as `"vt run build"` doesn't parse, and the test binary panics while loading the fixtures, before any case runs.
-- A table step takes `argv` (required), `cwd` (relative to the fixture root, defaulting to the case's `cwd`), `comment` (shown under the step's heading in the snapshot), `envs` (`[name, value]` pairs), `interactions`, and `formatted-snapshot` (keep colors and styles in the snapshot). Other keys are an error.
+- A table step takes `argv` (required), `cwd` (relative to the fixture root, defaulting to the case's `cwd`), `comment` (shown under the step's heading in the snapshot), `envs` (`[name, value]` pairs), `interactions`, `formatted-snapshot` (keep colors and styles in the snapshot), and `redact`. Other keys are an error.
+- `redact` maps regexes to replacements for output that varies between runs, such as `redact = { 'cache miss: .*' = 'cache miss: <changed input>' }`. They rewrite the step's output in key order, after the built-in redactions, and a replacement can refer to capture groups as `$1`. TOML literal strings (`'…'`) keep regex backslashes unescaped. An invalid regex, like an unknown key, makes the test binary panic while loading the fixtures.
 - A case takes `name` (ASCII letters, digits, and `_` only; it also names the snapshot file), `steps`, and optionally `comment`, `cwd`, `cfg` (a Rust cfg expression such as `'target_os = "linux"'`; the case runs only where it matches), and `ignore` (the case runs only with `-- --ignored`).
 - `vt` and `vtt` are the binaries built for the test. Other programs are looked up in `PATH`, with `packages/tools/node_modules/.bin` (when installed) ahead of the inherited entries.
 - `write-key` accepts `up`, `down`, `enter`, `escape`, `backspace`, and `ctrl-c`.
