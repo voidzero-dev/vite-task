@@ -1,6 +1,6 @@
 # output_negative_glob_prevents_read_write_overlap
 
-Exercises `output: [{ auto: true }, "!scratch/**"]` on a task that reads and writes `scratch/overlap.txt`. Because the write is excluded from the auto-output set, it should not count as a read-write overlap, while non-excluded outputs are still archived and restored.
+Exercises `output: [{ auto: true }, "!scratch/**"]` on a task that reads and writes `scratch/overlap.txt`. The write is excluded from the auto-output set, so it isn't archived, while non-excluded outputs are still archived and restored.
 
 ## `vt run auto-output-negative-overlap`
 

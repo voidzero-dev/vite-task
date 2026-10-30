@@ -1,6 +1,6 @@
 # ignore_output_allows_read_write_overlap
 
-Exercises `ignoreOutput` with auto output tracking. The task reads and writes `sidecar/tmp.txt`; without the ignore the runner's read-write overlap check would refuse to cache the run. The task also writes `dist/out.txt`, which should be auto-archived and restored on a cache hit.
+Exercises `ignoreOutput` with auto output tracking. The task reads and writes `sidecar/tmp.txt`, which the ignore keeps out of the archived outputs. The task also writes `dist/out.txt`, which should be auto-archived and restored on a cache hit.
 
 ## `vt run ignore-output`
 

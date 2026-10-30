@@ -1,6 +1,0 @@
-{
-  "name": "@test/touch-pkg",
-  "dependencies": {
-    "@test/normal-pkg": "workspace:*"
-  }
-}
