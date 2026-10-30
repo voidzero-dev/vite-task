@@ -50,6 +50,25 @@ steps = [
 ]
 
 [[e2e]]
+name = "ctrl_c_prevents_future_tasks_with___continue"
+comment = """
+`--continue` doesn't stop Ctrl+C from cancelling the run: a exits 0 after Ctrl+C, and with `--continue` no task's exit cancels anything, so only Ctrl+C keeps b, which depends on a, from starting.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "-r",
+    "--continue",
+    "--no-cache",
+    "dev",
+  ], interactions = [
+    { "expect-milestone" = "ready" },
+    { "write-key" = "ctrl-c" },
+  ] },
+]
+
+[[e2e]]
 name = "ctrl_c_prevents_caching"
 comment = """
 A task interrupted by Ctrl+C must not populate the cache, even if it happens to exit 0 — the following run should be a cache miss, not a hit.

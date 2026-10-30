@@ -7,6 +7,7 @@
 #![expect(clippy::print_stdout, reason = "CLI tool output")]
 
 mod barrier;
+mod broken_stdout;
 mod check_tty;
 mod cp;
 mod exit;
@@ -40,13 +41,14 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, fs, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-link, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, symlink, touch-file, write-file"
+            "Subcommands: barrier, broken-stdout, check-tty, cp, exit, exit-on-ctrlc, fs, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-link, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, symlink, touch-file, write-file"
         );
         std::process::exit(1);
     }
 
     let result: Result<(), Box<dyn std::error::Error>> = match args[1].as_str() {
         "barrier" => barrier::run(&args[2..]),
+        "broken-stdout" => broken_stdout::run(&args[2..]),
         "check-tty" => {
             check_tty::run();
             Ok(())

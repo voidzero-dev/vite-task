@@ -60,6 +60,9 @@ pub struct PlanOptions {
     /// running all tasks as independent. If `concurrency` is also `None`,
     /// this sets the effective concurrency to `usize::MAX`.
     pub parallel: bool,
+    /// This level's `--continue` flag. When `false`, `VP_RUN_INTERNAL_CONTINUE`
+    /// from the envs decides, so a nested level inherits its parent's flag.
+    pub continue_on_failure: bool,
     /// When `true`, an unmatched `--filter` expression turns the warning into
     /// an [`crate::Error::NoPackagesMatched`] error and the run exits non-zero.
     /// Mirrors pnpm's `--fail-if-no-match`.

@@ -606,6 +606,7 @@ impl<'a> Session<'a> {
                 remote_cache_mode: run_command.flags.remote_cache.map(Into::into),
                 concurrency_limit: None,
                 parallel: false,
+                continue_on_failure: run_command.flags.continue_on_failure,
                 // The selector path runs whatever the user picked interactively;
                 // there is no `--filter` in play, so strict-mode does not apply.
                 fail_if_no_match: false,

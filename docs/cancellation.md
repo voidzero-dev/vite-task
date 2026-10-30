@@ -18,6 +18,10 @@ When any task exits with non-zero status:
 2. No new tasks are scheduled.
 3. Results of other in-flight tasks are **not cached** (they were killed mid-execution).
 
+With `--continue` (or `--no-bail`, as in pnpm), a failed task doesn't cancel the run. Running tasks aren't killed, new tasks keep being scheduled, and tasks that succeed are cached as usual. Tasks that depend on a failed task, directly or through other tasks, don't run. Like tasks that fast-fail never started, they aren't shown in the summary. A task whose script runs `vp run` fails if any task in that run fails, and in a `&&`-chained command, the commands after a failed one don't run. Once every task that can run has finished, `vp run` exits with a non-zero status: the failed task's exit code if one task failed, or 1 if more did. Ctrl-C still cancels the run.
+
+`--continue` carries over to every `vp run` in the scripts of the tasks it runs, including one that a task starts as a separate process. A `vp run --continue` in a task's script applies to the tasks that it runs: when one of them fails, the others keep going, and once they're done, the task with that script fails like any other. If the outer `vp run` has no `--continue`, it then fast-fails, and a failure elsewhere in the outer run kills the tasks still running in the nested one.
+
 ## Remote cache lookups
 
 Both kinds of cancellation stop remote cache lookups and downloads right away instead of waiting for them to finish or time out. A task whose cache lookup was still in progress doesn't start and doesn't restore cached outputs, even if the lookup found them. Like a task that was never scheduled, it isn't shown in the summary.

@@ -340,8 +340,10 @@ impl Report {
 ///    via [`run_child`], then decide the cache update
 ///    ([`cache_update::update_cache`])
 ///
-/// Cancelling `fast_fail_token` kills the process. `cancel_token` must be a
-/// child of `fast_fail_token` that Ctrl-C also cancels: cancelling it stops
+/// Cancelling `fast_fail_token` kills the process. This function cancels it
+/// too when forwarding the process's output fails, so it must belong to this
+/// spawn alone (a child of the run's fast-fail token). `cancel_token` must be
+/// cancelled when the run fast-fails and on Ctrl-C: cancelling it stops
 /// remote cache lookups and prevents caching. A cached run's upload to the
 /// remote cache runs in the background, and the caller waits for it with
 /// [`ExecutionCache::wait_for_uploads`].

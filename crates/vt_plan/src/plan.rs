@@ -783,6 +783,17 @@ pub async fn plan_query_request(
         remote_cache::resolve(context.resolved_global_cache().remote_url.as_ref(), context.envs())?;
     context.set_resolved_remote_cache(resolved_remote_cache);
 
+    // Resolve `--continue` for this level the same way: write this level's
+    // flag to `VP_RUN_INTERNAL_CONTINUE` first, so nested levels inherit it,
+    // whether they're expanded here or run by a `vp run` that a task spawns.
+    // A nested flag can turn it on but not off, so a level without it never
+    // sits below one with it. The scheduler's single fast-fail token relies
+    // on that.
+    if plan_options.continue_on_failure {
+        context.add_envs(std::iter::once((CONTINUE_ENV_NAME, "1")));
+    }
+    let continue_on_failure = continue_from_env(context.envs());
+
     // Resolve effective concurrency for this level.
     //
     // Priority (highest to lowest):
@@ -915,28 +926,29 @@ pub async fn plan_query_request(
     // `try_from_graph` performs a DFS; if a cycle is found, it returns
     // `CycleError` containing the full cycle path as node indices.
     let graph =
-        ExecutionGraph::try_from_graph(inner_graph, effective_concurrency).map_err(|cycle| {
-            // Map each execution node index in the cycle path to its human-readable TaskDisplay.
-            // Every node in the cycle was added via `inner_graph.add_node()` above,
-            // with a corresponding entry in `execution_node_indices_by_task_index`.
-            let displays = cycle
-                .cycle_path()
-                .iter()
-                .map(|&exec_idx| {
-                    execution_node_indices_by_task_index
-                        .iter()
-                        .find_map(|(task_idx, &mapped_exec_idx)| {
-                            if mapped_exec_idx == exec_idx {
-                                Some(context.indexed_task_graph().display_task(*task_idx))
-                            } else {
-                                None
-                            }
-                        })
-                        .expect("cycle node must exist in execution_node_indices_by_task_index")
-                })
-                .collect();
-            Error::CycleDependencyDetected(displays)
-        })?;
+        ExecutionGraph::try_from_graph(inner_graph, effective_concurrency, continue_on_failure)
+            .map_err(|cycle| {
+                // Map each execution node index in the cycle path to its human-readable TaskDisplay.
+                // Every node in the cycle was added via `inner_graph.add_node()` above,
+                // with a corresponding entry in `execution_node_indices_by_task_index`.
+                let displays = cycle
+                    .cycle_path()
+                    .iter()
+                    .map(|&exec_idx| {
+                        execution_node_indices_by_task_index
+                            .iter()
+                            .find_map(|(task_idx, &mapped_exec_idx)| {
+                                if mapped_exec_idx == exec_idx {
+                                    Some(context.indexed_task_graph().display_task(*task_idx))
+                                } else {
+                                    None
+                                }
+                            })
+                            .expect("cycle node must exist in execution_node_indices_by_task_index")
+                    })
+                    .collect();
+                Error::CycleDependencyDetected(displays)
+            })?;
 
     Ok(crate::PlanResult { graph, no_packages_matched })
 }
@@ -954,6 +966,18 @@ fn concurrency_limit_from_env(
     let s = value.to_str().ok_or_else(|| Error::InvalidConcurrencyLimitEnv(Arc::clone(value)))?;
     let n: usize = s.parse().map_err(|_| Error::InvalidConcurrencyLimitEnv(Arc::clone(value)))?;
     Ok(Some(n.max(1)))
+}
+
+/// Set to `1` by `--continue` for the level it's passed to and every level
+/// nested in it, including `vp run` processes that tasks spawn. Matches the
+/// default `VP_*` untracked env pattern, so it reaches those processes
+/// without becoming part of any task's cache key.
+const CONTINUE_ENV_NAME: &str = "VP_RUN_INTERNAL_CONTINUE";
+
+/// Whether `VP_RUN_INTERNAL_CONTINUE` is set to `1` in the environment variables.
+fn continue_from_env(envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>) -> bool {
+    envs.get(EnvName::from_ref(OsStr::new(CONTINUE_ENV_NAME)))
+        .is_some_and(|value| &**value == OsStr::new("1"))
 }
 
 #[cfg(test)]

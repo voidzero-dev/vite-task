@@ -1,0 +1,85 @@
+{
+  "tasks": {
+    "keep-going": {
+      "command": "vtt print should not run",
+      "dependsOn": ["failing", "independent-1", "independent-2"]
+    },
+    "setup": {
+      "command": "vtt exit 0"
+    },
+    "failing": {
+      "command": "vtt barrier ../../.barrier sync 2 --exit=42"
+    },
+    "independent-1": {
+      "command": "vtt barrier ../../.barrier sync 3",
+      "dependsOn": ["setup"],
+      "cache": { "input": [], "output": [] }
+    },
+    "independent-2": {
+      "command": "vtt barrier ../../.barrier sync 3",
+      "dependsOn": ["setup"],
+      "cache": { "input": [], "output": [] }
+    },
+    "two-failures": {
+      "command": "vtt print should not run",
+      "dependsOn": ["fail-3", "fail-5"]
+    },
+    "fail-3": {
+      "command": "vtt exit 3"
+    },
+    "fail-5": {
+      "command": "vtt exit 5"
+    },
+    "nested": {
+      "command": "vt run fail-3"
+    },
+    "after-nested": {
+      "command": "vtt print should not run",
+      "dependsOn": ["nested"]
+    },
+    "nested-continue": {
+      "command": "vt run --continue --concurrency-limit 1 two-failures"
+    },
+    "nested-plain": {
+      "command": "vt run --concurrency-limit 1 two-failures"
+    },
+    "spawned-plain": {
+      "command": "vtt pipe-stdin -- vt run --concurrency-limit 1 two-failures",
+      "cache": false
+    },
+    "nested-failure-stops-outer": {
+      "command": "vtt print should not run",
+      "dependsOn": ["nested-continue-fails", "hangs-beside-nested"]
+    },
+    "nested-continue-fails": {
+      "command": "vt run --continue fails-after-barrier"
+    },
+    "fails-after-barrier": {
+      "command": "vtt barrier ../../.barrier nested 2 --exit=3"
+    },
+    "hangs-beside-nested": {
+      "command": "vtt barrier ../../.barrier nested 2 --hang"
+    },
+    "failure-stops-nested-continue": {
+      "command": "vtt print should not run",
+      "dependsOn": ["fails-beside-nested", "nested-continue-hangs"]
+    },
+    "fails-beside-nested": {
+      "command": "vtt barrier ../../.barrier outer 2 --exit=4"
+    },
+    "nested-continue-hangs": {
+      "command": "vt run --continue hangs-after-barrier"
+    },
+    "hangs-after-barrier": {
+      "command": "vtt barrier ../../.barrier outer 2 --hang"
+    },
+    "forward-failure": {
+      "command": "vtt print should not run",
+      "dependsOn": ["noisy", "independent-1", "independent-2"]
+    },
+    "noisy": {
+      "command": "vtt barrier ../../.barrier sync 2 && vtt print some output",
+      "cache": { "input": [], "output": [] }
+    }
+  }
+}
