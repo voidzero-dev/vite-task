@@ -4,7 +4,7 @@
 //! fingerprints of file system state after task execution.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ffi::OsStr,
     fs::File,
     io::{self, BufRead},
@@ -87,6 +87,10 @@ pub struct InferredInput {
     /// The task wrote the path, so a later run may find it missing, as on a
     /// clean checkout. A path that is there must still match `fingerprint`.
     pub may_be_missing: bool,
+    /// Entries of a folder listing that the task can rebuild, left out of
+    /// `fingerprint`. A later run may find them missing or present, so they're
+    /// left out of the current listing before comparing.
+    pub ignored_entries: BTreeSet<Str>,
 }
 
 /// Fingerprint for a single path (file or directory)
@@ -120,7 +124,8 @@ impl PostRunFingerprint {
     /// already tracked by the prerun glob fingerprint. Folders holding only
     /// what the task can rebuild are skipped too: a hit restores the files in
     /// them. Every other path is fingerprinted as the task left it, including
-    /// a file the task rewrote.
+    /// a file the task rewrote, except that a folder listing leaves out the
+    /// entries the task can rebuild and records their names.
     ///
     /// # Arguments
     /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
@@ -145,9 +150,21 @@ impl PostRunFingerprint {
             })
             .map(|(relative_path, path_read)| {
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
-                let fingerprint = fingerprint_path(&full_path, *path_read)?;
+                let mut fingerprint = fingerprint_path(&full_path, *path_read)?;
+                let mut ignored_entries = BTreeSet::new();
+                if let PathFingerprint::Folder(Some(entries)) = &mut fingerprint {
+                    entries.retain(|name, kind| {
+                        let is_dir = matches!(kind, DirEntryKind::Dir);
+                        let ignored = rebuildable.is_rebuildable_entry(relative_path, name, is_dir);
+                        if ignored {
+                            ignored_entries.insert(name.clone());
+                        }
+                        !ignored
+                    });
+                }
                 let may_be_missing = rebuildable.may_be_missing(relative_path);
-                Ok((relative_path.clone(), InferredInput { fingerprint, may_be_missing }))
+                let input = InferredInput { fingerprint, may_be_missing, ignored_entries };
+                Ok((relative_path.clone(), input))
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
@@ -171,15 +188,23 @@ impl PostRunFingerprint {
     ) -> anyhow::Result<Option<PostRunMismatch>> {
         let input_mismatch =
             self.inferred_inputs.par_iter().find_map_any(|(input_relative_path, input)| {
-                let InferredInput { fingerprint: path_fingerprint, may_be_missing } = input;
+                let InferredInput {
+                    fingerprint: path_fingerprint,
+                    may_be_missing,
+                    ignored_entries,
+                } = input;
                 let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
                 let path_read = PathRead {
                     read_dir_entries: matches!(path_fingerprint, PathFingerprint::Folder(Some(_))),
                 };
-                let current_path_fingerprint = match fingerprint_path(&input_full_path, path_read) {
-                    Ok(ok) => ok,
-                    Err(err) => return Some(Err(err)),
-                };
+                let mut current_path_fingerprint =
+                    match fingerprint_path(&input_full_path, path_read) {
+                        Ok(ok) => ok,
+                        Err(err) => return Some(Err(err)),
+                    };
+                if let PathFingerprint::Folder(Some(entries)) = &mut current_path_fingerprint {
+                    entries.retain(|name, _| !ignored_entries.contains(name));
+                }
                 if path_fingerprint == &current_path_fingerprint
                     || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound)
                 {
@@ -762,5 +787,50 @@ mod tests {
         );
         assert!(rebuildable.is_rebuildable_folder(&rel("out")));
         assert!(!rebuildable.is_rebuildable_folder(&rel("out/tmp")));
+    }
+
+    #[test]
+    fn listings_leave_out_entries_the_task_can_rebuild() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        for dir in ["pkg/gen", "pkg/mixed"] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        let written = ["pkg/gen/a.txt", "pkg/out.txt", "pkg/mixed/a.txt"];
+        for file in written.iter().copied().chain(["pkg/mixed/notes.txt"]) {
+            std::fs::write(workspace_root.join(file).as_path(), "x").unwrap();
+        }
+
+        let path_reads = HashMap::from([(rel("pkg"), PathRead { read_dir_entries: true })]);
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &Rebuildable::new(written.into_iter().map(rel).collect(), &workspace_root),
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let listing = &fingerprint.inferred_inputs[&rel("pkg")];
+        assert_eq!(listing.ignored_entries, BTreeSet::from(["gen".into(), "out.txt".into()]));
+        assert_eq!(
+            listing.fingerprint,
+            PathFingerprint::Folder(Some(BTreeMap::from([("mixed".into(), DirEntryKind::Dir)])))
+        );
+
+        let validate = || fingerprint.validate(&workspace_root, &FxHashMap::default()).unwrap();
+        assert!(validate().is_none());
+        std::fs::remove_dir_all(workspace_root.join("pkg/gen").as_path()).unwrap();
+        std::fs::remove_file(workspace_root.join("pkg/out.txt").as_path()).unwrap();
+        assert!(validate().is_none());
+
+        std::fs::write(workspace_root.join("pkg/notes.txt").as_path(), "x").unwrap();
+        match validate() {
+            Some(PostRunMismatch::Input { kind: InputChangeKind::Added, path }) => {
+                assert_eq!(path.as_str(), "pkg/notes.txt");
+            }
+            other => panic!("expected `pkg/notes.txt` added, got {other:?}"),
+        }
     }
 }
