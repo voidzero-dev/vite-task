@@ -1,0 +1,57 @@
+[[e2e]]
+name = "empty_folder_in_output"
+comment = """
+The task makes `out/empty` and leaves it empty, writes `out/a.txt` and stats `out`, like a build tool that makes a folder for outputs it doesn't have this time.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    "out",
+  ], comment = "remove the output folder, as on a clean checkout" },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "on Windows, where a mkdir is recorded as a read, `out/empty` is an input too, and vt names whichever removed input it finds first, so the miss reason is redacted", redact = { 'cache miss: .*, executing' = 'cache miss: <removed input>, executing' } },
+  [
+    "vtt",
+    "stat-file",
+    "out/empty",
+  ],
+]
+
+[[e2e]]
+name = "empty_folder_in_output_globs"
+comment = """
+The same task with explicit `output` globs, `out/**`, which match `out/empty`.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "build-globs",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    "out",
+  ], comment = "remove the output folder, as on a clean checkout" },
+  { argv = [
+    "vt",
+    "run",
+    "build-globs",
+  ], comment = "on Windows, where a mkdir is recorded as a read, `out/empty` is an input too, and vt names whichever removed input it finds first, so the miss reason is redacted", redact = { 'cache miss: .*, executing' = 'cache miss: <removed input>, executing' } },
+  [
+    "vtt",
+    "stat-file",
+    "out/empty",
+  ],
+]
