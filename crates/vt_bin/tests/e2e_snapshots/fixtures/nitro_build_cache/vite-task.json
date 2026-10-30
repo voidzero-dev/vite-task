@@ -6,6 +6,10 @@
         "input": ["routes/**", "nitro.config.ts"],
         "output": [".output/**"]
       }
+    },
+    "build-auto": {
+      "command": "CONSOLA_LEVEL=0 nitro build",
+      "cache": true
     }
   }
 }

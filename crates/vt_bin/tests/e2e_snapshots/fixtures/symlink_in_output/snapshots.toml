@@ -1,0 +1,30 @@
+[[e2e]]
+name = "symlink_in_output"
+comment = """
+The task links `out/link` to `out/target.txt`, a file in the fixture, like a build tool linking a dependency into its output.
+"""
+# Unix only for now: on Windows, the link is recorded as a read, so removing it
+# is a cache miss there.
+cfg = "unix"
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "out/link",
+  ], comment = "remove the link, as on a clean checkout" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "read-link",
+    "out/link",
+  ],
+]
