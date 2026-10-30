@@ -1,0 +1,28 @@
+[[e2e]]
+name = "stat_own_output_folder"
+comment = """
+The task makes `out`, writes `out/a.txt` and stats `out`, like a build tool checking its output folder.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    "out",
+  ], comment = "remove the output folder, as on a clean checkout" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "stat-file",
+    "out/a.txt",
+  ],
+]

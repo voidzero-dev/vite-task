@@ -33,8 +33,8 @@ struct TrackingOutcome {
     /// Auto-output writes after output exclusions are applied. Empty when
     /// `output_config.includes_auto` is false.
     path_writes: FxHashSet<RelativePathBuf>,
-    /// Every write fspy recorded, before output exclusions and `ignoreOutput`
-    /// paths are applied.
+    /// What the task can rebuild, from every write fspy recorded before output
+    /// exclusions and `ignoreOutput` paths are applied.
     rebuildable: Rebuildable,
 }
 
@@ -254,7 +254,7 @@ fn observe_fspy(
             TrackingOutcome {
                 path_reads: filtered_path_reads,
                 path_writes: filtered_path_writes,
-                rebuildable: Rebuildable::new(tracked.path_writes),
+                rebuildable: Rebuildable::new(tracked.path_writes, workspace_root),
             }
         })
     }
