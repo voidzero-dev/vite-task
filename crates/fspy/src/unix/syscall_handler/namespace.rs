@@ -1,7 +1,9 @@
-//! Syscalls that put an existing file or folder at a new path without opening
-//! it: rename and hard link. The new path of a rename is recorded as a rename
-//! target, which may be a whole folder, and that of a hard link, always a
-//! file, as a write. The source of a rename needs no record.
+//! Syscalls that make an entry at a path without opening it: mkdir, and
+//! rename and hard link, which put an existing file or folder at a new path.
+//! The path of a mkdir is recorded as a mkdir, whether or not the folder is
+//! there already; the new path of a rename as a rename target, which may be
+//! a whole folder; and that of a hard link, always a file, as a write. The
+//! source of a rename needs no record.
 
 use std::io;
 
@@ -11,6 +13,19 @@ use fspy_shared::ipc::AccessMode;
 use super::SyscallHandler;
 
 impl SyscallHandler {
+    #[cfg(target_arch = "x86_64")]
+    pub(super) fn mkdir(&mut self, caller: Caller, (path,): (CStrPtr,)) -> io::Result<()> {
+        self.handle_path(caller, Fd::cwd(), path, AccessMode::Mkdir)
+    }
+
+    pub(super) fn mkdirat(
+        &mut self,
+        caller: Caller,
+        (dir_fd, path): (Fd, CStrPtr),
+    ) -> io::Result<()> {
+        self.handle_path(caller, dir_fd, path, AccessMode::Mkdir)
+    }
+
     #[cfg(target_arch = "x86_64")]
     pub(super) fn rename(
         &mut self,

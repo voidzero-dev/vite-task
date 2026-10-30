@@ -17,6 +17,7 @@
     "@playwright/browser-chromium": "catalog:",
     "@vitest/browser-playwright": "catalog:",
     "@voidzero-dev/vite-task-client": "workspace:*",
+    "astro": "catalog:",
     "bun": "catalog:",
     "cbor-edn": "catalog:",
     "cbor2": "catalog:",

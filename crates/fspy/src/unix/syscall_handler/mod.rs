@@ -105,6 +105,8 @@ impl_handler!(
     faccessat,
     faccessat2,
 
+    #[cfg(target_arch = "x86_64")] mkdir,
+    mkdirat,
     #[cfg(target_arch = "x86_64")] rename,
     renameat,
     renameat2,
