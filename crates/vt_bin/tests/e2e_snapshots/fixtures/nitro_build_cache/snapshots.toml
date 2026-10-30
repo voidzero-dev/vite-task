@@ -30,3 +30,40 @@ steps = [
     "check.cjs",
   ], comment = "the restored output has the same links, not copies, and resolves the same versions" },
 ]
+
+[[e2e]]
+name = "nitro_auto_outputs_restore_links"
+comment = """
+The same Nitro build with automatic input and output tracking only, no `input` or `output` globs. nf3 checks each path before linking it, so the links are among the paths the task read.
+"""
+# Unix only for now: on Windows, nf3 makes junctions, which libuv opens for
+# writing before turning them into links, so they're recorded as written there
+# already.
+cfg = "unix"
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build-auto",
+  ], comment = "first run — cache miss, Nitro builds .output/" },
+  [
+    "node",
+    "check.cjs",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "-rf",
+    ".output",
+  ], comment = "remove .output/, as on a clean checkout" },
+  { argv = [
+    "vt",
+    "run",
+    "build-auto",
+  ], comment = "several inputs are missing and vt names whichever it finds first, so the miss reason is redacted", redact = { 'cache miss: .*, executing' = 'cache miss: <removed input>, executing' } },
+  { argv = [
+    "node",
+    "check.cjs",
+  ], comment = "the output has the same links, not copies, and resolves the same versions" },
+]
