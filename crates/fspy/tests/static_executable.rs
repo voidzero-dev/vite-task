@@ -90,6 +90,14 @@ async fn openat2_readwrite() {
 }
 
 #[test(tokio::test)]
+async fn mkdir() {
+    // The mkdir fails, since `/hello` doesn't exist; the folder is recorded
+    // anyway.
+    let accesses = track_test_bin(&["mkdir", "/hello/world"], None).await;
+    assert_contains(&accesses, Path::new("/hello/world"), fspy::PathAccess::Mkdir);
+}
+
+#[test(tokio::test)]
 async fn rename_destination() {
     // The rename fails, since `/hello` doesn't exist; the destination is
     // recorded anyway.

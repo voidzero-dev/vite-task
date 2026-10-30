@@ -17,10 +17,11 @@ remove the output folder, as on a clean checkout
 
 ## `vt run build-globs`
 
-on Windows, where a mkdir is recorded as a read, `out/empty` is an input too, and vt names whichever removed input it finds first, so the miss reason is redacted
-
 ```
-$ vtt fs mkdir out/empty write out/a.txt hi stat out ○ cache miss: <removed input>, executing
+$ vtt fs mkdir out/empty write out/a.txt hi stat out ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `vtt stat-file out/empty`

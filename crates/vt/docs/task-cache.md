@@ -197,7 +197,8 @@ Vite Task uses `fspy` to monitor file system access during task execution:
 │    • Check if file exists                                    │
 │    • If file: Hash contents with xxHash3                     │
 │    • If directory: Record structure                          │
-│      (skipped if it holds only files the task wrote; a       │
+│      (skipped if it's an empty folder the task made, or      │
+│      holds only files the task wrote and such folders; a     │
 │      listing leaves out such files and folders)              │
 │    • If missing: Mark as NotFound                            │
 │         │                                                    │
