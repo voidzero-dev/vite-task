@@ -7,13 +7,15 @@ use std::{
 
 use vt_path::{AbsolutePath, RelativePathBuf};
 
-/// Create a tar.zst archive from workspace-relative output paths.
+/// Create a tar.zst archive from workspace-relative output paths and output
+/// folder paths.
 ///
 /// A regular file is stored with its contents. A symbolic link is stored as a
 /// link with its target, never followed, so a link to a directory or a
-/// dangling link round-trips as the task left it. Paths that no longer exist
-/// are silently skipped (the task may delete temporary files during
-/// execution).
+/// dangling link round-trips as the task left it. A folder is stored without
+/// its contents, so that extracting recreates it even when nothing is in it.
+/// Paths that no longer exist are silently skipped (the task may delete
+/// temporary files during execution).
 ///
 /// # Errors
 ///
@@ -21,11 +23,26 @@ use vt_path::{AbsolutePath, RelativePathBuf};
 pub fn create_output_archive(
     workspace_root: &AbsolutePath,
     output_files: &[RelativePathBuf],
+    output_folders: &[RelativePathBuf],
     archive_path: &AbsolutePath,
 ) -> anyhow::Result<()> {
     let file = File::create(archive_path.as_path())?;
     let encoder = zstd::Encoder::new(file, 0)?.auto_finish();
     let mut builder = tar::Builder::new(encoder);
+
+    for rel_path in output_folders {
+        let metadata = match std::fs::symlink_metadata(workspace_root.join(rel_path).as_path()) {
+            Ok(m) => m,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(err.into()),
+        };
+        if metadata.is_dir() {
+            let mut header = tar::Header::new_gnu();
+            header.set_metadata(&metadata);
+            header.set_cksum();
+            builder.append_data(&mut header, rel_path.as_str(), io::empty())?;
+        }
+    }
 
     for rel_path in output_files {
         let abs_path = workspace_root.join(rel_path);
@@ -56,8 +73,8 @@ pub fn create_output_archive(
     Ok(())
 }
 
-/// Extract a tar.zst archive, restoring files and symbolic links relative to
-/// workspace root.
+/// Extract a tar.zst archive, restoring files, folders and symbolic links
+/// relative to workspace root.
 ///
 /// Parent directories are created automatically. Existing files are overwritten.
 ///
@@ -144,7 +161,7 @@ mod tests {
         let output = RelativePathBuf::new("output.txt").unwrap();
         std::fs::write(dir.join(&output).as_path(), "built\n".repeat(1000)).unwrap();
         let archive_path = dir.join("output.tar.zst");
-        create_output_archive(&dir, &[output], &archive_path).unwrap();
+        create_output_archive(&dir, &[output], &[], &archive_path).unwrap();
         let archive = std::fs::read(archive_path.as_path()).unwrap();
         check_output_archive(archive.as_slice()).unwrap();
 
@@ -187,7 +204,7 @@ mod tests {
         let files = ["dist/pkg/index.js", "dist/file.js", "dist/dependency", "dist/dangling"]
             .map(|path| RelativePathBuf::new(path).unwrap());
         let archive_path = dir.join("output.tar.zst");
-        create_output_archive(&dir, &files, &archive_path).unwrap();
+        create_output_archive(&dir, &files, &[], &archive_path).unwrap();
 
         fs::remove_dir_all(dir.join("dist")).unwrap();
         extract_output_archive(&dir, &archive_path).unwrap();
@@ -216,12 +233,30 @@ mod tests {
         symlink(outside.path().to_str().unwrap(), &dir.join("link"), true);
         let files = ["link", "link/sentinel.txt"].map(|path| RelativePathBuf::new(path).unwrap());
         let archive_path = dir.join("output.tar.zst");
-        create_output_archive(&dir, &files, &archive_path).unwrap();
+        create_output_archive(&dir, &files, &[], &archive_path).unwrap();
         fs::write(&sentinel, "must remain unchanged").unwrap();
 
         let restored = dir.join("restored");
         fs::create_dir_all(&restored).unwrap();
         assert!(extract_output_archive(&restored, &archive_path).is_err());
         assert_eq!(fs::read_to_string(&sentinel).unwrap(), "must remain unchanged");
+    }
+
+    #[test]
+    fn extracting_recreates_empty_folders() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let source = AbsolutePathBuf::new(tmp.path().join("source")).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        std::fs::create_dir_all(source.join("out/empty").as_path()).unwrap();
+        std::fs::write(source.join("out/a.txt").as_path(), "a").unwrap();
+        let archive_path = AbsolutePathBuf::new(tmp.path().join("output.tar.zst")).unwrap();
+        create_output_archive(&source, &[rel("out/a.txt")], &[rel("out/empty")], &archive_path)
+            .unwrap();
+
+        let target = AbsolutePathBuf::new(tmp.path().join("target")).unwrap();
+        std::fs::create_dir_all(target.as_path()).unwrap();
+        extract_output_archive(&target, &archive_path).unwrap();
+        assert!(target.join("out/empty").as_path().is_dir());
+        assert_eq!(std::fs::read_to_string(target.join("out/a.txt").as_path()).unwrap(), "a");
     }
 }

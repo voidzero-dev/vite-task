@@ -20,7 +20,10 @@ remove Astro's outputs and caches, as on a clean checkout (vp's own cache is in 
 several inputs are missing and vt names whichever it finds first, so the miss reason is redacted
 
 ```
-$ ASTRO_TELEMETRY_DISABLED=1 astro build --silent ○ cache miss: <removed input>, executing
+$ ASTRO_TELEMETRY_DISABLED=1 astro build --silent ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `vtt stat-file .astro/collections`

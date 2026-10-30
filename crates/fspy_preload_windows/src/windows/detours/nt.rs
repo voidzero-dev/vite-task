@@ -3,10 +3,11 @@ use std::mem::{offset_of, size_of, size_of_val};
 use fspy_shared::ipc::{AccessMode, IpcPath, PathAccess};
 use ntapi::{
     ntioapi::{
-        FILE_INFORMATION_CLASS, FILE_RENAME_INFORMATION, FileLinkInformation,
-        FileLinkInformationEx, FileRenameInformation, FileRenameInformationEx,
-        NtQueryDirectoryFile, NtQueryFullAttributesFile, NtQueryInformationByName,
-        PFILE_BASIC_INFORMATION, PFILE_NETWORK_OPEN_INFORMATION, PIO_APC_ROUTINE, PIO_STATUS_BLOCK,
+        FILE_CREATE, FILE_DIRECTORY_FILE, FILE_INFORMATION_CLASS, FILE_OPEN_IF,
+        FILE_RENAME_INFORMATION, FileLinkInformation, FileLinkInformationEx, FileRenameInformation,
+        FileRenameInformationEx, NtQueryDirectoryFile, NtQueryFullAttributesFile,
+        NtQueryInformationByName, PFILE_BASIC_INFORMATION, PFILE_NETWORK_OPEN_INFORMATION,
+        PIO_APC_ROUTINE, PIO_STATUS_BLOCK,
     },
     ntpsapi::{
         NtCreateUserProcess, PPS_ATTRIBUTE_LIST, PPS_CREATE_INFO, PS_ATTRIBUTE,
@@ -160,6 +161,11 @@ unsafe fn read_process_image_attribute<'a>(
     None
 }
 
+// An open that may create a directory, from `CreateDirectoryW` (`FILE_CREATE`)
+// or a caller making it if it's missing (`FILE_OPEN_IF`), is recorded as a
+// mkdir, like `mkdir` on Unix, rather than as the read its
+// `FILE_LIST_DIRECTORY` access maps to. Listing the directory is recorded by
+// `NtQueryDirectoryFile`.
 static DETOUR_NT_CREATE_FILE: Detour<
     unsafe extern "system" fn(
         file_handle: PHANDLE,
@@ -191,8 +197,15 @@ static DETOUR_NT_CREATE_FILE: Detour<
                 ea_buffer: PVOID,
                 ea_length: ULONG,
             ) -> HFILE {
-                // SAFETY: intercepting file open to record access before forwarding to real function
-                unsafe { handle_open(desired_access, object_attributes) };
+                if create_options & FILE_DIRECTORY_FILE != 0
+                    && matches!(create_disposition, FILE_CREATE | FILE_OPEN_IF)
+                {
+                    // SAFETY: intercepting directory creation to record it before forwarding to real function
+                    unsafe { handle_open(AccessMode::Mkdir, object_attributes) };
+                } else {
+                    // SAFETY: intercepting file open to record access before forwarding to real function
+                    unsafe { handle_open(desired_access, object_attributes) };
+                }
 
                 // SAFETY: calling the original NtCreateFile with all original arguments
                 unsafe {

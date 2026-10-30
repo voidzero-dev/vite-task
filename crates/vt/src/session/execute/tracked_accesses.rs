@@ -23,6 +23,9 @@ pub struct TrackedPathAccesses {
 
     /// Tracked rename targets: the new paths of renamed files and folders
     pub rename_targets: FxHashSet<RelativePathBuf>,
+
+    /// Tracked mkdirs: the folders the task made, or tried to make
+    pub mkdirs: FxHashSet<RelativePathBuf>,
 }
 
 impl TrackedPathAccesses {
@@ -66,6 +69,11 @@ impl TrackedPathAccesses {
                 PathAccess::RenameTarget(path) => {
                     if let Some(path) = relative_path(path) {
                         accesses.rename_targets.insert(path);
+                    }
+                }
+                PathAccess::Mkdir(path) => {
+                    if let Some(path) = relative_path(path) {
+                        accesses.mkdirs.insert(path);
                     }
                 }
             }

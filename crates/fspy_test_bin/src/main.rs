@@ -48,6 +48,9 @@ fn main() {
         "execve" => {
             let _ = std::process::Command::new(path).spawn();
         }
+        "mkdir" => {
+            let _ = std::fs::create_dir(path);
+        }
         "rename" => {
             let _ = std::fs::rename(path, second_path());
         }

@@ -70,6 +70,24 @@ async fn hard_link_destination() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+async fn mkdir() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    fs::create_dir(tmp_dir.path().join("existing"))?;
+    let tmp_dir_str = tmp_dir.path().to_str().unwrap().to_owned();
+    let accesses = track_fn!(tmp_dir_str, |tmp_dir_str: String| {
+        let tmp_dir = std::path::Path::new(&tmp_dir_str);
+        fs::create_dir(tmp_dir.join("new")).unwrap();
+        // Fails, since the folder is there already; recorded anyway.
+        fs::create_dir(tmp_dir.join("existing")).unwrap_err();
+    })
+    .await?;
+    assert_contains(&accesses, tmp_dir.path().join("new").as_path(), PathAccess::Mkdir);
+    assert_contains(&accesses, tmp_dir.path().join("existing").as_path(), PathAccess::Mkdir);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
 async fn metadata() -> anyhow::Result<()> {
     let tmp_dir = tempfile::tempdir()?;
     let tmp_path = tmp_dir.path().join("hello");

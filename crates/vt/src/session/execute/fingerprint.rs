@@ -121,11 +121,12 @@ impl PostRunFingerprint {
     /// Negative glob filtering is done upstream (see
     /// [`super::tracked_accesses::TrackedPathAccesses::from_raw`]).
     /// Paths already present in `globbed_inputs` are skipped — they are
-    /// already tracked by the prerun glob fingerprint. Folders holding only
-    /// what the task can rebuild are skipped too: a hit restores the files in
-    /// them. Every other path is fingerprinted as the task left it, including
-    /// a file the task rewrote, except that a folder listing leaves out the
-    /// entries the task can rebuild and records their names.
+    /// already tracked by the prerun glob fingerprint. Empty folders the task
+    /// made and folders holding only what the task can rebuild are skipped
+    /// too: a hit restores them. Every other path is fingerprinted as the task
+    /// left it, including a file the task rewrote, except that a folder
+    /// listing leaves out the entries the task can rebuild and records their
+    /// names.
     ///
     /// # Arguments
     /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
@@ -715,7 +716,12 @@ mod tests {
         let create = |written| {
             PostRunFingerprint::create(
                 &path_reads,
-                &Rebuildable::new(written, FxHashSet::default(), &workspace_root),
+                &Rebuildable::new(
+                    written,
+                    FxHashSet::default(),
+                    FxHashSet::default(),
+                    &workspace_root,
+                ),
                 &workspace_root,
                 &BTreeMap::new(),
                 BTreeMap::new(),
@@ -765,6 +771,7 @@ mod tests {
             &Rebuildable::new(
                 written.into_iter().map(rel).collect(),
                 FxHashSet::default(),
+                FxHashSet::default(),
                 &workspace_root,
             ),
             &workspace_root,
@@ -793,10 +800,53 @@ mod tests {
         let rebuildable = Rebuildable::new(
             ["out/a.txt", "out/tmp/b.txt"].into_iter().map(rel).collect(),
             FxHashSet::default(),
+            FxHashSet::default(),
             &workspace_root,
         );
         assert!(rebuildable.is_rebuildable_folder(&rel("out")));
         assert!(!rebuildable.is_rebuildable_folder(&rel("out/tmp")));
+    }
+
+    #[test]
+    fn empty_folders_the_task_made_are_rebuildable() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        for dir in ["out/empty", "mixed/made"] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        for file in ["out/a.txt", "out/empty/.DS_Store", "mixed/made/notes.txt"] {
+            std::fs::write(workspace_root.join(file).as_path(), "x").unwrap();
+        }
+
+        // `out/tmp` and the file the task wrote in it are gone after the run.
+        let rebuildable = Rebuildable::new(
+            ["out/a.txt", "out/tmp/b.txt"].into_iter().map(rel).collect(),
+            FxHashSet::default(),
+            ["out", "out/empty", "out/tmp", "mixed/made"].into_iter().map(rel).collect(),
+            &workspace_root,
+        );
+        let empty_folders: Vec<&str> =
+            rebuildable.empty_folders().iter().map(|path| path.as_str()).collect();
+        assert_eq!(empty_folders, ["out/empty"]);
+
+        let path_reads = ["out", "out/empty", "mixed", "mixed/made"]
+            .into_iter()
+            .map(|dir| (rel(dir), PathRead { read_dir_entries: false }))
+            .collect();
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &rebuildable,
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let mut fingerprinted: Vec<&str> =
+            fingerprint.inferred_inputs.keys().map(|path| path.as_str()).collect();
+        fingerprinted.sort_unstable();
+        assert_eq!(fingerprinted, ["mixed", "mixed/made"]);
     }
 
     #[test]
@@ -814,6 +864,7 @@ mod tests {
         let rebuildable = Rebuildable::new(
             FxHashSet::default(),
             FxHashSet::from_iter([rel("deps")]),
+            FxHashSet::default(),
             &workspace_root,
         );
         let mut written: Vec<&str> =
@@ -853,6 +904,7 @@ mod tests {
         let rebuildable = Rebuildable::new(
             FxHashSet::from_iter([rel("deps")]),
             FxHashSet::default(),
+            FxHashSet::default(),
             &workspace_root,
         );
         assert!(!rebuildable.may_be_missing(&rel("deps/a.js")));
@@ -888,6 +940,7 @@ mod tests {
             &path_reads,
             &Rebuildable::new(
                 written.into_iter().map(rel).collect(),
+                FxHashSet::default(),
                 FxHashSet::default(),
                 &workspace_root,
             ),
