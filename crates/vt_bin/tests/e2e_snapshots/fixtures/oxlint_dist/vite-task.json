@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "lint": {
+      "command": "oxlint -D no-debugger",
+      "cache": true
+    }
+  }
+}

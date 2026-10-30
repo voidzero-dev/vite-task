@@ -1,0 +1,22 @@
+[[e2e]]
+name = "dist_appears_in_listed_folder"
+comment = """
+The task lists the package root and prints its entries, like a tool looking for the files to process.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "mkdir",
+    "dist",
+  ], comment = "a `dist` folder the task didn't make appears in the listed folder" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+]
