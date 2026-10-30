@@ -23,13 +23,11 @@ a `dist` folder the task didn't make appears in the listed folder
 ## `vt run build`
 
 ```
-$ vtt list-dir . ◉ cache hit, replaying
+$ vtt list-dir . ○ cache miss: 'dist' added in workspace root, executing
+dist
 node_modules
 package.json
 snapshots
 snapshots.toml
 vite-task.json
-
----
-vt run: cache hit.
 ```
