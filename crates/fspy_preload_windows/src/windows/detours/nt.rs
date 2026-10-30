@@ -24,6 +24,7 @@ use winapi::{
     },
     um::winnt::{ACCESS_MASK, GENERIC_READ},
 };
+use windows_sys::Win32::System::Ioctl::{FSCTL_SET_REPARSE_POINT, FSCTL_SET_REPARSE_POINT_EX};
 
 use crate::windows::{
     client::global_client,
@@ -339,6 +340,66 @@ unsafe fn handle_destination(access_mode: AccessMode, file_information: PVOID, l
     unsafe { handle_open(access_mode, &raw mut object_attributes) };
 }
 
+// A reparse point set on a file or folder, which makes it a link, is recorded
+// as a write before the call, so a failed call is recorded too, as `symlink`
+// is on Unix. `CreateSymbolicLinkW` creates the link with an open that lacks
+// write access, recorded as a read (or as a mkdir for a folder link), and
+// sets its reparse point here. A junction, as libuv makes for Node's
+// `fs.symlink` with `'junction'`, is a folder, recorded as a mkdir, with a
+// mount point set here.
+static DETOUR_NT_FS_CONTROL_FILE: Detour<
+    unsafe extern "system" fn(
+        file_handle: HANDLE,
+        event: HANDLE,
+        apc_routine: PIO_APC_ROUTINE,
+        apc_context: PVOID,
+        io_status_block: PIO_STATUS_BLOCK,
+        fs_control_code: ULONG,
+        input_buffer: PVOID,
+        input_buffer_length: ULONG,
+        output_buffer: PVOID,
+        output_buffer_length: ULONG,
+    ) -> NTSTATUS,
+> =
+    // SAFETY: initializing Detour with the real NtFsControlFile function pointer
+    unsafe {
+        Detour::new(c"NtFsControlFile", ntapi::ntioapi::NtFsControlFile, {
+            unsafe extern "system" fn new_fn(
+                file_handle: HANDLE,
+                event: HANDLE,
+                apc_routine: PIO_APC_ROUTINE,
+                apc_context: PVOID,
+                io_status_block: PIO_STATUS_BLOCK,
+                fs_control_code: ULONG,
+                input_buffer: PVOID,
+                input_buffer_length: ULONG,
+                output_buffer: PVOID,
+                output_buffer_length: ULONG,
+            ) -> NTSTATUS {
+                if matches!(fs_control_code, FSCTL_SET_REPARSE_POINT | FSCTL_SET_REPARSE_POINT_EX) {
+                    // SAFETY: intercepting reparse point creation to record the file it is set on before forwarding to real function
+                    unsafe { handle_open(AccessMode::Write, file_handle) };
+                }
+                // SAFETY: calling the original NtFsControlFile with all original arguments
+                unsafe {
+                    (DETOUR_NT_FS_CONTROL_FILE.real())(
+                        file_handle,
+                        event,
+                        apc_routine,
+                        apc_context,
+                        io_status_block,
+                        fs_control_code,
+                        input_buffer,
+                        input_buffer_length,
+                        output_buffer,
+                        output_buffer_length,
+                    )
+                }
+            }
+            new_fn
+        })
+    };
+
 static DETOUR_NT_OPEN_FILE: Detour<
     unsafe extern "system" fn(
         file_handle: PHANDLE,
@@ -641,6 +702,7 @@ pub const DETOURS: &[DetourAny] = &[
     DETOUR_NT_CREATE_FILE.as_any(),
     DETOUR_NT_OPEN_FILE.as_any(),
     DETOUR_NT_SET_INFORMATION_FILE.as_any(),
+    DETOUR_NT_FS_CONTROL_FILE.as_any(),
     DETOUR_NT_QUERY_ATTRIBUTES_FILE.as_any(),
     DETOUR_NT_FULL_QUERY_ATTRIBUTES_FILE.as_any(),
     DETOUR_NT_OPEN_SYMBOLIC_LINK_OBJECT.as_any(),

@@ -26,8 +26,6 @@ vt run: cache hit.
 
 ## `vtt read-link out/link`
 
-**Exit code:** 1
-
 ```
-No such file or directory (os error 2)
+target.txt
 ```

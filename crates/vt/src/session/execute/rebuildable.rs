@@ -28,6 +28,9 @@
 //! ignored. A mkdir record counts only for a folder that is empty after the
 //! run, whether or not the call made it, since it may have been there
 //! already: what any other folder holds decides whether it is rebuildable.
+//! A Windows junction is made as a folder before its mount point is set, but
+//! std reports it as a symlink, so it counts as written, like any symlink the
+//! task made, and not as a folder.
 
 use std::{cmp::Reverse, fs, io};
 

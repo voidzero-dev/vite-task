@@ -112,6 +112,8 @@ impl_handler!(
     renameat2,
     #[cfg(target_arch = "x86_64")] link,
     linkat,
+    #[cfg(target_arch = "x86_64")] symlink,
+    symlinkat,
 
     execve,
     execveat,

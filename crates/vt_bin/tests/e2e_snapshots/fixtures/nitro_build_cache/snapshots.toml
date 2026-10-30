@@ -36,10 +36,6 @@ name = "nitro_auto_outputs_restore_links"
 comment = """
 The same Nitro build with automatic input and output tracking only, no `input` or `output` globs. nf3 checks each path before linking it, so the links are among the paths the task read.
 """
-# Unix only for now: on Windows, nf3 makes junctions, which libuv opens for
-# writing before turning them into links, so they're recorded as written there
-# already.
-cfg = "unix"
 ignore = true
 steps = [
   { argv = [

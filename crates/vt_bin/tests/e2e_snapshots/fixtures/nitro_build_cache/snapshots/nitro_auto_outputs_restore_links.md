@@ -33,7 +33,10 @@ remove .output/, as on a clean checkout
 several inputs are missing and vt names whichever it finds first, so the miss reason is redacted
 
 ```
-$ CONSOLA_LEVEL=0 nitro build ○ cache miss: <removed input>, executing
+$ CONSOLA_LEVEL=0 nitro build ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `node check.cjs`
