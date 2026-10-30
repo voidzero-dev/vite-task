@@ -3,8 +3,8 @@
     "build": {
       "command": "CONSOLA_LEVEL=0 nitro build",
       "cache": {
-        "input": [{ "auto": true }, "!.output/**"],
-        "output": [{ "auto": true }, ".output/**"]
+        "input": ["routes/**", "nitro.config.ts"],
+        "output": [".output/**"]
       }
     }
   }
