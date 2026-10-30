@@ -20,6 +20,8 @@ const USAGE: &str = "Usage: vtt fs <op> <arg>... [<op> <arg>...]...";
 ///   error.
 /// - `mkdir <dir>`: create the folder and any missing parents, like
 ///   `mkdir -p`.
+/// - `rename <from> <to>`: move the file or folder `<from>` to `<to>`, like
+///   a tool writing under a temporary name and renaming it into place.
 ///
 /// Prints nothing. The first call that fails stops the sequence with an error
 /// naming the operation.
@@ -38,6 +40,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             ["stat", path, rest @ ..] => (allow_missing(fs::metadata(path)), rest),
             ["list", dir, rest @ ..] => (allow_missing(list(dir)), rest),
             ["mkdir", dir, rest @ ..] => (fs::create_dir_all(dir), rest),
+            ["rename", from, to, rest @ ..] => (fs::rename(from, to), rest),
             _ => return Err(format!("{USAGE}\nunexpected arguments: {}", ops.join(" ")).into()),
         };
         let op = &ops[..ops.len() - rest.len()];

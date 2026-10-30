@@ -20,6 +20,9 @@ pub struct TrackedPathAccesses {
 
     /// Tracked path writes
     pub path_writes: FxHashSet<RelativePathBuf>,
+
+    /// Tracked rename targets: the new paths of renamed files and folders
+    pub rename_targets: FxHashSet<RelativePathBuf>,
 }
 
 impl TrackedPathAccesses {
@@ -58,6 +61,11 @@ impl TrackedPathAccesses {
                 PathAccess::ReadDir(path) => {
                     if let Some(path) = relative_path(path) {
                         accesses.add_read(path).read_dir_entries = true;
+                    }
+                }
+                PathAccess::RenameTarget(path) => {
+                    if let Some(path) = relative_path(path) {
+                        accesses.rename_targets.insert(path);
                     }
                 }
             }
