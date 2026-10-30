@@ -167,6 +167,9 @@ mod tests {
         }
     }
 
+    // Unix only: Windows doesn't resolve a relative link target with `/`
+    // separators, such as `pkg/index.js`, which is how `tar` stores targets.
+    #[cfg(unix)]
     #[test]
     fn symlinks_round_trip_as_links() {
         let tmp = tempfile::TempDir::new().unwrap();

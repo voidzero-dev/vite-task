@@ -1,6 +1,6 @@
 # output_globs___symlinks_restored_on_cache_hit
 
-A symbolic link matched by an output glob is archived as a link, so a cache hit restores it. Restoring also replaces a link that is already there. Not run on Windows, where a symbolic link in a task's outputs can't be cached.
+A symbolic link matched by an output glob is archived as a link, so a cache hit restores it. Restoring also replaces a link that is already there. Unix only: on Windows, `tar` restores the target `store/pkg` with its `/` separator, which Windows doesn't resolve, and can't replace the directory link already there.
 
 ## `vt run build-with-symlink`
 
