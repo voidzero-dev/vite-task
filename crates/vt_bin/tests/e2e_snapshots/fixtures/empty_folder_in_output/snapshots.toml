@@ -1,0 +1,28 @@
+[[e2e]]
+name = "empty_folder_in_output"
+comment = """
+The task makes `out/empty` and leaves it empty, writes `out/a.txt` and stats `out`, like a build tool that makes a folder for outputs it doesn't have this time.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    "out",
+  ], comment = "remove the output folder, as on a clean checkout" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "stat-file",
+    "out/empty",
+  ],
+]
