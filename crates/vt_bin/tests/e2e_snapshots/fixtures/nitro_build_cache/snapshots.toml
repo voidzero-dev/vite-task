@@ -1,7 +1,7 @@
 [[e2e]]
 name = "nitro_build_restores_traced_dependency_links"
 comment = """
-A real Nitro server build traces `dep-a` and `dep-b`, which depend on different versions of `tslib` (small stand-ins committed in the fixture's `node_modules`). nf3 writes each version under `.output/server/node_modules/.nf3/tslib@<version>`, links `node_modules/tslib` to the hoisted one, and links each package's `node_modules/tslib` to the one it needs. A cache hit restores those links, so each package still resolves its own version from the restored output. On Windows, nf3 creates junctions, whose targets are absolute paths.
+A real Nitro server build traces `dep-a` and `dep-b`, which depend on different versions of `tslib` (small stand-ins committed in the fixture's `node_modules`). nf3 writes each version under `.output/server/node_modules/.nf3/tslib@<version>`, links `node_modules/tslib` to the hoisted one, and links each package's `node_modules/tslib` to the one it needs. A cache hit restores those links as links, so each package still resolves its own version from the restored output. On Windows, nf3 creates junctions, whose targets are absolute paths.
 """
 ignore = true
 steps = [
@@ -13,7 +13,7 @@ steps = [
   { argv = [
     "node",
     "check.cjs",
-  ], comment = "each package resolves its own tslib through nf3's links" },
+  ], comment = "nf3 linked each package's tslib into .nf3, so each resolves its own version" },
   { argv = [
     "vtt",
     "rm",
@@ -28,5 +28,5 @@ steps = [
   { argv = [
     "node",
     "check.cjs",
-  ], comment = "the restored output resolves the same versions" },
+  ], comment = "the restored output has the same links, not copies, and resolves the same versions" },
 ]

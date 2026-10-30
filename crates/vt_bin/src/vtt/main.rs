@@ -20,6 +20,7 @@ mod print_color;
 mod print_cwd;
 mod print_env;
 mod print_file;
+mod read_link;
 mod read_stdin;
 mod replace_file_content;
 mod rm;
@@ -38,7 +39,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, symlink, touch-file, write-file"
+            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-link, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, symlink, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -67,6 +68,7 @@ fn main() {
         "print-cwd" => print_cwd::run(),
         "print-env" => print_env::run(&args[2..]),
         "print-file" => print_file::run(&args[2..]),
+        "read-link" => read_link::run(&args[2..]),
         "read-stdin" => read_stdin::run(),
         "replace-file-content" => replace_file_content::run(&args[2..]),
         "rm" => rm::run(&args[2..]),

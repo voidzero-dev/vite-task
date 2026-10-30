@@ -1,6 +1,6 @@
 # output_globs___symlinks_restored_on_cache_hit
 
-A symbolic link matched by an output glob is archived as a link, so a cache hit restores it. Restoring also replaces a link that is already there. Unix only: on Windows, `tar` restores the target `store/pkg` with its `/` separator, which Windows doesn't resolve, and can't replace the directory link already there.
+A symbolic link matched by an output glob is archived as a link, so a cache hit restores it as a link with the same target. Restoring also replaces a link that is already there. Unix only: on Windows, `tar` restores the target `store/pkg` with its `/` separator, which Windows doesn't resolve, and can't replace the directory link already there.
 
 ## `vt run build-with-symlink`
 
@@ -43,6 +43,14 @@ the file is reachable through the restored link
 built
 ```
 
+## `vtt read-link dist/pkg`
+
+dist/pkg is restored as a link to store/pkg, not as a copy
+
+```
+store/pkg
+```
+
 ## `vt run build-with-symlink`
 
 third run — cache hit, restores over the link the second run left
@@ -62,4 +70,12 @@ the file is still reachable through the link
 
 ```
 built
+```
+
+## `vtt read-link dist/pkg`
+
+dist/pkg is still a link to store/pkg
+
+```
+store/pkg
 ```

@@ -159,7 +159,7 @@ steps = [
 [[e2e]]
 name = "output_globs___symlinks_restored_on_cache_hit"
 comment = """
-A symbolic link matched by an output glob is archived as a link, so a cache hit restores it. Restoring also replaces a link that is already there. Unix only: on Windows, `tar` restores the target `store/pkg` with its `/` separator, which Windows doesn't resolve, and can't replace the directory link already there.
+A symbolic link matched by an output glob is archived as a link, so a cache hit restores it as a link with the same target. Restoring also replaces a link that is already there. Unix only: on Windows, `tar` restores the target `store/pkg` with its `/` separator, which Windows doesn't resolve, and can't replace the directory link already there.
 """
 cfg = "unix"
 steps = [
@@ -185,6 +185,11 @@ steps = [
     "dist/pkg/index.js",
   ], comment = "the file is reachable through the restored link" },
   { argv = [
+    "vtt",
+    "read-link",
+    "dist/pkg",
+  ], comment = "dist/pkg is restored as a link to store/pkg, not as a copy" },
+  { argv = [
     "vt",
     "run",
     "build-with-symlink",
@@ -194,4 +199,9 @@ steps = [
     "print-file",
     "dist/pkg/index.js",
   ], comment = "the file is still reachable through the link" },
+  { argv = [
+    "vtt",
+    "read-link",
+    "dist/pkg",
+  ], comment = "dist/pkg is still a link to store/pkg" },
 ]
