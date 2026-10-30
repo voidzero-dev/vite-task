@@ -70,6 +70,42 @@ async fn hard_link_destination() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+async fn symlink_destination() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    // On Windows the link is recorded from its handle, by its long name, while
+    // `TEMP` may hold an 8.3 short name, so name the links by the long name.
+    let tmp_path = tmp_dir.path().canonicalize()?;
+    fs::create_dir(tmp_path.join("folder"))?;
+    let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
+    let accesses = track_fn!(tmp_path_str, |tmp_path_str: String| {
+        let tmp_dir = std::path::Path::new(&tmp_path_str);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("file", tmp_dir.join("file_link")).unwrap();
+            std::os::unix::fs::symlink("folder", tmp_dir.join("folder_link")).unwrap();
+        }
+        #[cfg(windows)]
+        {
+            std::os::windows::fs::symlink_file("file", tmp_dir.join("file_link")).unwrap();
+            std::os::windows::fs::symlink_dir("folder", tmp_dir.join("folder_link")).unwrap();
+        }
+    })
+    .await?;
+    for link in ["file_link", "folder_link"] {
+        let link = tmp_path.join(link);
+        #[cfg(unix)]
+        assert_contains(&accesses, &link, PathAccess::Write);
+        // `CreateSymbolicLinkW` creates the link with an open that lacks write
+        // access, recorded as a read, or as a mkdir for a folder link, before
+        // it sets the reparse point.
+        #[cfg(windows)]
+        test_utils::assert_includes(&accesses, &link, PathAccess::Write);
+    }
+
+    Ok(())
+}
+
+#[test(tokio::test)]
 async fn mkdir() -> anyhow::Result<()> {
     let tmp_dir = tempfile::tempdir()?;
     fs::create_dir(tmp_dir.path().join("existing"))?;

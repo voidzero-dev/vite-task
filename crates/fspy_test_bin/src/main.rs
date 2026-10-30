@@ -57,6 +57,9 @@ fn main() {
         "hard_link" => {
             let _ = std::fs::hard_link(path, second_path());
         }
+        "symlink" => {
+            let _ = std::os::unix::fs::symlink(path, second_path());
+        }
         _ => panic!("unknown action: {action}"),
     }
 }

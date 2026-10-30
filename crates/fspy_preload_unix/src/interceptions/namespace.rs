@@ -1,9 +1,11 @@
-//! Calls that make an entry at a path without opening it: mkdir, and rename
-//! and hard link, which put an existing file or folder at a new path. The
-//! path is recorded before the call, so a failed call is recorded too: as a
-//! mkdir for a mkdir, whose folder may be there already; as a rename target
-//! for a rename, which may move a whole folder; and as a write for a hard
-//! link, always to a file. The source of a rename needs no record.
+//! Calls that make an entry at a path without opening it: mkdir, symlink,
+//! and rename and hard link, which put an existing file or folder at a new
+//! path. The path is recorded before the call, so a failed call is recorded
+//! too: as a mkdir for a mkdir, whose folder may be there already; as a
+//! rename target for a rename, which may move a whole folder; and as a write
+//! for a symlink, and for a hard link, always to a file. The source of a
+//! rename needs no record, and neither does the target of a symlink, which
+//! is stored as text, not accessed.
 
 use fspy_shared::ipc::AccessMode;
 use libc::{c_char, c_int, mode_t};
@@ -125,4 +127,24 @@ unsafe extern "C" fn linkat(
     unsafe { handle_open(PathAt::borrow_raw(newdirfd, new), AccessMode::Write) };
     // SAFETY: calling the original libc linkat() with the same arguments forwarded from the interposed function
     unsafe { linkat::original()(olddirfd, old, newdirfd, new, flags) }
+}
+
+intercept!(symlink: unsafe extern "C" fn(target: *const c_char, link: *const c_char) -> c_int);
+unsafe extern "C" fn symlink(target: *const c_char, link: *const c_char) -> c_int {
+    // SAFETY: link is a valid C string pointer provided by the caller of the interposed function
+    unsafe { handle_open(fspy_nostd::CStr::from_ptr(link.cast()), AccessMode::Write) };
+    // SAFETY: calling the original libc symlink() with the same arguments forwarded from the interposed function
+    unsafe { symlink::original()(target, link) }
+}
+
+intercept!(symlinkat: unsafe extern "C" fn(target: *const c_char, newdirfd: c_int, link: *const c_char) -> c_int);
+unsafe extern "C" fn symlinkat(
+    target: *const c_char,
+    newdirfd: c_int,
+    link: *const c_char,
+) -> c_int {
+    // SAFETY: newdirfd is -1 or a valid file descriptor, and link is a valid C string, provided by the caller of the interposed function
+    unsafe { handle_open(PathAt::borrow_raw(newdirfd, link), AccessMode::Write) };
+    // SAFETY: calling the original libc symlinkat() with the same arguments forwarded from the interposed function
+    unsafe { symlinkat::original()(target, newdirfd, link) }
 }

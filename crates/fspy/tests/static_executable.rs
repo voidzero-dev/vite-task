@@ -112,6 +112,14 @@ async fn hard_link_destination() {
 }
 
 #[test(tokio::test)]
+async fn symlink_destination() {
+    // The symlink fails, since `/hello` doesn't exist; the link is recorded
+    // anyway.
+    let accesses = track_test_bin(&["symlink", "target", "/hello/world"], None).await;
+    assert_contains(&accesses, Path::new("/hello/world"), fspy::PathAccess::Write);
+}
+
+#[test(tokio::test)]
 async fn open_relative() {
     let accesses = track_test_bin(&["open_read", "hello"], Some("/home")).await;
     assert_contains(&accesses, Path::new("/home/hello"), fspy::PathAccess::Read);

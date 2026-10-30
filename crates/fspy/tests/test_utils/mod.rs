@@ -62,6 +62,39 @@ pub fn assert_contains<'a>(
     );
 }
 
+/// Asserts that `expected_path` was accessed as `expected` (a variant such as
+/// `PathAccess::Write`), whatever other accesses to it there were.
+///
+/// # Panics
+///
+/// Panics if the path was not accessed as `expected`.
+#[expect(
+    clippy::allow_attributes,
+    reason = "allow attribute required for conditionally-used helper"
+)]
+#[allow(dead_code, reason = "not all test files use this helper")]
+#[track_caller]
+pub fn assert_includes<'a>(
+    accesses: &'a PathAccessIterable,
+    expected_path: &Path,
+    expected: fn(&'a IpcPath) -> PathAccess<'a>,
+) {
+    let found = accesses.iter().any(|access| {
+        access.paths().any(|path| {
+            access == expected(path)
+                && path.strip_path_prefix(expected_path, |strip_result| {
+                    strip_result.is_ok_and(|stripped| stripped.as_os_str().is_empty())
+                })
+        })
+    });
+    assert!(
+        found,
+        "Expected an access to {} of the expected kind. All accesses: {:?}",
+        expected_path.display(),
+        accesses.iter().collect::<Vec<_>>()
+    );
+}
+
 /// Asserts that `unexpected_path` was not accessed in any way.
 ///
 /// # Panics

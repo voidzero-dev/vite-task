@@ -30,7 +30,6 @@ mod small_dev_shm;
 mod stalled_remote_cache;
 mod stat_file;
 mod stat_many;
-#[cfg(unix)]
 mod symlink;
 mod touch_file;
 mod write_file;
@@ -84,10 +83,7 @@ fn main() {
             Ok(())
         }
         "stat-many" => stat_many::run(&args[2..]),
-        #[cfg(unix)]
         "symlink" => symlink::run(&args[2..]),
-        #[cfg(not(unix))]
-        "symlink" => Err("vtt symlink is only supported on Unix".into()),
         "touch-file" => touch_file::run(&args[2..]),
         "write-file" => write_file::run(&args[2..]),
         other => {
