@@ -23,6 +23,11 @@ pub use vt_subprocess_test::command_for_fn;
 /// # Panics
 ///
 /// Panics if the path was not accessed, or was accessed in another way.
+#[expect(
+    clippy::allow_attributes,
+    reason = "allow attribute required for conditionally-used helper"
+)]
+#[allow(dead_code, reason = "not all test files use this helper")]
 #[track_caller]
 pub fn assert_contains<'a>(
     accesses: &'a PathAccessIterable,
@@ -54,6 +59,36 @@ pub fn assert_contains<'a>(
         expected_path.display(),
         path_accesses,
         accesses.iter().collect::<Vec<_>>()
+    );
+}
+
+/// Asserts that `unexpected_path` was not accessed in any way.
+///
+/// # Panics
+///
+/// Panics if the path was accessed.
+#[expect(
+    clippy::allow_attributes,
+    reason = "allow attribute required for conditionally-used helper"
+)]
+#[allow(dead_code, reason = "not all test files use this helper")]
+#[track_caller]
+pub fn assert_not_contains(accesses: &PathAccessIterable, unexpected_path: &Path) {
+    let matching = accesses
+        .iter()
+        .filter(|access| {
+            access.paths().any(|path| {
+                path.strip_path_prefix(unexpected_path, |strip_result| {
+                    strip_result.is_ok_and(|stripped| stripped.as_os_str().is_empty())
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        matching.is_empty(),
+        "Expected no accesses to {}, found: {:?}",
+        unexpected_path.display(),
+        matching
     );
 }
 

@@ -10,10 +10,12 @@ rust-version.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+hashbrown = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
 petgraph = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
+serde-untagged = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

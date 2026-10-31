@@ -23,7 +23,7 @@ unsafe extern "C" fn faccessat(
     mode: c_int,
     flags: c_int,
 ) -> c_int {
-    // SAFETY: dirfd and pathname are valid arguments provided by the caller of the interposed function
+    // SAFETY: dirfd is -1 or a valid file descriptor, and pathname is a valid C string, provided by the caller of the interposed function
     unsafe {
         handle_open(PathAt::borrow_raw(dirfd, pathname), AccessMode::Read);
     }

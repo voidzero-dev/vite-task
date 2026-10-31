@@ -1,0 +1,10 @@
+# A package excluded by pnpm stays standalone even when package.json workspaces includes it.
+
+[fields]
+key = true
+execution_item_display = { command = true }
+
+[[plan]]
+name = "non_member_package_is_its_own_workspace"
+args = ["run", "--recursive", "build"]
+cwd = "examples/demo"

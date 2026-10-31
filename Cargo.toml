@@ -91,6 +91,7 @@ futures = "0.3.31"
 futures-util = "0.3.31"
 globset = "0.4.18"
 getrandom = "0.4.2"
+hashbrown = { version = "0.16.1", default-features = false, features = ["inline-more"] }
 itoa = "1.0.17"
 jsonc-parser = "0.32.0"
 libc = "0.2.185"
@@ -130,6 +131,7 @@ rustls = { version = "0.23.44", default-features = false }
 # SeccompAction::UserNotif (SECCOMP_RET_USER_NOTIF) was added after the latest published release (v0.5.0)
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler", rev = "08587106340b8e3cb361c7561411510039436857" }
 serde = "1.0.219"
+serde-untagged = "0.1.9"
 serde_bytes = "0.11.19"
 serde_json = "1.0.140"
 serde_norway = "0.9.42"
@@ -140,7 +142,6 @@ fspy_nostd_alloc = { path = "crates/fspy_nostd_alloc" }
 similar = "3.0.0"
 smallvec = "2.0.0-alpha.12"
 static_cell = "2"
-stackalloc = "1.2.1"
 supports-color = "3.0.1"
 syn = "2"
 syscalls = { version = "0.8.0", default-features = false }
@@ -148,7 +149,7 @@ tar = "0.4.45"
 tempfile = "3.14.0"
 test-log = "0.2.18"
 thiserror = "2"
-tokio = "1.48.0"
+tokio = "1.53.3"
 tokio-util = "0.7.17"
 toml = "1.0.0"
 tracing = "0.1.43"
@@ -196,7 +197,7 @@ winsafe = { version = "0.0.27" }
 xxhash-rust = "0.8.15"
 ntest = "0.9.5"
 terminal_size = "0.4"
-zstd = "0.13"
+zstd = "0.14"
 
 [workspace.metadata.cargo-shear]
 ignored = [

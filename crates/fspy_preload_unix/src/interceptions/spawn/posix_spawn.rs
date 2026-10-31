@@ -42,45 +42,48 @@ unsafe fn handle_posix_spawn(
     let client = global_client()
         .expect("posix_spawn(p) unexpectedly called before client initialized in ctor");
 
+    let arena = fspy_nostd_alloc::pooled_bump();
     // SAFETY: file, argv, and envp are valid pointers forwarded from the interposed posix_spawn(p) function
-    let result = unsafe {
-        client.handle_exec::<c_int>(
+    let handled = unsafe {
+        client.handle_exec(
             config,
             RawExec { prog: file, argv: argv.cast(), envp: envp.cast() },
-            fspy_nostd_alloc::pooled_bump(),
-            |raw_command, pre_exec| {
-                let call_original = move || {
-                    original(
-                        pid,
-                        raw_command.prog,
-                        file_actions,
-                        attrp,
-                        raw_command.argv.cast(),
-                        raw_command.envp.cast(),
-                    )
-                };
-                if let Some(pre_exec) = pre_exec {
-                    thread::scope(move |s| {
-                        let call_original = AssertSend(call_original);
-                        s.spawn(move || {
-                            let call_original = call_original;
-                            pre_exec.run()?;
-
-                            nix::Result::Ok((call_original.0)())
-                        })
-                        .join()
-                        .unwrap()
-                    })
-                } else {
-                    Ok(call_original())
-                }
-            },
+            &arena,
         )
     };
-    match result {
-        Err(errno) => errno as _,
-        Ok(ret) => ret,
-    }
+    let (raw_command, pre_exec) = match handled {
+        Ok(handled) => handled,
+        Err(errno) => return errno as _,
+    };
+    let call_original = move || {
+        // SAFETY: the caller's pointers are forwarded unchanged, and raw_command's
+        // strings and arrays live in `arena`, which outlives the call
+        unsafe {
+            original(
+                pid,
+                raw_command.prog,
+                file_actions,
+                attrp,
+                raw_command.argv.cast(),
+                raw_command.envp.cast(),
+            )
+        }
+    };
+    let Some(pre_exec) = pre_exec else {
+        return call_original();
+    };
+    thread::scope(move |s| {
+        let call_original = AssertSend(call_original);
+        s.spawn(move || {
+            let call_original = call_original;
+            pre_exec.run()?;
+
+            nix::Result::Ok((call_original.0)())
+        })
+        .join()
+        .unwrap()
+    })
+    .unwrap_or_else(|errno| errno as _)
 }
 
 intercept!(posix_spawnp(64): PosixSpawnFn);

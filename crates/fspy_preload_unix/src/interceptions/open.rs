@@ -47,7 +47,7 @@ unsafe extern "C" fn openat(
     flags: c_int,
     mut args: ...
 ) -> c_int {
-    // SAFETY: dirfd and path are valid arguments provided by the caller of the interposed function
+    // SAFETY: dirfd is -1 or a valid file descriptor, and path is a valid C string, provided by the caller of the interposed function
     unsafe { handle_open(PathAt::borrow_raw(dirfd, path), OpenFlags(flags)) };
 
     if has_mode_arg(flags) {
@@ -88,7 +88,7 @@ unsafe extern "C" fn openat_nocancel(
     flags: c_int,
     mut args: ...
 ) -> c_int {
-    // SAFETY: dirfd and path are valid arguments provided by the caller of openat$NOCANCEL
+    // SAFETY: dirfd is -1 or a valid file descriptor, and path is a valid C string, provided by the caller of openat$NOCANCEL
     unsafe { handle_open(PathAt::borrow_raw(dirfd, path), OpenFlags(flags)) };
     if has_mode_arg(flags) {
         // SAFETY: O_CREAT requires a mode argument, matching the openat$NOCANCEL contract

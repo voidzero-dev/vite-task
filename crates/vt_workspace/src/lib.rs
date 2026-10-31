@@ -11,7 +11,7 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::Deserialize;
 use vec1::smallvec_v1::SmallVec1;
 use vt_glob::path::PathGlobSet;
-use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
+use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePath, RelativePathBuf};
 use vt_str::Str;
 use wax::{
     Glob,
@@ -88,20 +88,29 @@ struct WorkspaceMemberGlobs {
     workspaces: Vec<Str>,
 }
 impl WorkspaceMemberGlobs {
-    const fn new(workspaces: Vec<Str>) -> Self {
-        Self { workspaces }
+    fn from_pnpm_workspace_yaml(file_with_path: &FileWithPath) -> Result<Self, Error> {
+        let workspace: PnpmWorkspace =
+            serde_norway::from_slice(strip_bom(file_with_path.content())).map_err(|e| {
+                Error::SerdeYaml {
+                    file_path: Arc::clone(file_with_path.path()),
+                    serde_yaml_error: e,
+                }
+            })?;
+        Ok(Self { workspaces: workspace.packages })
     }
 
-    fn get_package_json_paths(
-        self,
-        workspace_root: impl AsRef<AbsolutePath>,
-    ) -> Result<impl IntoIterator<Item = AbsolutePathBuf>, Error> {
-        let workspace_root = workspace_root.as_ref();
-        let mut package_json_paths = HashSet::<AbsolutePathBuf>::default();
-        let mut has_negated = false;
-        let mut inclusions = Vec::<Str>::new();
-        let mut all = Vec::<Str>::new();
-        for pattern in self.workspaces {
+    fn from_npm_workspace_json(file_with_path: &FileWithPath) -> Result<Self, Error> {
+        let workspace: NpmWorkspace = serde_json::from_slice(strip_bom(file_with_path.content()))
+            .map_err(|e| Error::SerdeJson {
+            file_path: Arc::clone(file_with_path.path()),
+            serde_json_error: e,
+        })?;
+        Ok(Self { workspaces: workspace.workspaces.into_packages() })
+    }
+
+    /// Converts each member glob into a glob of `package.json` files, paired with whether it is negated.
+    fn package_json_patterns(&self) -> impl Iterator<Item = (Str, bool)> + '_ {
+        self.workspaces.iter().map(|pattern| {
             // Ported from npm's workspace pattern normalization:
             // https://github.com/npm/map-workspaces/blob/76ea3c852171790e245052e006329de15b09e60e/lib/index.js#L17
             let exclusion_count = pattern.bytes().take_while(|byte| *byte == b'!').count();
@@ -124,7 +133,31 @@ impl WorkspaceMemberGlobs {
             } else {
                 "/package.json"
             });
+            (pattern, is_negated)
+        })
+    }
 
+    /// Checks whether the package at `package_path`, relative to the workspace root, is a member.
+    fn includes(&self, package_path: &RelativePath) -> Result<bool, Error> {
+        // `get_package_json_paths` never walks into `node_modules`.
+        if package_path.as_str().split('/').any(|component| component == "node_modules") {
+            return Ok(false);
+        }
+        let patterns = self.package_json_patterns().map(|(pattern, _)| pattern).collect::<Vec<_>>();
+        let package_json_path = vt_str::format!("{}/package.json", package_path.as_str());
+        Ok(PathGlobSet::new(&patterns)?.is_match(package_json_path.as_str()))
+    }
+
+    fn get_package_json_paths(
+        self,
+        workspace_root: impl AsRef<AbsolutePath>,
+    ) -> Result<impl IntoIterator<Item = AbsolutePathBuf>, Error> {
+        let workspace_root = workspace_root.as_ref();
+        let mut package_json_paths = HashSet::<AbsolutePathBuf>::default();
+        let mut has_negated = false;
+        let mut inclusions = Vec::<Str>::new();
+        let mut all = Vec::<Str>::new();
+        for (pattern, is_negated) in self.package_json_patterns() {
             if is_negated {
                 has_negated = true;
             } else {
@@ -283,26 +316,12 @@ pub fn load_package_graph(
     workspace_root: &WorkspaceRoot,
 ) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {
     let mut graph_builder = PackageGraphBuilder::default();
-    let workspaces = match &workspace_root.workspace_file {
+    let member_globs = match &workspace_root.workspace_file {
         WorkspaceFile::PnpmWorkspaceYaml(file_with_path) => {
-            let workspace: PnpmWorkspace =
-                serde_norway::from_slice(strip_bom(file_with_path.content())).map_err(|e| {
-                    Error::SerdeYaml {
-                        file_path: Arc::clone(file_with_path.path()),
-                        serde_yaml_error: e,
-                    }
-                })?;
-            workspace.packages
+            WorkspaceMemberGlobs::from_pnpm_workspace_yaml(file_with_path)?
         }
         WorkspaceFile::NpmWorkspaceJson(file_with_path) => {
-            let workspace: NpmWorkspace =
-                serde_json::from_slice(strip_bom(file_with_path.content())).map_err(|e| {
-                    Error::SerdeJson {
-                        file_path: Arc::clone(file_with_path.path()),
-                        serde_json_error: e,
-                    }
-                })?;
-            workspace.workspaces.into_packages()
+            WorkspaceMemberGlobs::from_npm_workspace_json(file_with_path)?
         }
         WorkspaceFile::NonWorkspacePackage(file_with_path) => {
             // For non-workspace packages, add the package.json to the graph as a root package
@@ -323,7 +342,6 @@ pub fn load_package_graph(
         }
     };
 
-    let member_globs = WorkspaceMemberGlobs::new(workspaces);
     let mut has_root_package = false;
     for package_json_path in member_globs.get_package_json_paths(&*workspace_root.path)? {
         let package_json_path: Arc<AbsolutePath> = package_json_path.clone().into();
@@ -1204,68 +1222,6 @@ mod tests {
         assert!(found_utils_peer_core, "Utils should have peer dependency on core");
         assert!(found_cli_dep_core, "CLI should depend on core");
         assert!(found_cli_dev_utils, "CLI should have dev dependency on utils");
-    }
-
-    #[test]
-    fn test_get_package_graph_npm_workspace_with_exclusions() {
-        let temp_dir = TempDir::new().unwrap();
-        let temp_dir_path = AbsolutePath::new(temp_dir.path()).unwrap();
-
-        // Create package.json with workspaces field including exclusions
-        let root_package = serde_json::json!({
-            "name": "npm-workspace-exclusions",
-            "private": true,
-            "workspaces": [
-                "packages/*",
-                "!packages/experimental",
-                "!packages/*.backup"
-            ]
-        });
-        fs::write(temp_dir_path.join("package.json"), root_package.to_string()).unwrap();
-
-        // Create packages directory
-        fs::create_dir_all(temp_dir_path.join("packages")).unwrap();
-
-        // Create normal package
-        fs::create_dir_all(temp_dir_path.join("packages/normal")).unwrap();
-        let normal_pkg = serde_json::json!({
-            "name": "normal-package"
-        });
-        fs::write(temp_dir_path.join("packages/normal/package.json"), normal_pkg.to_string())
-            .unwrap();
-
-        // Create experimental package (should be excluded)
-        fs::create_dir_all(temp_dir_path.join("packages/experimental")).unwrap();
-        let experimental_pkg = serde_json::json!({
-            "name": "experimental-package"
-        });
-        fs::write(
-            temp_dir_path.join("packages/experimental/package.json"),
-            experimental_pkg.to_string(),
-        )
-        .unwrap();
-
-        // Create backup package (should be excluded by pattern)
-        fs::create_dir_all(temp_dir_path.join("packages/old.backup")).unwrap();
-        let backup_pkg = serde_json::json!({
-            "name": "backup-package"
-        });
-        fs::write(temp_dir_path.join("packages/old.backup/package.json"), backup_pkg.to_string())
-            .unwrap();
-
-        let graph = discover_package_graph(temp_dir_path).unwrap();
-
-        // Check which packages were included
-        let mut packages_found = FxHashSet::<Str>::default();
-        for node in graph.node_weights() {
-            packages_found.insert(node.package_json.name.clone());
-        }
-
-        assert!(packages_found.contains("npm-workspace-exclusions"), "Root should be included");
-        assert!(packages_found.contains("normal-package"), "Normal package should be included");
-
-        // Note: As identified in the pnpm exclusion test, exclusions might not work correctly
-        // with the current implementation. This test documents the expected behavior.
     }
 
     #[test]

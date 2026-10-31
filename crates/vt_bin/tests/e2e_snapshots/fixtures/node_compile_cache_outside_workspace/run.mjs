@@ -2,13 +2,12 @@
 // few sibling modules so the cache directory actually gets some files
 // written to it. On a normally-configured machine the cache lives in
 // the OS temp directory (outside the workspace), so the runner doesn't
-// see those files when it decides whether the run can be cached.
+// see those files.
 //
 // If the spawned process doesn't have LOCALAPPDATA (or TMP/TEMP/
 // USERPROFILE) set on Windows, Node ends up putting the cache inside
-// the workspace, the same files are both written and read in this one
-// run, and the runner refuses to cache it. That's the bug this fixture
-// catches.
+// the workspace. The fixture's last step lists the workspace root to
+// catch that.
 import { enableCompileCache } from 'node:module';
 
 enableCompileCache();

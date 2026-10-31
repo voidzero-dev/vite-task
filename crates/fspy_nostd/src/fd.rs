@@ -36,6 +36,27 @@ impl BorrowedFd<'_> {
         Self { fd, lifetime: PhantomData }
     }
 
+    /// Borrows a descriptor argument passed by a caller, or returns `None`
+    /// when it is `-1`.
+    ///
+    /// Callers can pass `-1` unchecked from a failed call such as `open`.
+    /// The kernel rejects it with `EBADF` wherever it uses the descriptor,
+    /// so it is not a caller error to report here.
+    ///
+    /// # Safety
+    ///
+    /// Any value other than `-1` must satisfy [`Self::borrow_raw`].
+    #[must_use]
+    pub const unsafe fn try_borrow_raw(fd: RawFd) -> Option<Self> {
+        if fd == -1 {
+            None
+        } else {
+            // SAFETY: `fd` is not `-1`, and the caller upholds the
+            // remaining requirements of `borrow_raw`.
+            Some(unsafe { Self::borrow_raw(fd) })
+        }
+    }
+
     /// Returns the raw descriptor without transferring ownership.
     #[must_use]
     pub const fn as_raw_fd(self) -> RawFd {

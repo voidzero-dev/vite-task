@@ -2,7 +2,7 @@ use std::{fs, sync::Arc};
 
 use vt_path::{AbsolutePath, RelativePathBuf};
 
-use crate::Error;
+use crate::{Error, WorkspaceMemberGlobs};
 
 /// The contents of a file bundled with its absolute path for error context.
 ///
@@ -123,6 +123,9 @@ pub struct WorkspaceRoot {
 ///
 /// Returns the workspace root and the relative path from the workspace root to the original cwd.
 ///
+/// Like npm, a workspace is only used if its member globs include the package nearest to `original_cwd`, so a package
+/// nested in a workspace directory without being declared as a member is not treated as part of that workspace.
+///
 /// If the workspace file is not found, but a package is found, `workspace_file` will be `NonWorkspacePackage` with the `package.json` File.
 ///
 /// If neither workspace nor package is found, will return `PackageJsonNotFound` error.
@@ -136,11 +139,18 @@ pub fn find_workspace_root(
     original_cwd: &AbsolutePath,
 ) -> Result<(WorkspaceRoot, RelativePathBuf), Error> {
     let mut cwd = original_cwd;
+    let mut nearest_package: Option<&AbsolutePath> = None;
 
     loop {
         // Check for pnpm-workspace.yaml for pnpm workspace
         let pnpm_workspace_path: Arc<AbsolutePath> = cwd.join("pnpm-workspace.yaml").into();
-        if let Some(file_with_path) = FileWithPath::open_if_exists(pnpm_workspace_path)? {
+        let pnpm_workspace = FileWithPath::open_if_exists(pnpm_workspace_path)?;
+        let is_pnpm_workspace = pnpm_workspace.is_some();
+        if let Some(file_with_path) = pnpm_workspace
+            && includes_package(cwd, nearest_package, || {
+                WorkspaceMemberGlobs::from_pnpm_workspace_yaml(&file_with_path)
+            })?
+        {
             let relative_cwd =
                 original_cwd.strip_prefix(cwd)?.expect("cwd must be within the pnpm workspace");
             return Ok((
@@ -162,7 +172,13 @@ pub fn find_workspace_root(
                 file_path: Arc::clone(file_with_path.path()),
                 serde_json_error: e,
             })?;
-            if package_json.get("workspaces").is_some() {
+            // pnpm defines membership even when its globs exclude the current package.
+            if !is_pnpm_workspace
+                && package_json.get("workspaces").is_some()
+                && includes_package(cwd, nearest_package, || {
+                    WorkspaceMemberGlobs::from_npm_workspace_json(&file_with_path)
+                })?
+            {
                 let relative_cwd =
                     original_cwd.strip_prefix(cwd)?.expect("cwd must be within the workspace");
                 return Ok((
@@ -173,6 +189,7 @@ pub fn find_workspace_root(
                     relative_cwd,
                 ));
             }
+            nearest_package.get_or_insert(cwd);
         }
 
         // TODO(@fengmk2): other package manager support
@@ -190,6 +207,24 @@ pub fn find_workspace_root(
             ));
         }
     }
+}
+
+/// Checks whether the workspace at `workspace_root` includes the nearest package found below it.
+///
+/// Without a package below it, `original_cwd` belongs to the workspace root package itself.
+fn includes_package(
+    workspace_root: &AbsolutePath,
+    nearest_package: Option<&AbsolutePath>,
+    member_globs: impl FnOnce() -> Result<WorkspaceMemberGlobs, Error>,
+) -> Result<bool, Error> {
+    let Some(nearest_package) = nearest_package else {
+        return Ok(true);
+    };
+    // SAFETY: `nearest_package` is found while walking up from `original_cwd` to `workspace_root`.
+    let package_path = nearest_package
+        .strip_prefix(workspace_root)?
+        .expect("nearest package must be within the workspace root");
+    member_globs()?.includes(&package_path)
 }
 
 #[cfg(test)]

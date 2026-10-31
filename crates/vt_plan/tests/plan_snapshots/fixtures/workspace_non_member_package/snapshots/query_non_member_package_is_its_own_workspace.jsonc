@@ -1,0 +1,20 @@
+// run --recursive build
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/examples/demo/",
+        "build"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "vt tool print demo"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

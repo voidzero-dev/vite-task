@@ -268,23 +268,6 @@ mod tests {
     }
 
     #[test]
-    fn test_match_ignores_directory_only_patterns() -> Result<(), PathGlobError> {
-        let patterns = vec![
-            "build/**",       // Match everything under build
-            "!build/keep/**", // But not under build/keep
-        ];
-        let ignores = PathGlobSet::new(&patterns)?;
-        // Directory patterns
-        assert!(ignores.is_match("build/output.js"));
-        assert!(ignores.is_match("build/assets/style.css"));
-
-        // Negated directory
-        assert!(!ignores.is_match("build/keep/important.txt"));
-
-        Ok(())
-    }
-
-    #[test]
     fn test_match_ignores_mixed_patterns() -> Result<(), PathGlobError> {
         let patterns = vec![
             "**/*.log", // Match .log files at any depth

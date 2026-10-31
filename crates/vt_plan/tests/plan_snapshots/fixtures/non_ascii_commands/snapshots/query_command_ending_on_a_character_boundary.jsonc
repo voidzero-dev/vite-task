@@ -1,0 +1,20 @@
+// run greet-long
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "greet-long"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "echo あああ"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

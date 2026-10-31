@@ -5,8 +5,10 @@ How stdin, stdout, and stderr are connected to task processes, controlled by the
 ## The `--log` Flag
 
 ```
-vp run build --log=<mode>
+vp run --log=<mode> build
 ```
+
+The flag goes before the task name. Anything after the task name is passed to the task, so `vp run build --log=grouped` runs the task's command with `--log=grouped` appended.
 
 | Mode                        | Description                                                                   |
 | --------------------------- | ----------------------------------------------------------------------------- |

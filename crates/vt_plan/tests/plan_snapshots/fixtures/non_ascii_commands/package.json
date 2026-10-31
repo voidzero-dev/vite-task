@@ -1,0 +1,10 @@
+{
+  "name": "non-ascii-commands",
+  "private": true,
+  "scripts": {
+    "greet": "echo ああ",
+    "greet-long": "echo あああ",
+    "greet-and-done": "echo 你好 && FOO=é echo 🎉 done",
+    "greet-and-missing": "echo こんにちは && vt run missing"
+  }
+}
