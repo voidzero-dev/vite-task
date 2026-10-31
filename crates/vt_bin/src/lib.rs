@@ -93,6 +93,7 @@ impl vt::CommandHandler for CommandHandler {
                 let program = find_executable(get_path_env(&command.envs), &command.cwd, "vtt")?;
                 Ok(HandledCommand::Synthesized(SyntheticPlanRequest {
                     program,
+                    tool_entry: None,
                     args: args.into_iter().filter(|a| a.as_str() != "--").collect(),
                     cache_config: UserCacheConfig::with_config(EnabledCacheConfig {
                         env: None,
