@@ -233,7 +233,7 @@ pub struct RenderParams<'a> {
     /// Whether to render group header lines. When `false`, items are still
     /// grouped/sorted by `SelectItem::group` but headers are hidden.
     pub show_group_headers: bool,
-    /// `"\r\n"` for raw mode, `"\n"` for normal.
+    /// `"\x1b[K\r\n"` to clear old line tails in raw mode, `"\n"` for normal.
     pub line_ending: &'a str,
     /// Maximum visible width per line. Descriptions are truncated to prevent
     /// line wrapping, which would break cursor-based clearing in interactive mode.
@@ -445,23 +445,20 @@ fn render(
     header: Option<&str>,
     prompt: &str,
 ) -> anyhow::Result<()> {
-    // Move cursor up to clear previous render
+    // Build the whole update before writing to the terminal. Flushing a clear
+    // before the replacement content can expose an empty intermediate frame.
+    let mut frame = Vec::new();
     if state.rendered_lines > 0 {
         let move_up = u16::try_from(state.rendered_lines)
             .expect("rendered_lines fits in u16: at most header + page_size + footer lines");
-        crossterm::execute!(
-            stdout,
-            cursor::MoveUp(move_up),
-            MoveToColumn(0),
-            Clear(ClearType::FromCursorDown),
-        )?;
+        crossterm::queue!(frame, cursor::MoveUp(move_up), MoveToColumn(0),)?;
     }
 
     // Query terminal width on each render to handle resize
     let max_line_width = terminal::size().map_or(80, |(w, _)| w as usize);
 
     let lines = render_items(
-        stdout,
+        &mut frame,
         &RenderParams {
             items: state.items,
             display_rows: &state.display_rows,
@@ -472,11 +469,17 @@ fn render(
             prompt,
             query: Some(&state.query),
             show_group_headers: true,
-            line_ending: "\r\n",
+            // Overwrite each row before clearing its old trailing content.
+            line_ending: "\x1b[K\r\n",
             max_line_width,
         },
     )?;
 
+    // Remove rows left behind when filtering makes the list shorter, only
+    // after the new content has replaced the previous frame.
+    crossterm::queue!(frame, Clear(ClearType::FromCursorDown))?;
+    stdout.write_all(&frame)?;
+    stdout.flush()?;
     state.rendered_lines = lines;
     Ok(())
 }
@@ -895,5 +898,20 @@ mod tests {
         assert!(matches!(&rows[4], DisplayRow::Item { item_index: 1 }));
         assert!(matches!(&rows[5], DisplayRow::Header(h) if h.as_str() == "root (workspace root)"));
         assert!(matches!(&rows[6], DisplayRow::Item { item_index: 4 }));
+    }
+
+    #[test]
+    fn navigation_overwrites_the_previous_frame_before_clearing() {
+        let items = make_items(&[("build", "vp build"), ("test", "vp test")]);
+        let mut state = State::new(&items, None, 12);
+        render(&mut Vec::new(), &mut state, None, TASK_PROMPT).unwrap();
+        state.move_down();
+
+        let mut writer = Vec::new();
+        render(&mut writer, &mut state, None, TASK_PROMPT).unwrap();
+
+        let output = std::str::from_utf8(&writer).unwrap();
+        let before_clear = output.split("\x1b[J").next().unwrap();
+        assert!(strip_ansi(before_clear).contains("  \u{203a} test"));
     }
 }
