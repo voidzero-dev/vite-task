@@ -7,6 +7,13 @@
         "output": ["dist/**"]
       }
     },
+    "build-with-symlink": {
+      "command": "vtt write-file dist/store/pkg/index.js built && vtt symlink store/pkg dist/pkg",
+      "cache": {
+        "input": ["src/**"],
+        "output": ["dist/**"]
+      }
+    },
     "build-with-negative": {
       "command": "vtt write-file dist/keep.txt keep && vtt write-file dist/skip.txt skip",
       "cache": {

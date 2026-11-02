@@ -1,0 +1,11 @@
+{
+  "tasks": {
+    "build": {
+      "command": "CONSOLA_LEVEL=0 nitro build",
+      "cache": {
+        "input": ["routes/**", "nitro.config.ts"],
+        "output": [".output/**"]
+      }
+    }
+  }
+}

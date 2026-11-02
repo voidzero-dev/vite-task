@@ -6,12 +6,15 @@ use std::{
     path::Component,
 };
 
-use vt_path::{AbsolutePath, RelativePathBuf};
+use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 
-/// Create a tar.zst archive from workspace-relative output file paths.
+/// Create a tar.zst archive from workspace-relative output paths.
 ///
-/// Files that no longer exist are silently skipped (the task may delete
-/// temporary files during execution).
+/// A regular file is stored with its contents. A symbolic link is stored as a
+/// link with its target, never followed, so a link to a directory or a
+/// dangling link round-trips as the task left it. Paths that no longer exist
+/// are silently skipped (the task may delete temporary files during
+/// execution).
 ///
 /// # Errors
 ///
@@ -29,7 +32,7 @@ pub fn create_output_archive(
         let abs_path = workspace_root.join(rel_path);
         // Skip files that no longer exist (task may delete temp files between
         // glob walk and archiving). Any other error is propagated.
-        let metadata = match std::fs::metadata(abs_path.as_path()) {
+        let metadata = match std::fs::symlink_metadata(abs_path.as_path()) {
             Ok(m) => m,
             Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
             Err(err) => return Err(err.into()),
@@ -40,6 +43,13 @@ pub fn create_output_archive(
             header.set_metadata(&metadata);
             header.set_cksum();
             builder.append_data(&mut header, rel_path.as_str(), &mut file)?;
+        } else if metadata.file_type().is_symlink() {
+            let target = std::fs::read_link(abs_path.as_path())?;
+            let mut header = tar::Header::new_gnu();
+            header.set_metadata(&metadata);
+            header.set_entry_type(tar::EntryType::Symlink);
+            header.set_size(0);
+            builder.append_link(&mut header, rel_path.as_str(), target)?;
         }
     }
 
@@ -47,11 +57,12 @@ pub fn create_output_archive(
     Ok(())
 }
 
-/// Extract a tar.zst archive, restoring files relative to workspace root.
+/// Extract a tar.zst archive, restoring files and symbolic links relative to
+/// workspace root.
 ///
-/// A file that already has its entry's content and permissions is left as it
-/// is, modification time included, so restoring outputs that didn't change
-/// writes nothing and file watchers see no change. Every other entry is
+/// A regular file that already has its entry's content and permissions is left
+/// as it is, modification time included, so its file watchers see no change.
+/// Every other entry is
 /// unpacked as [`tar::Archive::unpack`] would: parent directories are created
 /// and an existing file is replaced. (`Archive::unpack` also defers directory
 /// entries to the end, and [`create_output_archive`] writes none.)
@@ -69,6 +80,9 @@ pub fn extract_output_archive(
         .as_path()
         .canonicalize()
         .unwrap_or_else(|_| workspace_root.as_path().to_path_buf());
+    let dst = AbsolutePathBuf::new(dst).expect("the destination is absolute");
+    #[cfg(windows)]
+    let mut links = Vec::new();
 
     // Comparing an entry with a file of the same size reads the entry's data,
     // so an entry found to differ that way is unpacked in a second pass.
@@ -79,7 +93,15 @@ pub fn extract_output_archive(
         match compare_with_disk(workspace_root, &mut entry)? {
             OnDisk::Matches => {}
             OnDisk::Differs => {
-                entry.unpack_in(&dst)?;
+                #[cfg(not(windows))]
+                entry.unpack_in(dst.as_path())?;
+                #[cfg(windows)]
+                {
+                    let is_link = entry.header().entry_type().is_symlink();
+                    if entry.unpack_in(dst.as_path())? && is_link {
+                        links.push(dst.join(entry.path()?));
+                    }
+                }
             }
             OnDisk::DiffersAfterRead => read_and_differ.push(index),
         }
@@ -92,9 +114,26 @@ pub fn extract_output_archive(
             let Some(&next) = pending.peek() else { break };
             let mut entry = entry?;
             if index == next {
-                entry.unpack_in(&dst)?;
+                entry.unpack_in(dst.as_path())?;
                 pending.next();
             }
+        }
+    }
+    #[cfg(windows)]
+    fix_directory_links(&links)?;
+    Ok(())
+}
+
+/// Make restored links to directories into directory links after all entries
+/// have been restored. `tar` creates file links on Windows, which Windows
+/// cannot follow to a directory.
+#[cfg(windows)]
+fn fix_directory_links(links: &[AbsolutePathBuf]) -> io::Result<()> {
+    for link in links {
+        let target = std::fs::read_link(link.as_path())?;
+        if link.parent().is_some_and(|parent| parent.join(&target).as_path().is_dir()) {
+            std::fs::remove_file(link.as_path())?;
+            std::os::windows::fs::symlink_dir(&target, link.as_path())?;
         }
     }
     Ok(())
@@ -203,6 +242,8 @@ pub fn check_output_archive(reader: impl Read) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use vt_path::AbsolutePathBuf;
 
     use super::*;
@@ -315,5 +356,102 @@ mod tests {
         // Windows can't remove the directory while the file is read-only.
         std::fs::set_permissions(output.as_path(), writable).unwrap();
         assert!(restored.readonly());
+    }
+    fn symlink(target: &str, link: &AbsolutePath, directory: bool) {
+        #[cfg(unix)]
+        {
+            let _ = directory;
+            std::os::unix::fs::symlink(target, link.as_path()).unwrap();
+        }
+        #[cfg(windows)]
+        if directory {
+            std::os::windows::fs::symlink_dir(target, link.as_path()).unwrap();
+        } else {
+            std::os::windows::fs::symlink_file(target, link.as_path()).unwrap();
+        }
+    }
+
+    // Unix only: Windows doesn't resolve a relative link target with `/`
+    // separators, such as `pkg/index.js`, which is how `tar` stores targets.
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_round_trip_as_links() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        fs::create_dir_all(dir.join("dist/pkg")).unwrap();
+        fs::write(dir.join("dist/pkg/index.js"), "export default 42;").unwrap();
+        let links = [
+            ("file.js", "pkg/index.js", false),
+            ("dependency", "pkg", true),
+            ("dangling", "missing", false),
+        ];
+        for (name, target, directory) in links {
+            symlink(target, &dir.join("dist").join(name), directory);
+        }
+        let files = ["dist/pkg/index.js", "dist/file.js", "dist/dependency", "dist/dangling"]
+            .map(|path| RelativePathBuf::new(path).unwrap());
+        let archive_path = dir.join("output.tar.zst");
+        create_output_archive(&dir, &files, &archive_path).unwrap();
+
+        fs::remove_dir_all(dir.join("dist")).unwrap();
+        extract_output_archive(&dir, &archive_path).unwrap();
+        for (name, target, _) in links {
+            let restored = fs::read_link(dir.join("dist").join(name)).unwrap();
+            assert_eq!(
+                RelativePathBuf::new(restored).unwrap(),
+                RelativePathBuf::new(target).unwrap()
+            );
+        }
+        assert_eq!(fs::read_to_string(dir.join("dist/file.js")).unwrap(), "export default 42;");
+        assert_eq!(
+            fs::read_to_string(dir.join("dist/dependency/index.js")).unwrap(),
+            "export default 42;"
+        );
+        assert!(!dir.join("dist/dangling").as_path().exists());
+    }
+
+    #[test]
+    fn restore_rejects_writing_through_a_link_outside_the_workspace() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let outside = tempfile::TempDir::new().unwrap();
+        let sentinel = outside.path().join("sentinel.txt");
+        fs::write(&sentinel, "archived").unwrap();
+        symlink(outside.path().to_str().unwrap(), &dir.join("link"), true);
+        let files = ["link", "link/sentinel.txt"].map(|path| RelativePathBuf::new(path).unwrap());
+        let archive_path = dir.join("output.tar.zst");
+        create_output_archive(&dir, &files, &archive_path).unwrap();
+        fs::write(&sentinel, "must remain unchanged").unwrap();
+
+        let restored = dir.join("restored");
+        fs::create_dir_all(&restored).unwrap();
+        assert!(extract_output_archive(&restored, &archive_path).is_err());
+        assert_eq!(fs::read_to_string(&sentinel).unwrap(), "must remain unchanged");
+    }
+
+    #[test]
+    fn extract_restores_directory_links_beside_changed_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let output = dir.join("dist/pkg/index.js");
+        fs::create_dir_all(output.parent().unwrap()).unwrap();
+        fs::write(output.as_path(), "original").unwrap();
+        let link = dir.join("dist/dependency");
+        symlink("pkg", &link, true);
+        let files = ["dist/pkg/index.js", "dist/dependency"]
+            .map(|path| RelativePathBuf::new(path).unwrap());
+        let archive_path = dir.join("output.tar.zst");
+        create_output_archive(&dir, &files, &archive_path).unwrap();
+        #[cfg(windows)]
+        fs::remove_dir(link.as_path()).unwrap();
+        #[cfg(not(windows))]
+        fs::remove_file(link.as_path()).unwrap();
+        fs::write(output.as_path(), "modified").unwrap();
+
+        extract_output_archive(&dir, &archive_path).unwrap();
+
+        assert!(fs::symlink_metadata(link.as_path()).unwrap().file_type().is_symlink());
+        assert!(link.as_path().is_dir());
+        assert_eq!(fs::read_to_string(link.join("index.js").as_path()).unwrap(), "original");
     }
 }
