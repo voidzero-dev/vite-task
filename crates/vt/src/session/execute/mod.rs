@@ -3,6 +3,7 @@ pub mod fingerprint;
 pub mod glob;
 mod hash;
 pub mod pipe;
+mod rebuildable;
 mod redact;
 mod scheduler;
 pub mod spawn;

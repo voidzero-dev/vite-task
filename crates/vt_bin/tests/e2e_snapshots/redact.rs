@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use vt_str::Str;
+
 #[expect(
     clippy::disallowed_types,
     reason = "String mutation required by regex replace and cow_replace APIs"
@@ -26,7 +28,11 @@ fn redact_string(s: &mut String, redactions: &[(&str, &str)]) {
     clippy::disallowed_types,
     reason = "String required by regex replace_all and cow_replace APIs; Path required for CARGO_MANIFEST_DIR path manipulation"
 )]
-pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
+pub fn redact_e2e_output(
+    mut output: String,
+    workspace_root: &str,
+    step_redactions: &[(regex::Regex, Str)],
+) -> String {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
     // On Windows, canonicalize() may produce verbatim paths (\\?\C:\...) while
@@ -123,6 +129,13 @@ pub fn redact_e2e_output(mut output: String, workspace_root: &str) -> String {
     // Remove nondeterministic mise warnings from shell startup in cross-platform runners.
     let mise_warning_regex = regex::Regex::new(r"(?m)^mise WARN\s+.*\n?").unwrap();
     output = mise_warning_regex.replace_all(&output, "").into_owned();
+
+    // Apply the step's own `redact` patterns after the global redactions, so
+    // they match the text the snapshot would otherwise show, and before
+    // sorting, so diagnostic blocks they normalize sort the same every run.
+    for (regex, replacement) in step_redactions {
+        output = regex.replace_all(&output, replacement.as_str()).into_owned();
+    }
 
     // Sort consecutive diagnostic blocks to handle non-deterministic tool output
     // (e.g., oxlint reports warnings in arbitrary order due to multi-threading).

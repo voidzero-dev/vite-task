@@ -14,6 +14,7 @@ use super::{
     CacheState,
     fingerprint::{PathRead, PostRunFingerprint, TrackedEnvQuery},
     glob,
+    rebuildable::Rebuildable,
     spawn::ChildOutcome,
 };
 use crate::{
@@ -32,9 +33,9 @@ struct TrackingOutcome {
     /// Auto-output writes after output exclusions are applied. Empty when
     /// `output_config.includes_auto` is false.
     path_writes: FxHashSet<RelativePathBuf>,
-    /// First path that was both read and written during execution, if any.
-    /// A non-empty value means caching this task is unsound.
-    read_write_overlap: Option<RelativePathBuf>,
+    /// Every write fspy recorded, before output exclusions and `ignoreOutput`
+    /// paths are applied.
+    rebuildable: Rebuildable,
 }
 
 type TrackedEnvValues = BTreeMap<Str, Option<EnvValueHash>>;
@@ -110,20 +111,6 @@ pub(super) async fn update_cache(
         workspace_root,
     );
 
-    if let Some(TrackingOutcome { read_write_overlap: Some(path), .. }) = &fspy_outcome {
-        // fspy-inferred read-write overlap: the task wrote to a file it also
-        // read, so the prerun input hashes are stale and caching is unsound.
-        // (We only check fspy-inferred reads, not globbed_inputs. A task that
-        // writes to a glob-matched file without reading it produces perpetual
-        // cache misses but not a correctness bug.)
-        return (
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::InputModified {
-                path: path.clone(),
-            }),
-            None,
-        );
-    }
-
     if fspy_outcome.is_none() && fspy.is_some() {
         // Task requested fspy auto-inference but this binary was built without
         // `cfg(fspy)`. Task ran, but we can't compute a valid cache entry
@@ -144,13 +131,16 @@ pub(super) async fn update_cache(
         }
     };
 
-    // Paths already in globbed_inputs are skipped: the overlap check above
-    // guarantees no input modification, so the prerun hash is the correct
-    // post-exec hash.
+    // Paths already in globbed_inputs are skipped: they are hashed before
+    // the run, so one that the task rewrote makes the next run miss instead
+    // of hitting a stale entry.
     let empty_path_reads = HashMap::default();
     let path_reads = fspy_outcome.as_ref().map_or(&empty_path_reads, |o| &o.path_reads);
+    let no_writes = Rebuildable::default();
+    let rebuildable = fspy_outcome.as_ref().map_or(&no_writes, |o| &o.rebuildable);
     let post_run_fingerprint = match PostRunFingerprint::create(
         path_reads,
+        rebuildable,
         workspace_root,
         &globbed_inputs,
         tracked_envs,
@@ -204,7 +194,9 @@ pub(super) async fn update_cache(
 /// `path_reads` is gated on `input_config.includes_auto`, filtered by
 /// user-configured input negatives, and by tool-reported `ignoreInput` paths.
 /// `path_writes` is filtered by user-configured output negatives and
-/// tool-reported `ignoreOutput` paths before read-write overlap detection.
+/// tool-reported `ignoreOutput` paths, which decide what is archived.
+/// `rebuildable` takes every write unfiltered, since what the task can
+/// rebuild doesn't depend on what is archived.
 #[cfg_attr(
     not(fspy),
     expect(clippy::missing_const_for_fn, reason = "the body is a no-op without fspy")
@@ -243,7 +235,7 @@ fn observe_fspy(
                 };
             let filtered_path_writes: FxHashSet<RelativePathBuf> =
                 // fspy can also be attached for auto-input-only tasks. In that
-                // mode writes must not become auto outputs or overlap candidates.
+                // mode writes must not become auto outputs.
                 if metadata.output_config.includes_auto
                     && let Some(fspy) = fspy
                 {
@@ -259,12 +251,10 @@ fn observe_fspy(
                 } else {
                     FxHashSet::default()
                 };
-            let read_write_overlap =
-                filtered_path_reads.keys().find(|p| filtered_path_writes.contains(*p)).cloned();
             TrackingOutcome {
                 path_reads: filtered_path_reads,
                 path_writes: filtered_path_writes,
-                read_write_overlap,
+                rebuildable: Rebuildable::new(tracked.path_writes),
             }
         })
     }
