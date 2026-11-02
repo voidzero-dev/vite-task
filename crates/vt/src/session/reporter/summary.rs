@@ -116,6 +116,12 @@ pub enum SpawnOutcome {
         /// Task ran successfully but cache was not updated.
         #[serde(default)]
         fspy_unsupported: bool,
+        /// `true` when the task required fspy auto-inference but the tracked
+        /// spawn failed (e.g. the preload library could not be materialized),
+        /// so the task ran untracked. Task ran successfully but cache was not
+        /// updated.
+        #[serde(default)]
+        fspy_unavailable: bool,
         /// The IPC server error that caused the cache to be skipped, if any.
         ipc_server_error: Option<SavedError>,
         /// `true` when the task made more file accesses than tracking had
@@ -309,24 +315,7 @@ impl TaskResult {
         saved_error: Option<&SavedError>,
         cache_update_status: &CacheUpdateStatus,
     ) -> Self {
-        let fspy_unsupported = matches!(
-            cache_update_status,
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported)
-        );
-        let ipc_server_error = match cache_update_status {
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::IpcServerError(err)) => {
-                Some(SavedError::new(err))
-            }
-            _ => None,
-        };
-        let tool_disabled_cache = matches!(
-            cache_update_status,
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ToolRequested)
-        );
-        let tracking_incomplete = matches!(
-            cache_update_status,
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete)
-        );
+        let details = SuccessDetails::from_cache_update_status(cache_update_status);
 
         match cache_status {
             // The only error a cache hit can have is a failed restore.
@@ -340,27 +329,13 @@ impl TaskResult {
             CacheStatus::Disabled(CacheDisabledReason::InProcessExecution) => Self::InProcess,
             CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Disabled,
-                outcome: spawn_outcome_from_execution(
-                    exit_status,
-                    saved_error,
-                    fspy_unsupported,
-                    ipc_server_error,
-                    tool_disabled_cache,
-                    tracking_incomplete,
-                ),
+                outcome: spawn_outcome_from_execution(exit_status, saved_error, details),
             },
             CacheStatus::Miss(cache_miss) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::from_cache_miss(
                     cache_miss,
                 )),
-                outcome: spawn_outcome_from_execution(
-                    exit_status,
-                    saved_error,
-                    fspy_unsupported,
-                    ipc_server_error,
-                    tool_disabled_cache,
-                    tracking_incomplete,
-                ),
+                outcome: spawn_outcome_from_execution(exit_status, saved_error, details),
             },
         }
     }
@@ -376,15 +351,60 @@ impl TaskResult {
     }
 }
 
+/// The cache-not-updated details a run carries into its [`SpawnOutcome::Success`].
+#[derive(Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a distinct cache-not-updated outcome mirroring a CacheNotUpdatedReason variant"
+)]
+struct SuccessDetails {
+    fspy_unsupported: bool,
+    fspy_unavailable: bool,
+    ipc_server_error: Option<SavedError>,
+    tool_disabled_cache: bool,
+    tracking_incomplete: bool,
+}
+
+impl SuccessDetails {
+    fn from_cache_update_status(cache_update_status: &CacheUpdateStatus) -> Self {
+        let fspy_unsupported = matches!(
+            cache_update_status,
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported)
+        );
+        let fspy_unavailable = matches!(
+            cache_update_status,
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnavailable)
+        );
+        let ipc_server_error = match cache_update_status {
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::IpcServerError(err)) => {
+                Some(SavedError::new(err))
+            }
+            _ => None,
+        };
+        let tool_disabled_cache = matches!(
+            cache_update_status,
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ToolRequested)
+        );
+        let tracking_incomplete = matches!(
+            cache_update_status,
+            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete)
+        );
+        Self {
+            fspy_unsupported,
+            fspy_unavailable,
+            ipc_server_error,
+            tool_disabled_cache,
+            tracking_incomplete,
+        }
+    }
+}
+
 /// Build a [`SpawnOutcome`] from process exit status and optional pre-converted error.
 /// A failed upload is set later, with [`TaskResult::set_upload_error`].
 fn spawn_outcome_from_execution(
     exit_status: Option<std::process::ExitStatus>,
     saved_error: Option<&SavedError>,
-    fspy_unsupported: bool,
-    ipc_server_error: Option<SavedError>,
-    tool_disabled_cache: bool,
-    tracking_incomplete: bool,
+    details: SuccessDetails,
 ) -> SpawnOutcome {
     match (exit_status, saved_error) {
         // Spawn error — process never ran
@@ -392,10 +412,11 @@ fn spawn_outcome_from_execution(
         // Process exited successfully, possible infra error
         (Some(status), _) if status.success() => SpawnOutcome::Success {
             infra_error: saved_error.cloned(),
-            fspy_unsupported,
-            ipc_server_error,
-            tool_disabled_cache,
-            tracking_incomplete,
+            fspy_unsupported: details.fspy_unsupported,
+            fspy_unavailable: details.fspy_unavailable,
+            ipc_server_error: details.ipc_server_error,
+            tool_disabled_cache: details.tool_disabled_cache,
+            tracking_incomplete: details.tracking_incomplete,
             upload_error: None,
         },
         // Process exited with non-zero code
@@ -414,6 +435,7 @@ fn spawn_outcome_from_execution(
         (None, None) => SpawnOutcome::Success {
             infra_error: None,
             fspy_unsupported: false,
+            fspy_unavailable: false,
             ipc_server_error: None,
             tool_disabled_cache: false,
             tracking_incomplete: false,
@@ -565,6 +587,18 @@ impl TaskResult {
             return (
                 Str::from(
                     "→ Not cached: `input` auto-inference isn't supported on this OS. Configure `input` manually to enable caching.",
+                ),
+                &[],
+            );
+        }
+        // The tracked spawn failed, so the task ran untracked.
+        if let Self::Spawned {
+            outcome: SpawnOutcome::Success { fspy_unavailable: true, .. }, ..
+        } = self
+        {
+            return (
+                Str::from(
+                    "→ Not cached: file access tracking failed to start, so the task ran untracked. Configure `input` manually to enable caching.",
                 ),
                 &[],
             );
@@ -1068,6 +1102,7 @@ mod tests {
                 outcome: SpawnOutcome::Success {
                     infra_error: None,
                     fspy_unsupported: false,
+                    fspy_unavailable: false,
                     ipc_server_error: None,
                     tracking_incomplete: false,
                     tool_disabled_cache: false,
@@ -1102,6 +1137,7 @@ mod tests {
                 outcome: SpawnOutcome::Success {
                     infra_error: None,
                     fspy_unsupported: false,
+                    fspy_unavailable: false,
                     ipc_server_error: None,
                     tracking_incomplete: false,
                     tool_disabled_cache: false,
@@ -1125,6 +1161,30 @@ mod tests {
 
     fn full_summary(tasks: Vec<TaskSummary>) -> Str {
         strip(&format_full_summary(&LastRunSummary { tasks, exit_code: 0 }))
+    }
+
+    #[test]
+    fn unavailable_tracking_has_its_own_summary_reason() {
+        let mut task = cache_miss_task("build");
+        if let TaskResult::Spawned { outcome, .. } = &mut task.result {
+            *outcome = spawn_outcome_from_execution(
+                Some(success_status()),
+                None,
+                SuccessDetails::from_cache_update_status(&CacheUpdateStatus::NotUpdated(
+                    CacheNotUpdatedReason::FspyUnavailable,
+                )),
+            );
+        }
+        let summary = full_summary(vec![task]);
+        assert!(summary.contains("file access tracking failed to start"), "{summary}");
+    }
+
+    fn success_status() -> std::process::ExitStatus {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt as _;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt as _;
+        std::process::ExitStatus::from_raw(0)
     }
 
     #[test]
