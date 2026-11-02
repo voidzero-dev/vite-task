@@ -537,6 +537,8 @@ pub const DEFAULT_UNTRACKED_ENV: &[&str] = &[
     "COMPOSE_*",
     // Playwright specific
     "PLAYWRIGHT_*",
+    // OpenTelemetry SDK settings, such as the exporter endpoint and service name
+    "OTEL_*",
     // Vite+ internal (not fingerprinted — internal state, not build-affecting)
     "VP_*",
     // Token patterns
