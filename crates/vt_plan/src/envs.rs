@@ -614,4 +614,22 @@ mod tests {
         assert!(envs.contains_key(EnvName::from_ref(OsStr::new("ACTIONS_ID_TOKEN_REQUEST_TOKEN"))));
         assert!(!envs.contains_key(EnvName::from_ref(OsStr::new("ACTIONS_UNRELATED"))));
     }
+
+    #[test]
+    fn test_opentelemetry_env_untracked() {
+        let env_config = create_env_config(&[], DEFAULT_UNTRACKED_ENV);
+
+        let mut envs = create_test_envs(vec![
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318"),
+            ("OTEL_SERVICE_NAME", "build"),
+            ("OTHER_VAR", "should-be-filtered"),
+        ]);
+
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
+
+        assert!(envs.contains_key(EnvName::from_ref(OsStr::new("OTEL_EXPORTER_OTLP_ENDPOINT"))));
+        assert!(envs.contains_key(EnvName::from_ref(OsStr::new("OTEL_SERVICE_NAME"))));
+        assert!(!envs.contains_key(EnvName::from_ref(OsStr::new("OTHER_VAR"))));
+        assert!(result.fingerprinted_envs.is_empty());
+    }
 }
