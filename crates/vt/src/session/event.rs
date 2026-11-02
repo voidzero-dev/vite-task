@@ -4,7 +4,6 @@ use std::{
     time::Duration,
 };
 
-use vt_path::RelativePathBuf;
 use vt_server::Error as IpcServerError;
 use vt_str::Str;
 
@@ -100,12 +99,6 @@ pub enum CacheNotUpdatedReason {
     /// - Fast-fail: a sibling task failed, triggering cancellation
     ///   while this task was still running.
     Cancelled,
-    /// Task modified files it read during execution (read-write overlap detected by fspy).
-    /// Caching such tasks is unsound because the prerun input hashes become stale.
-    InputModified {
-        /// First path that was both read and written during execution.
-        path: RelativePathBuf,
-    },
     /// fspy isn't compiled in on this build and the task requires fspy
     /// (its `input` config includes auto-inference). Task ran but cannot
     /// be cached without tracked path accesses.

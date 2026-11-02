@@ -20,6 +20,7 @@ use vt_plan::cache_metadata::EnvValueHash;
 use vt_str::Str;
 use wincode::{SchemaRead, SchemaWrite};
 
+use super::rebuildable::Rebuildable;
 use crate::{
     collections::HashMap,
     session::cache::{EnvMismatch, InputChangeKind},
@@ -43,9 +44,9 @@ pub struct PathRead {
 /// Used to validate whether cached outputs are still valid.
 #[derive(SchemaWrite, SchemaRead, Debug, Default, Serialize)]
 pub struct PostRunFingerprint {
-    /// Paths inferred from fspy during execution with their content fingerprints.
-    /// Only populated when `input_config.includes_auto` is true.
-    pub inferred_inputs: HashMap<RelativePathBuf, PathFingerprint>,
+    /// Paths inferred from fspy during execution, fingerprinted as the task
+    /// left them. Only populated when `input_config.includes_auto` is true.
+    pub inferred_inputs: HashMap<RelativePathBuf, InferredInput>,
 
     /// Env vars observed via runner-aware IPC `getEnv` with `tracked: true`.
     /// Key is the env name; value is the env value hash at execution time, or
@@ -79,6 +80,15 @@ pub enum PostRunMismatch {
     TrackedEnvQuery { query: TrackedEnvQuery, mismatch: EnvMismatch },
 }
 
+/// A path the task read, as the task left it.
+#[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+pub struct InferredInput {
+    pub fingerprint: PathFingerprint,
+    /// The task wrote the path, so a later run may find it missing, as on a
+    /// clean checkout. A path that is there must still match `fingerprint`.
+    pub may_be_missing: bool,
+}
+
 /// Fingerprint for a single path (file or directory)
 #[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub enum PathFingerprint {
@@ -107,12 +117,12 @@ impl PostRunFingerprint {
     /// Negative glob filtering is done upstream (see
     /// [`super::tracked_accesses::TrackedPathAccesses::from_raw`]).
     /// Paths already present in `globbed_inputs` are skipped — they are
-    /// already tracked by the prerun glob fingerprint, and the read-write
-    /// overlap check in `execute_spawn` guarantees the task did not modify
-    /// them, so the prerun hash is still correct.
+    /// already tracked by the prerun glob fingerprint. Every other path is
+    /// fingerprinted as the task left it, including a file the task rewrote.
     ///
     /// # Arguments
     /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
+    /// * `rebuildable` - What the task can rebuild, so a later run may find it missing
     /// * `base_dir` - Workspace root for resolving relative paths
     /// * `globbed_inputs` - Prerun glob fingerprint; paths here are skipped
     /// * `tracked_envs` - Tool-requested env vars (name -> value hash), validated on lookup
@@ -120,6 +130,7 @@ impl PostRunFingerprint {
     #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
     pub fn create(
         inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
+        rebuildable: &Rebuildable,
         base_dir: &AbsolutePath,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
@@ -131,7 +142,8 @@ impl PostRunFingerprint {
             .map(|(relative_path, path_read)| {
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
                 let fingerprint = fingerprint_path(&full_path, *path_read)?;
-                Ok((relative_path.clone(), fingerprint))
+                let may_be_missing = rebuildable.may_be_missing(relative_path);
+                Ok((relative_path.clone(), InferredInput { fingerprint, may_be_missing }))
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
@@ -153,8 +165,9 @@ impl PostRunFingerprint {
         base_dir: &AbsolutePath,
         unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     ) -> anyhow::Result<Option<PostRunMismatch>> {
-        let input_mismatch = self.inferred_inputs.par_iter().find_map_any(
-            |(input_relative_path, path_fingerprint)| {
+        let input_mismatch =
+            self.inferred_inputs.par_iter().find_map_any(|(input_relative_path, input)| {
+                let InferredInput { fingerprint: path_fingerprint, may_be_missing } = input;
                 let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
                 let path_read = PathRead {
                     read_dir_entries: matches!(path_fingerprint, PathFingerprint::Folder(Some(_))),
@@ -163,7 +176,9 @@ impl PostRunFingerprint {
                     Ok(ok) => ok,
                     Err(err) => return Some(Err(err)),
                 };
-                if path_fingerprint == &current_path_fingerprint {
+                if path_fingerprint == &current_path_fingerprint
+                    || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound)
+                {
                     None
                 } else {
                     let (kind, entry_name) =
@@ -180,8 +195,7 @@ impl PostRunFingerprint {
                     };
                     Some(Ok(PostRunMismatch::Input { kind, path }))
                 }
-            },
-        );
+            });
         if let Some(result) = input_mismatch {
             return result.map(Some);
         }
@@ -500,6 +514,9 @@ fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<Pa
 mod tests {
     use std::ffi::{OsStr, OsString};
 
+    use rustc_hash::FxHashSet;
+    use vt_path::AbsolutePathBuf;
+
     use super::*;
 
     #[cfg(unix)]
@@ -650,5 +667,45 @@ mod tests {
             fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
 
         assert_eq!(mismatch.is_none(), cfg!(windows));
+    }
+
+    #[test]
+    fn validate_allows_a_written_input_to_be_missing_but_not_changed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let path = RelativePathBuf::new("state.txt").unwrap();
+        let full_path = workspace_root.join(&path);
+        std::fs::write(full_path.as_path(), "v1").unwrap();
+
+        let path_reads = HashMap::from([(path.clone(), PathRead { read_dir_entries: false })]);
+        let create = |written| {
+            PostRunFingerprint::create(
+                &path_reads,
+                &Rebuildable::new(written),
+                &workspace_root,
+                &BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+            )
+            .unwrap()
+        };
+        let written = create(FxHashSet::from_iter([path]));
+        let read_only = create(FxHashSet::default());
+        let validate = |fingerprint: &PostRunFingerprint| {
+            fingerprint.validate(&workspace_root, &FxHashMap::default()).unwrap()
+        };
+
+        std::fs::remove_file(full_path.as_path()).unwrap();
+        assert!(validate(&written).is_none());
+        assert!(matches!(
+            validate(&read_only),
+            Some(PostRunMismatch::Input { kind: InputChangeKind::Removed, .. })
+        ));
+
+        std::fs::write(full_path.as_path(), "garbage").unwrap();
+        assert!(matches!(
+            validate(&written),
+            Some(PostRunMismatch::Input { kind: InputChangeKind::ContentModified, .. })
+        ));
     }
 }

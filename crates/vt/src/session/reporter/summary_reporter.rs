@@ -232,8 +232,6 @@ impl LeafExecutionReporter for SummaryLeafReporter {
                     status,
                     saved_error.as_ref(),
                     &cache_update_status,
-                    &self.display.task_display.package_path,
-                    &self.workspace_path,
                 ),
             };
             let upload_error = match &cache_update_status {

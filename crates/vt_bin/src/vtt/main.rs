@@ -11,6 +11,7 @@ mod check_tty;
 mod cp;
 mod exit;
 mod exit_on_ctrlc;
+mod fs;
 mod grep_file;
 mod list_dir;
 mod mkdir;
@@ -20,6 +21,7 @@ mod print_color;
 mod print_cwd;
 mod print_env;
 mod print_file;
+mod read_link;
 mod read_stdin;
 mod replace_file_content;
 mod rm;
@@ -28,6 +30,8 @@ mod small_dev_shm;
 mod stalled_remote_cache;
 mod stat_file;
 mod stat_many;
+#[cfg(unix)]
+mod symlink;
 mod touch_file;
 mod write_file;
 
@@ -36,7 +40,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, touch-file, write-file"
+            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, fs, grep-file, list-dir, mkdir, pipe-stdin, print, print-color, print-cwd, print-env, print-file, read-link, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, symlink, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -50,6 +54,7 @@ fn main() {
         "cp" => cp::run(&args[2..]),
         "exit" => exit::run(&args[2..]),
         "exit-on-ctrlc" => exit_on_ctrlc::run(),
+        "fs" => fs::run(&args[2..]),
         "grep-file" => {
             grep_file::run(&args[2..]);
             Ok(())
@@ -65,6 +70,7 @@ fn main() {
         "print-cwd" => print_cwd::run(),
         "print-env" => print_env::run(&args[2..]),
         "print-file" => print_file::run(&args[2..]),
+        "read-link" => read_link::run(&args[2..]),
         "read-stdin" => read_stdin::run(),
         "replace-file-content" => replace_file_content::run(&args[2..]),
         "rm" => rm::run(&args[2..]),
@@ -78,6 +84,10 @@ fn main() {
             Ok(())
         }
         "stat-many" => stat_many::run(&args[2..]),
+        #[cfg(unix)]
+        "symlink" => symlink::run(&args[2..]),
+        #[cfg(not(unix))]
+        "symlink" => Err("vtt symlink is only supported on Unix".into()),
         "touch-file" => touch_file::run(&args[2..]),
         "write-file" => write_file::run(&args[2..]),
         other => {
