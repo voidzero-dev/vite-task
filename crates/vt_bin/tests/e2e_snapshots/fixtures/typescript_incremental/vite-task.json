@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "typecheck": {
+      "command": "tsc --incremental --noEmit",
+      "cache": true
+    }
+  }
+}

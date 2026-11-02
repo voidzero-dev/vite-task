@@ -23,6 +23,7 @@
     "cross-env": "catalog:",
     "cross-spawn": "catalog:",
     "deno": "catalog:",
+    "nitro": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
