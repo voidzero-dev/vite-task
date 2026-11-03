@@ -52,7 +52,7 @@ fn initializes_runtime_bss_tls_and_auxiliary_vector() {
 
 #[test]
 #[timeout(10_000)]
-fn initializes_runtime_in_fixed_address_executable() {
+fn initializes_fixed_runtime() {
     check_runtime(FIXTURE_EXEC, elf::abi::ET_EXEC);
 }
 

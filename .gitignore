@@ -1,4 +1,5 @@
 /target
+/crates/fspy_elf_loader_tests/compat/
 node_modules
 # Fixture node_modules that stand in for real npm installs in snapshot tests.
 # `**` covers nested monorepo layouts (e.g. packages/foo/node_modules/.bin).
