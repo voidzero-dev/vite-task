@@ -65,24 +65,24 @@ export default defineConfig({
 
 ```json
 {
-  "version": 1,
-  "workspaceRoot": "/home/me/acme",
   "packages": {
     ".": { "name": "acme" },
-    "apps/web": { "name": "@acme/web", "dependencies": ["packages/ui"] },
+    "apps/web": { "dependencies": ["packages/ui"], "name": "@acme/web" },
     "packages/ui": { "name": "@acme/ui" }
   },
   "tasks": {
-    "apps/web#build": { "package": "apps/web", "name": "build", "command": "vite build" },
+    "apps/web#build": { "command": "vite build", "name": "build", "package": "apps/web" },
     "apps/web#deploy": {
-      "package": "apps/web",
-      "name": "deploy",
-      "cwd": "apps/web/infra",
       "command": "wrangler deploy",
-      "dependsOn": ["apps/web#build"]
+      "cwd": "apps/web/infra",
+      "dependsOn": ["apps/web#build"],
+      "name": "deploy",
+      "package": "apps/web"
     },
-    "packages/ui#build": { "package": "packages/ui", "name": "build", "command": "tsdown" }
-  }
+    "packages/ui#build": { "command": "tsdown", "name": "build", "package": "packages/ui" }
+  },
+  "version": 1,
+  "workspaceRoot": "/home/me/acme"
 }
 ```
 

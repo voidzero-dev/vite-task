@@ -140,23 +140,21 @@ vp run --dry-run --json -r build
 
 ```json
 {
-  "version": 1,
-  "workspaceRoot": "/home/me/acme",
   "plan": {
     "apps/web#build": {
+      "dependsOn": ["packages/ui#build"],
       "name": "build",
       "package": "apps/web",
-      "dependsOn": ["packages/ui#build"],
       "steps": [
         {
-          "program": "apps/web/node_modules/.bin/vite",
           "args": ["build"],
-          "cwd": "apps/web",
           "cache": {
-            "status": "changed",
-            "changes": [{ "kind": "env", "name": "NODE_ENV", "change": "changed" }],
-            "baseline": { "durationMs": 9120 }
-          }
+            "baseline": { "durationMs": 9120 },
+            "changes": [{ "change": "changed", "kind": "env", "name": "NODE_ENV" }],
+            "status": "changed"
+          },
+          "cwd": "apps/web",
+          "program": "apps/web/node_modules/.bin/vite"
         }
       ]
     },
@@ -165,24 +163,22 @@ vp run --dry-run --json -r build
       "package": "packages/ui",
       "steps": [
         {
-          "program": "packages/ui/node_modules/.bin/tsdown",
-          "cwd": "packages/ui",
           "cache": {
-            "status": "changed",
-            "partial": true,
             "baseline": { "durationMs": 1830 },
             "changes": [
-              {
-                "kind": "file",
-                "path": "packages/ui/src/button.tsx",
-                "change": "changed"
-              }
-            ]
-          }
+              { "change": "changed", "kind": "file", "path": "packages/ui/src/button.tsx" }
+            ],
+            "partial": true,
+            "status": "changed"
+          },
+          "cwd": "packages/ui",
+          "program": "packages/ui/node_modules/.bin/tsdown"
         }
       ]
     }
-  }
+  },
+  "version": 1,
+  "workspaceRoot": "/home/me/acme"
 }
 ```
 
@@ -198,42 +194,41 @@ vp run --dry-run --json -r build
 ```jsonc
 // --dry-run --json
 "cache": {
-  "status": "changed", "partial": true,
-  "changes": [
-    { "kind": "file", "path": "packages/ui/src/button.tsx", "change": "changed" }
-  ],
-  "baseline": { "durationMs": 1830 }
+  "baseline": { "durationMs": 1830 },
+  "changes": [{ "change": "changed", "kind": "file", "path": "packages/ui/src/button.tsx" }],
+  "partial": true,
+  "status": "changed"
 }
 
 // --dry-run --json -v: complete, so no "partial"
 "cache": {
-  "status": "changed",
+  "baseline": { "durationMs": 1830 },
   "changes": [
-    { "kind": "file", "path": "packages/ui/src/button.tsx", "change": "changed" },
-    { "kind": "file", "path": "packages/ui/src/theme.css", "change": "changed" }
+    { "change": "changed", "kind": "file", "path": "packages/ui/src/button.tsx" },
+    { "change": "changed", "kind": "file", "path": "packages/ui/src/theme.css" }
   ],
-  "baseline": { "durationMs": 1830 }
+  "status": "changed"
 }
 
 // --dry-run --json -vv: also everything the cached run depends on, changed or not, and its outputs
 "cache": {
-  "status": "changed",
-  "changes": [ … as with -v … ],
   "baseline": {
     "durationMs": 1830,
     "fingerprint": {
       "paths": {
         "packages/ui/.browserslistrc": { "type": "missing" },
-        "packages/ui/package.json": { "type": "file", "hash": "8f2c41d09a7be356" },
-        "packages/ui/src": { "type": "dir", "entries": ["button.tsx", "index.ts", "theme.css"] },
-        "packages/ui/src/button.tsx": { "type": "file", "hash": "1b9e07c4f26da813" },
-        "packages/ui/src/index.ts": { "type": "file", "hash": "c3a5d8e2017f94b6" },
-        "packages/ui/src/theme.css": { "type": "file", "hash": "5e0f9b72ad41c638" },
-        "packages/ui/tsdown.config.ts": { "type": "file", "hash": "e7d24a6b9c05f183" }
+        "packages/ui/package.json": { "hash": "8f2c41d09a7be356", "type": "file" },
+        "packages/ui/src": { "entries": ["button.tsx", "index.ts", "theme.css"], "type": "dir" },
+        "packages/ui/src/button.tsx": { "hash": "1b9e07c4f26da813", "type": "file" },
+        "packages/ui/src/index.ts": { "hash": "c3a5d8e2017f94b6", "type": "file" },
+        "packages/ui/src/theme.css": { "hash": "5e0f9b72ad41c638", "type": "file" },
+        "packages/ui/tsdown.config.ts": { "hash": "e7d24a6b9c05f183", "type": "file" }
       }
     },
     "outputs": ["packages/ui/dist/index.d.ts", "packages/ui/dist/index.js"]
-  }
+  },
+  "changes": [ … as with -v … ],
+  "status": "changed"
 }
 ```
 
@@ -253,11 +248,16 @@ Two more combinations:
 
 ```json
 "apps/web#deploy": {
+  "dependsOn": ["apps/web#build"],
   "name": "deploy",
   "package": "apps/web",
-  "dependsOn": ["apps/web#build"],
   "steps": [
-    { "program": "apps/web/node_modules/.bin/wrangler", "args": ["deploy"], "cwd": "apps/web/infra", "cache": { "status": "disabled" } }
+    {
+      "args": ["deploy"],
+      "cache": { "status": "disabled" },
+      "cwd": "apps/web/infra",
+      "program": "apps/web/node_modules/.bin/wrangler"
+    }
   ]
 }
 ```
