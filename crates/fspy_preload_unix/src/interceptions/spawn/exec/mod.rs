@@ -5,7 +5,7 @@ use fspy_shared_unix::exec::ExecResolveConfig;
 use libc::{c_char, c_int};
 
 use crate::{
-    client::{ExecInjectionError, global_client, raw_exec::RawExec},
+    client::{global_client, raw_exec::RawExec},
     macros::intercept,
 };
 
@@ -55,8 +55,8 @@ unsafe fn collect_argv<A: Allocator>(
 /// `untracked` performs the interposed call as the caller made it, through
 /// that function's own original: `execvp` keeps its `PATH` search,
 /// `execveat` its `dirfd` and flags, `fexecve` its descriptor. It runs when
-/// this process has no tracking client or the injection machinery fails, so
-/// the process still execs, untracked.
+/// this process has no tracking client or the seccomp filter cannot be
+/// installed, so the process still execs, untracked.
 fn handle_exec(
     allocator: impl Allocator,
     config: ExecResolveConfig,
@@ -70,31 +70,25 @@ fn handle_exec(
         // valid payload): run untracked.
         return untracked();
     };
-    // The injection machinery failed (e.g. the seccomp filter cannot be
-    // installed under a restrictive sandbox). Mark the run's trace incomplete
-    // so it is not cached, then run the interposed call untracked. Its envp
-    // still carries LD_PRELOAD/FSPY_PAYLOAD, so each generation independently
-    // attempts tracking and independently degrades.
-    let run_untracked = || {
-        client.report_loss();
-        untracked()
-    };
     // SAFETY: prog, argv, and envp are valid pointers to C strings/arrays forwarded from the interposed exec function
     let handled = unsafe { client.handle_exec(config, RawExec { prog, argv, envp }, &allocator) };
     let (raw_command, pre_exec) = match handled {
         Ok(handled) => handled,
-        Err(ExecInjectionError::Resolution(errno)) => {
-            // Resolution failed the way the real exec would have; the errno
-            // is authentic.
+        Err(errno) => {
             errno.set();
             return -1;
         }
-        Err(ExecInjectionError::Injection(_)) => return run_untracked(),
     };
     if let Some(pre_exec) = pre_exec
         && pre_exec.run().is_err()
     {
-        return run_untracked();
+        // The seccomp filter cannot be installed, for example in a sandbox
+        // that denies the `seccomp` syscall. Mark the run's trace incomplete
+        // so it is not cached, then run the interposed call untracked. Its
+        // envp still carries LD_PRELOAD/FSPY_PAYLOAD, so each generation
+        // tries tracking again on its own.
+        client.report_loss();
+        return untracked();
     }
     // SAFETY: raw_command's strings and arrays live in `allocator`, which outlives the call
     unsafe { execve::original()(raw_command.prog, raw_command.argv, raw_command.envp) }

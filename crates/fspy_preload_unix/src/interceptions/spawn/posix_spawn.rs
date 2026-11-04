@@ -4,7 +4,7 @@ use fspy_shared_unix::exec::ExecResolveConfig;
 use libc::{c_char, c_int};
 
 use crate::{
-    client::{ExecInjectionError, global_client, raw_exec::RawExec},
+    client::{global_client, raw_exec::RawExec},
     macros::intercept,
 };
 
@@ -57,20 +57,9 @@ unsafe fn handle_posix_spawn(
             &arena,
         )
     };
-    // The injection machinery failed. Mark the run's trace incomplete so it
-    // is not cached, then spawn untracked with the original arguments.
-    let spawn_untracked = || {
-        client.report_loss();
-        // SAFETY: all arguments are the interposed posix_spawn(p) function's
-        // own valid arguments.
-        unsafe { original(pid, file, file_actions, attrp, argv, envp) }
-    };
     let (raw_command, pre_exec) = match handled {
         Ok(handled) => handled,
-        // Resolution failed the way the real spawn would have; posix_spawn
-        // returns the errno code rather than -1.
-        Err(ExecInjectionError::Resolution(errno)) => return errno as _,
-        Err(ExecInjectionError::Injection(_)) => return spawn_untracked(),
+        Err(errno) => return errno as _,
     };
     let call_original = move || {
         // SAFETY: the caller's pointers are forwarded unchanged, and raw_command's
@@ -100,8 +89,15 @@ unsafe fn handle_posix_spawn(
         .join()
         .unwrap()
     })
-    // `pre_exec.run` failed, so the spawn never happened.
-    .unwrap_or_else(|_| spawn_untracked())
+    .unwrap_or_else(|_| {
+        // The seccomp filter cannot be installed, so the spawn never
+        // happened. Mark the run's trace incomplete so it is not cached,
+        // then spawn untracked with the caller's own arguments.
+        client.report_loss();
+        // SAFETY: all arguments are the interposed posix_spawn(p) function's
+        // own valid arguments.
+        unsafe { original(pid, file, file_actions, attrp, argv, envp) }
+    })
 }
 
 intercept!(posix_spawnp(64): PosixSpawnFn);

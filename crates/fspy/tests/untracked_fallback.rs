@@ -1,6 +1,6 @@
 //! Tests for the untracked-exec fallback: when the preload cannot install
-//! its injection machinery, the exec must proceed untracked and the run must
-//! be reported as incompletely tracked (so it is not cached), rather than
+//! the seccomp filter, the exec must proceed untracked and the run must be
+//! reported as incompletely tracked (so it is not cached), rather than
 //! every spawn failing. Skipped on musl: no preload library exists there.
 #![cfg(all(target_os = "linux", not(target_env = "musl")))]
 
@@ -113,6 +113,46 @@ fn execvp_fallback_keeps_path_search() {
     let Err(RecordsLost) = receiver.close() else {
         panic!("the channel did not report the untracked exec");
     };
+}
+
+/// Only a failed seccomp install takes the untracked path. An exec that
+/// fails the way the real exec would, here `ENOEXEC` for a script without a
+/// `#!` line, keeps its errno and leaves the trace complete. `sh` then runs
+/// the script itself, as it does without tracking.
+#[test]
+fn exec_errors_are_not_reported_as_lost() {
+    let script = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fspy-script-without-shebang");
+    fs::write(&script, "exit 0\n").expect("failed to write the script");
+    fs::set_permissions(&script, Permissions::from_mode(0o755))
+        .expect("failed to set permissions on the script");
+
+    let receiver = channel(1 << 30, Global).unwrap();
+    let preload_path: &IpcStr = Path::new(PRELOAD_CDYLIB).into();
+    let payload = Payload {
+        ipc_channel_conf: receiver.conf(),
+        preload_path,
+        seccomp_payload: SeccompPayload::unreachable(
+            b"/nonexistent/fspy-unreachable-supervisor".to_vec(),
+        ),
+    };
+    let bump = bumpalo::Bump::new();
+    let encoded = encode_payload(payload, &bump);
+
+    let output = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(script.as_os_str())
+        .env_clear()
+        .env("LD_PRELOAD", PRELOAD_CDYLIB)
+        .env("FSPY_PAYLOAD", OsStr::from_bytes(encoded.encoded_string.as_ref()))
+        .output()
+        .expect("failed to spawn the shell");
+    assert!(
+        output.status.success(),
+        "the script without a shebang did not run: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(receiver.close().is_ok(), "an authentic exec error was reported as an untracked exec");
 }
 
 /// A preload loaded without a payload (e.g. a leaked `LD_PRELOAD` in an
