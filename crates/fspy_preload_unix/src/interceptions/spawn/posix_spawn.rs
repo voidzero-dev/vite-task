@@ -39,8 +39,14 @@ unsafe fn handle_posix_spawn(
     // SAFETY: the raw pointers captured inside T are valid for the duration of the thread::scope call, so sending them to the scoped thread is safe
     unsafe impl<T> Send for AssertSend<T> {}
 
-    let client = global_client()
-        .expect("posix_spawn(p) unexpectedly called before client initialized in ctor");
+    let Some(client) = global_client() else {
+        // The ctor left the client unset (no readable environment, or no
+        // valid payload): spawn untracked by forwarding to the real
+        // posix_spawn(p).
+        // SAFETY: all arguments are valid pointers forwarded from the
+        // interposed posix_spawn(p) function.
+        return unsafe { original(pid, file, file_actions, attrp, argv, envp) };
+    };
 
     let arena = fspy_nostd_alloc::pooled_bump();
     // SAFETY: file, argv, and envp are valid pointers forwarded from the interposed posix_spawn(p) function
@@ -83,7 +89,15 @@ unsafe fn handle_posix_spawn(
         .join()
         .unwrap()
     })
-    .unwrap_or_else(|errno| errno as _)
+    .unwrap_or_else(|_| {
+        // The seccomp filter cannot be installed, so the spawn never
+        // happened. Mark the run's trace incomplete so it is not cached,
+        // then spawn untracked with the caller's own arguments.
+        client.report_loss();
+        // SAFETY: all arguments are the interposed posix_spawn(p) function's
+        // own valid arguments.
+        unsafe { original(pid, file, file_actions, attrp, argv, envp) }
+    })
 }
 
 intercept!(posix_spawnp(64): PosixSpawnFn);

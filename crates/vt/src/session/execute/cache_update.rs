@@ -93,8 +93,8 @@ pub(super) async fn update_cache(
     }
 
     // The accesses, or `None` when the task was not tracked at all. An
-    // `Err` means it made more file accesses than the tracking channel had
-    // room for, so what arrived is a subset of what it touched, and an entry
+    // `Err` means tracking could not record everything it did, so what
+    // arrived is a subset of what it touched, and an entry
     // built from a subset would replay with inputs and outputs missing.
     #[cfg(fspy)]
     let Ok(path_accesses) = outcome.path_accesses.as_ref().map(Result::as_ref).transpose() else {

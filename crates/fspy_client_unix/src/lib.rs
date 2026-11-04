@@ -51,16 +51,18 @@ impl<'a> Client<'a> {
     /// with no further ceremony — and the client never retains the
     /// allocator itself (see the `Send + Sync` assertion above).
     ///
-    /// # Panics
-    ///
-    /// Panics when the payload is missing, malformed, or cannot be decoded,
-    /// and when the channel is there but cannot be attached to (see
-    /// [`ChannelConf::sender`](fspy_shared::ipc::channel::ChannelConf::sender)).
+    /// Returns `None` when the payload is missing, malformed, or cannot be
+    /// decoded — e.g. a leaked `LD_PRELOAD` in an env-scrubbed sandbox. The
+    /// host process then runs untracked rather than dying in its preload
+    /// constructor. When the payload decodes but its channel cannot be
+    /// attached to, the client still functions with `ipc_sender: None`: it
+    /// reports nothing, and [`Client::report_loss`] is a no-op.
+    #[must_use]
     pub fn from_env(
         envs: impl Iterator<Item = fspy_nostd::env::Entry>,
         allocator: impl Allocator + Clone + 'a,
-    ) -> Self {
-        let encoded_payload = decode_payload_from_env(envs, allocator.clone()).unwrap();
+    ) -> Option<Self> {
+        let encoded_payload = decode_payload_from_env(envs, allocator.clone()).ok()?;
 
         // `None` when the channel is already over, which happens when this
         // process starts after the root target exited. Nothing is said
@@ -68,7 +70,7 @@ impl<'a> Client<'a> {
         // stderr corrupts whatever that process is printing.
         let ipc_sender = encoded_payload.payload.ipc_channel_conf.sender(allocator);
 
-        Self { encoded_payload, ipc_sender }
+        Some(Self { encoded_payload, ipc_sender })
     }
 
     fn send(&self, mode: AccessMode, path: &Path) {
@@ -85,6 +87,17 @@ impl<'a> Client<'a> {
         // The interception proceeds whether or not the record could be
         // sent — a preload library can never panic its host process.
         ipc_sender.send(&mode.with_path(path.into()));
+    }
+
+    /// Marks the run's trace incomplete, so the receiver treats it as
+    /// untracked and the runner does not cache it. Call it before the
+    /// process does something that tracking cannot record, such as an exec
+    /// that continues untracked because [`PreExec::run`] failed. It does
+    /// nothing when this client has no channel sender.
+    pub fn report_loss(&self) {
+        if let Some(ipc_sender) = &self.ipc_sender {
+            ipc_sender.report_loss();
+        }
     }
 
     /// Resolves and reports an exec, returning the transformed arguments to
