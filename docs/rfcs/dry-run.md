@@ -140,45 +140,45 @@ vp run --dry-run --json -r build
 
 ```json
 {
+  "version": 1,
+  "workspaceRoot": "/home/me/acme",
   "plan": {
     "apps/web#build": {
-      "dependsOn": ["packages/ui#build"],
-      "name": "build",
       "package": "apps/web",
+      "name": "build",
+      "dependsOn": ["packages/ui#build"],
       "steps": [
         {
+          "program": "apps/web/node_modules/.bin/vite",
           "args": ["build"],
-          "cache": {
-            "baseline": { "durationMs": 9120 },
-            "changes": [{ "change": "changed", "kind": "env", "name": "NODE_ENV" }],
-            "status": "unknown"
-          },
           "cwd": "apps/web",
-          "program": "apps/web/node_modules/.bin/vite"
+          "cache": {
+            "status": "unknown",
+            "baseline": { "durationMs": 9120 },
+            "changes": [{ "kind": "env", "name": "NODE_ENV", "change": "changed" }]
+          }
         }
       ]
     },
     "packages/ui#build": {
-      "name": "build",
       "package": "packages/ui",
+      "name": "build",
       "steps": [
         {
+          "program": "packages/ui/node_modules/.bin/tsdown",
+          "cwd": "packages/ui",
           "cache": {
+            "status": "changed",
             "baseline": { "durationMs": 1830 },
             "changes": [
-              { "change": "changed", "kind": "file", "path": "packages/ui/src/button.tsx" }
+              { "kind": "file", "path": "packages/ui/src/button.tsx", "change": "changed" }
             ],
-            "changesPartial": true,
-            "status": "changed"
-          },
-          "cwd": "packages/ui",
-          "program": "packages/ui/node_modules/.bin/tsdown"
+            "changesPartial": true
+          }
         }
       ]
     }
-  },
-  "version": 1,
-  "workspaceRoot": "/home/me/acme"
+  }
 }
 ```
 
@@ -194,41 +194,41 @@ vp run --dry-run --json -r build
 ```jsonc
 // --dry-run --json
 "cache": {
+  "status": "changed",
   "baseline": { "durationMs": 1830 },
-  "changes": [{ "change": "changed", "kind": "file", "path": "packages/ui/src/button.tsx" }],
-  "changesPartial": true,
-  "status": "changed"
+  "changes": [{ "kind": "file", "path": "packages/ui/src/button.tsx", "change": "changed" }],
+  "changesPartial": true
 }
 
 // --dry-run --json -v: complete, so no "changesPartial"
 "cache": {
+  "status": "changed",
   "baseline": { "durationMs": 1830 },
   "changes": [
-    { "change": "changed", "kind": "file", "path": "packages/ui/src/button.tsx" },
-    { "change": "changed", "kind": "file", "path": "packages/ui/src/theme.css" }
-  ],
-  "status": "changed"
+    { "kind": "file", "path": "packages/ui/src/button.tsx", "change": "changed" },
+    { "kind": "file", "path": "packages/ui/src/theme.css", "change": "changed" }
+  ]
 }
 
 // --dry-run --json -vv: also everything the cached run depends on, changed or not, and its outputs
 "cache": {
+  "status": "changed",
   "baseline": {
     "durationMs": 1830,
     "fingerprint": {
       "paths": {
         "packages/ui/.browserslistrc": { "type": "missing" },
-        "packages/ui/package.json": { "hash": "8f2c41d09a7be356", "type": "file" },
-        "packages/ui/src": { "entries": ["button.tsx", "index.ts", "theme.css"], "type": "dir" },
-        "packages/ui/src/button.tsx": { "hash": "1b9e07c4f26da813", "type": "file" },
-        "packages/ui/src/index.ts": { "hash": "c3a5d8e2017f94b6", "type": "file" },
-        "packages/ui/src/theme.css": { "hash": "5e0f9b72ad41c638", "type": "file" },
-        "packages/ui/tsdown.config.ts": { "hash": "e7d24a6b9c05f183", "type": "file" }
+        "packages/ui/package.json": { "type": "file", "hash": "8f2c41d09a7be356" },
+        "packages/ui/src": { "type": "dir", "entries": ["button.tsx", "index.ts", "theme.css"] },
+        "packages/ui/src/button.tsx": { "type": "file", "hash": "1b9e07c4f26da813" },
+        "packages/ui/src/index.ts": { "type": "file", "hash": "c3a5d8e2017f94b6" },
+        "packages/ui/src/theme.css": { "type": "file", "hash": "5e0f9b72ad41c638" },
+        "packages/ui/tsdown.config.ts": { "type": "file", "hash": "e7d24a6b9c05f183" }
       }
     },
     "outputs": ["packages/ui/dist/index.d.ts", "packages/ui/dist/index.js"]
   },
-  "changes": [ … as with -v … ],
-  "status": "changed"
+  "changes": [ … as with -v … ]
 }
 ```
 
@@ -248,15 +248,15 @@ Two more combinations:
 
 ```json
 "apps/web#deploy": {
-  "dependsOn": ["apps/web#build"],
-  "name": "deploy",
   "package": "apps/web",
+  "name": "deploy",
+  "dependsOn": ["apps/web#build"],
   "steps": [
     {
+      "program": "apps/web/node_modules/.bin/wrangler",
       "args": ["deploy"],
-      "cache": { "status": "disabled" },
       "cwd": "apps/web/infra",
-      "program": "apps/web/node_modules/.bin/wrangler"
+      "cache": { "status": "disabled" }
     }
   ]
 }
@@ -288,11 +288,11 @@ type RunPlan = {
    */
   plan: {
     [id: string]: {
-      /** The task name, such as `build`. */
-      name: string;
-
       /** The path of the task's package, such as `packages/ui`. */
       package: string;
+
+      /** The task name, such as `build`. */
+      name: string;
 
       /**
        * The tasks that must finish before this one starts, by ID: the task's own `dependsOn`,
@@ -415,7 +415,8 @@ type RunPlan = {
                   };
 
                   /**
-                   * Everything that differs from `baseline`, sorted by kind, then by name or path.
+                   * Everything that differs from `baseline`, in the order the kinds are listed
+                   * below, then by name or path.
                    * Undoing all of them would make the step a hit. Present for `changed`, and for
                    * `unknown` when today's check found differences. Absent for `hit`.
                    */

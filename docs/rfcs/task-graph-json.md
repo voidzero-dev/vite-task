@@ -65,24 +65,24 @@ export default defineConfig({
 
 ```json
 {
+  "version": 1,
+  "workspaceRoot": "/home/me/acme",
   "packages": {
     ".": { "name": "acme" },
-    "apps/web": { "dependencies": ["packages/ui"], "name": "@acme/web" },
+    "apps/web": { "name": "@acme/web", "dependencies": ["packages/ui"] },
     "packages/ui": { "name": "@acme/ui" }
   },
   "tasks": {
-    "apps/web#build": { "command": "vite build", "name": "build", "package": "apps/web" },
+    "apps/web#build": { "package": "apps/web", "name": "build", "command": "vite build" },
     "apps/web#deploy": {
-      "command": "wrangler deploy",
-      "cwd": "apps/web/infra",
-      "dependsOn": ["apps/web#build"],
+      "package": "apps/web",
       "name": "deploy",
-      "package": "apps/web"
+      "cwd": "apps/web/infra",
+      "command": "wrangler deploy",
+      "dependsOn": ["apps/web#build"]
     },
-    "packages/ui#build": { "command": "tsdown", "name": "build", "package": "packages/ui" }
-  },
-  "version": 1,
-  "workspaceRoot": "/home/me/acme"
+    "packages/ui#build": { "package": "packages/ui", "name": "build", "command": "tsdown" }
+  }
 }
 ```
 
@@ -185,7 +185,7 @@ Empty lists and maps, and fields at their default value, are left out, so the do
 
 ### Output
 
-Indented when stdout is a terminal, one line otherwise, with keys sorted. Nothing else goes to stdout: warnings go to stderr, and config files that print while loading must not reach stdout.
+Indented when stdout is a terminal, one line otherwise. Fields appear in the order the types declare them; entries of a map keyed by path or ID, such as `packages` and `tasks`, are sorted by key. Nothing else goes to stdout: warnings go to stderr, and config files that print while loading must not reach stdout.
 
 ### Errors
 
