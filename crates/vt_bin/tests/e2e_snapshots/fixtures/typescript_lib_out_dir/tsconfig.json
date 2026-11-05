@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "outDir": "lib",
+    "rootDir": "src"
+  }
+}

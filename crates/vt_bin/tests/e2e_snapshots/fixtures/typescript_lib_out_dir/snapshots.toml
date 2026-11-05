@@ -1,0 +1,24 @@
+[[e2e]]
+name = "typescript_lib_out_dir"
+comment = """
+TypeScript 7's `tsc` compiles `src` into `lib`. With no `include`, it lists the package root to find the files to compile, and stats `lib`.
+"""
+ignore = true
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    "lib",
+  ], comment = "remove the output folder, as on a clean checkout" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+]
