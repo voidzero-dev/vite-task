@@ -1,4 +1,4 @@
-use std::{fs, io};
+use std::{fs, io, path::Path};
 
 const USAGE: &str = "Usage: vtt fs <op> <arg>... [<op> <arg>...]...";
 
@@ -18,6 +18,9 @@ const USAGE: &str = "Usage: vtt fs <op> <arg>... [<op> <arg>...]...";
 ///   path isn't an error.
 /// - `list <dir>`: read every entry of the folder. A missing folder isn't an
 ///   error.
+/// - `walk <dir>`: read every entry of the folder and of every folder under
+///   it, without following symlinks, like a tool crawling a project. A
+///   missing folder isn't an error.
 /// - `mkdir <dir>`: create the folder and any missing parents, like
 ///   `mkdir -p`.
 ///
@@ -37,6 +40,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             ["write", file, content, rest @ ..] => (fs::write(file, content), rest),
             ["stat", path, rest @ ..] => (allow_missing(fs::metadata(path)), rest),
             ["list", dir, rest @ ..] => (allow_missing(list(dir)), rest),
+            ["walk", dir, rest @ ..] => (allow_missing(walk(Path::new(dir))), rest),
             ["mkdir", dir, rest @ ..] => (fs::create_dir_all(dir), rest),
             _ => return Err(format!("{USAGE}\nunexpected arguments: {}", ops.join(" ")).into()),
         };
@@ -49,6 +53,16 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
 fn list(dir: &str) -> io::Result<()> {
     fs::read_dir(dir)?.try_for_each(|entry| entry.map(drop))
+}
+
+fn walk(dir: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            walk(&entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 fn allow_missing<T>(result: io::Result<T>) -> io::Result<()> {

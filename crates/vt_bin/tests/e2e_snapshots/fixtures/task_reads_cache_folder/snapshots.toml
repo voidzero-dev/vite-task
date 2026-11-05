@@ -1,0 +1,33 @@
+[[e2e]]
+name = "task_reads_cache_folder"
+comment = """
+The task lists every folder under `node_modules/.vite`, the cache's own folder among them, like a tool crawling the project, and writes `out.txt`. The cache folder changes after every run: the run's archive is added, the previous one is removed, and the run summary is written.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "crawl",
+  ], comment = "no cache entry yet" },
+  { argv = [
+    "vt",
+    "run",
+    "crawl",
+  ], comment = "nothing changed", redact = { 'task-cache/v\d+' = 'task-cache/v<n>', "'<uuid>\\.tar\\.zst' (added in|removed from)" = "'<uuid>.tar.zst' added in or removed from" } },
+  { argv = [
+    "vt",
+    "run",
+    "crawl",
+  ], comment = "nothing changed", redact = { 'task-cache/v\d+' = 'task-cache/v<n>', "'<uuid>\\.tar\\.zst' (added in|removed from)" = "'<uuid>.tar.zst' added in or removed from" } },
+  { argv = [
+    "vtt",
+    "write-file",
+    "node_modules/.vite/other.txt",
+    "x",
+  ], comment = "a file appears in a folder the task lists, outside the cache" },
+  { argv = [
+    "vt",
+    "run",
+    "crawl",
+  ], comment = "two inputs changed, and either may be named", redact = { 'cache miss: .*, executing' = 'cache miss: <changed input>, executing' } },
+]
