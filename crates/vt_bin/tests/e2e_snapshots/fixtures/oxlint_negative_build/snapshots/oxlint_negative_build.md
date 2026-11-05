@@ -20,7 +20,10 @@ another task's `build` folder appears, holding code oxlint would reject if it di
 ## `vt run lint`
 
 ```
-$ oxlint -D no-debugger ○ cache miss: 'build' added in workspace root, executing
+$ oxlint -D no-debugger ◉ cache hit, replaying
 Found 0 warnings and 0 errors.
 Finished in <duration> on 1 file with <n> rules using <n> threads.
+
+---
+vt run: cache hit.
 ```

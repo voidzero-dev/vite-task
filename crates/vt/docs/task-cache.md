@@ -242,7 +242,7 @@ The `input` field under a task's `cache` controls which files are tracked for ca
 - **`[]`** (empty array): disables file tracking entirely
 - **Glob patterns** (e.g. `"src/**"`): select specific files
 - **`{auto: true}`**: enables automatic file tracking
-- **Negative patterns** (e.g. `"!dist/**"`): exclude matched files
+- **Negative patterns** (e.g. `"!dist/**"`): exclude matched files, and matching entries of the folders the task lists
 
 See [inputs.md](../../../docs/inputs.md) for full details.
 

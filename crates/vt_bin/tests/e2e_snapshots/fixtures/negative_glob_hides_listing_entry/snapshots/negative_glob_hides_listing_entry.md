@@ -23,13 +23,15 @@ an `out` folder, which `!out/**` excludes, appears in the listed folder
 ## `vt run build`
 
 ```
-$ vtt list-dir . ○ cache miss: 'out' added in workspace root, executing
+$ vtt list-dir . ◉ cache hit, replaying
 node_modules
-out
 package.json
 snapshots
 snapshots.toml
 vite-task.json
+
+---
+vt run: cache hit.
 ```
 
 ## `vtt write-file notes.txt x`
