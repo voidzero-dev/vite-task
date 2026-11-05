@@ -1,9 +1,11 @@
-//! Syscalls that make an entry at a path without opening it: mkdir, and
-//! rename and hard link, which put an existing file or folder at a new path.
-//! The path of a mkdir is recorded as a mkdir, whether or not the folder is
-//! there already; the new path of a rename as a rename target, which may be
-//! a whole folder; and that of a hard link, always a file, as a write. The
-//! source of a rename needs no record.
+//! Syscalls that make an entry at a path without opening it: mkdir, symlink,
+//! and rename and hard link, which put an existing file or folder at a new
+//! path. The path of a mkdir is recorded as a mkdir, whether or not the
+//! folder is there already; the new path of a rename as a rename target,
+//! which may be a whole folder; and that of a symlink, and of a hard link,
+//! always a file, as a write. The source of a rename needs no record, and
+//! neither does the target of a symlink, which is stored as text, not
+//! accessed.
 
 use std::io;
 
@@ -68,5 +70,22 @@ impl SyscallHandler {
         (_old_dir_fd, _old, new_dir_fd, new): (Ignored, Ignored, Fd, CStrPtr),
     ) -> io::Result<()> {
         self.handle_path(caller, new_dir_fd, new, AccessMode::Write)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub(super) fn symlink(
+        &mut self,
+        caller: Caller,
+        (_target, link): (Ignored, CStrPtr),
+    ) -> io::Result<()> {
+        self.handle_path(caller, Fd::cwd(), link, AccessMode::Write)
+    }
+
+    pub(super) fn symlinkat(
+        &mut self,
+        caller: Caller,
+        (_target, new_dir_fd, link): (Ignored, Fd, CStrPtr),
+    ) -> io::Result<()> {
+        self.handle_path(caller, new_dir_fd, link, AccessMode::Write)
     }
 }
