@@ -65,7 +65,7 @@ export default defineConfig({
 
 ```json
 {
-  "$schema": "https://viteplus.dev/schemas/task-graph.v1.json",
+  "$schema": "file:///home/me/acme/node_modules/vite-plus/schemas/task-graph.json",
   "version": 1,
   "workspaceRoot": "/home/me/acme",
   "packages": {
@@ -111,10 +111,10 @@ vp run --json | jq -r '.packages as $p | .tasks[] | "\($p[.package].name // "")#
 ```ts
 type TaskGraph = {
   /**
-   * The JSON Schema of this document, with the same descriptions as the comments here, so a
-   * reader can look up what each field means. Its URL changes with `version`.
+   * `file://` URL of the JSON Schema shipped with the vp that printed this document, so it
+   * describes this output exactly. Its descriptions are the comments here. See `$schema` below.
    */
-  $schema: 'https://viteplus.dev/schemas/task-graph.v1.json';
+  $schema: string;
 
   /** Format version. It changes only when the format changes incompatibly; see Versioning below. */
   version: 1;
@@ -184,7 +184,16 @@ An ID is `<package path>#<task name>`, e.g. `packages/ui#build`. A task of the r
 
 ### Paths
 
-A path inside the workspace is relative to `workspaceRoot`, with `/` on every platform; the workspace root itself is `"."`. A path outside it, such as a program the run plan starts, is absolute.
+A path inside the workspace is relative to `workspaceRoot`, with `/` on every platform; the workspace root itself is `"."`. A path outside it, such as a program the run plan starts, is absolute. `$schema` is a URL instead (below).
+
+### `$schema`
+
+`$schema` points to a JSON Schema (draft-07) in the vite-plus package that printed the document, so an agent can read what each field means, and an editor shows the descriptions and checks the document when it is opened as JSON. Its value uses a form that VS Code and JetBrains IDEs both read on every platform:
+
+- `file://`, then the absolute path with `/` separators, with a `/` before a Windows drive: `file:///home/me/acme/node_modules/vite-plus/schemas/task-graph.json`, `file:///C:/Users/me/acme/node_modules/vite-plus/schemas/task-graph.json`.
+- Not percent-encoded. JetBrains IDEs look the path up as written, so they wouldn't find a space written as `%20`; VS Code reads both.
+
+A plain path wouldn't work on Windows: neither editor reads `C:\Users\…` as a schema location.
 
 ### Absent means empty or default
 
