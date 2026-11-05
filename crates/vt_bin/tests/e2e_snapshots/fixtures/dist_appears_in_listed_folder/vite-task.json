@@ -1,8 +1,0 @@
-{
-  "tasks": {
-    "build": {
-      "command": "vtt list-dir .",
-      "cache": true
-    }
-  }
-}
