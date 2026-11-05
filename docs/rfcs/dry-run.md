@@ -151,7 +151,6 @@ vp run --dry-run --json -r build
         {
           "program": "apps/web/node_modules/.bin/vite",
           "args": ["build"],
-          "cwd": "apps/web",
           "cache": {
             "status": "unknown",
             "baseline": { "durationMs": 9120 },
@@ -166,7 +165,6 @@ vp run --dry-run --json -r build
       "steps": [
         {
           "program": "packages/ui/node_modules/.bin/tsdown",
-          "cwd": "packages/ui",
           "cache": {
             "status": "changed",
             "baseline": { "durationMs": 1830 },
@@ -325,10 +323,10 @@ type RunPlan = {
             args?: string[];
 
             /**
-             * The directory it runs in: the package directory, unless the task's `cwd` setting or
-             * an earlier `cd` in the command changes it.
+             * The directory it runs in, when the task's `cwd` setting or an earlier `cd` in the
+             * command changes it. Absent when it runs in the package directory.
              */
-            cwd: string;
+            cwd?: string;
 
             /** Set when the step comes from a `pre` or `post` script, such as `prebuild`. */
             hook?: string;
