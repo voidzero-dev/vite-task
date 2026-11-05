@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "deploy": {
+      "command": "echo 'Deploying app'",
+      "dependsOn": ["@test/broken#build"]
+    }
+  }
+}
