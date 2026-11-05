@@ -72,13 +72,13 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
     (
         "aarch64",
         &[
-            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.38.0
+            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.38.0-git-d114978ca467143f171a835cbcbe8ab6ccc009a7
             BinaryDownload {
                 name: "oils_for_unix",
                 env_var: "FSPY_MACOS_ARTIFACT_OILS_FOR_UNIX",
-                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.38.0/oils-for-unix-0.38.0-darwin-arm64.tar.gz",
+                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.38.0-git-d114978ca467143f171a835cbcbe8ab6ccc009a7/oils-for-unix-0.38.0-git-d114978ca467143f171a835cbcbe8ab6ccc009a7-darwin-arm64.tar.gz",
                 path_in_targz: "oils-for-unix",
-                expected_sha256: "b6e9d77aa6b22692f6132ca03346a8e166f1f57d966712f0ffff14c89412df15",
+                expected_sha256: "ac12f48c03f18edd39f509b9a12e162ba38702a4c6461fd3f1650b2d67406467",
             },
             // https://github.com/uutils/coreutils/releases/tag/0.4.0
             BinaryDownload {
@@ -93,13 +93,13 @@ const MACOS_BINARY_DOWNLOADS: &[(&str, &[BinaryDownload])] = &[
     (
         "x86_64",
         &[
-            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.38.0
+            // https://github.com/wan9chi/oils-for-unix-build/releases/tag/oils-for-unix-0.38.0-git-d114978ca467143f171a835cbcbe8ab6ccc009a7
             BinaryDownload {
                 name: "oils_for_unix",
                 env_var: "FSPY_MACOS_ARTIFACT_OILS_FOR_UNIX",
-                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.38.0/oils-for-unix-0.38.0-darwin-x86_64.tar.gz",
+                url: "https://github.com/wan9chi/oils-for-unix-build/releases/download/oils-for-unix-0.38.0-git-d114978ca467143f171a835cbcbe8ab6ccc009a7/oils-for-unix-0.38.0-git-d114978ca467143f171a835cbcbe8ab6ccc009a7-darwin-x86_64.tar.gz",
                 path_in_targz: "oils-for-unix",
-                expected_sha256: "1a41a729538fd3663809c70f72179503345ea717b956607771ba766574ab6382",
+                expected_sha256: "0193ef17d601b0e3c190e20c8a6144a5f9c62f65794aae4a1d7db7d873dd8149",
             },
             // https://github.com/uutils/coreutils/releases/tag/0.4.0
             BinaryDownload {
