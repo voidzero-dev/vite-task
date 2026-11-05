@@ -15,7 +15,10 @@ $ vtt fs walk node_modules/.vite write out.txt built
 nothing changed
 
 ```
-$ vtt fs walk node_modules/.vite write out.txt built ○ cache miss: '<uuid>.tar.zst' added in or removed from 'node_modules/.vite/task-cache/v<n>', executing
+$ vtt fs walk node_modules/.vite write out.txt built ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `vt run crawl`
@@ -23,7 +26,10 @@ $ vtt fs walk node_modules/.vite write out.txt built ○ cache miss: '<uuid>.tar
 nothing changed
 
 ```
-$ vtt fs walk node_modules/.vite write out.txt built ○ cache miss: '<uuid>.tar.zst' added in or removed from 'node_modules/.vite/task-cache/v<n>', executing
+$ vtt fs walk node_modules/.vite write out.txt built ◉ cache hit, replaying
+
+---
+vt run: cache hit.
 ```
 
 ## `vtt write-file node_modules/.vite/other.txt x`
@@ -35,8 +41,6 @@ a file appears in a folder the task lists, outside the cache
 
 ## `vt run crawl`
 
-two inputs changed, and either may be named
-
 ```
-$ vtt fs walk node_modules/.vite write out.txt built ○ cache miss: <changed input>, executing
+$ vtt fs walk node_modules/.vite write out.txt built ○ cache miss: 'other.txt' added in 'node_modules/.vite', executing
 ```
