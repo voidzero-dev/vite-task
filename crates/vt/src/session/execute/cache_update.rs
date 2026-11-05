@@ -109,6 +109,7 @@ pub(super) async fn update_cache(
         &ignored_input_rels,
         &ignored_output_rels,
         workspace_root,
+        cache_dir,
     );
 
     if fspy_outcome.is_none() && fspy.is_some() {
@@ -196,7 +197,8 @@ pub(super) async fn update_cache(
 /// `path_writes` is filtered by user-configured output negatives and
 /// tool-reported `ignoreOutput` paths, which decide what is archived.
 /// `rebuildable` takes every write unfiltered, since what the task can
-/// rebuild doesn't depend on what is archived.
+/// rebuild doesn't depend on what is archived. Accesses in the task cache, the
+/// parent of the schema version folder `cache_dir`, are left out of all three.
 #[cfg_attr(
     not(fspy),
     expect(clippy::missing_const_for_fn, reason = "the body is a no-op without fspy")
@@ -208,13 +210,16 @@ fn observe_fspy(
     ignored_input_rels: &FxHashSet<RelativePathBuf>,
     ignored_output_rels: &FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
+    cache_dir: &AbsolutePath,
 ) -> Option<TrackingOutcome> {
     #[cfg(fspy)]
     {
         use super::tracked_accesses::TrackedPathAccesses;
 
+        // Every schema version's folder is in the task cache, not only this one.
+        let cache_root = cache_dir.parent().unwrap_or(cache_dir);
         path_accesses.map(|raw| {
-            let tracked = TrackedPathAccesses::from_raw(raw, workspace_root);
+            let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, cache_root);
             let filtered_path_reads: HashMap<RelativePathBuf, PathRead> =
                 // fspy can be attached for auto-output-only tasks. In that
                 // mode reads must not become inferred inputs.
@@ -260,7 +265,8 @@ fn observe_fspy(
     }
     #[cfg(not(fspy))]
     {
-        let _ = (metadata, fspy, ignored_input_rels, ignored_output_rels, workspace_root);
+        let _ =
+            (metadata, fspy, ignored_input_rels, ignored_output_rels, workspace_root, cache_dir);
         None
     }
 }
