@@ -340,28 +340,18 @@ type RunPlan = {
              * earlier step may change before it starts.
              */
             cache?:
-              | ((
-                  | {
-                      /** Matches `baseline`, so it would replay `baseline` instead of running. */
-                      status: 'hit';
-                    }
-                  | {
-                      /**
-                       * Differs from `baseline`, so it would run. `changes` lists the differences.
-                       */
-                      status: 'changed';
-                    }
-                  | {
-                      /**
-                       * Can't be predicted yet: a step it waits on would write files before it starts, by
-                       * running or by being a hit that restores outputs. A step waits on the earlier steps of
-                       * its task, on the tasks in its `dependsOn`, and, in a nested plan, on the steps before
-                       * the enclosing step. Only a step that would otherwise be `hit` or `changed` can be
-                       * `unknown`, and `changes` and `partial` still show today's check.
-                       */
-                      status: 'unknown';
-                    }
-                ) & {
+              | {
+                  /**
+                   * - `hit`: matches `baseline`, so it would replay `baseline` instead of running.
+                   * - `changed`: differs from `baseline`, so it would run. `changes` lists the differences.
+                   * - `unknown`: can't be predicted yet, because a step it waits on would write files before
+                   *   it starts, by running or by being a hit that restores outputs. A step waits on the
+                   *   earlier steps of its task, on the tasks in its `dependsOn`, and, in a nested plan, on
+                   *   the steps before the enclosing step. Only a step that would otherwise be `hit` or
+                   *   `changed` can be `unknown`, and `changes` and `partial` still show today's check.
+                   */
+                  status: 'hit' | 'changed' | 'unknown';
+
                   /**
                    * The cached run the step is compared with: the one with the same command,
                    * config and env, or, if there is none, the step's most recent cached run.
@@ -468,7 +458,7 @@ type RunPlan = {
                    * Absent with `-v`, which lists every change.
                    */
                   partial?: true;
-                })
+                }
               | {
                   /**
                    * Would run: there is no cached run to compare with, as on a first run or after
