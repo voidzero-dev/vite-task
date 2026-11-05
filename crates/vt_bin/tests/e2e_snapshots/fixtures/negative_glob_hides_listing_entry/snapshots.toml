@@ -1,0 +1,33 @@
+[[e2e]]
+name = "negative_glob_hides_listing_entry"
+comment = """
+The task lists the package root and prints its entries, with `"!out/**"` in its `input`.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "mkdir",
+    "out",
+  ], comment = "an `out` folder, which `!out/**` excludes, appears in the listed folder" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "write-file",
+    "notes.txt",
+    "x",
+  ], comment = "a file the exclusion doesn't match appears in the listed folder" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+]

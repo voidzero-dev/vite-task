@@ -12,10 +12,11 @@ use std::{
 };
 
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use vt_casefold::EnvName;
-use vt_path::{AbsolutePath, RelativePathBuf};
+use vt_glob::path::PathGlobSet;
+use vt_path::{AbsolutePath, RelativePath, RelativePathBuf};
 use vt_plan::cache_metadata::EnvValueHash;
 use vt_str::Str;
 use wincode::{SchemaRead, SchemaWrite};
@@ -106,11 +107,16 @@ pub enum PathFingerprint {
 /// The entries of a listed directory.
 #[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct DirListing {
-    /// The entries sorted by name, without those in `ignored_entries`.
+    /// The entries sorted by name, without those in `ignored_entries` and
+    /// those the input negative globs exclude.
     pub entries: BTreeMap<Str, DirEntryKind>,
-    /// Names of the entries the task can rebuild, left out of `entries`. A
-    /// later run may find them missing or present, so they're left out of the
-    /// current listing before comparing.
+    /// Names left out of `entries` that a later run may find missing or
+    /// present: the entries the task can rebuild, and those that
+    /// tool-reported `ignoreInput` paths name, whether or not they were there
+    /// after the run. They're left out of the current listing before
+    /// comparing, and so are the entries the input negative globs exclude,
+    /// which aren't recorded: the globs are part of the cache key, so
+    /// validation has the same ones.
     pub ignored_entries: BTreeSet<Str>,
 }
 
@@ -125,27 +131,37 @@ pub enum DirEntryKind {
 impl PostRunFingerprint {
     /// Creates a new fingerprint from path accesses after task execution.
     ///
-    /// Negative glob filtering is done upstream (see
-    /// [`super::tracked_accesses::TrackedPathAccesses::from_raw`]).
-    /// Paths already present in `globbed_inputs` are skipped — they are
-    /// already tracked by the prerun glob fingerprint. Empty folders the task
-    /// made and folders holding only what the task can rebuild are skipped
-    /// too: a hit restores them if they're among the task's outputs. Every
-    /// other path is fingerprinted as the task left it, including a file the
-    /// task rewrote, except that a folder listing leaves out the entries the
-    /// task can rebuild and records their names.
+    /// Input negative globs and tool-reported `ignoreInput` paths have
+    /// already been applied to `inferred_path_reads` (see
+    /// `cache_update::observe_fspy`). Paths already present in
+    /// `globbed_inputs` are skipped — they are already tracked by the prerun
+    /// glob fingerprint. Empty folders the task made and folders holding only
+    /// what the task can rebuild are skipped too: a hit restores them if
+    /// they're among the task's outputs. Every other path is fingerprinted as
+    /// the task left it, including a file the task rewrote, except that a
+    /// folder listing leaves out the entries the task can rebuild and those
+    /// that `input_negative_globs` or `ignored_inputs` exclude, and records
+    /// the names validation can't tell from the globs (see [`DirListing`]).
     ///
     /// # Arguments
     /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
     /// * `rebuildable` - What the task can rebuild, so a later run may find it missing
+    /// * `input_negative_globs` - The input negative globs, which also exclude listing entries
+    /// * `ignored_inputs` - Tool-reported `ignoreInput` paths, which also exclude listing entries
     /// * `base_dir` - Workspace root for resolving relative paths
     /// * `globbed_inputs` - Prerun glob fingerprint; paths here are skipped
     /// * `tracked_envs` - Tool-requested env vars (name -> value hash), validated on lookup
     /// * `tracked_env_queries` - Tool-requested bulk env queries (query -> match-set hashes)
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "listing entries need the input exclusions next to the run's records"
+    )]
     #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
     pub fn create(
         inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
         rebuildable: &Rebuildable,
+        input_negative_globs: &PathGlobSet<'_>,
+        ignored_inputs: &FxHashSet<RelativePathBuf>,
         base_dir: &AbsolutePath,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
@@ -159,18 +175,23 @@ impl PostRunFingerprint {
             .map(|(relative_path, path_read)| {
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
                 let mut fingerprint = fingerprint_path(&full_path, *path_read)?;
-                if let PathFingerprint::Folder(Some(DirListing { entries, ignored_entries })) =
-                    &mut fingerprint
-                    && !rebuildable.is_empty()
-                {
-                    entries.retain(|name, kind| {
-                        let is_dir = matches!(kind, DirEntryKind::Dir);
-                        let ignored = rebuildable.is_rebuildable_entry(relative_path, name, is_dir);
-                        if ignored {
-                            ignored_entries.insert(name.clone());
-                        }
-                        !ignored
-                    });
+                if let PathFingerprint::Folder(Some(listing)) = &mut fingerprint {
+                    if !rebuildable.is_empty() {
+                        let DirListing { entries, ignored_entries } = listing;
+                        entries.retain(|name, kind| {
+                            let is_dir = matches!(kind, DirEntryKind::Dir);
+                            let ignored =
+                                rebuildable.is_rebuildable_entry(relative_path, name, is_dir);
+                            if ignored {
+                                ignored_entries.insert(name.clone());
+                            }
+                            !ignored
+                        });
+                    }
+                    listing
+                        .ignored_entries
+                        .extend(ignored_input_names(relative_path, ignored_inputs));
+                    leave_out_excluded_entries(listing, relative_path, input_negative_globs);
                 }
                 let may_be_missing =
                     rebuildable.may_be_missing(relative_path, &fingerprint, base_dir);
@@ -185,6 +206,8 @@ impl PostRunFingerprint {
     /// unfiltered env context used by runner-aware IPC. `unfiltered_envs` must
     /// be the same plan env context that served the original `getEnv` request,
     /// not the filtered env passed to the spawned process.
+    /// `input_negative_globs` are the task's input negative globs, part of the
+    /// cache key and so the same as when the fingerprint was created.
     ///
     /// Returns `Some(mismatch)` if anything changed, `None` if all valid.
     /// Returns an error if a tracked env is currently present but cannot be
@@ -194,6 +217,7 @@ impl PostRunFingerprint {
     pub fn validate(
         &self,
         base_dir: &AbsolutePath,
+        input_negative_globs: &PathGlobSet<'_>,
         unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     ) -> anyhow::Result<Option<PostRunMismatch>> {
         let input_mismatch =
@@ -208,15 +232,16 @@ impl PostRunFingerprint {
                         Ok(ok) => ok,
                         Err(err) => return Some(Err(err)),
                     };
-                // The entries the task can rebuild may be missing or present, so
-                // the current listing leaves out and records the same names.
+                // The ignored entries may be missing or present, so the current
+                // listing records and leaves out the same names, and the entries
+                // the input negative globs exclude.
                 if let (
                     PathFingerprint::Folder(Some(stored)),
                     PathFingerprint::Folder(Some(current)),
                 ) = (path_fingerprint, &mut current_path_fingerprint)
                 {
-                    current.entries.retain(|name, _| !stored.ignored_entries.contains(name));
                     current.ignored_entries.clone_from(&stored.ignored_entries);
+                    leave_out_excluded_entries(current, input_relative_path, input_negative_globs);
                 }
                 if path_fingerprint == &current_path_fingerprint
                     || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound)
@@ -418,6 +443,44 @@ fn determine_folder_change_kind<'a>(
     }
 }
 
+/// The names of the entries of the folder `dir` that `ignored_inputs`,
+/// tool-reported `ignoreInput` paths, cover, whether or not they're there. A
+/// path covers itself and everything under it, but a listed folder is never
+/// covered, since covered reads are left out, so an entry of `dir` is covered
+/// only by a path naming it.
+fn ignored_input_names<'a>(
+    dir: &'a RelativePath,
+    ignored_inputs: &'a FxHashSet<RelativePathBuf>,
+) -> impl Iterator<Item = Str> + 'a {
+    ignored_inputs.iter().filter(move |path| path.parent() == Some(dir)).map(|path| {
+        let path = path.as_str();
+        Str::from(path.rsplit_once('/').map_or(path, |(_, name)| name))
+    })
+}
+
+/// Leaves out of `listing`, a listing of the folder `dir`, the entries named
+/// in its `ignored_entries` and those whose path `input_negative_globs`
+/// match. A folder entry is matched by its own path: `build/**` matches the
+/// `build` folder itself, since `**` matches zero or more components, so it
+/// leaves out the entry, while `build/*` or `build/**/*.js` exclude only
+/// what is in the folder and leave the entry in.
+fn leave_out_excluded_entries(
+    listing: &mut DirListing,
+    dir: &RelativePath,
+    input_negative_globs: &PathGlobSet<'_>,
+) {
+    let DirListing { entries, ignored_entries } = listing;
+    if ignored_entries.is_empty() && input_negative_globs.is_empty() {
+        return;
+    }
+    entries.retain(|name, _| {
+        !ignored_entries.contains(name)
+            && (input_negative_globs.is_empty()
+                || !RelativePathBuf::new(name.as_str())
+                    .is_ok_and(|name| input_negative_globs.is_match(dir.join(name))))
+    });
+}
+
 /// Check if a directory entry should be ignored in fingerprinting
 const fn should_ignore_entry(name: &[u8]) -> bool {
     matches!(name, b"." | b".." | b".DS_Store") || name.eq_ignore_ascii_case(b"dist")
@@ -608,7 +671,7 @@ mod tests {
 
         let workspace_root = vt_path::current_dir().expect("cwd");
         let err = fingerprint
-            .validate(&workspace_root, &unfiltered_envs)
+            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
             .expect_err("non-UTF-8 tracked env values must error");
 
         assert!(err.to_string().contains("tracked env value for PROBE_ENV is not valid UTF-8"));
@@ -628,8 +691,9 @@ mod tests {
         );
 
         let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let mismatch = fingerprint
+            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
+            .expect("validation succeeds");
 
         match mismatch {
             Some(PostRunMismatch::TrackedEnvQuery {
@@ -663,8 +727,9 @@ mod tests {
         );
 
         let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let mismatch = fingerprint
+            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
+            .expect("validation succeeds");
 
         assert!(mismatch.is_none());
     }
@@ -683,8 +748,9 @@ mod tests {
         );
 
         let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let mismatch = fingerprint
+            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
+            .expect("validation succeeds");
 
         assert!(mismatch.is_none());
     }
@@ -702,8 +768,9 @@ mod tests {
         );
 
         let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let mismatch = fingerprint
+            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
+            .expect("validation succeeds");
 
         assert_eq!(mismatch.is_none(), cfg!(windows));
     }
@@ -724,8 +791,9 @@ mod tests {
         );
 
         let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let mismatch = fingerprint
+            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
+            .expect("validation succeeds");
 
         assert_eq!(mismatch.is_none(), cfg!(windows));
     }
@@ -748,6 +816,8 @@ mod tests {
                     FxHashSet::default(),
                     &workspace_root,
                 ),
+                &PathGlobSet::default(),
+                &FxHashSet::default(),
                 &workspace_root,
                 &BTreeMap::new(),
                 BTreeMap::new(),
@@ -758,7 +828,9 @@ mod tests {
         let written = create(FxHashSet::from_iter([path]));
         let read_only = create(FxHashSet::default());
         let validate = |fingerprint: &PostRunFingerprint| {
-            fingerprint.validate(&workspace_root, &FxHashMap::default()).unwrap()
+            fingerprint
+                .validate(&workspace_root, &PathGlobSet::default(), &FxHashMap::default())
+                .unwrap()
         };
 
         std::fs::remove_file(full_path.as_path()).unwrap();
@@ -801,6 +873,8 @@ mod tests {
                 &workspace_root,
             )
             .with_folders(&workspace_root),
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
             &workspace_root,
             &BTreeMap::new(),
             BTreeMap::new(),
@@ -873,6 +947,8 @@ mod tests {
         let fingerprint = PostRunFingerprint::create(
             &path_reads,
             &rebuildable,
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
             &workspace_root,
             &BTreeMap::new(),
             BTreeMap::new(),
@@ -916,6 +992,8 @@ mod tests {
         let fingerprint = PostRunFingerprint::create(
             &path_reads,
             &rebuildable,
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
             &workspace_root,
             &BTreeMap::new(),
             BTreeMap::new(),
@@ -959,6 +1037,8 @@ mod tests {
                 &workspace_root,
             )
             .with_folders(&workspace_root),
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
             &workspace_root,
             &BTreeMap::new(),
             BTreeMap::new(),
@@ -1003,6 +1083,8 @@ mod tests {
         let fingerprint = PostRunFingerprint::create(
             &path_reads,
             &rebuildable,
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
             &workspace_root,
             &BTreeMap::new(),
             BTreeMap::new(),
@@ -1035,6 +1117,8 @@ mod tests {
                 &workspace_root,
             )
             .with_folders(&workspace_root),
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
             &workspace_root,
             &BTreeMap::new(),
             BTreeMap::new(),
@@ -1049,10 +1133,72 @@ mod tests {
             }))
         );
 
-        let validate = || fingerprint.validate(&workspace_root, &FxHashMap::default()).unwrap();
+        let validate = || {
+            fingerprint
+                .validate(&workspace_root, &PathGlobSet::default(), &FxHashMap::default())
+                .unwrap()
+        };
         assert!(validate().is_none());
         std::fs::remove_dir_all(workspace_root.join("pkg/gen").as_path()).unwrap();
         std::fs::remove_file(workspace_root.join("pkg/out.txt").as_path()).unwrap();
+        assert!(validate().is_none());
+
+        std::fs::write(workspace_root.join("pkg/notes.txt").as_path(), "x").unwrap();
+        match validate() {
+            Some(PostRunMismatch::Input { kind: InputChangeKind::Added, path }) => {
+                assert_eq!(path.as_str(), "pkg/notes.txt");
+            }
+            other => panic!("expected `pkg/notes.txt` added, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn listings_leave_out_entries_the_input_config_excludes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        for dir in ["pkg/gen", "pkg/src"] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        std::fs::write(workspace_root.join("pkg/tool.log").as_path(), "x").unwrap();
+
+        // `pkg/out/**` matches `pkg/out` itself, `pkg/gen/*` only what is in
+        // `pkg/gen`. The tool reported `pkg/tool.log`, which is there, and
+        // `pkg/.cache`, which isn't, as ignored inputs.
+        let input_negative_globs = PathGlobSet::new(&["pkg/out/**", "pkg/gen/*"]).unwrap();
+        let ignored_inputs =
+            FxHashSet::from_iter([rel("pkg/tool.log"), rel("pkg/.cache"), rel("other/x")]);
+        let path_reads = HashMap::from([(rel("pkg"), PathRead { read_dir_entries: true })]);
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &Rebuildable::default(),
+            &input_negative_globs,
+            &ignored_inputs,
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            fingerprint.inferred_inputs[&rel("pkg")].fingerprint,
+            PathFingerprint::Folder(Some(DirListing {
+                entries: BTreeMap::from([
+                    ("gen".into(), DirEntryKind::Dir),
+                    ("src".into(), DirEntryKind::Dir),
+                ]),
+                ignored_entries: BTreeSet::from([".cache".into(), "tool.log".into()]),
+            }))
+        );
+
+        let validate = || {
+            fingerprint
+                .validate(&workspace_root, &input_negative_globs, &FxHashMap::default())
+                .unwrap()
+        };
+        std::fs::create_dir(workspace_root.join("pkg/out").as_path()).unwrap();
+        std::fs::create_dir(workspace_root.join("pkg/.cache").as_path()).unwrap();
+        std::fs::remove_file(workspace_root.join("pkg/tool.log").as_path()).unwrap();
         assert!(validate().is_none());
 
         std::fs::write(workspace_root.join("pkg/notes.txt").as_path(), "x").unwrap();

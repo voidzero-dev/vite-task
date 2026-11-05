@@ -4,6 +4,7 @@ use std::{collections::BTreeMap, ffi::OsStr, sync::Arc};
 
 use rustc_hash::FxHashMap;
 use vt_casefold::EnvName;
+use vt_glob::path::PathGlobSet;
 use vt_path::{AbsolutePath, RelativePathBuf};
 
 use super::{CacheEntryKey, CacheEntryValue, FingerprintMismatch, InputChangeKind};
@@ -11,8 +12,9 @@ use super::{CacheEntryKey, CacheEntryValue, FingerprintMismatch, InputChangeKind
 impl CacheEntryValue {
     /// Validate explicit inputs, then inferred inputs and tracked environment
     /// values against `unfiltered_envs`, the execution's
-    /// `CacheMetadata::unfiltered_envs`. Returns the first mismatch, or `None`
-    /// when the entry is valid.
+    /// `CacheMetadata::unfiltered_envs`. `input_negative_globs`, compiled from
+    /// the entry key's input config, leave entries out of listings. Returns
+    /// the first mismatch, or `None` when the entry is valid.
     ///
     /// # Errors
     ///
@@ -21,6 +23,7 @@ impl CacheEntryValue {
         &self,
         unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
+        input_negative_globs: &PathGlobSet<'_>,
         workspace_root: &AbsolutePath,
     ) -> anyhow::Result<Option<FingerprintMismatch>> {
         if let Some(mismatch) = detect_globbed_input_change(&self.globbed_inputs, globbed_inputs) {
@@ -28,7 +31,7 @@ impl CacheEntryValue {
         }
 
         self.post_run_fingerprint
-            .validate(workspace_root, unfiltered_envs)
+            .validate(workspace_root, input_negative_globs, unfiltered_envs)
             .map(|mismatch| mismatch.map(FingerprintMismatch::from))
     }
 }

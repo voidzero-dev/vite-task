@@ -146,9 +146,14 @@ pub(super) async fn update_cache(
     let path_reads = fspy_outcome.as_ref().map_or(&empty_path_reads, |o| &o.path_reads);
     let no_writes = Rebuildable::default();
     let rebuildable = fspy_outcome.as_ref().map_or(&no_writes, |o| &o.rebuildable);
+    // Listings leave out the entries input exclusions match, as reads do.
+    let no_globs = PathGlobSet::default();
+    let input_negative_globs = fspy.map_or(&no_globs, |fspy| &fspy.input_negative_globs);
     let post_run_fingerprint = match PostRunFingerprint::create(
         path_reads,
         rebuildable,
+        input_negative_globs,
+        &ignored_input_rels,
         workspace_root,
         &globbed_inputs,
         tracked_envs,
