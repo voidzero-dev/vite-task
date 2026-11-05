@@ -4,11 +4,11 @@
 
 Three flags for `vp run <task selector args>`, each doing one thing:
 
-| Flag        | What it does                                                                                                                                                       |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--dry-run` | Stops before running any command. Planning and cache checks happen, and print, as in a real run.                                                                   |
-| `--json`    | Prints the answer as JSON instead of text. Requires `--dry-run` for now, and conflicts with `--log`.                                                               |
-| `-v`, `-vv` | Checks every input instead of stopping at the first changed file. `-v` lists every change; `-vv` also lists everything the cached run depends on, and its outputs. |
+| Flag        | What it does                                                                                                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--dry-run` | Stops before running any command. Planning and cache checks happen, and print, as in a real run.                                                                                |
+| `--json`    | Prints the answer as JSON instead of text. With a task, it requires `--dry-run` for now; without one, it prints the [task graph](./task-graph-json.md). Conflicts with `--log`. |
+| `-v`, `-vv` | Checks every input instead of stopping at the first changed file. `-v` lists every change; `-vv` also lists everything the cached run depends on, and its outputs.              |
 
 ```bash
 vp run --dry-run -r build             # what would run, and the first reason for each miss
@@ -263,7 +263,7 @@ Two more combinations:
 ### Rules
 
 1. **A flag means the same thing in every combination.** `--dry-run` only stops execution, `--json` only changes the format, `-v`/`-vv` only change how much is checked and listed.
-2. **Adding `--dry-run` to a command line that works never breaks it.** Flags that only shape execution (`--log`, `--concurrency-limit`) are accepted and do nothing.
+2. **Adding `--dry-run` to a working command line with a task never breaks it.** Flags that only shape execution (`--log`, `--concurrency-limit`) are accepted and do nothing. `vp run --json` without a task runs nothing, so it rejects `--dry-run`: there is no task to preview.
 3. **A combination that isn't supported yet fails and says so**, like `--json` on a real run.
 4. **vp's flags go before the task name.** Everything after it is passed to the task.
 
