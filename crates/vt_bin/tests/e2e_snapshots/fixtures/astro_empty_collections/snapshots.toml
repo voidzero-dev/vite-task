@@ -1,7 +1,7 @@
 [[e2e]]
 name = "astro_empty_collections"
 comment = """
-`astro build` (Astro 6) on a one-page site makes `.astro/collections` and `node_modules/.astro` and leaves them empty, writes `.astro/*.d.ts`, rewrites `dist/.prerender/*` and then removes the folder, stats `dist`, lists the project root, and Vite's dependency optimizer renames `node_modules/.vite/deps_temp_*` to `deps` and reads it back.
+`astro build` (Astro 7) on a one-page site makes `.astro/collections` and `node_modules/.astro` and leaves them empty, writes `.astro/*.d.ts`, rewrites `dist/.prerender/*` and then removes the folder, stats `dist` and the project root, and Vite's dependency optimizer renames `node_modules/.vite/deps_temp_*` to `deps` and reads it back.
 """
 ignore = true
 steps = [
