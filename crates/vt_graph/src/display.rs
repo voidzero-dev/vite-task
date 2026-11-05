@@ -6,7 +6,7 @@ use serde::Serialize;
 use vt_path::AbsolutePath;
 use vt_str::Str;
 
-use crate::{IndexedTaskGraph, TaskNodeIndex};
+use crate::{IndexedTaskGraph, TaskGraphLoadError};
 
 /// struct for printing a task in a human-readable way.
 #[derive(Debug, Clone, Serialize)]
@@ -34,26 +34,22 @@ pub struct TaskListEntry {
     pub command: Str,
 }
 
-impl IndexedTaskGraph {
-    /// Get human-readable display for a task node.
-    #[must_use]
-    pub fn display_task(&self, task_index: TaskNodeIndex) -> TaskDisplay {
-        self.task_graph()[task_index].task_display.clone()
-    }
-
+impl IndexedTaskGraph<'_> {
     /// Returns all tasks as a flat list.
-    #[must_use]
-    pub fn list_tasks(&self) -> Vec<TaskListEntry> {
-        self.task_graph()
-            .node_indices()
-            .map(|idx| {
-                let node = &self.task_graph()[idx];
-                TaskListEntry {
-                    task_display: node.task_display.clone(),
-                    command: format_command_for_task_list(&node.resolved_config.commands),
-                }
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TaskGraphLoadError`] if any package's tasks fail to load.
+    pub async fn list_tasks(&self) -> Result<Vec<TaskListEntry>, TaskGraphLoadError> {
+        Ok(self
+            .tasks()
+            .await?
+            .into_iter()
+            .map(|node| TaskListEntry {
+                task_display: node.task_display.clone(),
+                command: format_command_for_task_list(&node.resolved_config.commands),
             })
-            .collect()
+            .collect())
     }
 }
 
