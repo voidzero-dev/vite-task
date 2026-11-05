@@ -168,7 +168,7 @@ vp run --dry-run --json -r build
             "changes": [
               { "change": "changed", "kind": "file", "path": "packages/ui/src/button.tsx" }
             ],
-            "partial": true,
+            "changesPartial": true,
             "status": "changed"
           },
           "cwd": "packages/ui",
@@ -184,8 +184,8 @@ vp run --dry-run --json -r build
 
 (As printed in a terminal; captured output is the same on one line.)
 
-- `"partial": true` marks a check that stopped at the first changed file; with `-v` it is gone.
-- `@acme/web#build` is `unknown`: it waits on `@acme/ui#build`, which would run. Its `changes` are still today's check, and it has no `partial` because that check found no changed file, so it checked them all.
+- `"changesPartial": true` marks a check that stopped at the first changed file; with `-v` it is gone.
+- `@acme/web#build` is `unknown`: it waits on `@acme/ui#build`, which would run. Its `changes` are still today's check, and it has no `changesPartial` because that check found no changed file, so it checked them all.
 
 ## Flags together
 
@@ -196,11 +196,11 @@ vp run --dry-run --json -r build
 "cache": {
   "baseline": { "durationMs": 1830 },
   "changes": [{ "change": "changed", "kind": "file", "path": "packages/ui/src/button.tsx" }],
-  "partial": true,
+  "changesPartial": true,
   "status": "changed"
 }
 
-// --dry-run --json -v: complete, so no "partial"
+// --dry-run --json -v: complete, so no "changesPartial"
 "cache": {
   "baseline": { "durationMs": 1830 },
   "changes": [
@@ -234,12 +234,12 @@ vp run --dry-run --json -r build
 
 Every combination:
 
-| Command                         | default                                                  | `-v`                                     | `-vv`                                            |
-| ------------------------------- | -------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------ |
-| `vp run <sel>`                  | runs; one-line summary; each miss shows its first reason | runs; detailed summary with every change | … and what it depends on                         |
-| `vp run --dry-run <sel>`        | each command's cache status; one-line summary            | detailed summary with every change       | … and what it depends on                         |
-| `vp run --dry-run --json <sel>` | the plan as JSON; `partial: true` where it stopped       | every change                             | … and `baseline.fingerprint`, `baseline.outputs` |
-| `vp run --json <sel>`           | error: requires `--dry-run` (JSON lines later)           | the same                                 | the same                                         |
+| Command                         | default                                                   | `-v`                                     | `-vv`                                            |
+| ------------------------------- | --------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------ |
+| `vp run <sel>`                  | runs; one-line summary; each miss shows its first reason  | runs; detailed summary with every change | … and what it depends on                         |
+| `vp run --dry-run <sel>`        | each command's cache status; one-line summary             | detailed summary with every change       | … and what it depends on                         |
+| `vp run --dry-run --json <sel>` | the plan as JSON; `changesPartial: true` where it stopped | every change                             | … and `baseline.fingerprint`, `baseline.outputs` |
+| `vp run --json <sel>`           | error: requires `--dry-run` (JSON lines later)            | the same                                 | the same                                         |
 
 Two more combinations:
 
@@ -348,7 +348,7 @@ type RunPlan = {
                    *   it starts, by running or by being a hit that restores outputs. A step waits on the
                    *   earlier steps of its task, on the tasks in its `dependsOn`, and, in a nested plan, on
                    *   the steps before the enclosing step. Only a step that would otherwise be `hit` or
-                   *   `changed` can be `unknown`, and `changes` and `partial` still show today's check.
+                   *   `changed` can be `unknown`, and `changes` and `changesPartial` still show today's check.
                    */
                   status: 'hit' | 'changed' | 'unknown';
 
@@ -454,10 +454,11 @@ type RunPlan = {
                   )[];
 
                   /**
-                   * Only the first changed file is listed: without `-v`, the check stops there.
-                   * Absent with `-v`, which lists every change.
+                   * Other files may have changed too: without `-v`, the file check stops at the
+                   * first changed file. Command, config and env changes are always listed in
+                   * full. Absent with `-v`.
                    */
-                  partial?: true;
+                  changesPartial?: true;
                 }
               | {
                   /**
