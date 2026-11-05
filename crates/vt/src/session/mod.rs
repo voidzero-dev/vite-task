@@ -19,14 +19,14 @@ use reporter::{
 use rustc_hash::FxHashMap;
 use vt_casefold::EnvName;
 use vt_graph::{
-    IndexedTaskGraph, TaskGraph, TaskGraphLoadError,
+    IndexedTaskGraph, TaskGraphLoadError,
     config::{GlobResolver, user::UserCacheConfig},
     loader::UserConfigLoader,
     query::TaskQuery,
 };
 use vt_path::{AbsolutePath, AbsolutePathBuf};
 use vt_plan::{
-    ExecutionGraph, TaskGraphLoader,
+    ExecutionGraph,
     plan_request::{
         PlanOptions, PlanRequest, QueryPlanRequest, ScriptCommand, SyntheticPlanRequest,
     },
@@ -57,32 +57,29 @@ where
     }
 }
 
+/// Builds the task graph the first time it's needed.
+///
+/// Building it reads every `package.json` and the root `vite.config.*`, which
+/// commands such as `vp cache clean` don't need.
 #[derive(Debug)]
-enum LazyTaskGraph<'a> {
-    Uninitialized {
-        workspace_root: WorkspaceRoot,
-        config_loader: &'a dyn UserConfigLoader,
-        glob_resolver: Rc<GlobResolver>,
-    },
-    Initialized(IndexedTaskGraph),
+struct TaskGraphCell<'a> {
+    workspace_root: WorkspaceRoot,
+    config_loader: &'a dyn UserConfigLoader,
+    glob_resolver: Rc<GlobResolver>,
+    graph: tokio::sync::OnceCell<IndexedTaskGraph<'a>>,
 }
 
-#[async_trait::async_trait(?Send)]
-impl TaskGraphLoader for LazyTaskGraph<'_> {
-    async fn load_task_graph(&mut self) -> Result<&vt_graph::IndexedTaskGraph, TaskGraphLoadError> {
-        let _span = tracing::debug_span!("load_task_graph").entered();
-        Ok(match self {
-            Self::Uninitialized { workspace_root, config_loader, glob_resolver } => {
-                let graph =
-                    IndexedTaskGraph::load(workspace_root, *config_loader, glob_resolver).await?;
-                *self = Self::Initialized(graph);
-                match self {
-                    Self::Initialized(graph) => &*graph,
-                    Self::Uninitialized { .. } => unreachable!(),
-                }
-            }
-            Self::Initialized(graph) => &*graph,
-        })
+impl<'a> TaskGraphCell<'a> {
+    async fn get(&self) -> Result<&IndexedTaskGraph<'a>, TaskGraphLoadError> {
+        self.graph
+            .get_or_try_init(|| {
+                IndexedTaskGraph::load(
+                    &self.workspace_root,
+                    self.config_loader,
+                    Rc::clone(&self.glob_resolver),
+                )
+            })
+            .await
     }
 }
 
@@ -163,7 +160,7 @@ pub struct Session<'a> {
     workspace_path: Arc<AbsolutePath>,
     /// A session doesn't necessarily load the task graph immediately.
     /// The task graph is loaded on-demand and cached for future use.
-    lazy_task_graph: LazyTaskGraph<'a>,
+    task_graph: TaskGraphCell<'a>,
 
     /// Shared by task graph loading and every plan, so each cache glob pattern is parsed once.
     glob_resolver: Rc<GlobResolver>,
@@ -217,16 +214,14 @@ impl<'a> Session<'a> {
         Self::init_with(envs, vt_path::current_dir()?.into(), config)
     }
 
-    /// Ensures the task graph is loaded, loading it if necessary.
+    /// The workspace's task graph, loaded on first access.
     ///
     /// # Errors
     ///
     /// Returns an error if the task graph cannot be loaded from the workspace configuration.
     #[tracing::instrument(level = "debug", skip_all)]
-    pub async fn ensure_task_graph_loaded(
-        &mut self,
-    ) -> Result<&IndexedTaskGraph, TaskGraphLoadError> {
-        self.lazy_task_graph.load_task_graph().await
+    pub async fn task_graph(&self) -> Result<&IndexedTaskGraph<'a>, TaskGraphLoadError> {
+        self.task_graph.get().await
     }
 
     /// Initialize a session with custom cwd, environment variables. Useful for testing.
@@ -255,10 +250,11 @@ impl<'a> Session<'a> {
         // Cache is lazily initialized on first access to avoid SQLite race conditions
         Ok(Self {
             workspace_path: Arc::clone(&workspace_root.path),
-            lazy_task_graph: LazyTaskGraph::Uninitialized {
+            task_graph: TaskGraphCell {
                 workspace_root,
                 config_loader: config.user_config_loader,
                 glob_resolver: Rc::clone(&glob_resolver),
+                graph: tokio::sync::OnceCell::new(),
             },
             glob_resolver,
             envs: Arc::new(envs),
@@ -461,15 +457,15 @@ impl<'a> Session<'a> {
         reason = "builds interactive/non-interactive select items and handles selection"
     )]
     async fn handle_no_task(
-        &mut self,
+        &self,
         is_interactive: bool,
         run_command: &ResolvedRunCommand,
     ) -> Result<QueryPlanRequest, SessionError> {
         let not_found_name = run_command.task_specifier.as_deref();
         let cwd = Arc::clone(&self.cwd);
-        let task_graph = self.ensure_task_graph_loaded().await?;
+        let task_graph = self.task_graph().await?;
         let current_package_path = task_graph.get_package_path_from_cwd(&cwd).cloned();
-        let mut entries = task_graph.list_tasks();
+        let mut entries = task_graph.list_tasks().await?;
         entries.sort_unstable_by(|a, b| {
             a.task_display
                 .package_name
@@ -683,13 +679,6 @@ impl<'a> Session<'a> {
         }
     }
 
-    pub const fn task_graph(&self) -> Option<&TaskGraph> {
-        match &self.lazy_task_graph {
-            LazyTaskGraph::Initialized(graph) => Some(graph.task_graph()),
-            LazyTaskGraph::Uninitialized { .. } => None,
-        }
-    }
-
     pub const fn envs(&self) -> &Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>> {
         &self.envs
     }
@@ -816,13 +805,14 @@ impl<'a> Session<'a> {
                 });
             }
         };
+        let task_graph = self.task_graph.get().await?;
         let plan_result = vt_plan::plan_query(
             query_plan_request,
             &self.workspace_path,
             &cwd,
             &self.envs,
             &mut self.plan_request_parser,
-            &mut self.lazy_task_graph,
+            task_graph,
             &self.glob_resolver,
         )
         .await?;
@@ -838,13 +828,14 @@ impl<'a> Session<'a> {
         request: QueryPlanRequest,
     ) -> Result<ExecutionGraph, vt_plan::Error> {
         let cwd = Arc::clone(&self.cwd);
+        let task_graph = self.task_graph.get().await?;
         let plan_result = vt_plan::plan_query(
             request,
             &self.workspace_path,
             &cwd,
             &self.envs,
             &mut self.plan_request_parser,
-            &mut self.lazy_task_graph,
+            task_graph,
             &self.glob_resolver,
         )
         .await?;

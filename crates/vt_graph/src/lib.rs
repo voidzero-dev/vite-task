@@ -1,60 +1,28 @@
 pub mod config;
 pub mod display;
+pub mod lazy_graph;
 pub mod loader;
 pub mod query;
 mod specifier;
+mod task_loader;
 
-use std::{convert::Infallible, sync::Arc};
+use std::{convert::Infallible, rc::Rc, sync::Arc};
 
-use config::{
-    GlobResolver, ResolvedGlobalCacheConfig, ResolvedTaskConfig, UserRunConfig, UserTaskConfig,
-    UserTaskDefinition, user::TopLevelCacheFieldsCollector,
-};
-use petgraph::{
-    graph::{DefaultIx, DiGraph, EdgeIndex, IndexType, NodeIndex},
-    visit::EdgeRef as _,
-};
-use rustc_hash::{FxBuildHasher, FxHashMap};
+use config::{GlobResolver, ResolvedGlobalCacheConfig, ResolvedTaskConfig};
 use serde::Serialize;
 pub use specifier::TaskSpecifier;
 use vt_path::AbsolutePath;
 use vt_str::Str;
-use vt_workspace::{
-    DependencyType, PackageNodeIndex, WorkspaceRoot, package_graph::IndexedPackageGraph,
-};
+use vt_workspace::{PackageNodeIndex, WorkspaceRoot, package_graph::IndexedPackageGraph};
 
 use crate::{
-    config::user::{
-        TopLevelCacheFields, UserDependencyType, UserDependsOnEntry, UserPackageDependency,
-        UserTaskOptions,
-    },
-    display::TaskDisplay,
+    config::user::TopLevelCacheFieldsCollector, display::TaskDisplay, lazy_graph::LazyGraph,
+    loader::UserConfigLoader, task_loader::TaskLoader,
 };
-
-/// The type of a task dependency edge in the task graph.
-///
-/// All edges are produced from `dependsOn` in task config, including string-form
-/// task specifiers and object-form package dependency selections. Topological
-/// ordering is handled at query time via the package subgraph rather than by
-/// pre-computing package edges in the task graph.
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct TaskDependencyType;
-
-impl TaskDependencyType {
-    /// Returns `true` — all task graph edges are explicit `dependsOn` dependencies.
-    ///
-    /// Kept as an associated function for use as a filter predicate in
-    /// `add_dependencies`. Always returns `true` since `TaskDependencyType`
-    /// only represents explicit edges now.
-    #[must_use]
-    pub const fn is_explicit() -> bool {
-        true
-    }
-}
 
 /// Uniquely identifies a task, by its name and the package where it's defined.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
-pub(crate) struct TaskId {
+pub struct TaskId {
     /// The index of the package where the task is defined.
     pub package_index: PackageNodeIndex,
 
@@ -74,6 +42,10 @@ pub enum TaskSource {
 /// A node in the task graph, representing a task with its resolved configuration.
 #[derive(Debug, Serialize)]
 pub struct TaskNode {
+    /// The key the task graph stores this task under.
+    #[serde(skip)]
+    pub id: TaskId,
+
     /// Printing the task in a human-readable way.
     pub task_display: TaskDisplay,
 
@@ -162,76 +134,17 @@ pub enum SpecifierLookupError<PackageUnknownError = Infallible> {
     PackageUnknown { unspecifier_package_error: PackageUnknownError, task_name: Str },
 }
 
-/// newtype of `DefaultIx` for indices in task graphs
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-pub struct TaskIx(DefaultIx);
-// SAFETY: TaskIx is a newtype over DefaultIx which already implements IndexType correctly
-unsafe impl IndexType for TaskIx {
-    fn new(x: usize) -> Self {
-        Self(DefaultIx::new(x))
-    }
-
-    fn index(&self) -> usize {
-        self.0.index()
-    }
-
-    fn max() -> Self {
-        Self(<DefaultIx as IndexType>::max())
-    }
-}
-
-pub type TaskNodeIndex = NodeIndex<TaskIx>;
-pub type TaskEdgeIndex = EdgeIndex<TaskIx>;
-
-/// A `dependsOn` entry that selects direct package dependencies from a source task.
-struct PackageDependencyEntry {
-    task_name: Str,
-    dependency_types: Box<[DependencyType]>,
-}
-
-impl PackageDependencyEntry {
-    fn from_user_config(entry: &UserPackageDependency) -> Self {
-        Self {
-            task_name: entry.task.clone(),
-            dependency_types: entry
-                .from
-                .as_slice()
-                .iter()
-                .copied()
-                .map(DependencyType::from)
-                .collect(),
-        }
-    }
-}
-
-impl From<UserDependencyType> for DependencyType {
-    fn from(value: UserDependencyType) -> Self {
-        match value {
-            UserDependencyType::Dependencies => Self::Normal,
-            UserDependencyType::DevDependencies => Self::Dev,
-            UserDependencyType::PeerDependencies => Self::Peer,
-        }
-    }
-}
-
-/// Full task graph of a workspace, with necessary hash maps for quick task lookup
+/// Full task graph of a workspace.
 ///
-/// It's immutable after created. The task nodes contain resolved task configurations and their dependencies.
-/// External factors (e.g. additional args from cli, current working directory, environmental variables) are not stored here.
+/// The package list loads up front. Tasks load per package the first time
+/// they're read, but readers can't tell: every read goes through the methods
+/// below, which load what they need.
+///
+/// External factors (e.g. additional args from cli, current working directory,
+/// environmental variables) are not stored here.
 #[derive(Debug)]
-pub struct IndexedTaskGraph {
-    task_graph: DiGraph<TaskNode, TaskDependencyType, TaskIx>,
-
-    /// Preserve the package graph for two purposes:
-    /// - `self.task_graph` refers packages via `PackageNodeIndex`. To display package names and paths, we need to lookup them in `package_graph`.
-    /// - To find nearest topological tasks when the starting package itself doesn't contain the task with the given name.
-    indexed_package_graph: IndexedPackageGraph,
-
-    /// task indices by task id for quick lookup
-    pub(crate) node_indices_by_task_id: FxHashMap<TaskId, TaskNodeIndex>,
-
-    /// Reverse map: task node index → task id (for hook lookup)
-    task_ids_by_node_index: FxHashMap<TaskNodeIndex, TaskId>,
+pub struct IndexedTaskGraph<'l> {
+    graph: LazyGraph<TaskLoader<'l>>,
 
     /// Global cache configuration resolved from the workspace root config.
     resolved_global_cache: ResolvedGlobalCacheConfig,
@@ -240,9 +153,7 @@ pub struct IndexedTaskGraph {
     pre_post_scripts_enabled: bool,
 }
 
-pub type TaskGraph = DiGraph<TaskNode, TaskDependencyType, TaskIx>;
-
-impl IndexedTaskGraph {
+impl<'l> IndexedTaskGraph<'l> {
     /// Load the task graph from a discovered workspace using the provided config loader.
     ///
     /// # Errors
@@ -251,350 +162,117 @@ impl IndexedTaskGraph {
     /// cannot be read, a task config cannot be resolved, a dependency specifier is invalid,
     /// or `cache` is set in a non-root package.
     #[tracing::instrument(level = "debug", skip_all)]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "graph loading is inherently sequential and multi-step"
-    )]
     pub async fn load(
         workspace_root: &WorkspaceRoot,
-        config_loader: &dyn loader::UserConfigLoader,
-        glob_resolver: &GlobResolver,
+        config_loader: &'l dyn UserConfigLoader,
+        glob_resolver: Rc<GlobResolver>,
     ) -> Result<Self, TaskGraphLoadError> {
-        let mut task_graph = DiGraph::<TaskNode, TaskDependencyType, TaskIx>::default();
+        let package_graph =
+            IndexedPackageGraph::index(vt_workspace::load_package_graph(workspace_root)?);
+        let package_indices: Vec<PackageNodeIndex> =
+            package_graph.package_graph().node_indices().collect();
+        let root_package = package_indices.iter().copied().find(|&package_index| {
+            package_graph.package_graph()[package_index].path.as_str().is_empty()
+        });
 
-        let package_graph = vt_workspace::load_package_graph(workspace_root)?;
+        let graph = LazyGraph::new(
+            TaskLoader::new(
+                package_graph,
+                Arc::clone(&workspace_root.path),
+                config_loader,
+                glob_resolver,
+            ),
+            package_indices,
+        );
 
-        // Record dependency declarations for each task node to add explicit dependencies later.
-        let mut task_ids_with_depends_on_entries: Vec<(TaskId, Option<Arc<[UserDependsOnEntry]>>)> =
-            Vec::new();
-
-        // index tasks by ids
-        let mut node_indices_by_task_id: FxHashMap<TaskId, TaskNodeIndex> =
-            FxHashMap::with_capacity_and_hasher(task_graph.node_count(), FxBuildHasher);
-        let mut task_ids_by_node_index: FxHashMap<TaskNodeIndex, TaskId> =
-            FxHashMap::with_capacity_and_hasher(task_graph.node_count(), FxBuildHasher);
-
-        // First pass: load all configs, extract root cache config, validate
-        let mut root_cache = None;
-        let mut root_pre_post_scripts_enabled = None;
-        let mut package_configs: Vec<(PackageNodeIndex, Arc<AbsolutePath>, UserRunConfig)> =
-            Vec::with_capacity(package_graph.node_count());
-
-        for package_index in package_graph.node_indices() {
-            let package = &package_graph[package_index];
-            let package_dir: Arc<AbsolutePath> = workspace_root.path.join(&package.path).into();
-            let is_workspace_root = package.path.as_str().is_empty();
-
-            let user_config = config_loader
-                .load_user_config_file(&package_dir)
-                .await
-                .map_err(|error| TaskGraphLoadError::ConfigLoadError {
-                    error,
-                    package_path: package_dir.clone(),
-                })?
-                .unwrap_or_default();
-
-            if let Some(cache) = &user_config.cache {
-                if is_workspace_root {
-                    root_cache = Some(cache.clone());
-                } else {
-                    return Err(TaskGraphLoadError::CacheInNonRootPackage {
-                        package_path: package_dir.clone(),
-                    });
-                }
-            }
-
-            if let Some(val) = user_config.enable_pre_post_scripts {
-                if is_workspace_root {
-                    root_pre_post_scripts_enabled = Some(val);
-                } else {
-                    return Err(TaskGraphLoadError::PrePostScriptsInNonRootPackage {
-                        package_path: package_dir.clone(),
-                    });
-                }
-            }
-
-            package_configs.push((package_index, package_dir, user_config));
+        // The root config holds the workspace-wide settings, so it loads with the package list.
+        if let Some(root_package) = root_package {
+            let _root_tasks = graph.nodes_in(root_package).await?;
         }
+        let root_settings = graph.loader().root_settings();
 
-        let resolved_global_cache = ResolvedGlobalCacheConfig::resolve_from(root_cache.as_ref());
-
-        let mut top_level_cache_fields = TopLevelCacheFieldsCollector::default();
-
-        // Second pass: create task nodes (cache is NOT applied here; it's applied at plan time)
-        for (package_index, package_dir, user_config) in package_configs {
-            let package = &package_graph[package_index];
-
-            // Collect package.json scripts into a mutable map for draining lookup.
-            let mut package_json_scripts: FxHashMap<&str, &str> = package
-                .package_json
-                .scripts
-                .iter()
-                .map(|(name, value)| (name.as_str(), value.as_str()))
-                .collect();
-
-            for (task_name, task_user_config) in user_config.tasks.unwrap_or_default() {
-                // Error if a package.json script with the same name exists
-                if package_json_scripts.remove(task_name.as_str()).is_some() {
-                    return Err(TaskGraphLoadError::ScriptConflict {
-                        task_display: TaskDisplay {
-                            package_name: package.package_json.name.clone(),
-                            task_name: task_name.clone(),
-                            package_path: Arc::clone(&package_dir),
-                        },
-                    });
-                }
-
-                let task_id = TaskId { task_name: task_name.clone(), package_index };
-
-                let task_user_config = match task_user_config {
-                    UserTaskDefinition::Object(config) => config,
-                    UserTaskDefinition::CommandShorthand(command) => UserTaskConfig {
-                        command,
-                        options: UserTaskOptions::default(),
-                        top_level_cache_fields: TopLevelCacheFields::default(),
-                    },
-                };
-                let depends_on_entries = task_user_config.options.depends_on.clone();
-
-                top_level_cache_fields.record(task_user_config.top_level_cache_fields, || {
-                    TaskDisplay {
-                        package_name: package.package_json.name.clone(),
-                        task_name: task_name.clone(),
-                        package_path: Arc::clone(&package_dir),
-                    }
-                });
-
-                // Resolve the task configuration from the user config
-                let resolved_config = ResolvedTaskConfig::resolve(
-                    task_user_config,
-                    &package_dir,
-                    &workspace_root.path,
-                    glob_resolver,
-                )
-                .map_err(|err| TaskGraphLoadError::ResolveConfigError {
-                    error: err,
-                    task_display: TaskDisplay {
-                        package_name: package.package_json.name.clone(),
-                        task_name: task_name.clone(),
-                        package_path: Arc::clone(&package_dir),
-                    },
-                })?;
-
-                let task_node = TaskNode {
-                    task_display: TaskDisplay {
-                        package_name: package.package_json.name.clone(),
-                        task_name: task_name.clone(),
-                        package_path: Arc::clone(&package_dir),
-                    },
-                    resolved_config,
-                    source: TaskSource::TaskConfig,
-                };
-
-                let node_index = task_graph.add_node(task_node);
-                task_ids_with_depends_on_entries.push((task_id.clone(), depends_on_entries));
-                task_ids_by_node_index.insert(node_index, task_id.clone());
-                node_indices_by_task_id.insert(task_id, node_index);
-            }
-
-            // For remaining package.json scripts not in the tasks map, create tasks with default config
-            for (script_name, package_json_script) in package_json_scripts {
-                let task_id = TaskId { task_name: Str::from(script_name), package_index };
-                let resolved_config = ResolvedTaskConfig::resolve_package_json_script(
-                    &package_dir,
-                    package_json_script,
-                    &workspace_root.path,
-                    glob_resolver,
-                )
-                .map_err(|err| TaskGraphLoadError::ResolveConfigError {
-                    error: err,
-                    task_display: TaskDisplay {
-                        package_name: package.package_json.name.clone(),
-                        task_name: script_name.into(),
-                        package_path: Arc::clone(&package_dir),
-                    },
-                })?;
-                let node_index = task_graph.add_node(TaskNode {
-                    task_display: TaskDisplay {
-                        package_name: package.package_json.name.clone(),
-                        task_name: script_name.into(),
-                        package_path: Arc::clone(&package_dir),
-                    },
-                    resolved_config,
-                    source: TaskSource::PackageJsonScript,
-                });
-                task_ids_by_node_index.insert(node_index, task_id.clone());
-                node_indices_by_task_id.insert(task_id, node_index);
-            }
-        }
-
-        top_level_cache_fields.finish().map_err(TaskGraphLoadError::TopLevelCacheFields)?;
-
-        // Construct `Self` with task_graph with all task nodes ready and indexed, but no edges.
-        let mut me = Self {
-            task_graph,
-            indexed_package_graph: IndexedPackageGraph::index(package_graph),
-            node_indices_by_task_id,
-            task_ids_by_node_index,
-            resolved_global_cache,
-            pre_post_scripts_enabled: root_pre_post_scripts_enabled.unwrap_or(true),
+        let me = Self {
+            graph,
+            resolved_global_cache: root_settings.global_cache,
+            pre_post_scripts_enabled: root_settings.pre_post_scripts_enabled,
         };
-
-        // Add explicit dependencies. String-form entries resolve to fixed task
-        // specifier edges. Object-form entries select direct package dependency
-        // tasks and materialize those selections as global task graph edges.
-        for (from_task_id, depends_on_entries) in task_ids_with_depends_on_entries {
-            let from_node_index = me.node_indices_by_task_id[&from_task_id];
-            for entry in depends_on_entries.iter().flat_map(|entries| entries.iter()) {
-                match entry {
-                    UserDependsOnEntry::Task(specifier) => {
-                        let to_node_index = me
-                            .get_task_index_by_specifier::<Infallible>(
-                                TaskSpecifier::parse_raw(specifier),
-                                || Ok(from_task_id.package_index),
-                            )
-                            .map_err(|error| {
-                                TaskGraphLoadError::DependencySpecifierLookupError {
-                                    error: Box::new(error),
-                                    specifier: specifier.clone(),
-                                    task_display: me.display_task(from_node_index),
-                                }
-                            })?;
-                        me.task_graph.update_edge(
-                            from_node_index,
-                            to_node_index,
-                            TaskDependencyType,
-                        );
-                    }
-                    UserDependsOnEntry::Package(entry) => {
-                        let entry = PackageDependencyEntry::from_user_config(entry);
-                        me.add_package_dependency_edges(from_node_index, &from_task_id, &entry);
-                    }
-                }
-            }
-        }
-
-        // Topological dependency edges are no longer pre-computed here.
-        // Ordering is now handled at query time via the package subgraph induced by
-        // `IndexedPackageGraph::resolve_query` in `query/mod.rs`.
+        me.load_all().await?;
         Ok(me)
     }
 
-    /// Lookup the node index of a task by a specifier.
-    ///
-    /// The specifier can be either 'packageName#taskName' or just 'taskName' (in which case the task in the origin package is looked up).
-    fn get_task_index_by_specifier<PackageUnknownError>(
-        &self,
-        specifier: TaskSpecifier,
-        get_package_origin: impl FnOnce() -> Result<PackageNodeIndex, PackageUnknownError>,
-    ) -> Result<TaskNodeIndex, SpecifierLookupError<PackageUnknownError>> {
-        let package_index = if let Some(package_name) = specifier.package_name {
-            // Lookup package path by the package name from '#'
-            let Some(package_indices) =
-                self.indexed_package_graph.get_package_indices_by_name(&package_name)
-            else {
-                return Err(SpecifierLookupError::PackageNameNotFound { package_name });
-            };
-            if package_indices.len() > 1 {
-                return Err(SpecifierLookupError::AmbiguousPackageName {
-                    package_name,
-                    package_paths: package_indices
-                        .iter()
-                        .map(|package_index| {
-                            Arc::clone(
-                                &self.indexed_package_graph.package_graph()[*package_index]
-                                    .absolute_path,
-                            )
-                        })
-                        .collect(),
-                });
+    /// Loads every task and resolves every `dependsOn`, so a configuration
+    /// error anywhere in the workspace fails the load.
+    async fn load_all(&self) -> Result<(), TaskGraphLoadError> {
+        // Report misplaced top-level cache fields from every package in one error.
+        let mut top_level_cache_fields = TopLevelCacheFieldsCollector::default();
+        for package_index in self.package_indices() {
+            match self.graph.nodes_in(package_index).await {
+                Ok(_) => {}
+                Err(TaskGraphLoadError::TopLevelCacheFields(error)) => {
+                    top_level_cache_fields.absorb(error);
+                }
+                Err(error) => return Err(error),
             }
-            *package_indices.first()
-        } else {
-            // No '#', so the specifier only contains task name, look up in the origin path package
-            get_package_origin().map_err(|err| SpecifierLookupError::PackageUnknown {
-                unspecifier_package_error: err,
-                task_name: specifier.task_name.clone(),
-            })?
-        };
-        let task_id_to_lookup = TaskId { task_name: specifier.task_name, package_index };
-        let Some(node_index) = self.node_indices_by_task_id.get(&task_id_to_lookup) else {
-            return Err(SpecifierLookupError::TaskNameNotFound {
-                package_name: self.indexed_package_graph.package_graph()[package_index]
-                    .package_json
-                    .name
-                    .clone(),
-                task_name: task_id_to_lookup.task_name,
-                package_index,
-            });
-        };
-        Ok(*node_index)
-    }
-
-    /// Materialize one object-form `dependsOn` entry as ordinary task graph edges.
-    ///
-    /// Object entries such as `{ "task": "build", "from": "dependencies" }`
-    /// are anchored to the package that declares the source task. During graph
-    /// loading we resolve the selected direct package dependencies and add
-    /// `source_task -> dependency_package#task` edges, so later query planning
-    /// can treat them exactly like string-form `dependsOn` edges.
-    fn add_package_dependency_edges(
-        &mut self,
-        from_node_index: TaskNodeIndex,
-        from_task_id: &TaskId,
-        entry: &PackageDependencyEntry,
-    ) {
-        let package_graph = self.indexed_package_graph.package_graph();
-        let dependency_tasks = package_graph
-            .edges(from_task_id.package_index)
-            // Only use package.json dependency fields requested by `from`.
-            .filter(|edge| entry.dependency_types.contains(edge.weight()))
-            // Missing tasks are intentionally ignored: selecting
-            // `{ task: "build", from: "dependencies" }` means "run build in
-            // direct dependency packages that define build", not "require every
-            // selected package to define build".
-            .filter_map(|edge| {
-                self.node_indices_by_task_id
-                    .get(&TaskId {
-                        package_index: edge.target(),
-                        task_name: entry.task_name.clone(),
-                    })
-                    .copied()
-            })
-            .collect::<Vec<_>>();
-
-        // Keep discovery separate from insertion so the package-graph walk and
-        // task-id lookups finish before we take a mutable borrow of task_graph.
-        for to_node_index in dependency_tasks {
-            self.task_graph.update_edge(from_node_index, to_node_index, TaskDependencyType);
         }
+        top_level_cache_fields.finish().map_err(TaskGraphLoadError::TopLevelCacheFields)?;
+
+        for task in self.tasks().await? {
+            let _dependencies = self.depends_on(&task.id).await?;
+        }
+        Ok(())
     }
 
-    #[must_use]
-    pub const fn task_graph(&self) -> &TaskGraph {
-        &self.task_graph
+    /// The task with `id`, or `None` if its package has no such task.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TaskGraphLoadError`] if the package's tasks fail to load.
+    pub async fn task(&self, id: &TaskId) -> Result<Option<&TaskNode>, TaskGraphLoadError> {
+        self.graph.get(id).await
+    }
+
+    /// Every task in the workspace, package by package.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TaskGraphLoadError`] if any package's tasks fail to load.
+    pub async fn tasks(&self) -> Result<Vec<&TaskNode>, TaskGraphLoadError> {
+        let mut tasks = Vec::new();
+        for package_index in self.package_indices() {
+            tasks.extend(self.graph.nodes_in(package_index).await?);
+        }
+        Ok(tasks)
+    }
+
+    /// The tasks in the `dependsOn` of the task with `id`. An entry such as
+    /// `{ task: "build", from: "dependencies" }` is replaced by the tasks it selects.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TaskGraphLoadError`] if a package's tasks fail to load, or an
+    /// entry names a task that doesn't exist.
+    pub async fn depends_on(
+        &self,
+        id: &TaskId,
+    ) -> Result<impl Iterator<Item = &TaskNode>, TaskGraphLoadError> {
+        self.graph.neighbors(id).await
     }
 
     #[must_use]
     pub fn get_package_name(&self, package_index: PackageNodeIndex) -> &str {
-        self.indexed_package_graph.package_graph()[package_index].package_json.name.as_str()
+        self.package_graph().package_graph()[package_index].package_json.name.as_str()
     }
 
     #[must_use]
     pub fn get_package_path(&self, package_index: PackageNodeIndex) -> &Arc<AbsolutePath> {
-        &self.indexed_package_graph.package_graph()[package_index].absolute_path
-    }
-
-    #[must_use]
-    pub fn get_package_path_for_task(&self, task_index: TaskNodeIndex) -> &Arc<AbsolutePath> {
-        &self.task_graph[task_index].task_display.package_path
+        &self.package_graph().package_graph()[package_index].absolute_path
     }
 
     /// Get the package path for a given current working directory by traversing up the directory
     /// tree to find the nearest package.
     #[must_use]
     pub fn get_package_path_from_cwd(&self, cwd: &AbsolutePath) -> Option<&Arc<AbsolutePath>> {
-        let index = self.indexed_package_graph.get_package_index_from_cwd(cwd)?;
+        let index = self.package_graph().get_package_index_from_cwd(cwd)?;
         Some(self.get_package_path(index))
     }
 
@@ -609,7 +287,7 @@ impl IndexedTaskGraph {
         self.pre_post_scripts_enabled
     }
 
-    /// Returns the `TaskNodeIndex` of the pre/post hook for a `PackageJsonScript` task.
+    /// Returns the pre/post hook for a `PackageJsonScript` task.
     ///
     /// Given a task named `X` and `prefix = "pre"`, looks up `preX` in the same package.
     /// Given a task named `X` and `prefix = "post"`, looks up `postX` in the same package.
@@ -618,16 +296,31 @@ impl IndexedTaskGraph {
     /// - The task is not a `PackageJsonScript`
     /// - No `{prefix}{name}` script exists in the same package
     /// - The hook is not itself a `PackageJsonScript`
-    #[must_use]
-    pub fn get_script_hook(&self, task_idx: TaskNodeIndex, prefix: &str) -> Option<TaskNodeIndex> {
-        let task_node = &self.task_graph[task_idx];
-        if task_node.source != TaskSource::PackageJsonScript {
-            return None;
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TaskGraphLoadError`] if the package's tasks fail to load.
+    pub async fn get_script_hook(
+        &self,
+        task: &TaskNode,
+        prefix: &str,
+    ) -> Result<Option<&TaskNode>, TaskGraphLoadError> {
+        if task.source != TaskSource::PackageJsonScript {
+            return Ok(None);
         }
-        let task_id = self.task_ids_by_node_index.get(&task_idx)?;
-        let hook_name = vt_str::format!("{prefix}{}", task_node.task_display.task_name);
-        let hook_id = TaskId { package_index: task_id.package_index, task_name: hook_name };
-        let &hook_idx = self.node_indices_by_task_id.get(&hook_id)?;
-        (self.task_graph[hook_idx].source == TaskSource::PackageJsonScript).then_some(hook_idx)
+        let hook_id = TaskId {
+            package_index: task.id.package_index,
+            task_name: vt_str::format!("{prefix}{}", task.id.task_name),
+        };
+        let hook = self.task(&hook_id).await?;
+        Ok(hook.filter(|hook| hook.source == TaskSource::PackageJsonScript))
+    }
+
+    const fn package_graph(&self) -> &IndexedPackageGraph {
+        &self.graph.loader().package_graph
+    }
+
+    fn package_indices(&self) -> impl Iterator<Item = PackageNodeIndex> + '_ {
+        self.package_graph().package_graph().node_indices()
     }
 }

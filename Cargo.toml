@@ -75,6 +75,7 @@ diff-struct = "0.5.3"
 directories = "6.0.0"
 dunce = "1.0.5"
 elf = { version = "0.8.0", default-features = false }
+elsa = "1.11.2"
 flate2 = "1.0.35"
 fspy = { path = "crates/fspy" }
 fspy_benchmark_launcher = { path = "crates/fspy_benchmark_launcher", artifact = "bin" }
