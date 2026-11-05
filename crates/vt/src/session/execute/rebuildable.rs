@@ -19,12 +19,24 @@
 //!
 //! The written paths are fspy's records before output exclusions and
 //! tool-reported `ignoreOutput` paths are applied: those decide what is
-//! archived, not what the task can rebuild.
+//! archived, not what the task can rebuild. A rename target that is a folder
+//! after the run, like Vite's `deps` folder renamed into place, stands for
+//! writes of every file (and symlink) under it; the folder itself and the
+//! folders in it don't count as written. The archive takes those files like
+//! any written file. The rename's source, like Vite's `deps_temp_*` folder,
+//! isn't recorded, but a path that is gone after the run and that the task
+//! wrote in counts as written: the task made or removed it. It is
+//! fingerprinted as missing, which a later run must match either way, so this
+//! only tells it apart from a path the task looked for and didn't find. A
+//! write record on a path that is a folder, from opening it with write
+//! access, is ignored.
 
 use std::{cmp::Reverse, fs, io};
 
 use rustc_hash::FxHashSet;
 use vt_path::{AbsolutePath, RelativePath, RelativePathBuf};
+
+use super::fingerprint::PathFingerprint;
 
 /// The paths a task wrote and the folders holding only what it can rebuild,
 /// relative to the workspace root.
@@ -32,13 +44,34 @@ use vt_path::{AbsolutePath, RelativePath, RelativePathBuf};
 pub struct Rebuildable {
     written: FxHashSet<RelativePathBuf>,
     folders: FxHashSet<RelativePathBuf>,
+    /// The folders above the written paths.
+    written_in: FxHashSet<RelativePathBuf>,
 }
 
 impl Rebuildable {
-    /// Takes the `written` paths. No folder is rebuildable until
-    /// [`Self::with_folders`] finds them.
-    pub fn new(written: FxHashSet<RelativePathBuf>) -> Self {
-        Self { written, folders: FxHashSet::default() }
+    /// Takes the `written` paths and the `rename_targets` as written, with the
+    /// files under a renamed folder in place of the folder, by looking under
+    /// `workspace_root`, which must be done after the run. No folder is
+    /// rebuildable until [`Self::with_folders`] finds them.
+    pub fn new(
+        written: FxHashSet<RelativePathBuf>,
+        rename_targets: FxHashSet<RelativePathBuf>,
+        workspace_root: &AbsolutePath,
+    ) -> Self {
+        let written = files_written(written, rename_targets, workspace_root);
+        let mut written_in = FxHashSet::default();
+        for path in &written {
+            let mut dir = path.parent();
+            // A folder already reached from another path has its parents too.
+            while let Some(parent) = dir
+                && !parent.as_str().is_empty()
+                && !written_in.contains(parent)
+            {
+                written_in.insert(parent.to_relative_path_buf());
+                dir = parent.parent();
+            }
+        }
+        Self { written, folders: FxHashSet::default(), written_in }
     }
 
     /// Finds the rebuildable folders above the written paths by listing them
@@ -51,9 +84,35 @@ impl Rebuildable {
         self
     }
 
-    /// Whether a later run may find `path` missing: the task wrote it.
-    pub fn may_be_missing(&self, path: &RelativePath) -> bool {
-        self.written.contains(path)
+    /// The paths the task wrote or renamed a file to, and the files under the
+    /// folders it renamed.
+    pub const fn written(&self) -> &FxHashSet<RelativePathBuf> {
+        &self.written
+    }
+
+    /// Whether a later run may find `path`, which a read found as
+    /// `fingerprint`, missing: the task wrote it, or it is gone after the run
+    /// and the task wrote in it. A write record on a folder, from opening it
+    /// with write access, is ignored. Only a written path that the read found
+    /// as a folder is stat'd under `workspace_root`, to tell a folder from a
+    /// link the task made to one.
+    pub fn may_be_missing(
+        &self,
+        path: &RelativePath,
+        fingerprint: &PathFingerprint,
+        workspace_root: &AbsolutePath,
+    ) -> bool {
+        match fingerprint {
+            PathFingerprint::NotFound => {
+                self.written.contains(path) || self.written_in.contains(path)
+            }
+            PathFingerprint::FileContentHash(_) => self.written.contains(path),
+            PathFingerprint::Folder(_) => {
+                self.written.contains(path)
+                    && !fs::symlink_metadata(workspace_root.join(path))
+                        .is_ok_and(|meta| meta.is_dir())
+            }
+        }
     }
 
     /// Whether `path` is a folder holding only what the task can rebuild.
@@ -73,6 +132,59 @@ impl Rebuildable {
     pub fn is_rebuildable_entry(&self, dir: &RelativePath, name: &str, is_dir: bool) -> bool {
         RelativePathBuf::new(name)
             .is_ok_and(|name| is_rebuildable(&dir.join(name), is_dir, &self.written, &self.folders))
+    }
+}
+
+/// The paths in `written`, the `rename_targets` that aren't folders under
+/// `workspace_root`, and every file (or symlink) under the rename targets that
+/// are, recursively. A symlink to a folder is a file here, as in
+/// [`holds_only_rebuildable`]. Entries that can't be read or named are left
+/// out. A written path that is a folder, from opening it with write access,
+/// stays without a stat: nothing under it counts, folder entries are checked
+/// against the rebuildable folders, and the archive skips folders, so only a
+/// read of it has to tell (see [`Rebuildable::may_be_missing`]).
+fn files_written(
+    mut written: FxHashSet<RelativePathBuf>,
+    rename_targets: FxHashSet<RelativePathBuf>,
+    workspace_root: &AbsolutePath,
+) -> FxHashSet<RelativePathBuf> {
+    for path in rename_targets {
+        if fs::symlink_metadata(workspace_root.join(&path)).is_ok_and(|meta| meta.is_dir()) {
+            add_files_under(&path, workspace_root, &mut written);
+        } else {
+            written.insert(path);
+        }
+    }
+    written
+}
+
+/// Adds every file (or symlink) under the folder `dir` to `files`. `.DS_Store`
+/// doesn't count, as in directory listing fingerprints.
+fn add_files_under(
+    dir: &RelativePath,
+    workspace_root: &AbsolutePath,
+    files: &mut FxHashSet<RelativePathBuf>,
+) {
+    let Ok(entries) = fs::read_dir(workspace_root.join(dir)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name == ".DS_Store" {
+            continue;
+        }
+        let (Some(name), Ok(file_type)) = (name.to_str(), entry.file_type()) else {
+            continue;
+        };
+        let Ok(name) = RelativePathBuf::new(name) else {
+            continue;
+        };
+        let path = dir.join(name);
+        if file_type.is_dir() {
+            add_files_under(&path, workspace_root, files);
+        } else {
+            files.insert(path);
+        }
     }
 }
 

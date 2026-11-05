@@ -10,9 +10,14 @@ fn main() {
 
     use nix::fcntl::{AT_FDCWD, OFlag, OpenHow, openat2};
     let args = std::env::args().collect::<Vec<_>>();
-    assert!(args.len() == 3, "expected 2 arguments: <action> <file_path>");
+    assert!(
+        args.len() == 3 || args.len() == 4,
+        "expected 2 or 3 arguments: <action> <file_path> [<second_path>]"
+    );
     let action = args[1].as_str();
     let path = args[2].as_str();
+    let second_path =
+        || args.get(3).unwrap_or_else(|| panic!("action {action} takes a second path")).as_str();
 
     match action {
         "open_read" => {
@@ -42,6 +47,30 @@ fn main() {
         }
         "execve" => {
             let _ = std::process::Command::new(path).spawn();
+        }
+        "rename" => {
+            let _ = std::fs::rename(path, second_path());
+        }
+        "renameat2" => {
+            // Renames `source` in the folder `path` to the second path, through
+            // a descriptor for the folder.
+            use std::os::fd::AsRawFd as _;
+            let dir = File::open(path).unwrap();
+            let destination = std::ffi::CString::new(second_path()).unwrap();
+            // SAFETY: the descriptor is open and the names are valid C strings.
+            let _ = unsafe {
+                nix::libc::syscall(
+                    nix::libc::SYS_renameat2,
+                    dir.as_raw_fd(),
+                    c"source".as_ptr(),
+                    dir.as_raw_fd(),
+                    destination.as_ptr(),
+                    0,
+                )
+            };
+        }
+        "hard_link" => {
+            let _ = std::fs::hard_link(path, second_path());
         }
         _ => panic!("unknown action: {action}"),
     }

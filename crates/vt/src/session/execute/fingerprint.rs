@@ -172,7 +172,8 @@ impl PostRunFingerprint {
                         !ignored
                     });
                 }
-                let may_be_missing = rebuildable.may_be_missing(relative_path);
+                let may_be_missing =
+                    rebuildable.may_be_missing(relative_path, &fingerprint, base_dir);
                 Ok((relative_path.clone(), InferredInput { fingerprint, may_be_missing }))
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
@@ -741,7 +742,7 @@ mod tests {
         let create = |written| {
             PostRunFingerprint::create(
                 &path_reads,
-                &Rebuildable::new(written),
+                &Rebuildable::new(written, FxHashSet::default(), &workspace_root),
                 &workspace_root,
                 &BTreeMap::new(),
                 BTreeMap::new(),
@@ -788,7 +789,12 @@ mod tests {
             .collect();
         let fingerprint = PostRunFingerprint::create(
             &path_reads,
-            &Rebuildable::new(written.into_iter().map(rel).collect()).with_folders(&workspace_root),
+            &Rebuildable::new(
+                written.into_iter().map(rel).collect(),
+                FxHashSet::default(),
+                &workspace_root,
+            )
+            .with_folders(&workspace_root),
             &workspace_root,
             &BTreeMap::new(),
             BTreeMap::new(),
@@ -812,11 +818,137 @@ mod tests {
 
         // `out/tmp` and the file the task wrote in it are gone after the run,
         // like Astro's `dist/.prerender`.
-        let rebuildable =
-            Rebuildable::new(["out/a.txt", "out/tmp/b.txt"].into_iter().map(rel).collect())
-                .with_folders(&workspace_root);
+        let rebuildable = Rebuildable::new(
+            ["out/a.txt", "out/tmp/b.txt"].into_iter().map(rel).collect(),
+            FxHashSet::default(),
+            &workspace_root,
+        )
+        .with_folders(&workspace_root);
         assert!(rebuildable.is_rebuildable_folder(&rel("out")));
         assert!(!rebuildable.is_rebuildable_folder(&rel("out/tmp")));
+    }
+
+    #[test]
+    fn files_under_a_renamed_folder_count_as_written() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        std::fs::create_dir_all(workspace_root.join("deps/sub").as_path()).unwrap();
+        for file in ["deps/a.js", "deps/sub/b.js", "deps/.DS_Store"] {
+            std::fs::write(workspace_root.join(file).as_path(), "x").unwrap();
+        }
+
+        // `deps` was renamed into place, so only the folder was recorded. Its
+        // `.DS_Store` doesn't count.
+        let rebuildable = Rebuildable::new(
+            FxHashSet::default(),
+            FxHashSet::from_iter([rel("deps")]),
+            &workspace_root,
+        )
+        .with_folders(&workspace_root);
+        let mut written: Vec<&str> =
+            rebuildable.written().iter().map(|path| path.as_str()).collect();
+        written.sort_unstable();
+        assert_eq!(written, ["deps/a.js", "deps/sub/b.js"]);
+
+        let path_reads = HashMap::from([
+            (rel("deps"), PathRead { read_dir_entries: true }),
+            (rel("deps/a.js"), PathRead { read_dir_entries: false }),
+        ]);
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &rebuildable,
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let fingerprinted: Vec<&str> =
+            fingerprint.inferred_inputs.keys().map(|path| path.as_str()).collect();
+        assert_eq!(fingerprinted, ["deps/a.js"]);
+        assert!(fingerprint.inferred_inputs[&rel("deps/a.js")].may_be_missing);
+    }
+
+    #[test]
+    fn a_gone_folder_the_task_wrote_in_counts_as_written() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        // Vite's dependency optimizer probes a fresh folder name, makes the
+        // folder, writes in it, and renames it into place. fspy records the
+        // probe as a read, the file as a write, and `.vite/deps` as the rename
+        // target, but nothing for the folder renamed away.
+        let full_path = |path: &str| workspace_root.join(rel(path));
+        std::fs::create_dir_all(full_path(".vite/deps_temp_1a2b").as_path()).unwrap();
+        std::fs::write(full_path(".vite/deps_temp_1a2b/package.json").as_path(), "{}").unwrap();
+        std::fs::write(full_path(".vite/notes.txt").as_path(), "").unwrap();
+        std::fs::rename(
+            full_path(".vite/deps_temp_1a2b").as_path(),
+            full_path(".vite/deps").as_path(),
+        )
+        .unwrap();
+
+        let path_reads = [".vite", ".vite/deps_temp_1a2b", ".vite/probe"]
+            .map(|read| (rel(read), PathRead { read_dir_entries: false }));
+        let fingerprint = PostRunFingerprint::create(
+            &HashMap::from(path_reads),
+            &Rebuildable::new(
+                FxHashSet::from_iter([rel(".vite/deps_temp_1a2b/package.json")]),
+                FxHashSet::from_iter([rel(".vite/deps")]),
+                &workspace_root,
+            )
+            .with_folders(&workspace_root),
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+
+        let may_be_missing = |read: &str| fingerprint.inferred_inputs[&rel(read)].may_be_missing;
+        assert!(may_be_missing(".vite/deps_temp_1a2b"));
+        // A folder that is still there with other files, or a path the task
+        // only probed, isn't.
+        assert!(!may_be_missing(".vite"));
+        assert!(!may_be_missing(".vite/probe"));
+    }
+
+    #[test]
+    fn a_write_record_on_a_folder_is_ignored() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        std::fs::create_dir_all(workspace_root.join("deps").as_path()).unwrap();
+        std::fs::write(workspace_root.join("deps/a.js").as_path(), "x").unwrap();
+
+        // An open of `deps` with write access puts nothing under it, and a read
+        // of it must still find it.
+        let rebuildable = Rebuildable::new(
+            FxHashSet::from_iter([rel("deps")]),
+            FxHashSet::default(),
+            &workspace_root,
+        )
+        .with_folders(&workspace_root);
+        let file = PathFingerprint::FileContentHash(0);
+        assert!(!rebuildable.may_be_missing(&rel("deps/a.js"), &file, &workspace_root));
+        assert!(!rebuildable.may_be_missing(
+            &rel("deps"),
+            &PathFingerprint::Folder(None),
+            &workspace_root
+        ));
+        assert!(!rebuildable.is_rebuildable_folder(&rel("deps")));
+        let path_reads = HashMap::from([(rel("deps"), PathRead { read_dir_entries: false })]);
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &rebuildable,
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(!fingerprint.inferred_inputs[&rel("deps")].may_be_missing);
     }
 
     #[test]
@@ -835,7 +967,12 @@ mod tests {
         let path_reads = HashMap::from([(rel("pkg"), PathRead { read_dir_entries: true })]);
         let fingerprint = PostRunFingerprint::create(
             &path_reads,
-            &Rebuildable::new(written.into_iter().map(rel).collect()).with_folders(&workspace_root),
+            &Rebuildable::new(
+                written.into_iter().map(rel).collect(),
+                FxHashSet::default(),
+                &workspace_root,
+            )
+            .with_folders(&workspace_root),
             &workspace_root,
             &BTreeMap::new(),
             BTreeMap::new(),

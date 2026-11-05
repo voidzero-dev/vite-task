@@ -90,6 +90,28 @@ async fn openat2_readwrite() {
 }
 
 #[test(tokio::test)]
+async fn rename_destination() {
+    // The rename fails, since `/hello` doesn't exist; the destination is
+    // recorded anyway.
+    let accesses = track_test_bin(&["rename", "/hello", "/world"], None).await;
+    assert_contains(&accesses, Path::new("/world"), fspy::PathAccess::RenameTarget);
+}
+
+#[test(tokio::test)]
+async fn renameat2_destination() {
+    // Relative to a descriptor for `/`. The rename fails, since `/source`
+    // doesn't exist; the destination is recorded anyway.
+    let accesses = track_test_bin(&["renameat2", "/", "world"], None).await;
+    assert_contains(&accesses, Path::new("/world"), fspy::PathAccess::RenameTarget);
+}
+
+#[test(tokio::test)]
+async fn hard_link_destination() {
+    let accesses = track_test_bin(&["hard_link", "/hello", "/world"], None).await;
+    assert_contains(&accesses, Path::new("/world"), fspy::PathAccess::Write);
+}
+
+#[test(tokio::test)]
 async fn open_relative() {
     let accesses = track_test_bin(&["open_read", "hello"], Some("/home")).await;
     assert_contains(&accesses, Path::new("/home/hello"), fspy::PathAccess::Read);
