@@ -16,8 +16,11 @@ use vt_str::Str;
 use vt_workspace::{PackageNodeIndex, WorkspaceRoot, package_graph::IndexedPackageGraph};
 
 use crate::{
-    config::user::TopLevelCacheFieldsCollector, display::TaskDisplay, lazy_graph::LazyGraph,
-    loader::UserConfigLoader, task_loader::TaskLoader,
+    config::user::{TopLevelCacheFieldsCollector, TopLevelCacheFieldsError},
+    display::TaskDisplay,
+    lazy_graph::LazyGraph,
+    loader::UserConfigLoader,
+    task_loader::TaskLoader,
 };
 
 /// Uniquely identifies a task, by its name and the package where it's defined.
@@ -186,8 +189,17 @@ impl<'l> IndexedTaskGraph<'l> {
         );
 
         // The root config holds the workspace-wide settings, so it loads with the package list.
+        // Its settings are read before its tasks, so they're set even if a task fails.
+        let mut failed_root = None;
         if let Some(root_package) = root_package {
-            let _root_tasks = graph.nodes_in(root_package).await?;
+            match graph.nodes_in(root_package).await {
+                Ok(_root_tasks) => {}
+                // `load_all` reports these with the other packages' misplaced fields.
+                Err(TaskGraphLoadError::TopLevelCacheFields(error)) => {
+                    failed_root = Some((root_package, error));
+                }
+                Err(error) => return Err(error),
+            }
         }
         let root_settings = graph.loader().root_settings();
 
@@ -196,16 +208,30 @@ impl<'l> IndexedTaskGraph<'l> {
             resolved_global_cache: root_settings.global_cache,
             pre_post_scripts_enabled: root_settings.pre_post_scripts_enabled,
         };
-        me.load_all().await?;
+        me.load_all(failed_root).await?;
         Ok(me)
     }
 
     /// Loads every task and resolves every `dependsOn`, so a configuration
     /// error anywhere in the workspace fails the load.
-    async fn load_all(&self) -> Result<(), TaskGraphLoadError> {
+    ///
+    /// `failed_root` is the root package and its error, if its tasks set cache
+    /// fields at the top level.
+    async fn load_all(
+        &self,
+        failed_root: Option<(PackageNodeIndex, TopLevelCacheFieldsError)>,
+    ) -> Result<(), TaskGraphLoadError> {
         // Report misplaced top-level cache fields from every package in one error.
         let mut top_level_cache_fields = TopLevelCacheFieldsCollector::default();
+        let failed_root = failed_root.map(|(root_package, error)| {
+            top_level_cache_fields.absorb(error);
+            root_package
+        });
         for package_index in self.package_indices() {
+            // Loading the root's tasks again would run its config again.
+            if Some(package_index) == failed_root {
+                continue;
+            }
             match self.graph.nodes_in(package_index).await {
                 Ok(_) => {}
                 Err(TaskGraphLoadError::TopLevelCacheFields(error)) => {
