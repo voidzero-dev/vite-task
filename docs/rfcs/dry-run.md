@@ -140,6 +140,7 @@ vp run --dry-run --json -r build
 
 ```json
 {
+  "$schema": "https://viteplus.dev/schemas/run-plan.v1.json",
   "version": 1,
   "workspaceRoot": "/home/me/acme",
   "plan": {
@@ -271,6 +272,12 @@ Two more combinations:
 
 ```ts
 type RunPlan = {
+  /**
+   * The JSON Schema of this document, with the same descriptions as the comments here, so a
+   * reader can look up what each field means. Its URL changes with `version`.
+   */
+  $schema: 'https://viteplus.dev/schemas/run-plan.v1.json';
+
   /** Format version. It changes only when the format changes incompatibly. */
   version: 1;
 

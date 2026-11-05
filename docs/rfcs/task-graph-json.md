@@ -65,6 +65,7 @@ export default defineConfig({
 
 ```json
 {
+  "$schema": "https://viteplus.dev/schemas/task-graph.v1.json",
   "version": 1,
   "workspaceRoot": "/home/me/acme",
   "packages": {
@@ -109,6 +110,12 @@ vp run --json | jq -r '.packages as $p | .tasks[] | "\($p[.package].name // "")#
 
 ```ts
 type TaskGraph = {
+  /**
+   * The JSON Schema of this document, with the same descriptions as the comments here, so a
+   * reader can look up what each field means. Its URL changes with `version`.
+   */
+  $schema: 'https://viteplus.dev/schemas/task-graph.v1.json';
+
   /** Format version. It changes only when the format changes incompatibly; see Versioning below. */
   version: 1;
 
@@ -197,7 +204,7 @@ When the workspace can't be loaded (a config error, a cycle), the error goes to 
 
 ### Field names
 
-camelCase, as in `vite.config.*`. Values that mirror `package.json` use its spelling (`devDependencies`).
+camelCase, as in `vite.config.*`. Values that mirror `package.json` use its spelling (`devDependencies`), and `$schema` uses JSON Schema's.
 
 ## Flags
 
