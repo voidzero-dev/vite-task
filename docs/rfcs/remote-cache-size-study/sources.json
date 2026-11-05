@@ -1,0 +1,71 @@
+{
+  "measurement_date": "2026-09-07",
+  "samples": [
+    {
+      "id": "directus",
+      "project": "Directus",
+      "version": "@directus/app 17.1.1 (Directus v12.3.1)",
+      "url": "https://registry.npmjs.org/@directus/app/-/app-17.1.1.tgz",
+      "sha256": "aeb56c7f70c6ba09782a5b649d0ab2cdf9cd746ab6dcaaa80bb3db9490f64f94",
+      "prefix": "package/dist/",
+      "repository": "https://github.com/directus/directus",
+      "source_commit": "973be10df8b0305569dc0dc53e187c648133c8d6",
+      "vite_config": "app/vite.config.js",
+      "build_script": "app/package.json",
+      "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@directus%2fapp@17.1.1",
+      "stars": 37786
+    },
+    {
+      "id": "docmost",
+      "project": "Docmost",
+      "version": "v0.95.0",
+      "url": "https://registry-1.docker.io/v2/docmost/docmost/blobs/sha256:4e7fffb4a1e8feb4e7213d2e8701c09df286de364177860e1c230e2374a25190",
+      "sha256": "4e7fffb4a1e8feb4e7213d2e8701c09df286de364177860e1c230e2374a25190",
+      "prefix": "app/apps/client/dist/",
+      "repository": "https://github.com/docmost/docmost",
+      "source_commit": "4132dd597c956a27423607d008708c0e214690da",
+      "vite_config": "apps/client/vite.config.ts",
+      "build_script": "apps/client/package.json",
+      "docker_repository": "docmost/docmost",
+      "image": "docmost/docmost:0.95.0",
+      "image_manifest": "sha256:2b0a3f73e57951b726bf67259c4e8cb5269eb24530cde521003ff382d7ad8ab6",
+      "image_platform": "linux/amd64",
+      "layer_index": 9,
+      "dockerfile": "Dockerfile",
+      "stars": 21602
+    },
+    {
+      "id": "hoppscotch",
+      "project": "Hoppscotch",
+      "version": "2026.8.0",
+      "url": "https://registry-1.docker.io/v2/hoppscotch/hoppscotch-frontend/blobs/sha256:9823634d487dac47140c008685e31f548e33644ba890c8bba66ba8b776aea98e",
+      "sha256": "9823634d487dac47140c008685e31f548e33644ba890c8bba66ba8b776aea98e",
+      "prefix": "site/selfhost-web/",
+      "repository": "https://github.com/hoppscotch/hoppscotch",
+      "source_commit": "ac145e7f758151b41fd46d3e5f513886ce9068ba",
+      "vite_config": "packages/hoppscotch-selfhost-web/vite.config.ts",
+      "build_script": "packages/hoppscotch-selfhost-web/package.json",
+      "docker_repository": "hoppscotch/hoppscotch-frontend",
+      "image": "hoppscotch/hoppscotch-frontend:2026.8.0",
+      "image_manifest": "sha256:c5acdcfa5e00d3500ff809a33d25b10d36eb2fe2b8ef23e0fd74a157c6abc362",
+      "image_platform": "linux/amd64",
+      "layer_index": 18,
+      "dockerfile": "prod.Dockerfile",
+      "stars": 80228
+    },
+    {
+      "id": "n8n",
+      "project": "n8n",
+      "version": "n8n-editor-ui 2.16.2",
+      "url": "https://registry.npmjs.org/n8n-editor-ui/-/n8n-editor-ui-2.16.2.tgz",
+      "sha256": "14636be99659fca25eaa19ed20ec52c5286745eb3e1cef80b699adb23144eb1f",
+      "prefix": "package/dist/",
+      "repository": "https://github.com/n8n-io/n8n",
+      "source_commit": "9bdde69954a4d7d1569d37b6fd3a3f55f55b297a",
+      "vite_config": "packages/frontend/editor-ui/vite.config.mts",
+      "build_script": "packages/frontend/editor-ui/package.json",
+      "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/n8n-editor-ui@2.16.2",
+      "stars": 203576
+    }
+  ]
+}
