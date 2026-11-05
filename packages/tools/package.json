@@ -30,6 +30,7 @@
     "playwright": "catalog:",
     "pnpm": "catalog:",
     "postject": "catalog:",
+    "tsdown": "catalog:",
     "typescript": "7.1.0-dev.20261001.1",
     "vite": "catalog:",
     "vitest": "catalog:"

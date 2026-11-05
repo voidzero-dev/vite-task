@@ -33,8 +33,8 @@ struct TrackingOutcome {
     /// Auto-output writes after output exclusions are applied. Empty when
     /// `output_config.includes_auto` is false.
     path_writes: FxHashSet<RelativePathBuf>,
-    /// Every write fspy recorded, before output exclusions and `ignoreOutput`
-    /// paths are applied.
+    /// What the task can rebuild, from every write fspy recorded before output
+    /// exclusions and `ignoreOutput` paths are applied.
     rebuildable: Rebuildable,
 }
 
@@ -256,10 +256,15 @@ fn observe_fspy(
                 } else {
                     FxHashSet::default()
                 };
+            let mut rebuildable = Rebuildable::new(tracked.path_writes);
+            // Only fingerprints of the paths the task read ask about folders.
+            if !filtered_path_reads.is_empty() {
+                rebuildable = rebuildable.with_folders(workspace_root);
+            }
             TrackingOutcome {
                 path_reads: filtered_path_reads,
                 path_writes: filtered_path_writes,
-                rebuildable: Rebuildable::new(tracked.path_writes),
+                rebuildable,
             }
         })
     }

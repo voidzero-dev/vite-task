@@ -1,0 +1,42 @@
+[[e2e]]
+name = "tsdown_rebuild_after_edit"
+comment = """
+tsdown bundles `src/index.ts` into `dist`. Before each build it lists `dist` and removes what it holds.
+"""
+ignore = true
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "src/index.ts",
+    "initial",
+    "edited",
+  ], comment = "edit the source, so the next run cleans and rebuilds the existing `dist`" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    "dist",
+  ], comment = "remove the output folder, as on a clean checkout" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "grep-file",
+    "dist/index.mjs",
+    "edited",
+  ],
+]
