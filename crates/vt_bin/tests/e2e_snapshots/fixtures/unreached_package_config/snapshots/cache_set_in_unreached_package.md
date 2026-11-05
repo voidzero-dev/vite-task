@@ -6,11 +6,15 @@
 
 app and lib only
 
-**Exit code:** 1
-
 ```
-error: Failed to load task graph
-* `cache` can only be set in the workspace root config, but found in <workspace>/packages/broken
+~/packages/lib$ echo 'Building lib' ⊘ cache disabled
+Building lib
+
+~/packages/app$ echo 'Building app' ⊘ cache disabled
+Building app
+
+---
+vt run: 2/2 successful. (Run `vt run --last-details` for full details)
 ```
 
 ## `vt run -r build`

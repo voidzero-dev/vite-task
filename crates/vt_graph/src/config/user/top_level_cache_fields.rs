@@ -49,12 +49,6 @@ impl TopLevelCacheFieldsCollector {
         }
     }
 
-    /// Records the tasks listed in `error`, which another collector returned.
-    pub fn absorb(&mut self, error: TopLevelCacheFieldsError) {
-        self.fields.extend(error.fields);
-        self.tasks.extend(error.tasks);
-    }
-
     /// Returns an error listing every recorded task, if any.
     pub fn finish(self) -> Result<(), TopLevelCacheFieldsError> {
         let Self { fields, mut tasks } = self;
