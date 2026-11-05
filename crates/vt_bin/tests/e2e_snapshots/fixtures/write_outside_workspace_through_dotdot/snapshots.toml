@@ -3,7 +3,4 @@ name = "write_outside_workspace_through_dotdot"
 comment = """
 The task makes `../site` and writes `../site/index.html`, outside the workspace, like `cp -r dist ../site` publishing a build next to it. `..` is the folder holding the staged workspace.
 """
-# On Windows, `..` is resolved before fspy reports the path, so the task is
-# already cached there.
-cfg = 'unix'
 steps = [["vt", "run", "deploy"], ["vt", "run", "deploy"]]
