@@ -66,7 +66,7 @@ vp run: 0/2 cache hit (0%), 2/2 successful. (Run `vp run --last-details` for ful
 
 - Nothing runs and nothing is written: no process, no cache entry, no change to `vp run --last-details`.
 - Everything else is a real run's: the plan, the cache check, every run flag and the args after the task name. The remote cache is read exactly when a real run would read it. Outputs are never downloaded or restored, since that would write files.
-- Each status is checked against the files as they are now. A command that runs after one that would run may see different files by then; the real run below shows it.
+- Each step is checked against the files as they are now. In the JSON, a step that waits on one that would write files first, by running or by restoring outputs on a hit, is `unknown`: its files may change before it starts. The text shows today's check for it, and the real run below shows what can change.
 - The first changed file is the first in path order, `cache.input` files before the files the task read.
 
 ### `-v`
@@ -106,7 +106,7 @@ Task Details:
                     'packages/ui/dist/index.js' modified
 ```
 
-`packages/ui/dist/index.js` changed because `@acme/ui#build` rebuilt it first. The dry run, checking today's files, couldn't see that.
+`packages/ui/dist/index.js` changed because `@acme/ui#build` rebuilt it first. The dry run, checking today's files, couldn't see that, which is why its JSON marks `@acme/web#build` as `unknown`.
 
 ### `-vv`
 
@@ -151,7 +151,7 @@ vp run --dry-run --json -r build
           "cache": {
             "baseline": { "durationMs": 9120 },
             "changes": [{ "change": "changed", "kind": "env", "name": "NODE_ENV" }],
-            "status": "changed"
+            "status": "unknown"
           },
           "cwd": "apps/web",
           "program": "apps/web/node_modules/.bin/vite"
@@ -185,7 +185,7 @@ vp run --dry-run --json -r build
 (As printed in a terminal; captured output is the same on one line.)
 
 - `"partial": true` marks a check that stopped at the first changed file; with `-v` it is gone.
-- `@acme/web#build` has no `partial`: its check found no changed file, so it checked them all.
+- `@acme/web#build` is `unknown`: it waits on `@acme/ui#build`, which would run. Its `changes` are still today's check, and it has no `partial` because that check found no changed file, so it checked them all.
 
 ## Flags together
 
@@ -336,8 +336,8 @@ type RunPlan = {
             /**
              * Whether the cache would be used. Absent for a built-in such as `echo`.
              *
-             * The check looks at the files as they are now. A task that runs earlier, listed in
-             * `dependsOn`, may still change them before this step starts.
+             * The check looks at the files as they are now. `unknown` marks a step whose files an
+             * earlier step may change before it starts.
              */
             cache?:
               | ((
@@ -350,50 +350,16 @@ type RunPlan = {
                        * Differs from `baseline`, so it would run. `changes` lists the differences.
                        */
                       status: 'changed';
-
+                    }
+                  | {
                       /**
-                       * Everything that differs from `baseline`, sorted by kind, then by name or
-                       * path. Undoing all of them would make the step a hit.
+                       * Can't be predicted yet: a step it waits on would write files before it starts, by
+                       * running or by being a hit that restores outputs. A step waits on the earlier steps of
+                       * its task, on the tasks in its `dependsOn`, and, in a nested plan, on the steps before
+                       * the enclosing step. Only a step that would otherwise be `hit` or `changed` can be
+                       * `unknown`, and `changes` and `partial` still show today's check.
                        */
-                      changes: (
-                        | {
-                            /**
-                             * The program as the cache records it: a path inside the workspace, or
-                             * just the file name outside it, so `node` from another install is not
-                             * a change.
-                             */
-                            kind: 'program';
-                            from: string;
-                            to: string;
-                          }
-                        | { kind: 'args'; from: string[]; to: string[] }
-                        | { kind: 'cwd'; from: string; to: string }
-                        | {
-                            /**
-                             * The setting changed. A changed `input` is one change: the files it
-                             * now matches aren't listed.
-                             */
-                            kind: 'config';
-                            setting: 'input' | 'output' | 'untrackedEnv';
-                          }
-                        | {
-                            kind: 'env';
-                            name: string;
-                            change: 'added' | 'removed' | 'changed';
-                          }
-                        | {
-                            kind: 'file';
-                            path: string;
-                            /** `added` also covers a new file in a directory the task listed. */
-                            change: 'added' | 'removed' | 'changed';
-                          }
-                      )[];
-
-                      /**
-                       * Only the first changed file is listed: without `-v`, the check stops there.
-                       * Absent with `-v`, which lists every change.
-                       */
-                      partial?: true;
+                      status: 'unknown';
                     }
                 ) & {
                   /**
@@ -457,6 +423,51 @@ type RunPlan = {
                      */
                     outputs?: string[];
                   };
+
+                  /**
+                   * Everything that differs from `baseline`, sorted by kind, then by name or path.
+                   * Undoing all of them would make the step a hit. Present for `changed`, and for
+                   * `unknown` when today's check found differences. Absent for `hit`.
+                   */
+                  changes?: (
+                    | {
+                        /**
+                         * The program as the cache records it: a path inside the workspace, or
+                         * just the file name outside it, so `node` from another install is not
+                         * a change.
+                         */
+                        kind: 'program';
+                        from: string;
+                        to: string;
+                      }
+                    | { kind: 'args'; from: string[]; to: string[] }
+                    | { kind: 'cwd'; from: string; to: string }
+                    | {
+                        /**
+                         * The setting changed. A changed `input` is one change: the files it
+                         * now matches aren't listed.
+                         */
+                        kind: 'config';
+                        setting: 'input' | 'output' | 'untrackedEnv';
+                      }
+                    | {
+                        kind: 'env';
+                        name: string;
+                        change: 'added' | 'removed' | 'changed';
+                      }
+                    | {
+                        kind: 'file';
+                        path: string;
+                        /** `added` also covers a new file in a directory the task listed. */
+                        change: 'added' | 'removed' | 'changed';
+                      }
+                  )[];
+
+                  /**
+                   * Only the first changed file is listed: without `-v`, the check stops there.
+                   * Absent with `-v`, which lists every change.
+                   */
+                  partial?: true;
                 })
               | {
                   /**
@@ -517,4 +528,4 @@ type RunPlan = {
 ## Future
 
 - `--json` without `--dry-run` can print JSON lines as a real run progresses, one event per line.
-- A step that runs after one that would run is checked against today's files, which the earlier step may change. Such steps could get a status of their own, such as `unknown`. If cache entries recorded each output's path and hash, a dry run could instead check them against the files as earlier hits will restore them.
+- A hit that restores outputs makes every step that waits on it `unknown`, even when the restore rewrites identical files. If cache entries recorded each output's path and hash, a dry run could check those steps against the files the hit will restore, and only a restore that changes files a step reads would make it `unknown`.
