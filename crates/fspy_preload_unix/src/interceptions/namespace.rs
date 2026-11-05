@@ -1,16 +1,33 @@
-//! Calls that put an existing file or folder at a new path without opening
-//! it: rename and hard link. The new path is recorded before the call, so a
-//! failed call is recorded too: as a rename target for a rename, which may
-//! move a whole folder, and as a write for a hard link, always to a file. The
-//! source of a rename needs no record.
+//! Calls that make an entry at a path without opening it: mkdir, and rename
+//! and hard link, which put an existing file or folder at a new path. The
+//! path is recorded before the call, so a failed call is recorded too: as a
+//! mkdir for a mkdir, whose folder may be there already; as a rename target
+//! for a rename, which may move a whole folder; and as a write for a hard
+//! link, always to a file. The source of a rename needs no record.
 
 use fspy_shared::ipc::AccessMode;
-use libc::{c_char, c_int};
+use libc::{c_char, c_int, mode_t};
 
 use crate::{
     client::{convert::PathAt, handle_open},
     macros::intercept,
 };
+
+intercept!(mkdir: unsafe extern "C" fn(path: *const c_char, mode: mode_t) -> c_int);
+unsafe extern "C" fn mkdir(path: *const c_char, mode: mode_t) -> c_int {
+    // SAFETY: path is a valid C string pointer provided by the caller of the interposed function
+    unsafe { handle_open(fspy_nostd::CStr::from_ptr(path.cast()), AccessMode::Mkdir) };
+    // SAFETY: calling the original libc mkdir() with the same arguments forwarded from the interposed function
+    unsafe { mkdir::original()(path, mode) }
+}
+
+intercept!(mkdirat: unsafe extern "C" fn(dirfd: c_int, path: *const c_char, mode: mode_t) -> c_int);
+unsafe extern "C" fn mkdirat(dirfd: c_int, path: *const c_char, mode: mode_t) -> c_int {
+    // SAFETY: dirfd is -1 or a valid file descriptor, and path is a valid C string, provided by the caller of the interposed function
+    unsafe { handle_open(PathAt::borrow_raw(dirfd, path), AccessMode::Mkdir) };
+    // SAFETY: calling the original libc mkdirat() with the same arguments forwarded from the interposed function
+    unsafe { mkdirat::original()(dirfd, path, mode) }
+}
 
 intercept!(rename: unsafe extern "C" fn(old: *const c_char, new: *const c_char) -> c_int);
 unsafe extern "C" fn rename(old: *const c_char, new: *const c_char) -> c_int {

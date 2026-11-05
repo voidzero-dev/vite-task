@@ -6,13 +6,15 @@
 //! would write them again, so a later run may find them missing. A file that
 //! is there must still be as the task left it.
 //!
-//! The same goes for a folder that holds only what the task can rebuild:
-//! every file (or symlink) in it is one the task wrote, and every folder in
-//! it holds only what the task can rebuild too. It isn't fingerprinted at
-//! all. A hit restores its files if they're among the task's outputs, which
-//! recreates it; explicit output config can leave them out. Such folders are
-//! found after the run by climbing from the written paths through their
-//! parent folders inside the workspace, listing each one in the real file
+//! The same goes for an empty folder the task made (`.DS_Store` aside), and
+//! for a folder that holds only what the task can rebuild: every file (or
+//! symlink) in it is one the task wrote, and every folder in it is rebuildable
+//! too. None of these is fingerprinted at all. A hit restores the files and
+//! the empty folders, which are archived as folders, if they're among the
+//! task's outputs, and the files recreate the folders holding them; explicit
+//! output config can leave them out. Such folders are found after the run by
+//! climbing from the written paths and the empty folders through their parent
+//! folders inside the workspace, listing each one once in the real file
 //! system. A written path or folder that is gone by then plays no part. A
 //! listing of any other folder leaves out its entries that the task can
 //! rebuild, which a later run may find missing too.
@@ -29,7 +31,10 @@
 //! fingerprinted as missing, which a later run must match either way, so this
 //! only tells it apart from a path the task looked for and didn't find. A
 //! write record on a path that is a folder, from opening it with write
-//! access, is ignored.
+//! access, is ignored. A mkdir record counts only for a folder that is empty
+//! after the run, whether or not the call made it, since it may have been
+//! there already: what any other folder holds decides whether it is
+//! rebuildable.
 
 use std::{cmp::Reverse, fs, io};
 
@@ -38,11 +43,16 @@ use vt_path::{AbsolutePath, RelativePath, RelativePathBuf};
 
 use super::fingerprint::PathFingerprint;
 
-/// The paths a task wrote and the folders holding only what it can rebuild,
-/// relative to the workspace root.
+/// The paths a task wrote, the empty folders it made, and the folders
+/// holding only what it can rebuild, relative to the workspace root.
 #[derive(Debug, Default)]
 pub struct Rebuildable {
     written: FxHashSet<RelativePathBuf>,
+    /// The folders the task made, or tried to make, inside the workspace.
+    mkdirs: FxHashSet<RelativePathBuf>,
+    /// The `mkdirs` that are empty folders.
+    empty_folders: FxHashSet<RelativePathBuf>,
+    /// The rebuildable folders, `empty_folders` among them.
     folders: FxHashSet<RelativePathBuf>,
     /// The folders above the written paths.
     written_in: FxHashSet<RelativePathBuf>,
@@ -51,11 +61,13 @@ pub struct Rebuildable {
 impl Rebuildable {
     /// Takes the `written` paths and the `rename_targets` as written, with the
     /// files under a renamed folder in place of the folder, by looking under
-    /// `workspace_root`, which must be done after the run. No folder is
-    /// rebuildable until [`Self::with_folders`] finds them.
+    /// `workspace_root`, which must be done after the run, and the `mkdirs`.
+    /// No folder is rebuildable, and none of the `mkdirs` is an empty folder,
+    /// until [`Self::with_folders`] or [`Self::with_empty_folders`] finds them.
     pub fn new(
         written: FxHashSet<RelativePathBuf>,
         rename_targets: FxHashSet<RelativePathBuf>,
+        mkdirs: FxHashSet<RelativePathBuf>,
         workspace_root: &AbsolutePath,
     ) -> Self {
         let written = files_written(written, rename_targets, workspace_root);
@@ -71,16 +83,38 @@ impl Rebuildable {
                 dir = parent.parent();
             }
         }
-        Self { written, folders: FxHashSet::default(), written_in }
+        Self {
+            written,
+            mkdirs,
+            empty_folders: FxHashSet::default(),
+            folders: FxHashSet::default(),
+            written_in,
+        }
     }
 
-    /// Finds the rebuildable folders above the written paths by listing them
-    /// under `workspace_root`, which must be done after the run. Only
-    /// fingerprints of the paths the task read ask about folders, so a run
-    /// without such reads skips this.
+    /// Finds the rebuildable folders, the empty folders the task made among
+    /// them, by listing the folders above the written paths and the folders
+    /// the task made under `workspace_root`, which must be done after the run.
+    /// Only fingerprints of the paths the task read ask about folders, so a
+    /// run without such reads takes [`Self::with_empty_folders`] instead.
     #[must_use]
     pub fn with_folders(mut self, workspace_root: &AbsolutePath) -> Self {
-        self.folders = find_folders(&self.written, workspace_root);
+        (self.folders, self.empty_folders) =
+            find_folders(&self.written, &self.mkdirs, workspace_root);
+        self
+    }
+
+    /// Finds the empty folders the task made, which the archive takes, by
+    /// listing the folders it made under `workspace_root`, which must be done
+    /// after the run, without climbing to the folders above them.
+    #[must_use]
+    pub fn with_empty_folders(mut self, workspace_root: &AbsolutePath) -> Self {
+        self.empty_folders = self
+            .mkdirs
+            .iter()
+            .filter(|dir| is_empty_folder(dir, workspace_root))
+            .cloned()
+            .collect();
         self
     }
 
@@ -88,6 +122,12 @@ impl Rebuildable {
     /// folders it renamed.
     pub const fn written(&self) -> &FxHashSet<RelativePathBuf> {
         &self.written
+    }
+
+    /// The empty folders the task made. No written file recreates them, so
+    /// they're archived as folders.
+    pub const fn empty_folders(&self) -> &FxHashSet<RelativePathBuf> {
+        &self.empty_folders
     }
 
     /// Whether a later run may find `path`, which a read found as
@@ -115,7 +155,8 @@ impl Rebuildable {
         }
     }
 
-    /// Whether `path` is a folder holding only what the task can rebuild.
+    /// Whether `path` is an empty folder the task made, or a folder holding
+    /// only what the task can rebuild.
     pub fn is_rebuildable_folder(&self, path: &RelativePath) -> bool {
         self.folders.contains(path)
     }
@@ -137,12 +178,12 @@ impl Rebuildable {
 
 /// The paths in `written`, the `rename_targets` that aren't folders under
 /// `workspace_root`, and every file (or symlink) under the rename targets that
-/// are, recursively. A symlink to a folder is a file here, as in
-/// [`holds_only_rebuildable`]. Entries that can't be read or named are left
-/// out. A written path that is a folder, from opening it with write access,
-/// stays without a stat: nothing under it counts, folder entries are checked
-/// against the rebuildable folders, and the archive skips folders, so only a
-/// read of it has to tell (see [`Rebuildable::may_be_missing`]).
+/// are, recursively. A symlink to a folder is a file here, as in [`holds`].
+/// Entries that can't be read or named are left out. A written path that is a
+/// folder, from opening it with write access, stays without a stat: nothing
+/// under it counts, folder entries are checked against the rebuildable
+/// folders, and the archive skips folders, so only a read of it has to tell
+/// (see [`Rebuildable::may_be_missing`]).
 fn files_written(
     mut written: FxHashSet<RelativePathBuf>,
     rename_targets: FxHashSet<RelativePathBuf>,
@@ -188,43 +229,68 @@ fn add_files_under(
     }
 }
 
-/// Finds the folders holding only what the task can rebuild. Each folder above
-/// a written path is listed once, deepest first, so a folder's subfolders are
-/// decided before it. Climbing stops at the first folder that isn't
-/// rebuildable, since no folder above it can be, and at the workspace root. A
-/// folder that is gone plays no part: its parent is decided by the entries it
-/// holds.
+/// Whether `dir` is a folder under `workspace_root` holding nothing but
+/// `.DS_Store`, which doesn't count, as in directory listing fingerprints.
+fn is_empty_folder(dir: &RelativePath, workspace_root: &AbsolutePath) -> bool {
+    let path = workspace_root.join(dir);
+    fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir())
+        && fs::read_dir(path).is_ok_and(|mut entries| {
+            entries.all(|entry| entry.is_ok_and(|entry| entry.file_name() == ".DS_Store"))
+        })
+}
+
+/// Finds the folders holding only what the task can rebuild, and the empty
+/// folders the task made among them. The folders above a written path are
+/// candidates, listed once, deepest first, so a folder's subfolders are
+/// decided before it; an empty one is rebuildable if the task made it. A
+/// folder the task made that isn't a candidate holds no written path, so only
+/// being empty makes it rebuildable, and then the folders above it are
+/// candidates too. Climbing stops at the first folder that isn't rebuildable,
+/// since no folder above it can be, and at the workspace root. A folder that
+/// is gone plays no part: its parent is decided by the entries it holds.
 fn find_folders(
     written: &FxHashSet<RelativePathBuf>,
+    mkdirs: &FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
-) -> FxHashSet<RelativePathBuf> {
+) -> (FxHashSet<RelativePathBuf>, FxHashSet<RelativePathBuf>) {
     let mut candidates = FxHashSet::default();
     for path in written {
-        let mut dir = path.parent();
-        // A folder already reached from another path has its parents too.
-        while let Some(parent) = dir
-            && !parent.as_str().is_empty()
-            && candidates.insert(parent)
-        {
-            dir = parent.parent();
+        add_parents(path, &mut candidates);
+    }
+    let mut empty_folders = FxHashSet::default();
+    let mut made: Vec<&RelativePath> = mkdirs
+        .iter()
+        .map(RelativePathBuf::as_relative_path)
+        .filter(|dir| !candidates.contains(dir))
+        .collect();
+    sort_deepest_first(&mut made);
+    for dir in made {
+        // A folder holding an empty folder found here is a candidate by now.
+        if !candidates.contains(dir) && is_empty_folder(dir, workspace_root) {
+            add_parents(dir, &mut candidates);
+            empty_folders.insert(dir.to_relative_path_buf());
         }
     }
     let mut candidates: Vec<&RelativePath> = candidates.into_iter().collect();
-    candidates.sort_unstable_by_key(|dir| Reverse(dir.as_str().matches('/').count()));
+    sort_deepest_first(&mut candidates);
 
-    let mut folders = FxHashSet::default();
+    let mut folders = empty_folders.clone();
     let mut above_unrebuildable = FxHashSet::default();
     for dir in candidates {
-        let rebuildable = if above_unrebuildable.contains(dir) {
-            Some(false)
+        let contents = if above_unrebuildable.contains(dir) {
+            Some(Holds::Other)
         } else {
-            holds_only_rebuildable(dir, workspace_root, written, &folders)
+            holds(dir, workspace_root, written, &folders)
         };
-        match rebuildable {
-            Some(true) => {
+        match contents {
+            Some(Holds::OnlyRebuildable) => {
                 folders.insert(dir.to_relative_path_buf());
             }
-            Some(false) => {
+            Some(Holds::Nothing) if mkdirs.contains(dir) => {
+                folders.insert(dir.to_relative_path_buf());
+                empty_folders.insert(dir.to_relative_path_buf());
+            }
+            Some(Holds::Nothing | Holds::Other) => {
                 if let Some(parent) = dir.parent() {
                     above_unrebuildable.insert(parent);
                 }
@@ -232,20 +298,46 @@ fn find_folders(
             None => {}
         }
     }
-    folders
+    (folders, empty_folders)
 }
 
-/// Whether `dir` holds at least one entry, and every entry is a file (or
-/// symlink) in `written` or a folder in `folders`, or `None` when `dir` isn't
-/// a folder anymore. `.DS_Store` doesn't count, as in directory listing
-/// fingerprints. An empty folder isn't rebuildable: there's no written file to
-/// recreate it.
-fn holds_only_rebuildable(
+/// Adds the folders above `path` inside the workspace to `candidates`, up to
+/// one that is there already and has its parents there too.
+fn add_parents<'a>(path: &'a RelativePath, candidates: &mut FxHashSet<&'a RelativePath>) {
+    let mut dir = path.parent();
+    while let Some(parent) = dir
+        && !parent.as_str().is_empty()
+        && candidates.insert(parent)
+    {
+        dir = parent.parent();
+    }
+}
+
+/// Sorts `dirs` so that each comes before the folders above it.
+fn sort_deepest_first(dirs: &mut [&RelativePath]) {
+    dirs.sort_unstable_by_key(|dir| Reverse(dir.as_str().matches('/').count()));
+}
+
+/// What a folder holds, `.DS_Store` aside, which doesn't count, as in
+/// directory listing fingerprints.
+enum Holds {
+    Nothing,
+    /// At least one entry, each a file (or symlink) the task wrote or a
+    /// rebuildable folder.
+    OnlyRebuildable,
+    /// Anything else, or entries that can't be read or named.
+    Other,
+}
+
+/// What `dir` holds, with `written` and `folders` deciding which entries are
+/// rebuildable, or `None` when `dir` isn't a folder anymore. An empty folder
+/// is rebuildable only if the task made it, so a hit recreates it.
+fn holds(
     dir: &RelativePath,
     workspace_root: &AbsolutePath,
     written: &FxHashSet<RelativePathBuf>,
     folders: &FxHashSet<RelativePathBuf>,
-) -> Option<bool> {
+) -> Option<Holds> {
     let entries = match fs::read_dir(workspace_root.join(dir)) {
         Ok(entries) => entries,
         // Gone, or not a folder anymore: it plays no part.
@@ -254,29 +346,29 @@ fn holds_only_rebuildable(
         {
             return None;
         }
-        Err(_) => return Some(false),
+        Err(_) => return Some(Holds::Other),
     };
-    let mut is_empty = true;
+    let mut holds = Holds::Nothing;
     for entry in entries {
         let Ok(entry) = entry else {
-            return Some(false);
+            return Some(Holds::Other);
         };
         let name = entry.file_name();
         if name == ".DS_Store" {
             continue;
         }
         let (Some(name), Ok(file_type)) = (name.to_str(), entry.file_type()) else {
-            return Some(false);
+            return Some(Holds::Other);
         };
         let Ok(name) = RelativePathBuf::new(name) else {
-            return Some(false);
+            return Some(Holds::Other);
         };
         if !is_rebuildable(&dir.join(name), file_type.is_dir(), written, folders) {
-            return Some(false);
+            return Some(Holds::Other);
         }
-        is_empty = false;
+        holds = Holds::OnlyRebuildable;
     }
-    Some(!is_empty)
+    Some(holds)
 }
 
 /// Whether the entry at `path` is rebuildable: a folder in `folders`, or a

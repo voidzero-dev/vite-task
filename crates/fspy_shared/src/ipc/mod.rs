@@ -21,6 +21,7 @@ pub enum AccessMode {
     ReadWrite,
     ReadDir,
     RenameTarget,
+    Mkdir,
 }
 
 impl AccessMode {
@@ -32,6 +33,7 @@ impl AccessMode {
             Self::ReadWrite => PathAccess::ReadWrite(path),
             Self::ReadDir => PathAccess::ReadDir(path),
             Self::RenameTarget => PathAccess::RenameTarget(path),
+            Self::Mkdir => PathAccess::Mkdir(path),
         }
     }
 }
@@ -48,6 +50,9 @@ pub enum PathAccess<'a> {
     /// The new path of a rename. What is there after the call, a file or a
     /// whole folder, was put there without being opened.
     RenameTarget(&'a IpcPath),
+    /// A folder made by `mkdir`, recorded whether or not the call succeeded,
+    /// so the folder may have been there already.
+    Mkdir(&'a IpcPath),
 }
 
 impl<'a> PathAccess<'a> {
@@ -58,7 +63,8 @@ impl<'a> PathAccess<'a> {
             | PathAccess::Write(path)
             | PathAccess::ReadWrite(path)
             | PathAccess::ReadDir(path)
-            | PathAccess::RenameTarget(path) => iter::once(path),
+            | PathAccess::RenameTarget(path)
+            | PathAccess::Mkdir(path) => iter::once(path),
         }
     }
 
@@ -70,6 +76,7 @@ impl<'a> PathAccess<'a> {
             PathAccess::ReadWrite(path) => PathAccess::ReadWrite(path.clone_in(bump)),
             PathAccess::ReadDir(path) => PathAccess::ReadDir(path.clone_in(bump)),
             PathAccess::RenameTarget(path) => PathAccess::RenameTarget(path.clone_in(bump)),
+            PathAccess::Mkdir(path) => PathAccess::Mkdir(path.clone_in(bump)),
         }
     }
 }

@@ -52,6 +52,7 @@ impl AccessCollector {
             PathAccess::RenameTarget(path) => {
                 relative(path).map(|path| format!("{path}: RenameTarget"))
             }
+            PathAccess::Mkdir(path) => relative(path).map(|path| format!("{path}: Mkdir")),
         };
         self.accesses.extend(line);
     }
