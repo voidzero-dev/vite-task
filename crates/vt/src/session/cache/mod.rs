@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use vt_casefold::EnvName;
-use vt_glob::path::PathGlobSet;
 use vt_graph::config::ResolvedGlobConfig;
 use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::{
@@ -35,7 +34,7 @@ use wincode::{
     error::{ReadResult, WriteResult},
 };
 
-use self::remote::{ReadError, RemoteClients, RemoteUploads, Restore, UploadError};
+use self::remote::{ReadError, RemoteClients, RemoteUploads, Resolved, Restore, UploadError};
 use super::{
     event::RunKind,
     execute::{fingerprint::PostRunFingerprint, pipe::StdOutput},
@@ -370,6 +369,15 @@ fn enable_wal(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// The miss to report when both the local and the remote cache missed: the
+/// local one, unless the local cache has no entry for the task.
+fn prefer_local_miss(local_miss: CacheMiss, remote_miss: CacheMiss) -> CacheMiss {
+    match local_miss {
+        CacheMiss::NotFound => remote_miss,
+        local_miss => local_miss,
+    }
+}
+
 impl ExecutionCache {
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
@@ -432,18 +440,9 @@ impl ExecutionCache {
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheHit, CacheMiss>> {
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
-        // Part of the key, so the same as when the entry was created.
-        let input_negative_globs = PathGlobSet::new(&cache_metadata.input_config.negative_globs)?;
 
         let local_miss = match self
-            .try_hit_local(
-                cache_metadata,
-                &cache_key,
-                globbed_inputs,
-                &input_negative_globs,
-                workspace_root,
-                run_kind,
-            )
+            .try_hit_local(cache_metadata, &cache_key, globbed_inputs, workspace_root, run_kind)
             .await?
         {
             Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Local })),
@@ -462,27 +461,20 @@ impl ExecutionCache {
             ) => remote_config,
             None => return Ok(Err(local_miss)),
         };
-        let remote_miss = match self
+        let hit = self
             .try_hit_remote(
                 remote_config,
                 cache_metadata,
                 &cache_key,
                 globbed_inputs,
-                &input_negative_globs,
                 workspace_root,
                 cache_dir,
                 run_kind,
+                local_miss,
                 cancel_token,
             )
-            .await?
-        {
-            Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Remote })),
-            Err(miss) => miss,
-        };
-        Ok(Err(match local_miss {
-            CacheMiss::NotFound => remote_miss,
-            local_miss => local_miss,
-        }))
+            .await?;
+        Ok(hit.map(|value| CacheHit { value, source: CacheHitSource::Remote }))
     }
 
     async fn try_hit_local(
@@ -490,7 +482,6 @@ impl ExecutionCache {
         cache_metadata: &CacheMetadata,
         cache_key: &CacheEntryKey,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
-        input_negative_globs: &PathGlobSet<'_>,
         workspace_root: &AbsolutePath,
         run_kind: RunKind,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
@@ -499,9 +490,10 @@ impl ExecutionCache {
         // Try to find the cache entry by key (spawn fingerprint + input config)
         if let Some(cache_value) = self.get_by_cache_key(cache_key).await? {
             let changes = cache_value.validate(
-                &cache_metadata.unfiltered_envs,
+                cache_key,
+                cache_key,
                 globbed_inputs,
-                input_negative_globs,
+                &cache_metadata.unfiltered_envs,
                 workspace_root,
             )?;
             if !changes.is_empty() {
@@ -521,8 +513,22 @@ impl ExecutionCache {
             self.get_cache_key_by_execution_key(execution_cache_key).await?
         {
             // `get_by_cache_key` above returned None for the *current* cache key,
-            // so the associated key must differ.
-            let changes = old_cache_key.changes_to(cache_key);
+            // so the associated key must differ. Its entry is only compared
+            // with, so one that can't be read leaves just the key changes.
+            let old_value = self.get_by_cache_key(&old_cache_key).await.unwrap_or_else(|err| {
+                tracing::debug!(?err, "failed to read the task's previous cache entry");
+                None
+            });
+            let changes = match old_value {
+                Some(old_value) => old_value.validate(
+                    &old_cache_key,
+                    cache_key,
+                    globbed_inputs,
+                    &cache_metadata.unfiltered_envs,
+                    workspace_root,
+                )?,
+                None => old_cache_key.changes_to(cache_key),
+            };
             return Ok(Err(CacheMiss::Changed(Comparison::new(changes))));
         }
 
@@ -532,9 +538,15 @@ impl ExecutionCache {
     /// Fetch the entry from the remote cache that `remote_config` configures.
     /// An exact entry that passes validation is a hit once its output archive
     /// is downloaded, or right away in a dry run.
-    /// A fallback entry, a failed validation, or a failed read is a miss. An
-    /// error while validating counts as a failed read, so the remote entry
-    /// never fails the task.
+    /// A failed validation or a failed read is a miss. An error while
+    /// validating counts as a failed read, so the remote entry never fails the
+    /// task. A miss is `local_miss`, the local cache's, unless the local cache
+    /// has no entry for the task.
+    ///
+    /// A fallback is only the key of the task's previous entry, so that entry
+    /// is fetched too, to compare with as in the local cache, unless the local
+    /// cache's miss wins anyway. If that fetch fails, the miss is a failed
+    /// read, like a failed first fetch.
     #[expect(clippy::too_many_arguments, reason = "forwarded from `try_hit`")]
     async fn try_hit_remote(
         &self,
@@ -542,29 +554,52 @@ impl ExecutionCache {
         cache_metadata: &CacheMetadata,
         cache_key: &CacheEntryKey,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
-        input_negative_globs: &PathGlobSet<'_>,
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
         run_kind: RunKind,
+        local_miss: CacheMiss,
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
+        let execution_cache_key = &cache_metadata.execution_cache_key;
         let fetched = self
             .remote_clients
-            .fetch(remote_config, cache_key, &cache_metadata.execution_cache_key, cancel_token)
+            .fetch(remote_config, cache_key, execution_cache_key, cancel_token)
             .await;
         let validate = |cache_value: &CacheEntryValue| {
             cache_value.validate(
-                &cache_metadata.unfiltered_envs,
+                cache_key,
+                cache_key,
                 globbed_inputs,
-                input_negative_globs,
+                &cache_metadata.unfiltered_envs,
                 workspace_root,
             )
         };
-        let Restore { value: cache_value, blob_id } =
-            match remote::resolve(fetched, cache_key, validate) {
-                Ok(restore) => restore,
-                Err(miss) => return Ok(Err(miss)),
-            };
+        let Restore { value: cache_value, blob_id } = match remote::resolve(fetched, validate) {
+            Ok(Resolved::Exact(restore)) => restore,
+            Ok(Resolved::Fallback(old_cache_key)) if matches!(local_miss, CacheMiss::NotFound) => {
+                let old_value = match self
+                    .remote_clients
+                    .fetch_value(remote_config, &old_cache_key, execution_cache_key, cancel_token)
+                    .await
+                {
+                    Ok(old_value) => old_value,
+                    Err(err) => return Ok(Err(err.into_miss())),
+                };
+                let changes = match old_value {
+                    Some(old_value) => old_value.validate(
+                        &old_cache_key,
+                        cache_key,
+                        globbed_inputs,
+                        &cache_metadata.unfiltered_envs,
+                        workspace_root,
+                    )?,
+                    None => old_cache_key.changes_to(cache_key),
+                };
+                return Ok(Err(CacheMiss::Changed(Comparison::new(changes))));
+            }
+            Ok(Resolved::Fallback(_)) => return Ok(Err(local_miss)),
+            Err(remote_miss) => return Ok(Err(prefer_local_miss(local_miss, remote_miss))),
+        };
         // `resolve` checks that the entry has an archive exactly when it has a
         // blob to download, so the hit a dry run shows says whether it restores
         // outputs.
@@ -580,7 +615,7 @@ impl ExecutionCache {
                     .await
                 {
                     Ok(archive_name) => Some(archive_name),
-                    Err(err) => return Ok(Err(err.into_miss())),
+                    Err(err) => return Ok(Err(prefer_local_miss(local_miss, err.into_miss()))),
                 }
             }
             None => None,

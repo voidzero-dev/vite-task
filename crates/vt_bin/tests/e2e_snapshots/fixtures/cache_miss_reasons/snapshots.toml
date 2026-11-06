@@ -355,3 +355,69 @@ steps = [
     "test",
   ], comment = "The inline reason is the first change. The summary lists both." },
 ]
+
+[[e2e]]
+name = "env_and_file_changed"
+comment = """
+When an env in `cache.env` changes, the miss also compares the task's files with its previous cached run, so it names what reverting needs. Dry runs record nothing, so each step compares with the same cached run.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], envs = [
+    [
+      "MY_ENV",
+      "1",
+    ],
+  ] },
+  [
+    "vtt",
+    "replace-file-content",
+    "test.txt",
+    "initial",
+    "changed",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "-v",
+    "test",
+  ], envs = [
+    [
+      "MY_ENV",
+      "2",
+    ],
+  ], comment = "The env and the file both changed." },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "test",
+  ], envs = [
+    [
+      "MY_ENV",
+      "1",
+    ],
+  ], comment = "Reverting the env isn't enough." },
+  [
+    "vtt",
+    "replace-file-content",
+    "test.txt",
+    "changed",
+    "initial",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "test",
+  ], envs = [
+    [
+      "MY_ENV",
+      "1",
+    ],
+  ], comment = "Reverting the file too is a hit." },
+]

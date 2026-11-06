@@ -291,6 +291,74 @@ steps = [
 ]
 
 [[e2e]]
+name = "fallback_compares_the_cached_run"
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "built",
+    "rebuilt",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "changed",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "--dry-run",
+    "-v",
+    "build",
+  ], comment = "The local cache has the previous run, and its miss reason wins, so the remote fallback's entry isn't fetched." },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "--dry-run",
+    "-v",
+    "build",
+  ], comment = "The fallback is only a key, so its entry is fetched too, and the miss lists its changed file." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
 name = "corrupt_archive"
 cfg = 'not(target_env = "musl")'
 ignore = true

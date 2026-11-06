@@ -116,31 +116,38 @@ pub(super) struct Restore {
     pub blob_id: Option<Str>,
 }
 
-/// Turn the result of a fetch into an entry to restore or a miss. An exact
-/// match's entries are checked newest first, and the first that passes is
-/// restored. `validate` checks an entry against the current execution. If no
-/// entry passes, the miss is the newest entry's: a fingerprint mismatch, or a
-/// read failure if it doesn't decode, its blob doesn't match its value, or it
-/// can't be validated. A fallback's miss reason compares its key with
-/// `cache_key`, and no match is a miss without an entry. A failed fetch is a
-/// read failure.
+/// What a fetch found that isn't a miss yet.
+#[derive(Debug)]
+pub(super) enum Resolved {
+    /// An exact entry that passed validation.
+    Exact(Restore),
+    /// No exact entry, but the key of the entry last stored for the task. The
+    /// miss compares the execution with that entry.
+    Fallback(CacheEntryKey),
+}
+
+/// Turn the result of a fetch into an entry to restore, a fallback key, or a
+/// miss. An exact match's entries are checked newest first, and the first
+/// that passes is restored. `validate` checks an entry against the current
+/// execution. If no entry passes, the miss is the newest entry's: the changes
+/// it found, or a read failure if it doesn't decode, its blob doesn't match
+/// its value, or it can't be validated. No match is a miss without an entry.
+/// A failed fetch is a read failure.
 pub(super) fn resolve(
     fetched: Result<Option<Fetched>, ReadError>,
-    cache_key: &CacheEntryKey,
     mut validate: impl FnMut(&CacheEntryValue) -> anyhow::Result<Vec<Change>>,
-) -> Result<Restore, CacheMiss> {
+) -> Result<Resolved, CacheMiss> {
     let entries = match fetched.map_err(ReadError::into_miss)? {
         Some(Fetched::Exact { entries }) => entries,
         Some(Fetched::Fallback { key }) => {
-            let key = decode_key(&key).map_err(ReadError::into_miss)?;
-            return Err(CacheMiss::Changed(Comparison::new(key.changes_to(cache_key))));
+            return Ok(Resolved::Fallback(decode_key(&key).map_err(ReadError::into_miss)?));
         }
         None => return Err(CacheMiss::NotFound),
     };
     let mut newest_miss = None;
     for entry in entries {
         match check_entry(entry, &mut validate) {
-            Ok(restore) => return Ok(restore),
+            Ok(restore) => return Ok(Resolved::Exact(restore)),
             Err(miss) => {
                 newest_miss.get_or_insert(miss);
             }
@@ -216,6 +223,25 @@ impl RemoteClients {
             .await
             .ok_or(ReadError::Cancelled)?
             .map_err(ReadError::Fetch)
+    }
+
+    /// Fetch the value of the newest entry stored under exactly `cache_key`,
+    /// to compare with, without its blob. `None` if there is no such entry.
+    pub(super) async fn fetch_value(
+        &self,
+        remote_config: &ResolvedRemoteCacheConfig,
+        cache_key: &CacheEntryKey,
+        execution_cache_key: &ExecutionCacheKey,
+        cancel_token: &CancellationToken,
+    ) -> Result<Option<CacheEntryValue>, ReadError> {
+        match self.fetch(remote_config, cache_key, execution_cache_key, cancel_token).await? {
+            Some(Fetched::Exact { entries }) => entries
+                .first()
+                .map(|newest| decode_value(&newest.value))
+                .transpose()
+                .map_err(ReadError::CorruptValue),
+            Some(Fetched::Fallback { .. }) | None => Ok(None),
+        }
     }
 
     /// Download the blob `blob_id` from the remote cache that `remote_config`
@@ -495,11 +521,10 @@ fn decode_key(bytes: &[u8]) -> Result<CacheEntryKey, ReadError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::{collections::BTreeMap, net::TcpListener, time::Duration};
 
     use tokio::sync::oneshot;
-    use vt_glob::path::PathGlobSet;
     use vt_graph::config::ResolvedGlobConfig;
     use vt_path::{AbsolutePathBuf, RelativePathBuf};
     use vt_plan::{
@@ -519,7 +544,8 @@ mod tests {
     /// A key whose spawn fingerprint runs `vtt build`. `SpawnFingerprint`'s
     /// fields are private to `vt_plan`, so it's decoded from types with the
     /// same encoding. Update them if `SpawnFingerprint` changes.
-    fn cache_key(input_config: ResolvedGlobConfig) -> CacheEntryKey {
+    /// A cache entry key with `input_config`, for tests.
+    pub(in crate::session::cache) fn cache_key(input_config: ResolvedGlobConfig) -> CacheEntryKey {
         #[derive(SchemaWrite)]
         enum ProgramFingerprintLayout {
             OutsideWorkspace { program_name: Str },
@@ -603,12 +629,8 @@ mod tests {
     ) -> impl FnMut(&CacheEntryValue) -> anyhow::Result<Vec<Change>> {
         move |value| {
             let workspace_root = vt_path::current_dir().unwrap();
-            value.validate(
-                &FxHashMap::default(),
-                &globbed_inputs,
-                &PathGlobSet::default(),
-                &workspace_root,
-            )
+            let key = cache_key(ResolvedGlobConfig::default_auto());
+            value.validate(&key, &key, &globbed_inputs, &FxHashMap::default(), &workspace_root)
         }
     }
 
@@ -626,9 +648,8 @@ mod tests {
     /// The read failure of an exact match whose only entry is `value`, without
     /// a blob. It must be "remote cache value is corrupt".
     fn corrupt_value(value: Vec<u8>) -> Arc<ReadError> {
-        let key = cache_key(ResolvedGlobConfig::default_auto());
         let fetched = Ok(Some(Fetched::Exact { entries: vec![Entry { value, blob_id: None }] }));
-        match resolve(fetched, &key, not_validated).unwrap_err() {
+        match resolve(fetched, not_validated).unwrap_err() {
             CacheMiss::RemoteReadFailed(error) => {
                 assert_eq!(vt_str::format!("{error}"), "remote cache value is corrupt");
                 error
@@ -637,12 +658,21 @@ mod tests {
         }
     }
 
+    /// The entry `resolved` restores, which must be an exact entry.
+    fn restored(resolved: Resolved) -> Restore {
+        match resolved {
+            Resolved::Exact(restore) => restore,
+            Resolved::Fallback(key) => {
+                panic!("expected an entry to restore, got a fallback {key:?}")
+            }
+        }
+    }
+
     #[test]
     fn exact_entry_that_validates_is_restored() {
-        let key = cache_key(ResolvedGlobConfig::default_auto());
-        let restore =
-            resolve(Ok(Some(exact(&cache_value()))), &key, validate_against(BTreeMap::new()))
-                .unwrap();
+        let restore = restored(
+            resolve(Ok(Some(exact(&cache_value()))), validate_against(BTreeMap::new())).unwrap(),
+        );
         assert_eq!(restore.blob_id.as_deref(), Some("1"));
         assert_eq!(restore.value.std_outputs[0].content, b"built\n");
         assert_eq!(restore.value.duration, Duration::from_millis(5));
@@ -651,12 +681,8 @@ mod tests {
     #[test]
     fn exact_entry_that_fails_validation_is_a_mismatch() {
         let current_inputs = BTreeMap::from([(RelativePathBuf::new("src/a.txt").unwrap(), 1)]);
-        let miss = resolve(
-            Ok(Some(exact(&cache_value()))),
-            &cache_key(ResolvedGlobConfig::default_auto()),
-            validate_against(current_inputs),
-        )
-        .unwrap_err();
+        let miss =
+            resolve(Ok(Some(exact(&cache_value()))), validate_against(current_inputs)).unwrap_err();
         let CacheMiss::Changed(comparison) = &miss else { panic!("{miss:?}") };
         assert!(
             matches!(
@@ -669,17 +695,16 @@ mod tests {
 
     #[test]
     fn newest_entry_that_validates_is_restored() {
-        let key = cache_key(ResolvedGlobConfig::default_auto());
         let entries = vec![entry(&cache_value(), "2"), entry(&cache_value(), "1")];
-        let restore =
-            resolve(Ok(Some(Fetched::Exact { entries })), &key, validate_against(BTreeMap::new()))
-                .unwrap();
+        let restore = restored(
+            resolve(Ok(Some(Fetched::Exact { entries })), validate_against(BTreeMap::new()))
+                .unwrap(),
+        );
         assert_eq!(restore.blob_id.as_deref(), Some("2"));
     }
 
     #[test]
     fn older_entry_that_validates_is_restored_after_newer_ones_fail() {
-        let key = cache_key(ResolvedGlobConfig::default_auto());
         let entries = vec![
             entry(&with_inputs(&["src/c.txt"]), "4"),
             Entry { value: b"not a cache value".to_vec(), blob_id: Some(Str::from("3")) },
@@ -688,11 +713,13 @@ mod tests {
         ];
         let mut validated = 0;
         let mut validate = validate_against(inputs(&["src/a.txt"]));
-        let restore = resolve(Ok(Some(Fetched::Exact { entries })), &key, |value| {
-            validated += 1;
-            validate(value)
-        })
-        .unwrap();
+        let restore = restored(
+            resolve(Ok(Some(Fetched::Exact { entries })), |value| {
+                validated += 1;
+                validate(value)
+            })
+            .unwrap(),
+        );
         assert_eq!(restore.blob_id.as_deref(), Some("2"));
         // The corrupt entry isn't validated, and the entry after the restored
         // one isn't checked.
@@ -701,26 +728,19 @@ mod tests {
 
     #[test]
     fn newest_entry_explains_the_miss_when_none_validates() {
-        let key = cache_key(ResolvedGlobConfig::default_auto());
         let entries = vec![entry(&cache_value(), "2"), entry(&with_inputs(&["src/b.txt"]), "1")];
-        let miss = resolve(
-            Ok(Some(Fetched::Exact { entries })),
-            &key,
-            validate_against(inputs(&["src/a.txt"])),
-        )
-        .unwrap_err();
+        let miss =
+            resolve(Ok(Some(Fetched::Exact { entries })), validate_against(inputs(&["src/a.txt"])))
+                .unwrap_err();
         assert_eq!(added_input(&miss), "src/a.txt");
 
         let entries = vec![
             Entry { value: b"not a cache value".to_vec(), blob_id: None },
             entry(&cache_value(), "1"),
         ];
-        let miss = resolve(
-            Ok(Some(Fetched::Exact { entries })),
-            &key,
-            validate_against(inputs(&["src/a.txt"])),
-        )
-        .unwrap_err();
+        let miss =
+            resolve(Ok(Some(Fetched::Exact { entries })), validate_against(inputs(&["src/a.txt"])))
+                .unwrap_err();
         assert_eq!(read_failure(miss), "remote cache value is corrupt");
     }
 
@@ -732,44 +752,29 @@ mod tests {
             .post_run_fingerprint
             .tracked_env_queries
             .insert(TrackedEnvQuery::Glob(Str::from("PROBE_[")), BTreeMap::new());
-        let miss = resolve(
-            Ok(Some(exact(&value))),
-            &cache_key(ResolvedGlobConfig::default_auto()),
-            validate_against(BTreeMap::new()),
-        )
-        .unwrap_err();
+        let miss = resolve(Ok(Some(exact(&value))), validate_against(BTreeMap::new())).unwrap_err();
         assert_eq!(read_failure(miss), "remote cache entry couldn't be validated");
     }
 
     #[test]
-    fn fallback_is_a_mismatch_with_the_stored_key() {
-        let stored_key = encode_key(&cache_key(ResolvedGlobConfig::default_auto())).unwrap();
-        let mut input_config = ResolvedGlobConfig::default_auto();
-        input_config.positive_globs.insert(Str::from("src/**"));
-        let miss = resolve(
-            Ok(Some(Fetched::Fallback { key: stored_key })),
-            &cache_key(input_config),
-            not_validated,
-        )
-        .unwrap_err();
-        assert!(
-            matches!(&miss, CacheMiss::Changed(comparison) if comparison.changes == [Change::InputConfig]),
-            "{miss:?}"
-        );
+    fn fallback_is_the_stored_key() {
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let stored_key = encode_key(&key).unwrap();
+        let resolved =
+            resolve(Ok(Some(Fetched::Fallback { key: stored_key })), not_validated).unwrap();
+        assert!(matches!(&resolved, Resolved::Fallback(stored) if *stored == key), "{resolved:?}");
     }
 
     #[test]
     fn no_match_is_a_miss_without_an_entry() {
-        let key = cache_key(ResolvedGlobConfig::default_auto());
-        let miss = resolve(Ok(None), &key, not_validated).unwrap_err();
+        let miss = resolve(Ok(None), not_validated).unwrap_err();
         assert!(matches!(miss, CacheMiss::NotFound), "{miss:?}");
     }
 
     #[test]
     fn failed_fetch_is_a_read_failure() {
-        let key = cache_key(ResolvedGlobConfig::default_auto());
         let fetched = Err(ReadError::Fetch(vt_remote_cache::Error::InvalidEndpoint(None)));
-        let miss = resolve(fetched, &key, not_validated).unwrap_err();
+        let miss = resolve(fetched, not_validated).unwrap_err();
         assert_eq!(read_failure(miss), "remote cache fetch failed");
     }
 
@@ -831,12 +836,11 @@ mod tests {
 
     #[test]
     fn blob_that_does_not_match_the_value_is_a_read_failure() {
-        let key = cache_key(ResolvedGlobConfig::default_auto());
         let without_archive = CacheEntryValue { output_archive: None, ..cache_value() };
         for (value, blob_id) in [(cache_value(), None), (without_archive, Some(Str::from("1")))] {
             let value = encode_value(&value).unwrap();
             let fetched = Ok(Some(Fetched::Exact { entries: vec![Entry { value, blob_id }] }));
-            let miss = resolve(fetched, &key, not_validated).unwrap_err();
+            let miss = resolve(fetched, not_validated).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache entry's blob doesn't match its value");
         }
     }
@@ -861,7 +865,7 @@ mod tests {
         garbage.extend(b"not a cache key");
         for stored_key in [b"not a cache key".to_vec(), other_schema, other_format, garbage] {
             let fetched = Ok(Some(Fetched::Fallback { key: stored_key }));
-            let miss = resolve(fetched, &key, not_validated).unwrap_err();
+            let miss = resolve(fetched, not_validated).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache key is corrupt");
         }
     }
