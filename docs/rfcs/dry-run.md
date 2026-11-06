@@ -102,14 +102,16 @@ Task Details:
   [1] @acme/ui#build: ~/packages/ui$ tsdown
       → Cache miss: 'packages/ui/src/button.tsx' modified
                     'packages/ui/src/theme.css' modified
-        Unchanged: 'packages/ui/package.json'
+        Unchanged: 'packages/ui/.browserslistrc' (missing)
+                   'packages/ui/package.json'
                    'packages/ui/src' (listing)
                    'packages/ui/src/index.ts'
                    'packages/ui/tsdown.config.ts'
-                   'packages/ui/.browserslistrc' (missing)
         Outputs:   'packages/ui/dist/index.d.ts'
                    'packages/ui/dist/index.js'
 ```
+
+Both lists are in path order. A folder the task listed reads `(listing)`, one it only opened `(folder)`, and a path it looked for and didn't find `(missing)`; the env names it depends on follow, as `env 'NODE_ENV'`. A dry run doesn't download the archive of a cached run from the remote cache, so its outputs read `(not downloaded)`; a real run downloads it and lists them. A miss after a command, config or env change lists neither, since only the key of the step's most recent cached run is compared, not the run itself.
 
 ### `--json`
 
@@ -196,7 +198,7 @@ vp run --dry-run --json -r build
   "baseline": {
     "durationMs": 1830,
     "fingerprint": {
-      "paths": {
+      "inputs": {
         "packages/ui/.browserslistrc": { "type": "missing" },
         "packages/ui/package.json": { "type": "file", "hash": "8f2c41d09a7be356" },
         "packages/ui/src": { "type": "dir", "entries": ["button.tsx", "index.ts", "theme.css"] },
@@ -350,14 +352,17 @@ type RunPlan = {
 
                     /**
                      * With `-vv`: everything the cached run depends on, changed or not: the env
-                     * names and paths the cache records for this step.
+                     * names and inputs the cache records for this step. Absent when it depends on none.
                      */
                     fingerprint?: {
                       /** Env names. */
                       env?: string[];
 
-                      /** Each path the cached run depends on, with what is checked. */
-                      paths?: {
+                      /**
+                       * The cached run's inputs, by path, with what is checked: the files it matched or
+                       * read, the directories it opened, and the paths it found missing.
+                       */
+                      inputs?: {
                         [path: string]:
                           | {
                               /** A file, matched by `cache.input` or read by the task. Its content is checked. */
@@ -386,6 +391,12 @@ type RunPlan = {
                                * task opened the directory without listing it: then only that it exists is checked.
                                */
                               entries?: string[];
+
+                              /**
+                               * The task creates this directory, as a folder or a link, so it may be missing, as
+                               * on a fresh checkout. When it is there, it is still checked.
+                               */
+                              mayBeMissing?: true;
                             }
                           | {
                               /** A path the task looked for and didn't find. Creating it is a change. */
@@ -397,9 +408,11 @@ type RunPlan = {
                     /**
                      * With `-vv`: the files the cached run archived as its outputs, which a hit restores.
                      * Only files are listed: `packages/ui/dist/index.js` appears, but its directory
-                     * `packages/ui/dist` doesn't get an entry of its own.
+                     * `packages/ui/dist` doesn't get an entry of its own. Absent when there are none.
+                     * `'notDownloaded'` for a cached run from the remote cache that has outputs: a dry run
+                     * doesn't download its archive, so its files aren't known.
                      */
-                    outputs?: string[];
+                    outputs?: string[] | 'notDownloaded';
                   };
 
                   /**
