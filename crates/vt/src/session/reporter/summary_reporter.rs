@@ -19,7 +19,7 @@ use vt_str::Str;
 
 use super::{
     ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
-    StdioConfig,
+    LeafPath, StdioConfig,
 };
 use crate::session::{
     cache::remote::UploadError,
@@ -108,10 +108,11 @@ struct SummaryGraphReporter {
 impl GraphExecutionReporter for SummaryGraphReporter {
     fn new_leaf_execution(
         &mut self,
+        path: &LeafPath,
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
     ) -> Box<dyn LeafExecutionReporter> {
-        let inner = self.inner.new_leaf_execution(display, leaf_kind);
+        let inner = self.inner.new_leaf_execution(path, display, leaf_kind);
         Box::new(SummaryLeafReporter {
             inner,
             tasks: Rc::clone(&self.tasks),
@@ -308,7 +309,7 @@ mod tests {
         .build();
 
         let upload_error = Arc::new(OnceLock::new());
-        let mut leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind);
+        let mut leaf = reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind);
         leaf.start(CacheStatus::Miss(CacheMiss::NotFound));
         leaf.finish(
             Some(StdExitStatus::default()),
@@ -353,7 +354,7 @@ mod tests {
                 run_kind,
             ))
             .build();
-            let leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind);
+            let leaf = reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind);
             leaf.finish(
                 None,
                 CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),

@@ -13,9 +13,9 @@ use vt_str::Str;
 
 use super::{
     COMMAND_STYLE, ColorSupport, ColorizeExt as _, ExitStatus, GraphExecutionReporter,
-    GraphExecutionReporterBuilder, LeafExecutionReporter, PipeWriters, RetryingWriter, StdioConfig,
-    StdioSuggestion, format_command_display, format_command_with_cache_status, maybe_strip_writer,
-    write_leaf_trailing_output,
+    GraphExecutionReporterBuilder, LeafExecutionReporter, LeafPath, PipeWriters, RetryingWriter,
+    StdioConfig, StdioSuggestion, format_command_display, format_command_with_cache_status,
+    maybe_strip_writer, write_leaf_trailing_output,
 };
 use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError, RunKind};
 
@@ -63,6 +63,7 @@ struct InterleavedGraphReporter {
 impl GraphExecutionReporter for InterleavedGraphReporter {
     fn new_leaf_execution(
         &mut self,
+        _path: &LeafPath,
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
     ) -> Box<dyn LeafExecutionReporter> {
@@ -182,7 +183,7 @@ mod tests {
             RunKind::Real,
         ));
         let mut reporter = builder.build();
-        let mut leaf = reporter.new_leaf_execution(display, leaf_kind);
+        let mut leaf = reporter.new_leaf_execution(&[], display, leaf_kind);
         leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).suggestion
     }
 
@@ -220,11 +221,12 @@ mod tests {
         .build();
         let not_updated = || CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::DryRun);
 
-        let mut leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind(item));
+        let mut leaf =
+            reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind(item));
         leaf.start(CacheStatus::Miss(CacheMiss::NotFound));
         leaf.finish(None, not_updated(), None);
 
-        let leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind(item));
+        let leaf = reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind(item));
         let error = ExecutionError::Cache {
             kind: CacheErrorKind::Lookup,
             source: anyhow::anyhow!("database is locked"),
