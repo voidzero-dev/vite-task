@@ -14,6 +14,7 @@
 //! Three output mode reporters are provided:
 //!
 //! - [`interleaved::InterleavedReporterBuilder`] — streams output directly as tasks produce it.
+//!   A dry run (`vp run --dry-run`) always uses it, since there is no output to shape.
 //! - [`labeled::LabeledReporterBuilder`] — prefixes each output line with `[pkg#task]`.
 //! - [`grouped::GroupedReporterBuilder`] — buffers output per task and prints as a block.
 //!
@@ -46,7 +47,7 @@ use vt_str::Str;
 
 use super::{
     cache::format_cache_status_inline,
-    event::{CacheStatus, CacheUpdateStatus, ExecutionError},
+    event::{CacheStatus, CacheUpdateStatus, ExecutionError, RunKind},
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -278,9 +279,10 @@ fn format_command_with_cache_status(
     display: &ExecutionItemDisplay,
     workspace_path: &AbsolutePath,
     cache_status: &CacheStatus,
+    run_kind: RunKind,
 ) -> Str {
     let command_str = format_command_display(display, workspace_path);
-    format_cache_status_inline(cache_status).map_or_else(
+    format_cache_status_inline(cache_status, run_kind).map_or_else(
         || vt_str::format!("{}\n", command_str.style(COMMAND_STYLE)),
         |inline_status| {
             let styled_status = inline_status.split_once(' ').map_or_else(
@@ -437,7 +439,7 @@ mod strip_writer_tests {
 
 #[cfg(test)]
 pub mod test_fixtures {
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::{cell::RefCell, collections::BTreeMap, io::Write, rc::Rc, sync::Arc};
 
     use vt_graph::display::TaskDisplay;
     use vt_path::AbsolutePath;
@@ -445,6 +447,31 @@ pub mod test_fixtures {
         ExecutionItem, ExecutionItemDisplay, ExecutionItemKind, InProcessExecution,
         LeafExecutionKind, SpawnCommand, SpawnExecution, TaskExecution,
     };
+    use vt_str::Str;
+
+    /// A writer whose output stays readable after it's moved into a reporter.
+    #[derive(Clone, Default)]
+    pub struct SharedBuffer(Rc<RefCell<Vec<u8>>>);
+
+    impl Write for SharedBuffer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl SharedBuffer {
+        /// What was written, without styles.
+        pub fn text(&self) -> Str {
+            let bytes = self.0.borrow();
+            let text = std::str::from_utf8(&bytes).unwrap();
+            vt_str::format!("{}", anstream::adapter::strip_str(text))
+        }
+    }
 
     /// Create a dummy `AbsolutePath` for test fixtures.
     pub fn test_path() -> Arc<AbsolutePath> {

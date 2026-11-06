@@ -21,7 +21,9 @@ use crate::{
     Session,
     session::{
         cache::ExecutionCache,
-        event::{CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus},
+        event::{
+            CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, RunKind,
+        },
         reporter::{ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder},
     },
 };
@@ -58,6 +60,9 @@ struct ExecutionContext<'a> {
     /// Public-facing program name (e.g. `vp`), used in user-facing error
     /// messages that suggest a CLI command (e.g. `cache clean`).
     program_name: &'a str,
+    /// In a dry run, each leaf is looked up and reported as in a real run, but
+    /// nothing runs: see [`execute_spawn`].
+    run_kind: RunKind,
     /// Token cancelled when a task fails. Kills in-flight child processes
     /// (via `start_kill` in spawn.rs).
     fast_fail_token: CancellationToken,
@@ -218,10 +223,13 @@ impl ExecutionContext<'_> {
                 let mut stdio_config = leaf_reporter
                     .start(CacheStatus::Disabled(CacheDisabledReason::InProcessExecution));
 
-                let execution_output = in_process_execution.execute();
-                // Write output to the stdout writer from StdioConfig
-                let _ = stdio_config.writers.stdout_writer.write_all(&execution_output.stdout);
-                let _ = stdio_config.writers.stdout_writer.flush();
+                // A dry run doesn't run it.
+                if self.run_kind == RunKind::Real {
+                    let execution_output = in_process_execution.execute();
+                    // Write output to the stdout writer from StdioConfig
+                    let _ = stdio_config.writers.stdout_writer.write_all(&execution_output.stdout);
+                    let _ = stdio_config.writers.stdout_writer.flush();
+                }
 
                 leaf_reporter.finish(
                     None,
@@ -238,12 +246,15 @@ impl ExecutionContext<'_> {
                     self.workspace_root,
                     self.cache_dir,
                     self.program_name,
+                    self.run_kind,
                     self.fast_fail_token.clone(),
                     self.cancel_token.clone(),
                 )
                 .await;
                 match outcome {
-                    SpawnOutcome::CacheHit | SpawnOutcome::Cancelled => false,
+                    SpawnOutcome::CacheHit | SpawnOutcome::WouldSpawn | SpawnOutcome::Cancelled => {
+                        false
+                    }
                     SpawnOutcome::Spawned(status) => !status.success(),
                     SpawnOutcome::Failed => true,
                 }
@@ -263,6 +274,9 @@ impl Session<'_> {
     /// after cache initialization, so cache errors are reported directly to stderr
     /// without involving the reporter at all.
     ///
+    /// In a dry run (`RunKind::Dry`), each leaf only reports what a real run
+    /// would do: nothing runs, and no cache entry is written.
+    ///
     /// `fast_fail_token` and `cancel_token` are described on [`ExecutionContext`].
     ///
     /// Uploads to the remote cache run in the background and can outlive
@@ -278,6 +292,7 @@ impl Session<'_> {
         &self,
         execution_graph: ExecutionGraph,
         builder: Box<dyn GraphExecutionReporterBuilder>,
+        run_kind: RunKind,
         fast_fail_token: CancellationToken,
         cancel_token: CancellationToken,
         interrupt_token: CancellationToken,
@@ -302,6 +317,7 @@ impl Session<'_> {
             workspace_root: &self.workspace_path,
             cache_dir: &self.cache_path,
             program_name: self.program_name.as_str(),
+            run_kind,
             fast_fail_token,
             cancel_token,
         };

@@ -77,10 +77,6 @@ pub struct RunFlags {
     #[clap(long, hide = true)]
     pub remote_cache: Option<RemoteCacheMode>,
 
-    /// How task output is displayed.
-    #[clap(long, default_value = "interleaved")]
-    pub log: LogMode,
-
     /// Maximum number of tasks to run concurrently. Defaults to 4.
     #[clap(long)]
     pub concurrency_limit: Option<usize>,
@@ -125,6 +121,15 @@ impl RunFlags {
 pub struct RunCommand {
     #[clap(flatten)]
     pub(crate) flags: RunFlags,
+
+    /// How task output is displayed.
+    #[clap(long, default_value = "interleaved")]
+    pub(crate) log: LogMode,
+
+    /// Show what the run would do, and whether each command would hit the
+    /// cache, without running anything or writing to the cache.
+    #[clap(long)]
+    pub(crate) dry_run: bool,
 
     /// Display the detailed summary of the last run.
     #[clap(long, exclusive = true)]
@@ -210,6 +215,19 @@ pub struct ResolvedRunCommand {
 
     /// Additional arguments to pass to the tasks.
     pub additional_args: Vec<Str>,
+
+    /// Whether the tasks run, and how their output is shown.
+    pub mode: RunMode,
+}
+
+/// Whether a run runs its tasks. A dry run has no task output, so `--log`
+/// has nothing to shape there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunMode {
+    /// Run the tasks, showing their output as `log` says.
+    Real { log: LogMode },
+    /// `--dry-run`: show what the run would do, without running anything.
+    Dry,
 }
 
 impl RunCommand {
@@ -228,7 +246,8 @@ impl RunCommand {
         let mut iter = self.task_and_args.into_iter();
         let task_specifier = iter.next();
         let additional_args: Vec<Str> = iter.collect();
-        ResolvedRunCommand { task_specifier, flags: self.flags, additional_args }
+        let mode = if self.dry_run { RunMode::Dry } else { RunMode::Real { log: self.log } };
+        ResolvedRunCommand { task_specifier, flags: self.flags, additional_args, mode }
     }
 }
 

@@ -11,7 +11,7 @@ use vt_str::Str;
 use super::{
     CacheHitSource, CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind, split_path,
 };
-use crate::session::event::CacheStatus;
+use crate::session::event::{CacheStatus, RunKind};
 
 /// Describes a single atomic change between two spawn fingerprints.
 ///
@@ -148,15 +148,23 @@ fn format_env_changed_inline(names: &[&Str]) -> Str {
 /// - Cache Miss (with mismatch): Shows "cache miss" with brief reason
 /// - Cache Disabled: Shows "cache disabled" with reason
 ///
+/// In a real run, a hit ends in ", replaying" and a miss in ", executing". A
+/// dry run does neither, so its status has no such suffix.
+///
 /// Note: Returns plain text without styling. The reporter applies colors.
-pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
+pub fn format_cache_status_inline(cache_status: &CacheStatus, run_kind: RunKind) -> Option<Str> {
+    let suffix = |next_step: &str| match run_kind {
+        RunKind::Real => vt_str::format!(", {next_step}"),
+        RunKind::Dry => Str::default(),
+    };
     match cache_status {
         CacheStatus::Hit { source, .. } => {
             // Show "cache hit" indicator when replaying from cache
-            Some(match source {
-                CacheHitSource::Local => Str::from("◉ cache hit, replaying"),
-                CacheHitSource::Remote => Str::from("◉ remote cache hit, replaying"),
-            })
+            let hit = match source {
+                CacheHitSource::Local => "cache hit",
+                CacheHitSource::Remote => "remote cache hit",
+            };
+            Some(vt_str::format!("◉ {hit}{}", suffix("replaying")))
         }
         CacheStatus::Miss(CacheMiss::NotFound) => {
             // No inline message for "not found" case - just show command
@@ -196,10 +204,10 @@ pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
                     vt_str::format!("{mismatch}")
                 }
             };
-            Some(vt_str::format!("○ cache miss: {reason}, executing"))
+            Some(vt_str::format!("○ cache miss: {reason}{}", suffix("executing")))
         }
         CacheStatus::Miss(CacheMiss::RemoteReadFailed(error)) => {
-            Some(vt_str::format!("○ cache miss: {error}, executing"))
+            Some(vt_str::format!("○ cache miss: {error}{}", suffix("executing")))
         }
         CacheStatus::Disabled(_) => Some(Str::from("⊘ cache disabled")),
     }
@@ -260,12 +268,16 @@ mod tests {
             |source| CacheStatus::Hit { replayed_duration: std::time::Duration::ZERO, source };
 
         assert_eq!(
-            format_cache_status_inline(&hit(CacheHitSource::Local)).as_deref(),
+            format_cache_status_inline(&hit(CacheHitSource::Local), RunKind::Real).as_deref(),
             Some("◉ cache hit, replaying")
         );
         assert_eq!(
-            format_cache_status_inline(&hit(CacheHitSource::Remote)).as_deref(),
+            format_cache_status_inline(&hit(CacheHitSource::Remote), RunKind::Real).as_deref(),
             Some("◉ remote cache hit, replaying")
+        );
+        assert_eq!(
+            format_cache_status_inline(&hit(CacheHitSource::Remote), RunKind::Dry).as_deref(),
+            Some("◉ remote cache hit")
         );
     }
 
@@ -286,12 +298,12 @@ mod tests {
         ));
 
         assert_eq!(
-            format_cache_status_inline(&added).as_deref(),
+            format_cache_status_inline(&added, RunKind::Real).as_deref(),
             Some("○ cache miss: env 'PROBE_C' added, executing")
         );
         assert_eq!(
-            format_cache_status_inline(&removed).as_deref(),
-            Some("○ cache miss: env 'PROBE_A' removed, executing")
+            format_cache_status_inline(&removed, RunKind::Dry).as_deref(),
+            Some("○ cache miss: env 'PROBE_A' removed")
         );
     }
 }
