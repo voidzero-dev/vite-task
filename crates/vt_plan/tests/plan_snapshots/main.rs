@@ -281,6 +281,19 @@ fn run_case_inner(
             let mut case_session =
                 Session::init_with(case_envs, Arc::clone(&case_cwd), case_owned_config.as_config())
                     .unwrap();
+            if run_command.is_task_graph_json() {
+                let document = case_session.task_graph_json().await.unwrap();
+                let mut json = redact_snapshot(&document, workspace_root_str);
+                // The schema is copied into the system temp dir; unit tests cover its URL.
+                json["$schema"] = serde_json::Value::from("<schema>");
+                snapshots.check_json_snapshot(
+                    snapshot_base.as_str(),
+                    vt_str::format!("{args_display}").as_str(),
+                    &json,
+                )?;
+                continue;
+            }
+
             let plan_result = case_session.plan_from_cli_run(case_cwd, run_command).await;
 
             let plan = match plan_result {

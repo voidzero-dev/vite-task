@@ -293,7 +293,9 @@ impl<'l> IndexedTaskGraph<'l> {
         Ok(hook.filter(|hook| hook.source == TaskSource::PackageJsonScript))
     }
 
-    const fn package_graph(&self) -> &IndexedPackageGraph {
+    /// The workspace packages, including those without tasks. Reading them loads no config.
+    #[must_use]
+    pub const fn package_graph(&self) -> &IndexedPackageGraph {
         &self.graph.loader().package_graph
     }
 

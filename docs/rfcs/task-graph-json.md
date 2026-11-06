@@ -8,7 +8,7 @@
 vp run --json
 ```
 
-It is the JSON form of the task list `vp run` prints without a task. It runs nothing, and gives the same output from any directory in the workspace.
+It is the JSON form of the task list `vp run` prints without a task, and like that list, it loads every package's `vite.config.*`. It runs nothing, and gives the same output from any directory in the workspace.
 
 The companion RFC, [dry runs and complete miss reasons](./dry-run.md), covers `vp run --dry-run --json <task>`: what a particular run would do. It uses the conventions defined here.
 
@@ -65,7 +65,7 @@ export default defineConfig({
 
 ```json
 {
-  "$schema": "file:///home/me/acme/node_modules/vite-plus/schemas/task-graph.json",
+  "$schema": "file:///tmp/vp-schemas-1000/task-graph_80cde1ad99307ef3eea7a658d7c95f88.json",
   "version": 1,
   "workspaceRoot": "/home/me/acme",
   "packages": {
@@ -111,8 +111,8 @@ vp run --json | jq -r '.packages as $p | .tasks[] | "\($p[.package].name // "")#
 ```ts
 type TaskGraph = {
   /**
-   * `file://` URL of the JSON Schema shipped with the vp that printed this document, so it
-   * describes this output exactly. Its descriptions are the comments here. See `$schema` below.
+   * `file://` URL of the JSON Schema that describes this document. Its descriptions are the
+   * comments here. See `$schema` below.
    */
   $schema: string;
 
@@ -153,7 +153,8 @@ type TaskGraph = {
 
       /**
        * The command as the task defines it: a string, or an array of strings that run one after
-       * another. A `package.json` script is always a string.
+       * another. A single command is always a string, even when the task defines it as a
+       * one-element array.
        */
       command: string | string[];
 
@@ -188,9 +189,11 @@ A path inside the workspace is relative to `workspaceRoot`, with `/` on every pl
 
 ### `$schema`
 
-`$schema` points to a JSON Schema (draft-07) in the vite-plus package that printed the document, so an agent can read what each field means, and an editor shows the descriptions and checks the document when it is opened as JSON. Its value uses a form that VS Code and JetBrains IDEs both read on every platform:
+`$schema` points to the document's JSON Schema (draft-07), so an agent can read what each field means, and an editor shows the descriptions and checks the document when it is opened as JSON. Each time it prints a document, vp writes the schema to a folder in the system temp directory that only the current user can write to, such as `/tmp/vp-schemas-1000`, unless it is already there. The file is named by a hash of its content, such as `task-graph_80cde1ad99307ef3eea7a658d7c95f88.json`, so documents printed by different vp versions point to their own schemas.
 
-- `file://`, then the absolute path with `/` separators, with a `/` before a Windows drive: `file:///home/me/acme/node_modules/vite-plus/schemas/task-graph.json`, `file:///C:/Users/me/acme/node_modules/vite-plus/schemas/task-graph.json`.
+Its value uses a form that VS Code and JetBrains IDEs both read on every platform:
+
+- `file://`, then the absolute path with `/` separators, with a `/` before a Windows drive: `file:///tmp/vp-schemas-1000/task-graph_80cde1ad99307ef3eea7a658d7c95f88.json`, `file:///C:/Users/me/AppData/Local/Temp/vp-schemas/task-graph_80cde1ad99307ef3eea7a658d7c95f88.json`.
 - Not percent-encoded. JetBrains IDEs look the path up as written, so they wouldn't find a space written as `%20`; VS Code reads both.
 
 A plain path wouldn't work on Windows: neither editor reads `C:\Users\…` as a schema location.
@@ -205,7 +208,7 @@ Indented when stdout is a terminal, one line otherwise. Fields appear in the ord
 
 ### Errors
 
-When the workspace can't be loaded (a config error, a cycle), the error goes to stderr as text, nothing is printed to stdout, and the exit code is non-zero.
+When the document can't be produced, such as when a config can't be loaded, or, for a run plan, when the tasks it runs depend on each other in a cycle, the error goes to stderr as text, nothing is printed to stdout, and the exit code is non-zero. The task graph is printed even when `dependsOn` entries form a cycle.
 
 ### Versioning
 

@@ -1,0 +1,22 @@
+[[e2e]]
+name = "indented_in_terminal"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--json",
+  ], redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"' } },
+]
+
+[[e2e]]
+name = "one_line_when_captured"
+steps = [
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--json",
+  ], redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"' } },
+]

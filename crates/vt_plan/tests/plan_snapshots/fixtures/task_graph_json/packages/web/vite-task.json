@@ -1,0 +1,17 @@
+{
+  "tasks": {
+    "build": {
+      "command": ["vite build"],
+      "dependsOn": [{ "task": "build", "from": "dependencies" }]
+    },
+    "deploy": {
+      "command": "wrangler deploy",
+      "cwd": "infra",
+      "dependsOn": ["build"]
+    },
+    "lint": {
+      "command": "oxlint",
+      "cwd": ".."
+    }
+  }
+}

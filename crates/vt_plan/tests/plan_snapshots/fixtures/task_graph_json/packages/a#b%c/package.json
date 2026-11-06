@@ -1,0 +1,6 @@
+{
+  "name": "@test/odd",
+  "scripts": {
+    "x#y": "echo x"
+  }
+}

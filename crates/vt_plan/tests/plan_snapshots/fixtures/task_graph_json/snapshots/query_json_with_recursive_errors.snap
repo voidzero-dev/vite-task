@@ -1,0 +1,5 @@
+error: the argument '--json' cannot be used with one or more of the other specified arguments
+
+Usage: vt run [OPTIONS] [TASK_SPECIFIER] [ADDITIONAL_ARGS]...
+
+For more information, try '--help'.

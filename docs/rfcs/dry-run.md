@@ -140,7 +140,7 @@ vp run --dry-run --json -r build
 
 ```json
 {
-  "$schema": "file:///home/me/acme/node_modules/vite-plus/schemas/run-plan.json",
+  "$schema": "file:///tmp/vp-schemas-1000/run-plan_3b5d5c3712955042212316173ccf37be.json",
   "version": 1,
   "workspaceRoot": "/home/me/acme",
   "plan": {
@@ -273,8 +273,7 @@ Two more combinations:
 ```ts
 type RunPlan = {
   /**
-   * `file://` URL of the JSON Schema shipped with the vp that printed this document, written as
-   * in `vp run --json`.
+   * `file://` URL of the JSON Schema that describes this document, written as in `vp run --json`.
    */
   $schema: string;
 

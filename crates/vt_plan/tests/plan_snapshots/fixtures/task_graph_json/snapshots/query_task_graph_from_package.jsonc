@@ -1,0 +1,74 @@
+// run --json
+{
+  "$schema": "<schema>",
+  "version": 1,
+  "workspaceRoot": "<workspace>",
+  "packages": {
+    ".": {
+      "name": "task-graph-json-test"
+    },
+    "packages/a#b%c": {
+      "name": "@test/odd"
+    },
+    "packages/nameless": {
+      "peerDependencies": [
+        "packages/ui"
+      ]
+    },
+    "packages/ui": {
+      "name": "@test/ui"
+    },
+    "packages/web": {
+      "name": "@test/web",
+      "dependencies": [
+        "packages/ui"
+      ],
+      "devDependencies": [
+        "packages/ui"
+      ]
+    }
+  },
+  "tasks": {
+    "ci": {
+      "package": ".",
+      "name": "ci",
+      "command": [
+        "vt run -r lint",
+        "vt run -r build"
+      ]
+    },
+    "packages/a%23b%25c#x%23y": {
+      "package": "packages/a#b%c",
+      "name": "x#y",
+      "command": "echo x"
+    },
+    "packages/ui#build": {
+      "package": "packages/ui",
+      "name": "build",
+      "command": "tsdown"
+    },
+    "packages/web#build": {
+      "package": "packages/web",
+      "name": "build",
+      "command": "vite build",
+      "dependsOn": [
+        "packages/ui#build"
+      ]
+    },
+    "packages/web#deploy": {
+      "package": "packages/web",
+      "name": "deploy",
+      "cwd": "packages/web/infra",
+      "command": "wrangler deploy",
+      "dependsOn": [
+        "packages/web#build"
+      ]
+    },
+    "packages/web#lint": {
+      "package": "packages/web",
+      "name": "lint",
+      "cwd": "packages",
+      "command": "oxlint"
+    }
+  }
+}

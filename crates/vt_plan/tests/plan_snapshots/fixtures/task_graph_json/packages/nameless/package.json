@@ -1,0 +1,5 @@
+{
+  "peerDependencies": {
+    "@test/ui": "workspace:*"
+  }
+}

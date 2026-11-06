@@ -130,6 +130,10 @@ pub struct RunCommand {
     #[clap(long, exclusive = true)]
     pub(crate) last_details: bool,
 
+    /// Print every package and task in the workspace as JSON, and run nothing.
+    #[clap(long, exclusive = true)]
+    pub(crate) json: bool,
+
     #[clap(
         allow_hyphen_values = true,
         value_names = ["TASK_SPECIFIER", "ADDITIONAL_ARGS"],
@@ -165,6 +169,7 @@ impl Command {
     pub(crate) fn into_resolved(self) -> ResolvedCommand {
         match self {
             Self::Run(run) if run.last_details => ResolvedCommand::RunLastDetails,
+            Self::Run(run) if run.json => ResolvedCommand::TaskGraphJson,
             Self::Run(run) => ResolvedCommand::Run(run.into_resolved()),
             Self::Cache { subcmd } => ResolvedCommand::Cache { subcmd },
         }
@@ -186,6 +191,8 @@ pub enum ResolvedCommand {
     Run(ResolvedRunCommand),
     /// Display the saved detailed summary of the last run (`--last-details`).
     RunLastDetails,
+    /// Print the task graph as JSON (`--json` without a task).
+    TaskGraphJson,
     /// Manage the task cache.
     Cache { subcmd: CacheSubcommand },
 }
@@ -206,6 +213,12 @@ pub struct ResolvedRunCommand {
 }
 
 impl RunCommand {
+    /// Whether `--json` is set, asking for the task graph as JSON instead of a run.
+    #[must_use]
+    pub const fn is_task_graph_json(&self) -> bool {
+        self.json
+    }
+
     /// Convert to the resolved run command, stripping the `last_details` flag.
     ///
     /// Splits `task_and_args` into `task_specifier` (the first element) and
