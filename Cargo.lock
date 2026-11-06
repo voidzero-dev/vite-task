@@ -5124,6 +5124,7 @@ dependencies = [
 name = "vt_materialized_artifact"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "tempfile",
  "vt_materialized_artifact_macros",
 ]
