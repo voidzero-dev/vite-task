@@ -157,9 +157,9 @@ pub enum CacheMiss {
 #[derive(Debug, Clone)]
 pub struct Comparison {
     /// Every difference found, sorted by kind, then by name or path, never
-    /// empty. Command, config and env changes are complete. The file check
-    /// stops at the first changed file it finds, so at most one file is
-    /// listed.
+    /// empty. Command, config and env changes are complete. Without `-v`, the
+    /// file check stops at the first changed file it finds, so at most one
+    /// file is listed.
     pub changes: Vec<Change>,
 }
 
@@ -237,6 +237,15 @@ impl Change {
 enum OrderName<'a> {
     Exact(&'a str),
     Env(EnvName<&'a str>),
+}
+
+/// How far a cache lookup checks a cached run's files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileCheck {
+    /// Stop at the first changed file, which is enough to know it's a miss.
+    First,
+    /// Check every file, so the miss lists every change (`vp run -v`).
+    All,
 }
 
 /// Where the cache records an env var.
@@ -428,6 +437,8 @@ struct Validation {
     globbed_inputs: Arc<BTreeMap<RelativePathBuf, u64>>,
     input_negative_globs: Arc<PathGlobSet<'static>>,
     workspace_root: Arc<AbsolutePath>,
+    /// How many changed files to look for.
+    file_check: FileCheck,
 }
 
 impl Validation {
@@ -438,6 +449,7 @@ impl Validation {
             &self.globbed_inputs,
             &self.input_negative_globs,
             &self.workspace_root,
+            self.file_check,
         )
     }
 }
@@ -499,8 +511,10 @@ impl ExecutionCache {
     /// task doesn't start, so nothing is reported.
     ///
     /// A dry run (`RunKind::Dry`) writes nothing: a local hit isn't recorded,
-    /// and a remote hit's archive isn't downloaded.
+    /// and a remote hit's archive isn't downloaded. `file_check` says how many
+    /// changed files a miss lists.
     #[tracing::instrument(level = "debug", skip_all)]
+    #[expect(clippy::too_many_arguments, reason = "each argument is part of one lookup")]
     pub async fn try_hit(
         &self,
         cache_metadata: &CacheMetadata,
@@ -508,6 +522,7 @@ impl ExecutionCache {
         workspace_root: &Arc<AbsolutePath>,
         cache_dir: &AbsolutePath,
         run_kind: RunKind,
+        file_check: FileCheck,
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Option<Result<CacheHit, CacheMiss>>> {
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
@@ -519,6 +534,7 @@ impl ExecutionCache {
                 PathGlobSet::new(&cache_metadata.input_config.negative_globs)?.into_owned(),
             ),
             workspace_root: Arc::clone(workspace_root),
+            file_check,
         };
 
         let start = Instant::now();

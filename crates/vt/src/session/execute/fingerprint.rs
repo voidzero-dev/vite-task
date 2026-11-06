@@ -25,7 +25,7 @@ use wincode::{SchemaRead, SchemaWrite};
 use super::rebuildable::Rebuildable;
 use crate::{
     collections::HashMap,
-    session::cache::{Change, EnvMismatch, EnvSource, InputChangeKind},
+    session::cache::{Change, EnvMismatch, EnvSource, FileCheck, InputChangeKind},
 };
 
 #[derive(
@@ -206,76 +206,93 @@ impl PostRunFingerprint {
         Ok(Self { inferred_inputs, tracked_envs, tracked_env_queries })
     }
 
-    /// The first inferred input that differs from the filesystem now, if any.
-    /// The inputs are checked in parallel, so when several changed, which one
-    /// is found isn't defined. `input_negative_globs` are the task's input
-    /// negative globs, part of the cache key and so the same as when the
-    /// fingerprint was created.
+    /// What checking the inferred inputs against the filesystem found, one
+    /// result per change, or per input or folder entry that can't be checked:
+    /// with [`FileCheck::First`], the first one found, and with
+    /// [`FileCheck::All`], every one, listing every entry added to or removed
+    /// from a listed folder. The inputs are checked in parallel, so when
+    /// several changed, which one is found first isn't defined. `input_negative_globs` are the
+    /// task's input negative globs, part of the cache key and so the same as
+    /// when the fingerprint was created.
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn first_input_change(
+    pub fn input_changes(
         &self,
         base_dir: &AbsolutePath,
         input_negative_globs: &PathGlobSet<'_>,
-    ) -> anyhow::Result<Option<Change>> {
+        file_check: FileCheck,
+    ) -> Vec<anyhow::Result<Change>> {
         let start = Instant::now();
         // As in `create`, the per-input events name this span as their parent.
         let span = tracing::Span::current();
-        let input_change =
-            self.inferred_inputs.par_iter().find_map_any(|(input_relative_path, input)| {
-                let InferredInput { fingerprint: path_fingerprint, may_be_missing } = input;
-                let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
-                let path_read = PathRead {
-                    read_dir_entries: matches!(path_fingerprint, PathFingerprint::Folder(Some(_))),
-                };
-                let mut current_path_fingerprint =
-                    match fingerprint_path(&input_full_path, path_read) {
-                        Ok(ok) => ok,
-                        Err(err) => return Some(Err(err)),
-                    };
-                // The ignored entries may be missing or present, so the current
-                // listing records and leaves out the same names, and the entries
-                // the input negative globs exclude.
-                if let (
-                    PathFingerprint::Folder(Some(stored)),
-                    PathFingerprint::Folder(Some(current)),
-                ) = (path_fingerprint, &mut current_path_fingerprint)
-                {
-                    current.ignored_entries.clone_from(&stored.ignored_entries);
-                    leave_out_excluded_entries(current, input_relative_path, input_negative_globs);
-                }
-                let unchanged = path_fingerprint == &current_path_fingerprint
-                    || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound);
-                tracing::trace!(
-                    parent: &span,
-                    path = input_relative_path.as_str(),
-                    unchanged,
-                    "validated an inferred input"
-                );
-                if unchanged {
-                    None
-                } else {
-                    let (kind, entry_name) =
-                        determine_change_kind(path_fingerprint, &current_path_fingerprint);
+        // At most `limit` changes of one input.
+        let check_input = |(input_relative_path, input): (&RelativePathBuf, &InferredInput),
+                           limit: usize|
+         -> Vec<anyhow::Result<Change>> {
+            let InferredInput { fingerprint: path_fingerprint, may_be_missing } = input;
+            let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
+            let path_read = PathRead {
+                read_dir_entries: matches!(path_fingerprint, PathFingerprint::Folder(Some(_))),
+            };
+            let mut current_path_fingerprint = match fingerprint_path(&input_full_path, path_read) {
+                Ok(ok) => ok,
+                Err(err) => return vec![Err(err)],
+            };
+            // The ignored entries may be missing or present, so the current
+            // listing records and leaves out the same names, and the entries
+            // the input negative globs exclude.
+            if let (PathFingerprint::Folder(Some(stored)), PathFingerprint::Folder(Some(current))) =
+                (path_fingerprint, &mut current_path_fingerprint)
+            {
+                current.ignored_entries.clone_from(&stored.ignored_entries);
+                leave_out_excluded_entries(current, input_relative_path, input_negative_globs);
+            }
+            let unchanged = path_fingerprint == &current_path_fingerprint
+                || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound);
+            tracing::trace!(
+                parent: &span,
+                path = input_relative_path.as_str(),
+                unchanged,
+                "validated an inferred input"
+            );
+            if unchanged {
+                return Vec::new();
+            }
+            determine_change_kinds(path_fingerprint, &current_path_fingerprint)
+                .into_iter()
+                .take(limit)
+                .map(|(kind, entry_name)| {
                     let path = if let Some(name) = entry_name {
                         // For folder changes, build `dir/entry` path
-                        let entry = match RelativePathBuf::new(name.as_str()) {
-                            Ok(p) => p,
-                            Err(e) => return Some(Err(e.into())),
-                        };
-                        input_relative_path.as_relative_path().join(entry)
+                        input_relative_path
+                            .as_relative_path()
+                            .join(RelativePathBuf::new(name.as_str())?)
                     } else {
                         input_relative_path.clone()
                     };
-                    Some(Ok(Change::File { kind, path }))
-                }
-            });
+                    Ok(Change::File { kind, path })
+                })
+                .collect()
+        };
+        let changes: Vec<_> = match file_check {
+            FileCheck::First => self
+                .inferred_inputs
+                .par_iter()
+                .find_map_any(|input| check_input(input, 1).pop())
+                .into_iter()
+                .collect(),
+            FileCheck::All => self
+                .inferred_inputs
+                .par_iter()
+                .flat_map_iter(|input| check_input(input, usize::MAX))
+                .collect(),
+        };
         tracing::debug!(
             inputs = self.inferred_inputs.len(),
-            valid = input_change.is_none(),
+            valid = changes.is_empty(),
             elapsed = ?start.elapsed(),
             "validated the inferred inputs"
         );
-        input_change.transpose()
+        changes
     }
 
     /// Every tracked env var and tracked query match that differs from the
@@ -398,40 +415,43 @@ fn env_query_mismatches(
     mismatches
 }
 
-/// Determine the kind of change between two differing path fingerprints.
+/// Determine the kinds of change between two differing path fingerprints.
 /// Caller guarantees `stored != current`.
 ///
-/// Returns `(kind, entry_name)` where `entry_name` is `Some` for folder changes
-/// when a specific added/removed entry can be identified.
-fn determine_change_kind<'a>(
+/// Returns `(kind, entry_name)` pairs, never empty, where `entry_name` is
+/// `Some` for folder changes when a specific added or removed entry can be
+/// identified. A folder's changes are in entry-name order.
+fn determine_change_kinds<'a>(
     stored: &'a PathFingerprint,
     current: &'a PathFingerprint,
-) -> (InputChangeKind, Option<&'a Str>) {
+) -> Vec<(InputChangeKind, Option<&'a Str>)> {
     match (stored, current) {
-        (PathFingerprint::NotFound, _) => (InputChangeKind::Added, None),
-        (_, PathFingerprint::NotFound) => (InputChangeKind::Removed, None),
+        (PathFingerprint::NotFound, _) => vec![(InputChangeKind::Added, None)],
+        (_, PathFingerprint::NotFound) => vec![(InputChangeKind::Removed, None)],
         (PathFingerprint::FileContentHash(_), PathFingerprint::FileContentHash(_)) => {
-            (InputChangeKind::ContentModified, None)
+            vec![(InputChangeKind::ContentModified, None)]
         }
         (PathFingerprint::Folder(old), PathFingerprint::Folder(new)) => {
-            determine_folder_change_kind(old.as_ref(), new.as_ref())
+            determine_folder_change_kinds(old.as_ref(), new.as_ref())
         }
         // Type changed (file ↔ folder)
-        _ => (InputChangeKind::Added, None),
+        _ => vec![(InputChangeKind::Added, None)],
     }
 }
 
-/// Determine whether a folder change is an addition or removal by comparing entries.
-/// Both maps are `BTreeMap` so we iterate them in sorted lockstep.
-/// Returns the specific entry name that was added or removed, if identifiable.
-fn determine_folder_change_kind<'a>(
+/// Determine which entries of a folder were added or removed by comparing
+/// entries. Both maps are `BTreeMap` so we iterate them in sorted lockstep.
+/// Returns each added or removed entry's name, or the folder itself as added
+/// if no entry can be identified.
+fn determine_folder_change_kinds<'a>(
     old: Option<&'a DirListing>,
     new: Option<&'a DirListing>,
-) -> (InputChangeKind, Option<&'a Str>) {
+) -> Vec<(InputChangeKind, Option<&'a Str>)> {
     let (Some(old_listing), Some(new_listing)) = (old, new) else {
-        return (InputChangeKind::Added, None);
+        return vec![(InputChangeKind::Added, None)];
     };
 
+    let mut changes = Vec::new();
     let mut old_iter = old_listing.entries.iter();
     let mut new_iter = new_listing.entries.iter();
     let mut o = old_iter.next();
@@ -439,22 +459,38 @@ fn determine_folder_change_kind<'a>(
 
     loop {
         match (o, n) {
-            (None, None) => return (InputChangeKind::Added, None),
-            (Some((name, _)), None) => return (InputChangeKind::Removed, Some(name)),
-            (None, Some((name, _))) => return (InputChangeKind::Added, Some(name)),
+            (None, None) => break,
+            (Some((name, _)), None) => {
+                changes.push((InputChangeKind::Removed, Some(name)));
+                o = old_iter.next();
+            }
+            (None, Some((name, _))) => {
+                changes.push((InputChangeKind::Added, Some(name)));
+                n = new_iter.next();
+            }
             (Some((ok, ov)), Some((nk, nv))) => match ok.cmp(nk) {
                 std::cmp::Ordering::Equal => {
                     if ov != nv {
-                        return (InputChangeKind::Added, Some(ok));
+                        changes.push((InputChangeKind::Added, Some(ok)));
                     }
                     o = old_iter.next();
                     n = new_iter.next();
                 }
-                std::cmp::Ordering::Less => return (InputChangeKind::Removed, Some(ok)),
-                std::cmp::Ordering::Greater => return (InputChangeKind::Added, Some(nk)),
+                std::cmp::Ordering::Less => {
+                    changes.push((InputChangeKind::Removed, Some(ok)));
+                    o = old_iter.next();
+                }
+                std::cmp::Ordering::Greater => {
+                    changes.push((InputChangeKind::Added, Some(nk)));
+                    n = new_iter.next();
+                }
             },
         }
     }
+    if changes.is_empty() {
+        changes.push((InputChangeKind::Added, None));
+    }
+    changes
 }
 
 /// The names of the entries of the folder `dir` that `ignored_inputs`,
@@ -678,6 +714,29 @@ mod tests {
         OsString::from_wide(&[0xD800])
     }
 
+    /// A listed folder reports every entry added or removed, in name order.
+    #[test]
+    fn folder_changes_name_every_added_and_removed_entry() {
+        let listing = |names: &[&str]| DirListing {
+            entries: names.iter().map(|name| (Str::from(*name), DirEntryKind::File)).collect(),
+            ignored_entries: BTreeSet::new(),
+        };
+        let (old, new) = (listing(&["a", "b"]), listing(&["b", "c", "d"]));
+        let changes: Vec<(InputChangeKind, Option<&str>)> =
+            determine_folder_change_kinds(Some(&old), Some(&new))
+                .into_iter()
+                .map(|(kind, name)| (kind, name.map(Str::as_str)))
+                .collect();
+        assert_eq!(
+            changes,
+            [
+                (InputChangeKind::Removed, Some("a")),
+                (InputChangeKind::Added, Some("c")),
+                (InputChangeKind::Added, Some("d")),
+            ]
+        );
+    }
+
     #[test]
     fn validate_errors_on_current_non_utf8_tracked_env_value() {
         let mut tracked_envs = BTreeMap::new();
@@ -828,7 +887,10 @@ mod tests {
         let written = create(FxHashSet::from_iter([path]));
         let read_only = create(FxHashSet::default());
         let validate = |fingerprint: &PostRunFingerprint| {
-            fingerprint.first_input_change(&workspace_root, &PathGlobSet::default()).unwrap()
+            fingerprint
+                .input_changes(&workspace_root, &PathGlobSet::default(), FileCheck::First)
+                .pop()
+                .map(Result::unwrap)
         };
 
         std::fs::remove_file(full_path.as_path()).unwrap();
@@ -1131,8 +1193,12 @@ mod tests {
             }))
         );
 
-        let validate =
-            || fingerprint.first_input_change(&workspace_root, &PathGlobSet::default()).unwrap();
+        let validate = || {
+            fingerprint
+                .input_changes(&workspace_root, &PathGlobSet::default(), FileCheck::First)
+                .pop()
+                .map(Result::unwrap)
+        };
         assert!(validate().is_none());
         std::fs::remove_dir_all(workspace_root.join("pkg/gen").as_path()).unwrap();
         std::fs::remove_file(workspace_root.join("pkg/out.txt").as_path()).unwrap();
@@ -1186,8 +1252,12 @@ mod tests {
             }))
         );
 
-        let validate =
-            || fingerprint.first_input_change(&workspace_root, &input_negative_globs).unwrap();
+        let validate = || {
+            fingerprint
+                .input_changes(&workspace_root, &input_negative_globs, FileCheck::First)
+                .pop()
+                .map(Result::unwrap)
+        };
         std::fs::create_dir(workspace_root.join("pkg/out").as_path()).unwrap();
         std::fs::create_dir(workspace_root.join("pkg/.cache").as_path()).unwrap();
         std::fs::remove_file(workspace_root.join("pkg/tool.log").as_path()).unwrap();

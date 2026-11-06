@@ -1,0 +1,54 @@
+[[e2e]]
+name = "verbose_lists_every_changed_input"
+comment = """
+Without `-v`, the file check stops at the first changed file it finds, which can be any of them. With `-v`, every input is checked, and every change is listed in path order: in dry runs, in real runs, and in `--last-details` afterwards.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "read",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "a.txt",
+    "changed",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "b.txt",
+    "changed",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "c.txt",
+    "changed",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "read",
+  ], comment = "One changed file, whichever the check finds first.", redact = { "'[abc]\\.txt' modified" = "'<one of a, b, c>.txt' modified" } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "-v",
+    "read",
+  ], comment = "All three, in path order." },
+  { argv = [
+    "vt",
+    "run",
+    "-v",
+    "read",
+  ], comment = "A real run checks and lists the same." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The saved summary lists them too." },
+]
