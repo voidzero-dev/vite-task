@@ -111,7 +111,8 @@ pub struct CommandStep {
 
     /// Whether the cache would be used. Absent for a built-in such as `echo`.
     ///
-    /// The check looks at the files as they are now.
+    /// The check looks at the files as they are now. `unknown` marks a step whose files an
+    /// earlier step may change before it starts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, schemars(with = "Cache"))]
     pub cache: Option<Cache>,
@@ -127,6 +128,10 @@ pub enum Cache {
 
     /// Differs from `baseline`, so it would run. `changes` lists the differences.
     Changed(Changed),
+
+    /// Can't be predicted yet: a step that runs before it would write files first, by running
+    /// or by restoring a hit's outputs. `changes` shows the check of the files as they are now.
+    Unknown(Changed),
 
     /// Would run: there is no cached run to compare with, as on a first run or after
     /// `vp cache clean`. Arguments given after the task name count, so a new combination of
@@ -151,6 +156,13 @@ pub enum Cache {
 pub struct Hit {
     /// The cached run the step matches.
     pub baseline: Baseline,
+
+    /// The cached run has output files, which a real run restores. Not printed: it only
+    /// decides which later steps are `unknown`. It comes from the cache entry, not from a list
+    /// of the files: a remote hit's archive isn't downloaded, so its files can't be listed, and
+    /// listing a local one decompresses the whole archive.
+    #[serde(skip)]
+    pub restores_outputs: bool,
 }
 
 /// A step that differs from its cached run.
@@ -166,6 +178,8 @@ pub struct Changed {
 
     /// What differs from the cached run, sorted by kind in the order listed here, then by name
     /// or path. Undoing all of them would make the step a hit, unless `changesPartial` is set.
+    /// Present for `changed`, and for `unknown` when today's check found differences.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub changes: Vec<Change>,
 
     /// Other files may have changed too: without `-v`, the file check stops at the first
