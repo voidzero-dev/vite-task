@@ -1,15 +1,16 @@
 //! The `vt_client_napi` cdylib is embedded into the `vp` binary and
 //! materialized to disk on first use so tools can `require()` it at runtime.
 
-use std::{env, fs, sync::LazyLock};
+use std::sync::LazyLock;
 
-use vt_materialized_artifact::artifact;
+use vt_materialized_artifact::{artifact, user_temp_dir};
 use vt_path::{AbsolutePath, AbsolutePathBuf};
 
 /// Path to the materialized `vt_client_napi` `.node` addon.
 ///
-/// The file is written to a process-wide temp directory on first call and
-/// reused on every subsequent call (content-addressed filename; no re-writes).
+/// The file is written to the user's own folder in the system temp dir on first
+/// call and reused on every subsequent call (content-addressed filename; no
+/// re-writes).
 ///
 /// # Panics
 ///
@@ -19,12 +20,13 @@ use vt_path::{AbsolutePath, AbsolutePathBuf};
 #[must_use]
 pub fn napi_client_path() -> &'static AbsolutePath {
     static PATH: LazyLock<AbsolutePathBuf> = LazyLock::new(|| {
-        let dir = env::temp_dir().join("vt_client_napi");
-        let _ = fs::create_dir(&dir);
-        let path = artifact!("vt_client_napi", "CARGO_CDYLIB_FILE_VT_CLIENT_NAPI")
-            .materialize()
-            .suffix(".node")
-            .at(&dir)
+        let path = user_temp_dir("vt_client_napi")
+            .and_then(|dir| {
+                artifact!("vt_client_napi", "CARGO_CDYLIB_FILE_VT_CLIENT_NAPI")
+                    .materialize()
+                    .suffix(".node")
+                    .at(&dir)
+            })
             .expect("materialize vt_client_napi");
         AbsolutePathBuf::new(path).expect("system temp dir yields an absolute path")
     });

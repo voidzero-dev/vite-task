@@ -9,7 +9,8 @@
 //! the value-add over a bare `include_bytes!`.
 //!
 //! Materialized files are named `{name}_{hash}{suffix}` in the caller-chosen
-//! directory. The hash (computed at macro-expansion time by [`artifact!`])
+//! directory, normally one from [`user_temp_dir`], which no other user can
+//! write to. The hash (computed at macro-expansion time by [`artifact!`])
 //! gives three properties without any coordination between processes:
 //!
 //! - **No repeated writes.** [`Materialize::at`] returns the existing path if
@@ -22,10 +23,65 @@
 //!   without overwriting each other.
 
 use std::{
-    fs,
+    env, fs,
     io::{self, Write},
     path::{Path, PathBuf},
 };
+
+/// A folder named after `name` in the system temp dir that only the current
+/// user can write to, for materializing artifacts. It's created if missing.
+///
+/// - On Unix, it's `{temp}/{name}-{uid}`, created with mode `0o700`, since the
+///   temp dir can be shared by every user (`/tmp` on Linux). An existing path
+///   must be a directory, not a symlink, owned by the current user, and not
+///   writable by anyone else; otherwise this returns an error, so another user
+///   can't plant files there.
+/// - On Windows, it's `{temp}\{name}`: the temp dir is already the user's own.
+///
+/// # Errors
+///
+/// Returns an error if the folder can't be created, or, on Unix, if the
+/// existing path isn't a directory only the current user can write to.
+pub fn user_temp_dir(name: &str) -> io::Result<PathBuf> {
+    user_dir_in(&env::temp_dir(), name)
+}
+
+#[cfg(unix)]
+fn user_dir_in(temp_dir: &Path, name: &str) -> io::Result<PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+
+    let uid = current_uid();
+    let dir = temp_dir.join(format!("{name}-{uid}"));
+    match fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Err(err) if err.kind() != io::ErrorKind::AlreadyExists => return Err(err),
+        _ => {}
+    }
+    // `symlink_metadata` doesn't follow a symlink, so one planted by another
+    // user fails the `is_dir` check instead of redirecting the files.
+    let metadata = fs::symlink_metadata(&dir)?;
+    if !metadata.is_dir() || metadata.uid() != uid || metadata.permissions().mode() & 0o022 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} isn't a directory that only the current user can write to", dir.display()),
+        ));
+    }
+    Ok(dir)
+}
+
+#[cfg(unix)]
+fn current_uid() -> libc::uid_t {
+    // SAFETY: `geteuid` has no preconditions and always succeeds.
+    unsafe { libc::geteuid() }
+}
+
+#[cfg(windows)]
+fn user_dir_in(temp_dir: &Path, name: &str) -> io::Result<PathBuf> {
+    let dir = temp_dir.join(name);
+    match fs::create_dir(&dir) {
+        Err(err) if err.kind() != io::ErrorKind::AlreadyExists => Err(err),
+        _ => Ok(dir),
+    }
+}
 
 /// A file embedded into the executable at compile time.
 ///
@@ -89,7 +145,8 @@ impl Materialize<'_> {
     }
 
     /// Mark the materialized file as executable (`0o755` on Unix; no-op on
-    /// Windows where the filesystem has no executable bit).
+    /// Windows where the filesystem has no executable bit). Other files get
+    /// the default mode for new temp files, `0o600`.
     #[cfg_attr(not(unix), expect(unused_mut, reason = "executable is Unix-only"))]
     pub const fn executable(mut self) -> Self {
         #[cfg(unix)]
@@ -100,16 +157,16 @@ impl Materialize<'_> {
     }
 
     /// Materialize the artifact in `dir` under a content-addressed filename,
-    /// writing it if missing. On Unix, newly created files get `0o755` when
-    /// [`Materialize::executable`] was called and `0o644` otherwise, and an
-    /// existing file's mode is reconciled if it drifted.
+    /// writing it if missing.
     ///
-    /// Returns the final path. If the target already exists and its mode
-    /// already matches, no I/O beyond the stat is performed.
+    /// Returns the final path. If the target already exists, no I/O beyond the
+    /// stat is performed: only the current user can write to `dir`, so the file
+    /// is the one an earlier call wrote.
     ///
     /// # Preconditions
     ///
-    /// `dir` must already exist — this method does not create it.
+    /// `dir` must already exist and be writable only by the current user, as
+    /// [`user_temp_dir`] ensures — this method does not create it.
     ///
     /// # Errors
     ///
@@ -121,33 +178,11 @@ impl Materialize<'_> {
         let path =
             dir.join(format!("{}_{}{}", self.artifact.name, self.artifact.hash, self.suffix));
 
-        #[cfg(unix)]
-        let want_mode: u32 = if self.executable { 0o755 } else { 0o644 };
-
-        // Fast path: one stat tells us both whether the file exists and,
-        // on Unix, what its permission bits are. The content is assumed
-        // correct because the hash is in the filename, so there is nothing
-        // else to verify.
-        match fs::metadata(&path) {
-            #[cfg(unix)]
-            Ok(meta) => {
-                use std::os::unix::fs::PermissionsExt;
-                // Reconcile a drifted mode (e.g. someone chmod'd it away)
-                // but skip the syscall when it already matches.
-                if meta.permissions().mode() & 0o777 != want_mode {
-                    fs::set_permissions(&path, fs::Permissions::from_mode(want_mode))?;
-                }
-                return Ok(path);
-            }
-            // On non-Unix there is no mode to reconcile; existence alone is
-            // enough to declare success.
-            #[cfg(not(unix))]
-            Ok(_) => return Ok(path),
-            // Not found: fall through to the create-and-rename path.
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            // Any other stat failure (permission denied, I/O error, etc.)
-            // propagates — we can't reason about what's on disk.
-            Err(err) => return Err(err),
+        // Fast path: the content is assumed correct because the hash is in the
+        // filename, so existence is all there is to check. Any stat failure
+        // other than not-found (permission denied, I/O error, etc.) propagates.
+        if fs::exists(&path)? {
+            return Ok(path);
         }
 
         // Slow path: write to a unique temp file in the same directory, then
@@ -155,17 +190,16 @@ impl Materialize<'_> {
         // system temp) so the final rename stays within one filesystem — cross-
         // filesystem rename isn't atomic. `NamedTempFile`'s `Drop` removes the
         // temp on any early return, so we never leak partial files on error.
+        #[cfg_attr(not(unix), expect(unused_mut, reason = "only Unix sets the mode"))]
+        let mut builder = tempfile::Builder::new();
         #[cfg(unix)]
-        let mut tmp = {
+        if self.executable {
             use std::os::unix::fs::PermissionsExt;
             // `Builder::permissions` sets the mode at open(2) time, so there's
-            // no window where the temp exists with the wrong bits.
-            tempfile::Builder::new()
-                .permissions(fs::Permissions::from_mode(want_mode))
-                .tempfile_in(dir)?
-        };
-        #[cfg(not(unix))]
-        let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+            // no window where the temp exists without the executable bit.
+            builder.permissions(fs::Permissions::from_mode(0o755));
+        }
+        let mut tmp = builder.tempfile_in(dir)?;
         tmp.as_file_mut().write_all(self.artifact.content)?;
 
         // `persist_noclobber` (link+unlink on Unix, MoveFileExW without
@@ -181,5 +215,48 @@ impl Materialize<'_> {
             }
         }
         Ok(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_dir_is_created_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = user_dir_in(temp.path(), "artifacts").unwrap();
+        assert_eq!(dir.parent(), Some(temp.path()));
+        assert!(dir.is_dir());
+        assert_eq!(user_dir_in(temp.path(), "artifacts").unwrap(), dir);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn user_dir_rejects_a_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let link = temp.path().join(format!("artifacts-{}", current_uid()));
+        std::os::unix::fs::symlink(elsewhere.path(), link).unwrap();
+        let err = user_dir_in(temp.path(), "artifacts").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn user_dir_rejects_a_dir_others_can_write_to() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join(format!("artifacts-{}", current_uid()));
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o777)).unwrap();
+        let err = user_dir_in(temp.path(), "artifacts").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
     }
 }
