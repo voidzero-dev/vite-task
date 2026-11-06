@@ -22,6 +22,14 @@ steps = [
     "run",
     "deploy",
   ], comment = "`dependsOn` reaches @test/broken" },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--json",
+  ], comment = "`--json` loads every config, as listing the tasks does" },
 ]
 
 [[e2e]]

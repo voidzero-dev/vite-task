@@ -2,10 +2,18 @@ mod cache;
 mod event;
 mod execute;
 pub(crate) mod reporter;
+mod task_graph_json;
 
 // Re-export types that are part of the public API
-use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, rc::Rc, sync::Arc};
+use std::{
+    ffi::OsStr,
+    fmt::Debug,
+    io::{IsTerminal, Write as _},
+    rc::Rc,
+    sync::Arc,
+};
 
+use anyhow::Context as _;
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
 use clap::Parser as _;
@@ -129,11 +137,11 @@ impl vt_plan::PlanRequestParser for PlanRequestParser<'_> {
         match self.command_handler.handle_command(command).await? {
             HandledCommand::Synthesized(synthetic) => Ok(Some(PlanRequest::Synthetic(synthetic))),
             HandledCommand::ViteTaskCommand(cli_command) => match cli_command.into_resolved() {
-                ResolvedCommand::Cache { .. } | ResolvedCommand::RunLastDetails => {
-                    Ok(Some(PlanRequest::Synthetic(
-                        command.to_synthetic_plan_request(UserCacheConfig::disabled()),
-                    )))
-                }
+                ResolvedCommand::Cache { .. }
+                | ResolvedCommand::RunLastDetails
+                | ResolvedCommand::TaskGraphJson => Ok(Some(PlanRequest::Synthetic(
+                    command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                ))),
                 ResolvedCommand::Run(run_command) => {
                     match run_command.into_query_plan_request(&command.cwd) {
                         Ok((query_plan_request, _)) => {
@@ -288,10 +296,12 @@ impl<'a> Session<'a> {
     /// # Panics
     ///
     /// Panics if parsing a hardcoded bare `RunCommand` fails (should never happen).
+    #[expect(clippy::too_many_lines, reason = "dispatches every command, and plans and runs `run`")]
     async fn main_inner(&mut self, command: Command) -> Result<(), SessionError> {
         match command.into_resolved() {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             ResolvedCommand::RunLastDetails => self.show_last_run_details(),
+            ResolvedCommand::TaskGraphJson => self.print_task_graph_json().await,
             ResolvedCommand::Run(run_command) => {
                 let is_interactive =
                     std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
@@ -766,6 +776,38 @@ impl<'a> Session<'a> {
                 Ok(ExitStatus::FAILURE)
             }
         }
+    }
+
+    /// The document `vp run --json` prints: every package and task in the workspace.
+    ///
+    /// Like listing the tasks, this loads every package's config. It also copies the JSON
+    /// Schema that the document's `$schema` points to into the system temp dir.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a package's config can't be loaded, a `dependsOn` entry names
+    /// a task that doesn't exist, or the schema can't be written.
+    pub async fn task_graph_json(&self) -> anyhow::Result<task_graph_json::TaskGraph> {
+        let task_graph = self.task_graph().await?;
+        let schema = task_graph_json::schema_url()
+            .context("Failed to write the JSON Schema that `$schema` points to")?;
+        Ok(task_graph_json::build(task_graph, &self.workspace_path, schema).await?)
+    }
+
+    /// Prints the task graph as JSON: indented in a terminal, on one line otherwise.
+    async fn print_task_graph_json(&self) -> Result<(), SessionError> {
+        let document = self.task_graph_json().await?;
+        let mut stdout = std::io::stdout().lock();
+        // Serialize fully before writing, so an error leaves stdout empty.
+        let mut json = if stdout.is_terminal() {
+            serde_json::to_vec_pretty(&document)
+        } else {
+            serde_json::to_vec(&document)
+        }?;
+        json.push(b'\n');
+        stdout.write_all(&json)?;
+        stdout.flush()?;
+        Ok(())
     }
 
     /// Plans execution from a CLI run command.

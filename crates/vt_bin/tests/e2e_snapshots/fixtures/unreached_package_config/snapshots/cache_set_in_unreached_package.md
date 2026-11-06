@@ -38,3 +38,14 @@ error: Failed to load task graph
 error: Failed to load task graph
 * `cache` can only be set in the workspace root config, but found in <workspace>/packages/broken
 ```
+
+## `vtt pipe-stdout -- vt run --json`
+
+`--json` loads every config, as listing the tasks does
+
+**Exit code:** 1
+
+```
+error: `cache` can only be set in the workspace root config, but found in <workspace>/packages/broken
+--- stdout ---
+```
