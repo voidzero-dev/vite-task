@@ -100,7 +100,7 @@
           "type": "string"
         },
         "cache": {
-          "description": "Whether the cache would be used. Absent for a built-in such as `echo`.\n\nThe check looks at the files as they are now.",
+          "description": "Whether the cache would be used. Absent for a built-in such as `echo`.\n\nThe check looks at the files as they are now. `unknown` marks a step whose files an earlier step may change before it starts.",
           "allOf": [
             {
               "$ref": "#/definitions/Cache"
@@ -140,6 +140,24 @@
             "status": {
               "type": "string",
               "const": "changed"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "allOf": [
+            {
+              "$ref": "#/definitions/Changed"
+            }
+          ]
+        },
+        {
+          "description": "Can't be predicted yet, because a step it waits on would write files before it starts, by running or by being a hit that restores outputs. A step waits on the earlier steps of its task, on the tasks in its `dependsOn`, and, in a nested plan, on the steps before the enclosing step. Only a step that would otherwise be `hit` or `changed` can be `unknown`, and `changes` and `changesPartial` still show today's check.",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "unknown"
             }
           },
           "required": [
@@ -393,7 +411,7 @@
           ]
         },
         "changes": {
-          "description": "Everything that differs from `baseline`, in the order the kinds are listed here, then by name or path. Undoing all of them would make the step a hit.",
+          "description": "Everything that differs from `baseline`, in the order the kinds are listed here, then by name or path. Undoing all of them would make the step a hit. Present for `changed`, and for `unknown` when today's check found differences.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/Change"
@@ -406,8 +424,7 @@
         }
       },
       "required": [
-        "baseline",
-        "changes"
+        "baseline"
       ]
     },
     "NestedStep": {

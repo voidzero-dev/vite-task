@@ -152,3 +152,77 @@ steps = [
     "nested",
   ], redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>' } },
 ]
+
+[[e2e]]
+name = "unknown"
+comment = """
+A step that would be a hit or changed is `unknown` when a step it waits on would write files first: by running, or by being a hit that restores outputs. The text output doesn't show it.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "after-emit",
+  ],
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "after-emit",
+  ], comment = "`emit` is a hit that restores `dist/out.txt`, so `after-emit` is unknown.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>' } },
+  [
+    "vt",
+    "run",
+    "after-build",
+  ],
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "after-build",
+  ], comment = "`build` has no outputs, so `after-build` stays a hit.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>' } },
+  [
+    "vt",
+    "run",
+    "emit-then-print",
+  ],
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "emit-then-print",
+  ], comment = "The first step restores outputs, so the step after it is unknown.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>' } },
+  [
+    "vt",
+    "run",
+    "nested-then-print",
+  ],
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "nested-then-print",
+  ], comment = "The nested plan restores outputs, so the step after it is unknown.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>' } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "after-emit",
+  ], comment = "The text shows today's check." },
+]

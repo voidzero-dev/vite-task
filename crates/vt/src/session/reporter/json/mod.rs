@@ -15,7 +15,7 @@ use document::{
     Baseline, Cache, Change, Changed, CommandStep, Hit, HowChanged, NestedStep, PlanTask, RunPlan,
     Setting, Step,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use vt_materialized_artifact::{Artifact, artifact};
 use vt_path::AbsolutePath;
 use vt_plan::{
@@ -208,9 +208,10 @@ impl GraphExecutionReporter for JsonGraphReporter {
     }
 
     /// A run stopped by an error, or cancelled by Ctrl-C, leaves some steps
-    /// unreported, and prints no plan. Its errors go to stderr.
+    /// unreported, and prints no plan. Its errors go to stderr. Otherwise,
+    /// the steps that earlier steps may change are marked `unknown` first.
     fn finish(self: Box<Self>) -> Result<(), ExitStatus> {
-        let state = self.state.borrow();
+        let mut state = self.state.borrow_mut();
         if state.unreported > 0 {
             #[expect(clippy::print_stderr, reason = "errors go to stderr, and stdout gets no plan")]
             for message in &state.errors {
@@ -218,6 +219,7 @@ impl GraphExecutionReporter for JsonGraphReporter {
             }
             return Err(ExitStatus::FAILURE);
         }
+        mark_unknown(&mut state.document.plan, false);
         let mut writer = self.writer;
         json::write_document(&mut writer, &state.document, self.pretty)
             .map_err(|_| ExitStatus::FAILURE)
@@ -292,12 +294,99 @@ impl LeafExecutionReporter for JsonLeafReporter {
     }
 }
 
+/// Mark as `unknown` each `hit` or `changed` step of `plan` that waits on a
+/// step that writes files. `before_writes` says whether something the plan
+/// waits on writes: the steps before the nested `vp run` step it comes from.
+///
+/// A step waits on the earlier steps of its task and on every step of the
+/// tasks in its `dependsOn`, transitively. Whether a step writes is decided
+/// from today's check, before any step is marked.
+fn mark_unknown(plan: &mut BTreeMap<Str, PlanTask>, before_writes: bool) {
+    let task_writes: FxHashMap<Str, bool> =
+        plan.iter().map(|(id, task)| (id.clone(), task.steps.iter().any(step_writes))).collect();
+    let ids: Vec<Str> = plan.keys().cloned().collect();
+    for id in ids {
+        let mut writes = before_writes || depends_on_writes(plan, &task_writes, &id);
+        let Some(task) = plan.get_mut(&id) else { continue };
+        for step in &mut task.steps {
+            let step_writes = step_writes(step);
+            match step {
+                Step::Command(CommandStep { cache: Some(cache), .. }) if writes => {
+                    mark_step_unknown(cache);
+                }
+                Step::Command(_) => {}
+                Step::Nested(nested) => mark_unknown(&mut nested.plan, writes),
+            }
+            writes |= step_writes;
+        }
+    }
+}
+
+/// Whether a task in the transitive `dependsOn` of the task `id` writes files.
+fn depends_on_writes(
+    plan: &BTreeMap<Str, PlanTask>,
+    task_writes: &FxHashMap<Str, bool>,
+    id: &Str,
+) -> bool {
+    let mut seen = FxHashSet::default();
+    let mut pending: Vec<&Str> =
+        plan.get(id).map(|task| task.depends_on.iter().collect()).unwrap_or_default();
+    while let Some(dependency) = pending.pop() {
+        if !seen.insert(dependency) {
+            continue;
+        }
+        if task_writes.get(dependency).copied().unwrap_or(false) {
+            return true;
+        }
+        if let Some(task) = plan.get(dependency) {
+            pending.extend(&task.depends_on);
+        }
+    }
+    false
+}
+
+/// Whether a step would write files before the steps that wait on it start:
+/// it would run, or it's a hit that restores outputs. A nested plan writes if
+/// any of its steps does. A built-in writes nothing.
+fn step_writes(step: &Step) -> bool {
+    match step {
+        Step::Command(CommandStep { cache, .. }) => match cache {
+            None | Some(Cache::Hit(Hit { restores_outputs: false, .. })) => false,
+            Some(
+                Cache::Hit(_)
+                | Cache::Changed(_)
+                | Cache::Unknown(_)
+                | Cache::NoBaseline
+                | Cache::Error { .. }
+                | Cache::Disabled,
+            ) => true,
+        },
+        Step::Nested(nested) => nested.plan.values().any(|task| task.steps.iter().any(step_writes)),
+    }
+}
+
+/// Turn a `hit` or `changed` status into `unknown`, keeping today's check.
+fn mark_step_unknown(cache: &mut Cache) {
+    let unknown = match std::mem::replace(cache, Cache::Disabled) {
+        Cache::Hit(Hit { baseline, .. }) => {
+            Changed { baseline, changes: Vec::new(), changes_partial: false }
+        }
+        Cache::Changed(changed) => changed,
+        other => {
+            *cache = other;
+            return;
+        }
+    };
+    *cache = Cache::Unknown(unknown);
+}
+
 /// How the plan shows a cache status. `None` for a built-in, which isn't cached.
 fn cache_of(status: &CacheStatus) -> Option<Cache> {
     Some(match status {
-        CacheStatus::Hit { replayed_duration, .. } => {
-            Cache::Hit(Hit { baseline: baseline(*replayed_duration) })
-        }
+        CacheStatus::Hit { replayed_duration, restores_outputs, .. } => Cache::Hit(Hit {
+            baseline: baseline(*replayed_duration),
+            restores_outputs: *restores_outputs,
+        }),
         CacheStatus::Miss(CacheMiss::NotFound) => Cache::NoBaseline,
         CacheStatus::Miss(CacheMiss::Changed(comparison)) => changed(comparison),
         CacheStatus::Miss(CacheMiss::RemoteReadFailed(error)) => {
@@ -440,6 +529,88 @@ mod tests {
                     { "kind": "cwd", "from": ".", "to": "src" },
                     { "kind": "config", "setting": "untrackedEnv" },
                 ],
+            })
+        );
+    }
+
+    fn command(cache: Option<Cache>) -> Step {
+        Step::Command(CommandStep {
+            program: Str::from("vtt"),
+            args: Vec::new(),
+            cwd: None,
+            hook: None,
+            cache,
+        })
+    }
+
+    fn hit(restores_outputs: bool) -> Cache {
+        Cache::Hit(Hit { baseline: baseline(Duration::ZERO), restores_outputs })
+    }
+
+    fn task(depends_on: &[&str], steps: Vec<Step>) -> PlanTask {
+        PlanTask {
+            package: Str::from("."),
+            name: Str::from("t"),
+            depends_on: depends_on.iter().copied().map(Str::from).collect(),
+            steps,
+        }
+    }
+
+    fn statuses(plan: &BTreeMap<Str, PlanTask>) -> serde_json::Value {
+        serde_json::Value::Object(
+            plan.iter()
+                .map(|(id, task)| {
+                    let steps = task.steps.iter().map(|step| match step {
+                        Step::Command(step) => {
+                            serde_json::to_value(&step.cache).unwrap()["status"].clone()
+                        }
+                        Step::Nested(nested) => statuses(&nested.plan),
+                    });
+                    (id.to_string(), serde_json::Value::Array(steps.collect()))
+                })
+                .collect(),
+        )
+    }
+
+    /// A step is `unknown` when a step it waits on writes files: an earlier
+    /// step of its task, a step of a task in its `dependsOn` (transitively),
+    /// or a step before the nested run it's in. A hit without outputs and a
+    /// built-in write nothing.
+    #[test]
+    fn steps_after_a_write_are_unknown() {
+        let nested_plan =
+            BTreeMap::from([(Str::from("n"), task(&[], vec![command(Some(hit(false)))]))]);
+        let mut plan = BTreeMap::from([
+            (Str::from("restores"), task(&[], vec![command(Some(hit(true)))])),
+            (Str::from("after-restore"), task(&["through"], vec![command(Some(hit(false)))])),
+            (Str::from("through"), task(&["restores"], vec![command(None)])),
+            (Str::from("plain"), task(&[], vec![command(Some(hit(false))), command(None)])),
+            (Str::from("after-plain"), task(&["plain"], vec![command(Some(hit(false)))])),
+            (
+                Str::from("steps"),
+                task(
+                    &[],
+                    vec![
+                        command(Some(hit(false))),
+                        command(Some(Cache::NoBaseline)),
+                        Step::Nested(NestedStep {
+                            expanded_from: Str::from("vt run n"),
+                            plan: nested_plan,
+                        }),
+                    ],
+                ),
+            ),
+        ]);
+        mark_unknown(&mut plan, false);
+        assert_eq!(
+            statuses(&plan),
+            serde_json::json!({
+                "after-plain": ["hit"],
+                "after-restore": ["unknown"],
+                "plain": ["hit", null],
+                "restores": ["hit"],
+                "steps": ["hit", "noBaseline", { "n": ["unknown"] }],
+                "through": [null],
             })
         );
     }

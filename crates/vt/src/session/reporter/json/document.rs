@@ -118,7 +118,8 @@ pub struct CommandStep {
 
     /// Whether the cache would be used. Absent for a built-in such as `echo`.
     ///
-    /// The check looks at the files as they are now.
+    /// The check looks at the files as they are now. `unknown` marks a step whose files an
+    /// earlier step may change before it starts.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, schemars(with = "Cache"))]
     pub cache: Option<Cache>,
@@ -134,6 +135,14 @@ pub enum Cache {
 
     /// Differs from `baseline`, so it would run. `changes` lists the differences.
     Changed(Changed),
+
+    /// Can't be predicted yet, because a step it waits on would write files before it
+    /// starts, by running or by being a hit that restores outputs. A step waits on the
+    /// earlier steps of its task, on the tasks in its `dependsOn`, and, in a nested plan, on
+    /// the steps before the enclosing step. Only a step that would otherwise be `hit` or
+    /// `changed` can be `unknown`, and `changes` and `changesPartial` still show today's
+    /// check.
+    Unknown(Changed),
 
     /// Would run: there is no cached run to compare with, as on a first run or after
     /// `vp cache clean`. Arguments given after the task name count, so a new combination of
@@ -158,6 +167,11 @@ pub enum Cache {
 pub struct Hit {
     /// The cached run the step matches.
     pub baseline: Baseline,
+
+    /// The cached run has output files, which a real run restores. Not printed: it only
+    /// decides which later steps are `unknown`.
+    #[serde(skip)]
+    pub restores_outputs: bool,
 }
 
 /// A step that differs from its cached run.
@@ -170,7 +184,9 @@ pub struct Changed {
     pub baseline: Baseline,
 
     /// Everything that differs from `baseline`, in the order the kinds are listed here, then
-    /// by name or path. Undoing all of them would make the step a hit.
+    /// by name or path. Undoing all of them would make the step a hit. Present for `changed`,
+    /// and for `unknown` when today's check found differences.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub changes: Vec<Change>,
 
     /// Other files may have changed too: without `-v`, the file check stops at the first
