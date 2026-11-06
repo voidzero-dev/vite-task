@@ -28,6 +28,12 @@
       "package": "packages/lib",
       "name": "build",
       "command": "vtt print built lib"
+    },
+    "packages/lib#test": {
+      "package": "packages/lib",
+      "name": "test",
+      "cwd": "packages",
+      "command": "vtt print tested lib"
     }
   }
 }
