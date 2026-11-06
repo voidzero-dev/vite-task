@@ -151,6 +151,10 @@ pub fn redact_snapshot(value: &impl Serialize, workspace_root: &str) -> serde_js
             strip_windows_executable_extension(program_path);
             redact_powershell_program_path(program_path);
         }
+        // Normalize the program of a run plan step
+        if let Some(serde_json::Value::String(program)) = map.get_mut("program") {
+            strip_windows_executable_extension(program);
+        }
     });
 
     // Redact shell program and arguments for cross-platform consistency

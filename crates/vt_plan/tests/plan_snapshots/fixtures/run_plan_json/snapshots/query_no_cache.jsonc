@@ -1,0 +1,23 @@
+// run --dry-run --json --no-cache --filter @acme/web build
+{
+  "$schema": "<schema>",
+  "version": 1,
+  "workspaceRoot": "<workspace>",
+  "plan": {
+    "packages/web#build": {
+      "package": "packages/web",
+      "name": "build",
+      "steps": [
+        {
+          "program": "packages/web/node_modules/.bin/tool",
+          "args": [
+            "build"
+          ],
+          "cache": {
+            "status": "disabled"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,20 @@
+// run --dry-run --json b%c
+{
+  "$schema": "<schema>",
+  "version": 1,
+  "workspaceRoot": "<workspace>",
+  "plan": {
+    "b%25c": {
+      "package": ".",
+      "name": "b%c",
+      "steps": [
+        {
+          "program": "echo",
+          "args": [
+            "id"
+          ]
+        }
+      ]
+    }
+  }
+}

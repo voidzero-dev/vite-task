@@ -3,12 +3,15 @@
 
 mod schema;
 
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    io::{self, Write},
+};
 
 use cow_utils::CowUtils as _;
-#[cfg(test)]
-pub use schema::materialize;
 pub use schema::schema_url;
+#[cfg(test)]
+pub use schema::{check_schema, materialize};
 use serde::{Serialize, Serializer};
 use vt_path::AbsolutePath;
 use vt_str::Str;
@@ -64,6 +67,22 @@ pub fn path_key(path: &AbsolutePath, workspace_root: &AbsolutePath) -> Str {
         Ok(Some(relative)) => Str::from(relative.as_str()),
         Ok(None) | Err(_) => Str::from(path.as_path().to_string_lossy().as_ref()),
     }
+}
+
+/// Write `document` to `writer` as one JSON document and a newline: indented
+/// when `pretty` is set, as in a terminal, and on one line otherwise. It's
+/// serialized fully first, so an error leaves `writer` empty.
+pub fn write_document(
+    writer: &mut impl Write,
+    document: &impl Serialize,
+    pretty: bool,
+) -> io::Result<()> {
+    let json =
+        if pretty { serde_json::to_vec_pretty(document) } else { serde_json::to_vec(document) };
+    let mut json = json.map_err(io::Error::other)?;
+    json.push(b'\n');
+    writer.write_all(&json)?;
+    writer.flush()
 }
 
 #[cfg(test)]

@@ -136,8 +136,10 @@ pub struct RunCommand {
     #[clap(long, exclusive = true)]
     pub(crate) last_details: bool,
 
-    /// Print every package and task in the workspace as JSON, and run nothing.
-    #[clap(long, exclusive = true)]
+    /// Print JSON instead of text. Without a task, print every package and task
+    /// in the workspace, and run nothing. With a task, print what the run would
+    /// do, which requires `--dry-run`.
+    #[clap(long, conflicts_with = "log")]
     pub(crate) json: bool,
 
     #[clap(
@@ -171,14 +173,23 @@ impl Command {
     /// When `--last-details` is set on the `run` subcommand, this produces
     /// [`ResolvedCommand::RunLastDetails`] instead of [`ResolvedCommand::Run`],
     /// making the exclusivity enforced at the type level.
-    #[must_use]
-    pub(crate) fn into_resolved(self) -> ResolvedCommand {
-        match self {
+    ///
+    /// # Errors
+    ///
+    /// Returns the clap error of [`RunCommand::validate`].
+    pub(crate) fn into_resolved(self, program_name: &str) -> Result<ResolvedCommand, clap::Error> {
+        Ok(match self {
             Self::Run(run) if run.last_details => ResolvedCommand::RunLastDetails,
-            Self::Run(run) if run.json => ResolvedCommand::TaskGraphJson,
-            Self::Run(run) => ResolvedCommand::Run(run.into_resolved()),
+            Self::Run(run) => {
+                run.validate(program_name)?;
+                if run.is_task_graph_json() {
+                    ResolvedCommand::TaskGraphJson
+                } else {
+                    ResolvedCommand::Run(run.into_resolved())
+                }
+            }
             Self::Cache { subcmd } => ResolvedCommand::Cache { subcmd },
-        }
+        })
     }
 }
 
@@ -216,13 +227,60 @@ pub struct ResolvedRunCommand {
 
     /// Additional arguments to pass to the tasks.
     pub additional_args: Vec<Str>,
+
+    /// Whether `--json` is set, with `--dry-run`, asking for the run plan as JSON.
+    pub json: bool,
 }
 
 impl RunCommand {
-    /// Whether `--json` is set, asking for the task graph as JSON instead of a run.
+    /// Whether `--json` is set without a task, asking for the task graph as JSON.
     #[must_use]
     pub const fn is_task_graph_json(&self) -> bool {
-        self.json
+        self.json && self.task_and_args.is_empty()
+    }
+
+    /// Whether `--json` is set with a task, asking for the run plan of a dry run
+    /// as JSON.
+    #[must_use]
+    pub const fn is_run_plan_json(&self) -> bool {
+        self.json && !self.task_and_args.is_empty()
+    }
+
+    /// Check the combinations of arguments that clap can't: without a task,
+    /// `--json` takes no other argument, and with one, it requires `--dry-run`.
+    /// `program_name`, such as `vp`, names the command in the error's usage.
+    ///
+    /// # Errors
+    ///
+    /// Returns a clap error, formatted like the ones clap reports while parsing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if parsing a hardcoded bare `RunCommand` fails (should never happen).
+    pub fn validate(&self, program_name: &str) -> Result<(), clap::Error> {
+        use clap::error::ErrorKind;
+
+        if !self.json {
+            return Ok(());
+        }
+        if self.task_and_args.is_empty() {
+            let bare = Self::try_parse_from::<_, &str>([])
+                .expect("parsing hardcoded bare command should never fail");
+            if self.flags != bare.flags {
+                return Err(run_usage_error(
+                    program_name,
+                    ErrorKind::ArgumentConflict,
+                    "the argument '--json' cannot be used with one or more of the other specified arguments",
+                ));
+            }
+        } else if !self.flags.dry_run {
+            return Err(run_usage_error(
+                program_name,
+                ErrorKind::MissingRequiredArgument,
+                "the argument '--json' requires '--dry-run' when a task is given",
+            ));
+        }
+        Ok(())
     }
 
     /// Convert to the resolved run command, stripping the `last_details` flag.
@@ -234,8 +292,21 @@ impl RunCommand {
         let mut iter = self.task_and_args.into_iter();
         let task_specifier = iter.next();
         let additional_args: Vec<Str> = iter.collect();
-        ResolvedRunCommand { task_specifier, flags: self.flags, additional_args }
+        ResolvedRunCommand { task_specifier, flags: self.flags, additional_args, json: self.json }
     }
+}
+
+/// A clap error with `message`, whose usage line is that of `program_name run`.
+fn run_usage_error(
+    program_name: &str,
+    kind: clap::error::ErrorKind,
+    message: &'static str,
+) -> clap::Error {
+    use clap::CommandFactory as _;
+
+    let mut command = Command::command().bin_name(program_name);
+    command.build();
+    command.find_subcommand_mut("run").expect("`run` is a subcommand").error(kind, message)
 }
 
 #[derive(thiserror::Error, Debug)]

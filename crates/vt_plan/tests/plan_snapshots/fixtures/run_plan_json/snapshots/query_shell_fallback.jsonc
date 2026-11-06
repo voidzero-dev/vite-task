@@ -1,0 +1,24 @@
+// run --dry-run --json pipe
+{
+  "$schema": "<schema>",
+  "version": 1,
+  "workspaceRoot": "<workspace>",
+  "plan": {
+    "packages/web#pipe": {
+      "package": "packages/web",
+      "name": "pipe",
+      "steps": [
+        {
+          "program": "<os_shell_path>",
+          "args": [
+            "<os_shell_args>",
+            "vtt print a | vtt print b"
+          ],
+          "cache": {
+            "status": "noBaseline"
+          }
+        }
+      ]
+    }
+  }
+}

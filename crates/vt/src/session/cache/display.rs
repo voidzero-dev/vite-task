@@ -12,9 +12,9 @@ use crate::session::event::{CacheStatus, RunKind};
 /// `env 'NODE_ENV' added` or `'src/a.ts' modified`.
 pub fn format_change(change: &Change) -> Str {
     match change {
-        Change::Program => Str::from("program changed"),
-        Change::Args => Str::from("args changed"),
-        Change::Cwd => Str::from("working directory changed"),
+        Change::Program { .. } => Str::from("program changed"),
+        Change::Args { .. } => Str::from("args changed"),
+        Change::Cwd { .. } => Str::from("working directory changed"),
         Change::InputConfig => Str::from("input configuration changed"),
         Change::OutputConfig => Str::from("output configuration changed"),
         Change::UntrackedEnvAdded { name } => vt_str::format!("untracked env '{name}' added"),
@@ -132,6 +132,8 @@ pub fn format_input_change_str(kind: InputChangeKind, path: &str) -> Str {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::session::cache::{Comparison, EnvMismatch};
 
@@ -140,7 +142,7 @@ mod tests {
     }
 
     fn miss(changes: Vec<Change>) -> CacheStatus {
-        CacheStatus::Miss(CacheMiss::Changed(Comparison::new(changes)))
+        CacheStatus::Miss(CacheMiss::Changed(Comparison::new(changes, None, false)))
     }
 
     #[test]
@@ -160,7 +162,8 @@ mod tests {
     fn inline_reason_is_the_first_change_in_kind_order() {
         let fingerprinted =
             |name| env(EnvMismatch::Added { name: Str::from(name) }, EnvSource::Fingerprinted);
-        let status = miss(vec![fingerprinted("B"), Change::Args, fingerprinted("A")]);
+        let args = Change::Args { from: Arc::from([]), to: Arc::from([Str::from("--watch")]) };
+        let status = miss(vec![fingerprinted("B"), args, fingerprinted("A")]);
         assert_eq!(
             format_cache_status_inline(&status, RunKind::Dry).as_deref(),
             Some("○ cache miss: args changed")

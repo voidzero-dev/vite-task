@@ -6,13 +6,7 @@ pub(crate) mod reporter;
 mod task_graph_json;
 
 // Re-export types that are part of the public API
-use std::{
-    ffi::OsStr,
-    fmt::Debug,
-    io::{IsTerminal, Write as _},
-    rc::Rc,
-    sync::Arc,
-};
+use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, rc::Rc, sync::Arc};
 
 use anyhow::Context as _;
 pub use cache::{CacheMiss, Change, Comparison};
@@ -22,8 +16,8 @@ use event::RunKind;
 use once_cell::sync::OnceCell;
 pub use reporter::ExitStatus;
 use reporter::{
-    ColorSupport, GroupedReporterBuilder, InterleavedReporterBuilder, LabeledReporterBuilder,
-    SummaryReporterBuilder,
+    ColorSupport, GroupedReporterBuilder, InterleavedReporterBuilder, JsonReporterBuilder,
+    LabeledReporterBuilder, RUN_PLAN_SCHEMA, SummaryReporterBuilder,
     summary::{LastRunSummary, ReadSummaryError, format_full_summary},
 };
 use rustc_hash::FxHashMap;
@@ -138,33 +132,35 @@ impl vt_plan::PlanRequestParser for PlanRequestParser<'_> {
     ) -> anyhow::Result<Option<PlanRequest>> {
         match self.command_handler.handle_command(command).await? {
             HandledCommand::Synthesized(synthetic) => Ok(Some(PlanRequest::Synthetic(synthetic))),
-            HandledCommand::ViteTaskCommand(cli_command) => match cli_command.into_resolved() {
-                ResolvedCommand::Cache { .. }
-                | ResolvedCommand::RunLastDetails
-                | ResolvedCommand::TaskGraphJson => Ok(Some(PlanRequest::Synthetic(
-                    command.to_synthetic_plan_request(UserCacheConfig::disabled()),
-                ))),
-                // A nested dry run isn't inlined. It runs as a process, which
-                // prints its own dry run, so an enclosing dry run doesn't run it.
-                ResolvedCommand::Run(run_command) if run_command.flags.dry_run => {
-                    Ok(Some(PlanRequest::Synthetic(
+            HandledCommand::ViteTaskCommand(cli_command) => {
+                match cli_command.into_resolved(&command.program)? {
+                    ResolvedCommand::Cache { .. }
+                    | ResolvedCommand::RunLastDetails
+                    | ResolvedCommand::TaskGraphJson => Ok(Some(PlanRequest::Synthetic(
                         command.to_synthetic_plan_request(UserCacheConfig::disabled()),
-                    )))
-                }
-                ResolvedCommand::Run(run_command) => {
-                    match run_command.into_query_plan_request(&command.cwd) {
-                        Ok((query_plan_request, _)) => {
-                            Ok(Some(PlanRequest::Query(query_plan_request)))
+                    ))),
+                    // A nested dry run isn't inlined. It runs as a process, which
+                    // prints its own dry run, so an enclosing dry run doesn't run it.
+                    ResolvedCommand::Run(run_command) if run_command.flags.dry_run => {
+                        Ok(Some(PlanRequest::Synthetic(
+                            command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                        )))
+                    }
+                    ResolvedCommand::Run(run_command) => {
+                        match run_command.into_query_plan_request(&command.cwd) {
+                            Ok((query_plan_request, _)) => {
+                                Ok(Some(PlanRequest::Query(query_plan_request)))
+                            }
+                            Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
+                                Ok(Some(PlanRequest::Synthetic(
+                                    command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                                )))
+                            }
+                            Err(err) => Err(err.into()),
                         }
-                        Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
-                            Ok(Some(PlanRequest::Synthetic(
-                                command.to_synthetic_plan_request(UserCacheConfig::disabled()),
-                            )))
-                        }
-                        Err(err) => Err(err.into()),
                     }
                 }
-            },
+            }
             HandledCommand::Verbatim => Ok(None),
         }
     }
@@ -305,113 +301,34 @@ impl<'a> Session<'a> {
     /// # Panics
     ///
     /// Panics if parsing a hardcoded bare `RunCommand` fails (should never happen).
-    #[expect(clippy::too_many_lines, reason = "dispatches every command, and plans and runs `run`")]
     async fn main_inner(&mut self, command: Command) -> Result<(), SessionError> {
-        match command.into_resolved() {
+        let command = match command.into_resolved(&self.program_name) {
+            Ok(command) => command,
+            Err(err) => {
+                // Printed as clap prints the errors it finds while parsing.
+                let _ = err.print();
+                return Err(SessionError::EarlyExit(ExitStatus(
+                    u8::try_from(err.exit_code()).unwrap_or(2),
+                )));
+            }
+        };
+        match command {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             ResolvedCommand::RunLastDetails => self.show_last_run_details(),
             ResolvedCommand::TaskGraphJson => self.print_task_graph_json().await,
             ResolvedCommand::Run(run_command) => {
-                let is_interactive =
-                    std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-
-                let graph = if let Some(ref task_specifier) = run_command.task_specifier {
-                    // Task specifier provided — plan it.
-                    let cwd = Arc::clone(&self.cwd);
-                    let (plan_result, is_cwd_only) =
-                        self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?;
-
-                    if plan_result.graph.graph.node_count() == 0 {
-                        // Three empty-graph outcomes, in order of precedence:
-                        //   1. `--filter` selected zero packages — the planner has
-                        //      already warned per filter; exit 0 silently. This is the
-                        //      pnpm-compatible default; `--fail-if-no-match` opts in
-                        //      to strict behaviour and is raised inside the planner.
-                        //   2. Bare `vp run` (cwd-only, no execution flags) — fall
-                        //      through to the interactive task selector.
-                        //   3. Otherwise (e.g. typoed task, `-r` with no matching
-                        //      package) — surface NoTasksMatched.
-                        if plan_result.no_packages_matched {
-                            return Ok(());
-                        }
-                        let has_execution_flags = run_command.flags.concurrency_limit.is_some()
-                            || run_command.flags.parallel;
-                        if is_cwd_only && !has_execution_flags {
-                            let qpr = self.handle_no_task(is_interactive, &run_command).await?;
-                            self.plan_from_query(qpr).await?
-                        } else {
-                            return Err(
-                                vt_plan::Error::NoTasksMatched(task_specifier.clone()).into()
-                            );
-                        }
-                    } else {
-                        plan_result.graph
-                    }
-                } else {
-                    // No task specifier (e.g. `vp run` or `vp run --verbose`).
-                    // Only bare `vp run` enters the selector; with extra flags, error.
-                    let bare = RunCommand::try_parse_from::<_, &str>([])
-                        .expect("parsing hardcoded bare command should never fail")
-                        .into_resolved();
-
-                    // Normalize the run_command for comparison by ignoring cache flags, which don't affect task selection.
-                    let mut normalized_run_command = run_command.clone();
-                    normalized_run_command.flags.cache = false;
-
-                    if normalized_run_command != bare {
-                        return Err(vt_plan::Error::MissingTaskSpecifier.into());
-                    }
-                    let qpr = self.handle_no_task(is_interactive, &run_command).await?;
-                    self.plan_from_query(qpr).await?
-                };
-
-                let workspace_path = self.workspace_path();
-                let writer: Box<dyn std::io::Write> = Box::new(std::io::stdout());
-
-                // Detect color support once at the point where reporters are
-                // constructed. The reporters and their pipe writers then strip
-                // ANSI escapes from cached/replayed output if the terminal
-                // can't render them. Detect per-stream so a redirected stdout
-                // doesn't trigger stripping of an interactive stderr.
-                let color_support = ColorSupport {
-                    stdout: stdout_supports_color(),
-                    stderr: stderr_supports_color(),
+                let Some(graph) = self.plan_run(&run_command).await? else {
+                    return Ok(());
                 };
 
                 let run_kind = if run_command.flags.dry_run { RunKind::Dry } else { RunKind::Real };
-                // `--log` only shapes task output, and a dry run has none.
-                let log = match run_kind {
-                    RunKind::Real => run_command.flags.log,
-                    RunKind::Dry => crate::cli::LogMode::Interleaved,
+                let builder = if run_command.json {
+                    let stdout = std::io::stdout();
+                    let pretty = stdout.is_terminal();
+                    self.run_plan_reporter(&graph, Box::new(stdout), pretty)?
+                } else {
+                    self.text_reporter(&run_command, run_kind)
                 };
-                let inner: Box<dyn reporter::GraphExecutionReporterBuilder> = match log {
-                    crate::cli::LogMode::Interleaved => Box::new(InterleavedReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                        run_kind,
-                    )),
-                    crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                    )),
-                    crate::cli::LogMode::Grouped => Box::new(GroupedReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                    )),
-                };
-
-                let builder = Box::new(SummaryReporterBuilder::new(
-                    inner,
-                    workspace_path,
-                    Box::new(std::io::stdout()),
-                    run_command.flags.verbose,
-                    (run_kind == RunKind::Real).then(|| self.make_summary_writer()),
-                    self.program_name.clone(),
-                    run_kind,
-                ));
                 // Don't let SIGINT/CTRL_C kill the runner. Child tasks receive
                 // the signal directly from the terminal driver and handle it
                 // themselves. Cancelling the cancel token prevents scheduling
@@ -476,6 +393,60 @@ impl<'a> Session<'a> {
             }
         }
         Ok(())
+    }
+
+    /// The graph that `run_command` runs, or `None` when `--filter` selects no
+    /// package, which the planner has already warned about. A run plan
+    /// (`--json`) of no tasks is still a document, so it gets the empty graph.
+    async fn plan_run(
+        &mut self,
+        run_command: &ResolvedRunCommand,
+    ) -> Result<Option<ExecutionGraph>, SessionError> {
+        let is_interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+
+        let Some(task_specifier) = &run_command.task_specifier else {
+            // No task specifier (e.g. `vp run` or `vp run --verbose`).
+            // Only bare `vp run` enters the selector; with extra flags, error.
+            let bare = RunCommand::try_parse_from::<_, &str>([])
+                .expect("parsing hardcoded bare command should never fail")
+                .into_resolved();
+
+            // Normalize the run_command for comparison by ignoring cache flags, which don't affect task selection.
+            let mut normalized_run_command = run_command.clone();
+            normalized_run_command.flags.cache = false;
+
+            if normalized_run_command != bare {
+                return Err(vt_plan::Error::MissingTaskSpecifier.into());
+            }
+            let qpr = self.handle_no_task(is_interactive, run_command).await?;
+            return Ok(Some(self.plan_from_query(qpr).await?));
+        };
+
+        let cwd = Arc::clone(&self.cwd);
+        let (plan_result, is_cwd_only) =
+            self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?;
+        if plan_result.graph.graph.node_count() > 0 {
+            return Ok(Some(plan_result.graph));
+        }
+        // Three empty-graph outcomes, in order of precedence:
+        //   1. `--filter` selected zero packages — the planner has
+        //      already warned per filter; exit 0 silently. This is the
+        //      pnpm-compatible default; `--fail-if-no-match` opts in
+        //      to strict behaviour and is raised inside the planner.
+        //   2. Bare `vp run` (cwd-only, no execution flags) — fall
+        //      through to the interactive task selector.
+        //   3. Otherwise (e.g. typoed task, `-r` with no matching
+        //      package) — surface NoTasksMatched.
+        let has_execution_flags =
+            run_command.flags.concurrency_limit.is_some() || run_command.flags.parallel;
+        if plan_result.no_packages_matched {
+            Ok(run_command.json.then_some(plan_result.graph))
+        } else if is_cwd_only && !has_execution_flags && !run_command.json {
+            let qpr = self.handle_no_task(is_interactive, run_command).await?;
+            Ok(Some(self.plan_from_query(qpr).await?))
+        } else {
+            Err(vt_plan::Error::NoTasksMatched(task_specifier.clone()).into())
+        }
     }
 
     /// Show the task selector or list, and return a plan request for the selected task.
@@ -827,16 +798,130 @@ impl<'a> Session<'a> {
     async fn print_task_graph_json(&self) -> Result<(), SessionError> {
         let document = self.task_graph_json().await?;
         let mut stdout = std::io::stdout().lock();
-        // Serialize fully before writing, so an error leaves stdout empty.
-        let mut json = if stdout.is_terminal() {
-            serde_json::to_vec_pretty(&document)
-        } else {
-            serde_json::to_vec(&document)
-        }?;
-        json.push(b'\n');
-        stdout.write_all(&json)?;
-        stdout.flush()?;
+        let pretty = stdout.is_terminal();
+        json::write_document(&mut stdout, &document, pretty)?;
         Ok(())
+    }
+
+    /// The reporters of a run that prints text: the lines that `--log` and a
+    /// dry run choose, and the summary.
+    fn text_reporter(
+        &self,
+        run_command: &ResolvedRunCommand,
+        run_kind: RunKind,
+    ) -> Box<dyn reporter::GraphExecutionReporterBuilder> {
+        let workspace_path = self.workspace_path();
+        let writer: Box<dyn std::io::Write> = Box::new(std::io::stdout());
+
+        // Detect color support once at the point where reporters are
+        // constructed. The reporters and their pipe writers then strip
+        // ANSI escapes from cached/replayed output if the terminal
+        // can't render them. Detect per-stream so a redirected stdout
+        // doesn't trigger stripping of an interactive stderr.
+        let color_support =
+            ColorSupport { stdout: stdout_supports_color(), stderr: stderr_supports_color() };
+
+        // `--log` only shapes task output, and a dry run has none.
+        let log = match run_kind {
+            RunKind::Real => run_command.flags.log,
+            RunKind::Dry => crate::cli::LogMode::Interleaved,
+        };
+        let inner: Box<dyn reporter::GraphExecutionReporterBuilder> = match log {
+            crate::cli::LogMode::Interleaved => Box::new(InterleavedReporterBuilder::new(
+                Arc::clone(&workspace_path),
+                writer,
+                color_support,
+                run_kind,
+            )),
+            crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
+                Arc::clone(&workspace_path),
+                writer,
+                color_support,
+            )),
+            crate::cli::LogMode::Grouped => Box::new(GroupedReporterBuilder::new(
+                Arc::clone(&workspace_path),
+                writer,
+                color_support,
+            )),
+        };
+
+        Box::new(SummaryReporterBuilder::new(
+            inner,
+            workspace_path,
+            Box::new(std::io::stdout()),
+            run_command.flags.verbose,
+            (run_kind == RunKind::Real).then(|| self.make_summary_writer()),
+            self.program_name.clone(),
+            run_kind,
+        ))
+    }
+
+    /// The reporter that writes the run plan of `graph`, for
+    /// `vp run --dry-run --json`, to `writer`: indented when `pretty` is set,
+    /// on one line otherwise. It also copies the JSON Schema that the
+    /// document's `$schema` points to into the system temp dir.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a task runs a nested `vp run`, which the run plan
+    /// doesn't show yet, or if the schema can't be written.
+    fn run_plan_reporter(
+        &self,
+        graph: &ExecutionGraph,
+        writer: Box<dyn std::io::Write>,
+        pretty: bool,
+    ) -> anyhow::Result<Box<dyn reporter::GraphExecutionReporterBuilder>> {
+        if has_nested_run(graph) {
+            let program = &self.program_name;
+            return Err(anyhow::Error::msg(vt_str::format!(
+                "`{program} run --dry-run --json` doesn't support tasks that run `{program} run` yet"
+            )));
+        }
+        let schema = json::schema_url(RUN_PLAN_SCHEMA)
+            .context("Failed to write the JSON Schema that `$schema` points to")?;
+        Ok(Box::new(JsonReporterBuilder::new(graph, &self.workspace_path, writer, pretty, schema)))
+    }
+
+    /// Writes the run plan of `command`, a validated `vp run --dry-run --json`
+    /// command line, to `writer`, indented as in a terminal. Its tasks are
+    /// chosen as `vp run` chooses them. Like a dry run, this reads the cache
+    /// and writes nothing to it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if planning fails, if a task runs a nested `vp run`,
+    /// which the run plan doesn't show yet, or if the JSON Schema can't be
+    /// written. A run plan that can't be written is a failed status.
+    pub async fn write_run_plan(
+        &mut self,
+        command: RunCommand,
+        writer: Box<dyn std::io::Write>,
+    ) -> anyhow::Result<ExitStatus> {
+        let command = command.into_resolved();
+        let file_check = if command.flags.verbose { FileCheck::All } else { FileCheck::First };
+        let graph = match self.plan_run(&command).await {
+            Ok(Some(graph)) => graph,
+            // Only a run without `--json` has nothing to plan.
+            Ok(None) => return Ok(ExitStatus::SUCCESS),
+            Err(SessionError::Anyhow(err)) => return Err(err),
+            Err(SessionError::EarlyExit(status)) => return Ok(status),
+        };
+        let builder = self.run_plan_reporter(&graph, writer, true)?;
+        let fast_fail_token = tokio_util::sync::CancellationToken::new();
+        let cancel_token = fast_fail_token.child_token();
+        let interrupt_token = tokio_util::sync::CancellationToken::new();
+        let status = self
+            .execute_graph(
+                graph,
+                builder,
+                RunKind::Dry,
+                file_check,
+                fast_fail_token,
+                cancel_token,
+                interrupt_token,
+            )
+            .await;
+        Ok(status.err().unwrap_or(ExitStatus::SUCCESS))
     }
 
     /// Plans execution from a CLI run command.
@@ -912,6 +997,14 @@ impl<'a> Session<'a> {
         .await?;
         Ok(plan_result.graph)
     }
+}
+
+/// Whether a task in `graph` runs a nested `vp run`, which is planned as part
+/// of the graph.
+fn has_nested_run(graph: &ExecutionGraph) -> bool {
+    graph.graph.node_weights().any(|task| {
+        task.items.iter().any(|item| matches!(item.kind, vt_plan::ExecutionItemKind::Expanded(_)))
+    })
 }
 
 /// Print `error` to stderr formatted as the `vp` CLI does:

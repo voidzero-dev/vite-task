@@ -156,28 +156,56 @@ pub struct Comparison {
     /// file check stops at the first changed file it finds, so at most one
     /// file is listed.
     pub changes: Vec<Change>,
+    /// How long the cached run took. `None` when the task's previous cached
+    /// run, which only its key pointed to, couldn't be read.
+    pub baseline_duration: Option<Duration>,
+    /// Other files may have changed too: the file check stopped at the first
+    /// changed file, or couldn't check some of them.
+    pub changes_partial: bool,
 }
 
 impl Comparison {
     /// Sort `changes` and drop duplicates, such as an env var that two
     /// tracked queries match. Of two duplicates, the one found first is kept.
-    fn new(mut changes: Vec<Change>) -> Self {
+    fn new(
+        mut changes: Vec<Change>,
+        baseline_duration: Option<Duration>,
+        changes_partial: bool,
+    ) -> Self {
         changes.sort_by(|a, b| a.order_key().cmp(&b.order_key()));
         changes.dedup_by(|a, b| a.order_key() == b.order_key());
-        Self { changes }
+        Self { changes, baseline_duration, changes_partial }
     }
+
+    /// The miss for a cached run, `value`, that differs from the execution
+    /// as `checked` found.
+    fn of_value(value: &CacheEntryValue, checked: Checked) -> Self {
+        Self::new(checked.changes, Some(value.duration), checked.partial)
+    }
+}
+
+/// What comparing a cached run with the execution found.
+#[derive(Debug)]
+pub struct Checked {
+    /// Every difference found. Empty when the cached run matches.
+    pub changes: Vec<Change>,
+    /// Some files weren't checked, as in [`Comparison::changes_partial`].
+    pub partial: bool,
 }
 
 /// One difference between the current execution and the cached run it's
 /// compared with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Change {
-    /// The program the command runs changed.
-    Program,
+    /// The program the command runs changed. Each is the program as the
+    /// cache records it: its path inside the workspace, or just its name
+    /// outside it.
+    Program { from: Str, to: Str },
     /// The command's arguments changed.
-    Args,
-    /// The directory the command runs in changed.
-    Cwd,
+    Args { from: Arc<[Str]>, to: Arc<[Str]> },
+    /// The directory the command runs in changed. Each is relative to the
+    /// workspace root.
+    Cwd { from: RelativePathBuf, to: RelativePathBuf },
     /// The task's `input` setting changed.
     InputConfig,
     /// The task's `output` setting changed.
@@ -200,9 +228,9 @@ impl Change {
     fn order_key(&self) -> (u8, OrderName<'_>, u8) {
         let exact = OrderName::Exact;
         match self {
-            Self::Program => (0, exact(""), 0),
-            Self::Args => (1, exact(""), 0),
-            Self::Cwd => (2, exact(""), 0),
+            Self::Program { .. } => (0, exact(""), 0),
+            Self::Args { .. } => (1, exact(""), 0),
+            Self::Cwd { .. } => (2, exact(""), 0),
             Self::InputConfig => (3, exact(""), 0),
             Self::OutputConfig => (4, exact(""), 0),
             Self::UntrackedEnvAdded { name } => (5, exact(name), 0),
@@ -510,7 +538,7 @@ impl ExecutionCache {
 
         // Try to find the cache entry by key (spawn fingerprint + input config)
         if let Some(cache_value) = self.get_by_cache_key(cache_key).await? {
-            let changes = cache_value.validate(
+            let checked = cache_value.validate(
                 cache_key,
                 cache_key,
                 globbed_inputs,
@@ -518,8 +546,8 @@ impl ExecutionCache {
                 workspace_root,
                 file_check,
             )?;
-            if !changes.is_empty() {
-                return Ok(Err(CacheMiss::Changed(Comparison::new(changes))));
+            if !checked.changes.is_empty() {
+                return Ok(Err(CacheMiss::Changed(Comparison::of_value(&cache_value, checked))));
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed
@@ -541,18 +569,21 @@ impl ExecutionCache {
                 tracing::debug!(?err, "failed to read the task's previous cache entry");
                 None
             });
-            let changes = match old_value {
-                Some(old_value) => old_value.validate(
-                    &old_cache_key,
-                    cache_key,
-                    globbed_inputs,
-                    &cache_metadata.unfiltered_envs,
-                    workspace_root,
-                    file_check,
-                )?,
-                None => old_cache_key.changes_to(cache_key),
+            let comparison = match old_value {
+                Some(old_value) => {
+                    let checked = old_value.validate(
+                        &old_cache_key,
+                        cache_key,
+                        globbed_inputs,
+                        &cache_metadata.unfiltered_envs,
+                        workspace_root,
+                        file_check,
+                    )?;
+                    Comparison::of_value(&old_value, checked)
+                }
+                None => Comparison::new(old_cache_key.changes_to(cache_key), None, false),
             };
-            return Ok(Err(CacheMiss::Changed(Comparison::new(changes))));
+            return Ok(Err(CacheMiss::Changed(comparison)));
         }
 
         Ok(Err(CacheMiss::NotFound))
@@ -610,18 +641,21 @@ impl ExecutionCache {
                     Ok(old_value) => old_value,
                     Err(err) => return Ok(Err(err.into_miss())),
                 };
-                let changes = match old_value {
-                    Some(old_value) => old_value.validate(
-                        &old_cache_key,
-                        cache_key,
-                        globbed_inputs,
-                        &cache_metadata.unfiltered_envs,
-                        workspace_root,
-                        file_check,
-                    )?,
-                    None => old_cache_key.changes_to(cache_key),
+                let comparison = match old_value {
+                    Some(old_value) => {
+                        let checked = old_value.validate(
+                            &old_cache_key,
+                            cache_key,
+                            globbed_inputs,
+                            &cache_metadata.unfiltered_envs,
+                            workspace_root,
+                            file_check,
+                        )?;
+                        Comparison::of_value(&old_value, checked)
+                    }
+                    None => Comparison::new(old_cache_key.changes_to(cache_key), None, false),
                 };
-                return Ok(Err(CacheMiss::Changed(Comparison::new(changes))));
+                return Ok(Err(CacheMiss::Changed(comparison)));
             }
             Ok(Resolved::Fallback(_)) => return Ok(Err(local_miss)),
             Err(remote_miss) => return Ok(Err(prefer_local_miss(local_miss, remote_miss))),
@@ -991,11 +1025,15 @@ mod tests {
     /// same env, so its change is listed once.
     #[test]
     fn env_changes_dedupe_by_platform_rules() {
-        let comparison = Comparison::new(vec![
-            tracked_env_changed("probe_env"),
-            tracked_env_changed("PROBE_ENV"),
-            tracked_env_changed("probe_env"),
-        ]);
+        let comparison = Comparison::new(
+            vec![
+                tracked_env_changed("probe_env"),
+                tracked_env_changed("PROBE_ENV"),
+                tracked_env_changed("probe_env"),
+            ],
+            None,
+            false,
+        );
         assert_eq!(comparison.changes.len(), if cfg!(windows) { 1 } else { 2 });
     }
 
