@@ -1,0 +1,18 @@
+# A nested `vt run` is a step with its own plan, whose `dependsOn` refers only
+# to its own tasks.
+
+# `ci` runs two nested plans in turn. The first has its own edges, and the
+# root's `build` in it runs a third plan, so `a#build` is at two levels.
+[[plan]]
+name = "nested_plans"
+args = ["run", "--dry-run", "--json", "ci"]
+
+# Args after the task name go to the last command, a nested run here.
+[[plan]]
+name = "forwarded_args"
+args = ["run", "--dry-run", "--json", "ci", "--flag"]
+
+# A nested `vt run --dry-run` stays a spawned step, which a dry run doesn't start.
+[[plan]]
+name = "nested_dry_run"
+args = ["run", "--dry-run", "--json", "preview"]

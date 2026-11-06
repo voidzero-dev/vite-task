@@ -1,0 +1,9 @@
+{
+  "name": "b",
+  "scripts": {
+    "build": "vtt print b"
+  },
+  "dependencies": {
+    "a": "workspace:*"
+  }
+}

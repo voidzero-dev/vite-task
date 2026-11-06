@@ -1,0 +1,25 @@
+// run --dry-run --json preview
+{
+  "$schema": "<schema>",
+  "version": 1,
+  "workspaceRoot": "<workspace>",
+  "plan": {
+    "preview": {
+      "package": ".",
+      "name": "preview",
+      "steps": [
+        {
+          "program": "<tools>/vt",
+          "args": [
+            "run",
+            "--dry-run",
+            "lint"
+          ],
+          "cache": {
+            "status": "disabled"
+          }
+        }
+      ]
+    }
+  }
+}

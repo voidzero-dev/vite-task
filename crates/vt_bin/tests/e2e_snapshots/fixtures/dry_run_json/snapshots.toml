@@ -128,11 +128,27 @@ steps = [
     "--json",
     "typo",
   ], comment = "A task that isn't found is an error, not a task list." },
+]
+
+[[e2e]]
+name = "nested_plan"
+comment = """
+A nested `vt run` is a step with the plan of that run.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
   { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
     "vt",
     "run",
     "--dry-run",
     "--json",
     "nested",
-  ], comment = "Nested runs aren't in the run plan yet." },
+  ], redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>' } },
 ]

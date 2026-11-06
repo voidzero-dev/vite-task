@@ -12,7 +12,8 @@ use std::{
 };
 
 use document::{
-    Baseline, Cache, Change, Changed, Hit, HowChanged, PlanTask, RunPlan, Setting, Step,
+    Baseline, Cache, Change, Changed, CommandStep, Hit, HowChanged, NestedStep, PlanTask, RunPlan,
+    Setting, Step,
 };
 use rustc_hash::FxHashMap;
 use vt_materialized_artifact::{Artifact, artifact};
@@ -49,35 +50,9 @@ impl JsonReporterBuilder {
         pretty: bool,
         schema: Str,
     ) -> Self {
-        let ids: FxHashMap<ExecutionNodeIndex, Str> = graph
-            .graph
-            .node_indices()
-            .map(|node| (node, task_key(&graph.graph[node], workspace_path).1))
-            .collect();
-        let mut plan = BTreeMap::new();
-        let mut unreported = 0;
-        for node in graph.graph.node_indices() {
-            let task = &graph.graph[node];
-            let (package, id) = task_key(task, workspace_path);
-            let mut depends_on: Vec<Str> =
-                graph.graph.neighbors(node).map(|dependency| ids[&dependency].clone()).collect();
-            depends_on.sort_unstable();
-            let steps = task
-                .items
-                .iter()
-                .map(|item| {
-                    let step = lay_out_step(item, task, workspace_path);
-                    if matches!(item.kind, ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(_))) {
-                        unreported += 1;
-                    }
-                    step
-                })
-                .collect();
-            plan.insert(
-                id,
-                PlanTask { package, name: task.task_display.task_name.clone(), depends_on, steps },
-            );
-        }
+        let mut layout = Layout { workspace_path, steps: FxHashMap::default(), unreported: 0 };
+        let plan = layout.plan(graph, &[], &[]);
+        let Layout { steps, unreported, .. } = layout;
         let document = RunPlan {
             schema,
             version: Version,
@@ -87,7 +62,7 @@ impl JsonReporterBuilder {
         };
         Self(JsonGraphReporter {
             state: Rc::new(RefCell::new(State { document, unreported, errors: Vec::new() })),
-            ids,
+            steps,
             writer,
             pretty,
         })
@@ -100,35 +75,106 @@ impl GraphExecutionReporterBuilder for JsonReporterBuilder {
     }
 }
 
+/// Where a step is in the document: the task ID and step index in each plan,
+/// outermost first, down through the nested plans of `vp run` steps.
+type StepLocation = Vec<(Str, usize)>;
+
+/// Lays out the plans of a graph and its nested graphs, before any cache is
+/// checked.
+struct Layout<'a> {
+    workspace_path: &'a AbsolutePath,
+    /// Where each spawned or built-in leaf's step is, by the leaf's path in
+    /// the graph.
+    steps: FxHashMap<Vec<(ExecutionNodeIndex, usize)>, StepLocation>,
+    /// The number of spawned steps, which each report a cache status.
+    unreported: usize,
+}
+
+impl Layout<'_> {
+    /// The plan of `graph`, whose items are at `path` in the root graph and
+    /// whose steps are at `location` in the document. Each plan's
+    /// `dependsOn` refers only to its own tasks.
+    fn plan(
+        &mut self,
+        graph: &ExecutionGraph,
+        path: &LeafPath,
+        location: &[(Str, usize)],
+    ) -> BTreeMap<Str, PlanTask> {
+        let ids: FxHashMap<ExecutionNodeIndex, Str> = graph
+            .graph
+            .node_indices()
+            .map(|node| (node, task_key(&graph.graph[node], self.workspace_path).1))
+            .collect();
+        let mut plan = BTreeMap::new();
+        for node in graph.graph.node_indices() {
+            let task = &graph.graph[node];
+            let (package, id) = task_key(task, self.workspace_path);
+            let mut depends_on: Vec<Str> =
+                graph.graph.neighbors(node).map(|dependency| ids[&dependency].clone()).collect();
+            depends_on.sort_unstable();
+            let steps = task
+                .items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    let item_path: Vec<_> = path.iter().copied().chain([(node, index)]).collect();
+                    let item_location: StepLocation =
+                        location.iter().cloned().chain([(id.clone(), index)]).collect();
+                    self.step(item, task, item_path, item_location)
+                })
+                .collect();
+            plan.insert(
+                id,
+                PlanTask { package, name: task.task_display.task_name.clone(), depends_on, steps },
+            );
+        }
+        plan
+    }
+
+    /// The step of `item`, a step of `task`, at `path` in the graph and
+    /// `location` in the document. A nested `vp run` is its own plan.
+    fn step(
+        &mut self,
+        item: &ExecutionItem,
+        task: &TaskExecution,
+        path: Vec<(ExecutionNodeIndex, usize)>,
+        location: StepLocation,
+    ) -> Step {
+        let display = &item.execution_item_display;
+        // A spawned step runs its spawn command, which a command handler may
+        // have changed from what the display shows.
+        let (program, args, cwd) = match &item.kind {
+            ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn)) => {
+                self.unreported += 1;
+                (
+                    path_key(&spawn.spawn_command.program_path, self.workspace_path),
+                    spawn.spawn_command.args.to_vec(),
+                    &spawn.spawn_command.cwd,
+                )
+            }
+            ExecutionItemKind::Leaf(LeafExecutionKind::InProcess(in_process)) => {
+                (Str::from(in_process.name()), in_process.args(), &display.cwd)
+            }
+            ExecutionItemKind::Expanded(nested_graph) => {
+                let plan = self.plan(nested_graph, &path, &location);
+                return Step::Nested(NestedStep { expanded_from: display.command.clone(), plan });
+            }
+        };
+        self.steps.insert(path, location);
+        let cwd =
+            (*cwd != task.task_display.package_path).then(|| path_key(cwd, self.workspace_path));
+        // A `pre` or `post` script's steps keep the script's own name.
+        let hook = (display.task_display.task_name != task.task_display.task_name)
+            .then(|| display.task_display.task_name.clone());
+        Step::Command(CommandStep { program, args, cwd, hook, cache: None })
+    }
+}
+
 /// The task's package path and its task ID.
 fn task_key(task: &TaskExecution, workspace_path: &AbsolutePath) -> (Str, Str) {
     let package = path_key(&task.task_display.package_path, workspace_path);
     let id = task_id(&package, &task.task_display.task_name);
     (package, id)
-}
-
-/// A step of `task` as the plan shows it before its cache is checked.
-fn lay_out_step(item: &ExecutionItem, task: &TaskExecution, workspace_path: &AbsolutePath) -> Step {
-    let display = &item.execution_item_display;
-    // A spawned step runs its spawn command, which a command handler may have
-    // changed from what the display shows.
-    let (program, args, cwd) = match &item.kind {
-        ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn)) => (
-            path_key(&spawn.spawn_command.program_path, workspace_path),
-            spawn.spawn_command.args.to_vec(),
-            &spawn.spawn_command.cwd,
-        ),
-        ExecutionItemKind::Leaf(LeafExecutionKind::InProcess(in_process)) => {
-            (Str::from(in_process.name()), in_process.args(), &display.cwd)
-        }
-        // The session rejects plans with nested runs before building this reporter.
-        ExecutionItemKind::Expanded(_) => (display.command.clone(), Vec::new(), &display.cwd),
-    };
-    let cwd = (*cwd != task.task_display.package_path).then(|| path_key(cwd, workspace_path));
-    // A `pre` or `post` script's steps keep the script's own name.
-    let hook = (display.task_display.task_name != task.task_display.task_name)
-        .then(|| display.task_display.task_name.clone());
-    Step { program, args, cwd, hook, cache: None }
 }
 
 /// The document, filled in as leaves report.
@@ -144,8 +190,8 @@ struct State {
 
 struct JsonGraphReporter {
     state: Rc<RefCell<State>>,
-    /// The task ID of each node.
-    ids: FxHashMap<ExecutionNodeIndex, Str>,
+    /// Where each leaf's step is, by the leaf's path in the graph.
+    steps: FxHashMap<Vec<(ExecutionNodeIndex, usize)>, StepLocation>,
     writer: Box<dyn Write>,
     pretty: bool,
 }
@@ -157,12 +203,8 @@ impl GraphExecutionReporter for JsonGraphReporter {
         _display: &ExecutionItemDisplay,
         _leaf_kind: &LeafExecutionKind,
     ) -> Box<dyn LeafExecutionReporter> {
-        // Plans with nested runs are rejected, so a leaf is one level deep.
-        let slot = match path {
-            [(node, item)] => self.ids.get(node).map(|id| (id.clone(), *item)),
-            _ => None,
-        };
-        Box::new(JsonLeafReporter { state: Rc::clone(&self.state), slot })
+        let location = self.steps.get(path).cloned();
+        Box::new(JsonLeafReporter { state: Rc::clone(&self.state), location })
     }
 
     /// A run stopped by an error, or cancelled by Ctrl-C, leaves some steps
@@ -184,21 +226,34 @@ impl GraphExecutionReporter for JsonGraphReporter {
 
 struct JsonLeafReporter {
     state: Rc<RefCell<State>>,
-    /// The task ID and step index of the leaf's step.
-    slot: Option<(Str, usize)>,
+    /// Where the leaf's step is in the document.
+    location: Option<StepLocation>,
 }
 
 impl JsonLeafReporter {
     fn report(&self, cache: Option<Cache>) {
-        let Some((id, step)) = &self.slot else { return };
+        let Some(location) = &self.location else { return };
         let mut state = self.state.borrow_mut();
         let State { document, unreported, .. } = &mut *state;
-        if let Some(step) = document.plan.get_mut(id).and_then(|task| task.steps.get_mut(*step)) {
+        if let Some(step) = find_step(&mut document.plan, location) {
             if cache.is_some() {
                 *unreported = unreported.saturating_sub(1);
             }
             step.cache = cache;
         }
+    }
+}
+
+/// The command step at `location` in `plan`.
+fn find_step<'a>(
+    plan: &'a mut BTreeMap<Str, PlanTask>,
+    location: &[(Str, usize)],
+) -> Option<&'a mut CommandStep> {
+    let ((id, index), rest) = location.split_first()?;
+    match (plan.get_mut(id)?.steps.get_mut(*index)?, rest) {
+        (Step::Command(step), []) => Some(step),
+        (Step::Nested(nested), rest) => find_step(&mut nested.plan, rest),
+        (Step::Command(_), _) => None,
     }
 }
 
@@ -228,7 +283,7 @@ impl LeafExecutionReporter for JsonLeafReporter {
     ) {
         if let Some(error) = error {
             let message = vt_str::format!("{:#}", anyhow::Error::from(error));
-            let message = match &self.slot {
+            let message = match self.location.as_ref().and_then(|location| location.last()) {
                 Some((id, _)) => vt_str::format!("{id}: {message}"),
                 None => message,
             };
