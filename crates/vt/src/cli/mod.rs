@@ -58,9 +58,10 @@ pub struct RunFlags {
     pub ignore_depends_on: bool,
 
     /// Show full detailed summary after execution. A cache miss checks every
-    /// input, so the summary lists every change.
-    #[clap(default_value = "false", short = 'v', long)]
-    pub verbose: bool,
+    /// input, so the summary lists every change. Twice (`-vv`), it also lists
+    /// everything each cached run depends on, and its outputs.
+    #[clap(short = 'v', long, action = clap::ArgAction::Count)]
+    pub verbose: u8,
 
     /// Show what the run would do, and whether each command would hit the
     /// cache, without running anything or writing to the cache.

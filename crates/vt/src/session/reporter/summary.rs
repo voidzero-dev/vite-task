@@ -15,13 +15,18 @@ use std::{
 };
 
 use owo_colors::Style;
+use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
-use vt_path::AbsolutePath;
+use vt_casefold::EnvName;
+use vt_path::{AbsolutePath, RelativePath};
 use vt_str::Str;
 
 use super::{CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt};
 use crate::session::{
-    cache::{CacheHitSource, CacheMiss, Change, format_change},
+    cache::{
+        BaselineDetails, BaselinePath, CacheHitSource, CacheMiss, Change, InputChangeKind,
+        format_change,
+    },
     event::{CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, RunKind},
 };
 
@@ -67,6 +72,9 @@ pub enum TaskResult {
         /// Summaries saved before the source was recorded read as local hits.
         #[serde(default)]
         source: CacheHitSource,
+        /// With `vp run -vv`, what the cached run depends on and its outputs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        baseline: Option<BaselineDetails>,
     },
 
     /// Cache hit whose output files couldn't be restored. Always a failure.
@@ -145,6 +153,12 @@ pub enum SavedCacheMissReason {
     Changed {
         /// Each change, in the order they're listed.
         changes: Vec<Change>,
+        /// Some files or envs couldn't be checked, so `changes` may miss some.
+        #[serde(default, skip_serializing_if = "is_false")]
+        changes_partial: bool,
+        /// With `vp run -vv`, what the cached run depends on and its outputs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        baseline: Option<BaselineDetails>,
     },
     /// Reading the remote cache failed, and the local cache had no entry.
     RemoteReadFailed(SavedError),
@@ -197,7 +211,7 @@ impl SummaryStats {
 
         for task in tasks {
             match &task.result {
-                TaskResult::CacheHit { saved_duration_ms, source } => {
+                TaskResult::CacheHit { saved_duration_ms, source, .. } => {
                     stats.cache_hits += 1;
                     if *source == CacheHitSource::Remote {
                         stats.remote_cache_hits += 1;
@@ -258,7 +272,11 @@ impl SavedCacheMissReason {
     fn from_cache_miss(cache_miss: &CacheMiss) -> Self {
         match cache_miss {
             CacheMiss::NotFound => Self::NotFound,
-            CacheMiss::Changed(comparison) => Self::Changed { changes: comparison.changes.clone() },
+            CacheMiss::Changed(comparison) => Self::Changed {
+                changes: comparison.changes.clone(),
+                changes_partial: comparison.changes_partial,
+                baseline: comparison.baseline.as_deref().cloned(),
+            },
             CacheMiss::RemoteReadFailed(error) => {
                 Self::RemoteReadFailed(SavedError::new(error.as_ref()))
             }
@@ -300,13 +318,15 @@ impl TaskResult {
 
         match cache_status {
             // The only error a cache hit can have is a failed restore.
-            CacheStatus::Hit { replayed_duration, source, .. } => saved_error.map_or_else(
-                || Self::CacheHit {
-                    saved_duration_ms: duration_to_ms(*replayed_duration),
-                    source: *source,
-                },
-                |error| Self::RestoreFailed { source: *source, error: error.clone() },
-            ),
+            CacheStatus::Hit { replayed_duration, source, baseline, .. } => saved_error
+                .map_or_else(
+                    || Self::CacheHit {
+                        saved_duration_ms: duration_to_ms(*replayed_duration),
+                        source: *source,
+                        baseline: baseline.as_deref().cloned(),
+                    },
+                    |error| Self::RestoreFailed { source: *source, error: error.clone() },
+                ),
             CacheStatus::Disabled(CacheDisabledReason::InProcessExecution) => Self::InProcess,
             CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Disabled,
@@ -545,7 +565,7 @@ impl TaskResult {
         }
 
         let detail = match self {
-            Self::CacheHit { saved_duration_ms, source } => {
+            Self::CacheHit { saved_duration_ms, source, .. } => {
                 let hit = format_hit(*source);
                 match run_kind {
                     RunKind::Real => {
@@ -566,7 +586,7 @@ impl TaskResult {
                     SavedCacheMissReason::NotFound => {
                         Str::from("→ Cache miss: no previous cache entry found")
                     }
-                    SavedCacheMissReason::Changed { changes } => {
+                    SavedCacheMissReason::Changed { changes, .. } => {
                         let mut lines = changes.iter().map(format_change);
                         let first =
                             lines.next().unwrap_or_else(|| Str::from("configuration changed"));
@@ -583,6 +603,25 @@ impl TaskResult {
             },
         };
         (detail, Vec::new(), &[])
+    }
+
+    /// With `vp run -vv`, the cached run the task was compared with, and the
+    /// changes found, or `None` for them when some files or envs couldn't be
+    /// checked, so what's unchanged isn't known.
+    fn baseline(&self) -> Option<(&BaselineDetails, Option<&[Change]>)> {
+        match self {
+            Self::CacheHit { baseline: Some(baseline), .. } => Some((baseline, Some(&[]))),
+            Self::Spawned {
+                cache_status:
+                    SpawnedCacheStatus::Miss(SavedCacheMissReason::Changed {
+                        changes,
+                        changes_partial,
+                        baseline: Some(baseline),
+                    }),
+                ..
+            } => Some((baseline, (!changes_partial).then_some(changes.as_slice()))),
+            _ => None,
+        }
     }
 
     /// The [`Style`] for the cache detail line.
@@ -815,6 +854,9 @@ pub fn format_full_summary(summary: &LastRunSummary, run_kind: RunKind) -> Vec<u
                 let _ = writeln!(buf, "                    {}", change.style(detail_style));
             }
             write_causes(&mut buf, causes, detail_style);
+            if let Some((baseline, changes)) = task.result.baseline() {
+                write_baseline(&mut buf, baseline, changes);
+            }
         }
 
         if let Some(error) = task.result.upload_error() {
@@ -854,6 +896,96 @@ pub fn format_full_summary(summary: &LastRunSummary, run_kind: RunKind) -> Vec<u
     );
 
     buf
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's `skip_serializing_if` passes a reference"
+)]
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Write what `vp run -vv` shows of a cached run: what it depends on that
+/// didn't change, under `Unchanged:`, and its output files, under `Outputs:`,
+/// each by path, aligned under the first. Without the complete `changes`,
+/// what's unchanged isn't known, and only the outputs are written.
+fn write_baseline(buf: &mut Vec<u8>, baseline: &BaselineDetails, changes: Option<&[Change]>) {
+    let style = Style::new().bright_black();
+    let unchanged = changes.map_or_else(Vec::new, |changes| unchanged_lines(baseline, changes));
+    let outputs: Vec<Str> =
+        baseline.outputs.iter().flatten().map(|path| vt_str::format!("'{path}'")).collect();
+    for (label, lines) in [("Unchanged:", unchanged), ("Outputs:", outputs)] {
+        for (index, line) in lines.iter().enumerate() {
+            let label = if index == 0 { label } else { "" };
+            let _ = writeln!(buf, "        {}", vt_str::format!("{label:<11}{line}").style(style));
+        }
+    }
+}
+
+/// The lines of what a cached run depends on that none of `changes` changed:
+/// its paths, then its env names.
+fn unchanged_lines(baseline: &BaselineDetails, changes: &[Change]) -> Vec<Str> {
+    let mut changed_paths: FxHashSet<&RelativePath> = FxHashSet::default();
+    // The folders whose listing changed: an entry was added or removed, not
+    // just changed.
+    let mut changed_listings: FxHashSet<&RelativePath> = FxHashSet::default();
+    // Env names compare by the platform's rules, as the changes do.
+    let mut changed_envs: FxHashSet<EnvName<&str>> = FxHashSet::default();
+    for change in changes {
+        match change {
+            Change::File { path, kind } => {
+                changed_paths.insert(path.as_relative_path());
+                if matches!(kind, InputChangeKind::Added | InputChangeKind::Removed)
+                    && let Some(parent) = path.as_relative_path().parent()
+                {
+                    changed_listings.insert(parent);
+                }
+            }
+            Change::Env { mismatch, .. } => {
+                changed_envs.insert(EnvName::new(mismatch.name().as_str()));
+            }
+            _ => {}
+        }
+    }
+    let mut unchanged: Vec<Str> = baseline
+        .paths
+        .iter()
+        .filter(|(path, recorded)| {
+            let path = path.as_relative_path();
+            let listed = matches!(recorded, BaselinePath::Dir { entries: Some(_), .. });
+            let differs =
+                changed_paths.contains(path) || (listed && changed_listings.contains(path));
+            !differs
+        })
+        .map(|(path, recorded)| {
+            let path = quoted_path(path);
+            match recorded {
+                BaselinePath::File { .. } => path,
+                BaselinePath::Dir { entries: Some(_), .. } => vt_str::format!("{path} (listing)"),
+                BaselinePath::Dir { entries: None, .. } => vt_str::format!("{path} (folder)"),
+                BaselinePath::Missing => vt_str::format!("{path} (missing)"),
+            }
+        })
+        .collect();
+    unchanged.extend(
+        baseline
+            .envs
+            .iter()
+            .filter(|name| !changed_envs.contains(&EnvName::new(name.as_str())))
+            .map(|name| vt_str::format!("env '{name}'")),
+    );
+    unchanged
+}
+
+/// `path` in quotes, or `workspace root` for the root itself, as the miss
+/// reasons name it.
+fn quoted_path(path: &RelativePath) -> Str {
+    if path.as_str().is_empty() {
+        Str::from("workspace root")
+    } else {
+        vt_str::format!("'{}'", path.as_str())
+    }
 }
 
 /// Write a task detail line with `label` and `error`'s message, then each of
@@ -1052,6 +1184,10 @@ pub fn format_uploads_pending(count: NonZeroUsize) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use vt_path::RelativePathBuf;
+
     use super::*;
     use crate::session::event::ExecutionError;
 
@@ -1092,7 +1228,7 @@ mod tests {
             task_name: Str::from(task_name),
             command: Str::from("build"),
             cwd: Str::default(),
-            result: TaskResult::CacheHit { saved_duration_ms: 1000, source },
+            result: TaskResult::CacheHit { saved_duration_ms: 1000, source, baseline: None },
         }
     }
 
@@ -1138,6 +1274,8 @@ mod tests {
         if let TaskResult::Spawned { cache_status, .. } = &mut task.result {
             *cache_status = SpawnedCacheStatus::Miss(SavedCacheMissReason::Changed {
                 changes: vec![Change::InputConfig, Change::OutputConfig],
+                changes_partial: false,
+                baseline: None,
             });
         }
         let summary = full_summary(vec![task]);
@@ -1150,6 +1288,86 @@ mod tests {
                 ]),
             "{summary}"
         );
+    }
+
+    fn baseline_details() -> BaselineDetails {
+        let rel = |path| RelativePathBuf::new(path).unwrap();
+        BaselineDetails {
+            envs: vec![Str::from("NODE_ENV")],
+            paths: BTreeMap::from([
+                (
+                    rel("src"),
+                    BaselinePath::Dir {
+                        entries: Some(vec![Str::from("a.txt")]),
+                        may_be_missing: false,
+                    },
+                ),
+                (rel("src/a.txt"), BaselinePath::File { hash: 1, may_be_missing: false }),
+            ]),
+            outputs: Some(vec![Str::from("dist/out.txt")]),
+        }
+    }
+
+    fn baseline_text(changes: Option<&[Change]>) -> Str {
+        let mut buf = Vec::new();
+        write_baseline(&mut buf, &baseline_details(), changes);
+        strip(&buf)
+    }
+
+    /// A changed file's content leaves the folder listing it unchanged, and
+    /// an added entry changes it.
+    #[test]
+    fn unchanged_leaves_out_only_what_changed() {
+        let file = |kind, path| Change::File { kind, path: RelativePathBuf::new(path).unwrap() };
+        assert_eq!(
+            baseline_text(Some(&[file(InputChangeKind::ContentModified, "src/a.txt")])).as_str(),
+            "        Unchanged: 'src' (listing)\n                   env 'NODE_ENV'\n        \
+             Outputs:   'dist/out.txt'\n"
+        );
+        assert_eq!(
+            baseline_text(Some(&[file(InputChangeKind::Added, "src/b.txt")])).as_str(),
+            "        Unchanged: 'src/a.txt'\n                   env 'NODE_ENV'\n        \
+             Outputs:   'dist/out.txt'\n"
+        );
+    }
+
+    /// The workspace root reads as in the miss reasons, not as `''`.
+    #[test]
+    fn workspace_root_is_named() {
+        let root = RelativePathBuf::new("").unwrap();
+        let baseline = BaselineDetails {
+            envs: Vec::new(),
+            paths: BTreeMap::from([(
+                root,
+                BaselinePath::Dir {
+                    entries: Some(vec![Str::from("a.txt")]),
+                    may_be_missing: false,
+                },
+            )]),
+            outputs: Some(Vec::new()),
+        };
+        let mut buf = Vec::new();
+        write_baseline(&mut buf, &baseline, Some(&[]));
+        assert_eq!(strip(&buf).as_str(), "        Unchanged: workspace root (listing)\n");
+    }
+
+    /// A changed env isn't unchanged under another spelling that the
+    /// platform treats as the same name: on Windows, `node_env` is `NODE_ENV`.
+    #[test]
+    fn changed_envs_compare_by_platform_rules() {
+        let change = Change::Env {
+            mismatch: crate::session::cache::EnvMismatch::Changed { name: Str::from("node_env") },
+            source: crate::session::cache::EnvSource::Tracked,
+        };
+        let text = baseline_text(Some(&[change]));
+        assert_eq!(text.as_str().contains("env 'NODE_ENV'"), !cfg!(windows), "{text}");
+    }
+
+    /// When some files or envs couldn't be checked, what's unchanged isn't
+    /// known, so only the outputs are listed.
+    #[test]
+    fn partial_changes_list_only_the_outputs() {
+        assert_eq!(baseline_text(None).as_str(), "        Outputs:   'dist/out.txt'\n");
     }
 
     /// A dry run whose tasks all have caching disabled still gets its
@@ -1253,7 +1471,20 @@ mod tests {
         .unwrap();
         assert!(matches!(
             summary.tasks[0].result,
-            TaskResult::CacheHit { saved_duration_ms: 5, source: CacheHitSource::Local }
+            TaskResult::CacheHit { saved_duration_ms: 5, source: CacheHitSource::Local, .. }
+        ));
+    }
+
+    /// A miss saved before `-vv` existed, without `changes_partial` or
+    /// `baseline`, still reads.
+    #[test]
+    fn saved_miss_without_baseline_reads() {
+        let reason: SavedCacheMissReason =
+            serde_json::from_str(r#"{"Changed":{"changes":["InputConfig"]}}"#).unwrap();
+        assert!(matches!(
+            reason,
+            SavedCacheMissReason::Changed { ref changes, changes_partial: false, baseline: None }
+                if changes.as_slice() == [Change::InputConfig]
         ));
     }
 

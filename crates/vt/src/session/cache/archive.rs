@@ -6,6 +6,7 @@ use std::{
 };
 
 use vt_path::{AbsolutePath, RelativePathBuf};
+use vt_str::Str;
 
 /// Create a tar.zst archive from workspace-relative output paths and output
 /// folder paths.
@@ -129,21 +130,40 @@ fn unpack_with_directory_links(
     Ok(())
 }
 
-/// Read a tar.zst archive from `reader` to the end without writing any files,
-/// to check that it decodes.
+/// Read a tar.zst output archive from `reader` to the end without writing any
+/// files, which checks that it decodes, calling `on_file` with the path of
+/// each file and symbolic link in it. Folders, which are stored so that
+/// extracting recreates them, aren't passed.
 ///
 /// # Errors
 ///
 /// Returns an error if reading fails or the archive doesn't decode.
-pub fn check_output_archive(reader: impl Read) -> io::Result<()> {
+pub fn read_output_archive(reader: impl Read, mut on_file: impl FnMut(&str)) -> io::Result<()> {
     let mut archive = tar::Archive::new(zstd::Decoder::new(reader)?);
     for entry in archive.entries()? {
-        io::copy(&mut entry?, &mut io::sink())?;
+        let mut entry = entry?;
+        if !entry.header().entry_type().is_dir() {
+            on_file(&entry.path()?.to_string_lossy());
+        }
+        io::copy(&mut entry, &mut io::sink())?;
     }
     // Decode the rest of the stream too, so a truncated zstd frame after the
     // end of the tar data is caught.
     io::copy(&mut archive.into_inner(), &mut io::sink())?;
     Ok(())
+}
+
+/// The files and symbolic links in the output archive at `archive_path`,
+/// sorted by path: see [`read_output_archive`].
+///
+/// # Errors
+///
+/// Returns an error if reading the archive fails or it doesn't decode.
+pub fn list_output_files(archive_path: &AbsolutePath) -> io::Result<Vec<Str>> {
+    let mut paths = Vec::new();
+    read_output_archive(File::open(archive_path.as_path())?, |path| paths.push(Str::from(path)))?;
+    paths.sort_unstable();
+    Ok(paths)
 }
 
 #[cfg(test)]
@@ -155,6 +175,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn listing_names_files_but_not_folders() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        fs::create_dir_all(root.join("dist/empty").as_path()).unwrap();
+        fs::write(root.join("dist/b.js").as_path(), "b").unwrap();
+        fs::write(root.join("dist/a.js").as_path(), "a").unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        let archive = root.join("out.tar.zst");
+        create_output_archive(
+            &root,
+            &[rel("dist/b.js"), rel("dist/a.js")],
+            &[rel("dist"), rel("dist/empty")],
+            &archive,
+        )
+        .unwrap();
+
+        let files = list_output_files(&archive).unwrap();
+        assert_eq!(files, [Str::from("dist/a.js"), Str::from("dist/b.js")]);
+    }
+
+    #[test]
     fn check_accepts_only_complete_archives() {
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
@@ -163,10 +204,10 @@ mod tests {
         let archive_path = dir.join("output.tar.zst");
         create_output_archive(&dir, &[output], &[], &archive_path).unwrap();
         let archive = std::fs::read(archive_path.as_path()).unwrap();
-        check_output_archive(archive.as_slice()).unwrap();
+        read_output_archive(archive.as_slice(), |_| {}).unwrap();
 
         for corrupt in [&archive[..archive.len() - 1], b"corrupt"] {
-            assert!(check_output_archive(corrupt).is_err());
+            assert!(read_output_archive(corrupt, |_| {}).is_err());
         }
     }
 

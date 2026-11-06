@@ -205,6 +205,75 @@ pub struct Changed {
 pub struct Baseline {
     /// How long the cached run took, in milliseconds. On a hit, the time a replay saves.
     pub duration_ms: u64,
+
+    /// With `-vv`: everything the cached run depends on, changed or not: the env names and
+    /// paths the cache records for this step. Absent when it depends on none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, schemars(with = "Fingerprint"))]
+    pub fingerprint: Option<Fingerprint>,
+
+    /// With `-vv`: the files the cached run archived as its outputs, which a hit restores, by
+    /// path. Only files are listed: `packages/ui/dist/index.js` appears, but its directory
+    /// `packages/ui/dist` doesn't get an entry of its own. Absent when there are none, and
+    /// for a cached run from the remote cache, whose archive a dry run doesn't download.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, schemars(with = "Vec<Str>"))]
+    pub outputs: Option<Vec<Str>>,
+}
+
+/// Everything a cached run depends on.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct Fingerprint {
+    /// Env names, sorted. Absent when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<Str>,
+
+    /// Each path the cached run depends on, with what is checked. Absent when there are none.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub paths: BTreeMap<Str, PathFingerprint>,
+}
+
+/// What a cached run recorded of a path it depends on.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum PathFingerprint {
+    /// A file, matched by `cache.input` or read by the task. Its content is checked.
+    #[serde(rename_all = "camelCase")]
+    File {
+        /// A hash of the content the cached run recorded. Use it only to compare with other
+        /// hashes from the same version of `vp run`: the algorithm isn't part of the format
+        /// and can change, so don't compute hashes yourself to compare with it.
+        hash: Str,
+
+        /// The task rewrites this file, so it may be missing, as on a fresh checkout. When it
+        /// is there, its content is still checked.
+        #[serde(skip_serializing_if = "is_false")]
+        #[cfg_attr(test, schemars(with = "AlwaysTrue"))]
+        may_be_missing: bool,
+    },
+
+    /// A directory the task opened.
+    #[serde(rename_all = "camelCase")]
+    Dir {
+        /// The names of the directory's entries, when the task listed it. Adding or removing
+        /// an entry is a change. An empty array means the directory was empty. Absent when the
+        /// task opened the directory without listing it: then only that it exists is checked.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, schemars(with = "Vec<Str>"))]
+        entries: Option<Vec<Str>>,
+
+        /// The task creates this directory, as a folder or a link, so it may be missing, as on a
+        /// fresh checkout. When it is there, it is still checked.
+        #[serde(skip_serializing_if = "is_false")]
+        #[cfg_attr(test, schemars(with = "AlwaysTrue"))]
+        may_be_missing: bool,
+    },
+
+    /// A path the task looked for and didn't find. Creating it is a change.
+    Missing,
 }
 
 /// One difference between a step and its cached run.

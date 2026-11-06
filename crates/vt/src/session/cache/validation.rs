@@ -20,8 +20,7 @@ impl CacheEntryValue {
     /// inferred inputs, and tracked environment values against
     /// `unfiltered_envs`, the execution's `CacheMetadata::unfiltered_envs`.
     /// Returns every key and env change and, with [`FileCheck::First`], the
-    /// first changed file found, or with [`FileCheck::All`], every changed
-    /// file. Nothing when the entry is valid. The changes are partial when the
+    /// first changed file found, or otherwise every changed file. Nothing when the entry is valid. The changes are partial when the
     /// file check stopped early or couldn't check some files.
     ///
     /// The entry stored under the execution's key has no key changes. The
@@ -99,7 +98,7 @@ impl CacheEntryValue {
         let limit = if file_check == FileCheck::First { 1 } else { usize::MAX };
         let mut changes = globbed_input_changes(&self.globbed_inputs, globbed_inputs, limit);
         let mut partial = false;
-        if changes.is_empty() || file_check == FileCheck::All {
+        if changes.is_empty() || file_check != FileCheck::First {
             let input_changes = self.post_run_fingerprint.input_changes(
                 workspace_root,
                 &input_negative_globs,

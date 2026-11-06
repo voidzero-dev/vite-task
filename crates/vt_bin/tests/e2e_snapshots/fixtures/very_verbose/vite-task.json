@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "vv": {
+      "command": "vtt list-dir src && vtt print-file src/a.txt && vtt stat-file missing.txt && vtt write-file dist/out.txt built",
+      "cache": true
+    }
+  }
+}

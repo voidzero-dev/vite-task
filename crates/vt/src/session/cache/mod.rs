@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use vt_casefold::EnvName;
 use vt_graph::config::ResolvedGlobConfig;
-use vt_path::{AbsolutePath, RelativePathBuf};
+use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vt_plan::{
     cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint},
     remote_cache::{RemoteCacheAccess, ResolvedRemoteCacheConfig},
@@ -37,7 +37,10 @@ use wincode::{
 use self::remote::{ReadError, RemoteClients, RemoteUploads, Resolved, Restore, UploadError};
 use super::{
     event::RunKind,
-    execute::{fingerprint::PostRunFingerprint, pipe::StdOutput},
+    execute::{
+        fingerprint::{PathFingerprint, PostRunFingerprint},
+        pipe::StdOutput,
+    },
 };
 
 const TASK_CACHE_PREALLOCATION_SIZE_LIMIT: usize = 256 * 1024 * 1024;
@@ -115,8 +118,37 @@ pub struct CacheEntryValue {
 #[derive(Debug)]
 pub struct ExecutionCache {
     conn: Mutex<Connection>,
+    /// The folder that holds the database and the output archives.
+    dir: AbsolutePathBuf,
     remote_clients: RemoteClients,
     uploads: RemoteUploads,
+}
+
+/// What `vp run -vv` shows of a cached run: everything it depends on, changed
+/// or not, and its outputs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BaselineDetails {
+    /// The env names it depends on, sorted: its `cache.env`, and those that
+    /// runner-aware tools read or matched with a tracked query.
+    pub envs: Vec<Str>,
+    /// Each path it depends on, with what is checked.
+    pub paths: BTreeMap<RelativePathBuf, BaselinePath>,
+    /// The output files a hit restores, sorted. `None` for a run from the
+    /// remote cache, whose archive isn't downloaded to list them.
+    pub outputs: Option<Vec<Str>>,
+}
+
+/// What a cached run recorded of a path it depends on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BaselinePath {
+    /// A file, with a hash of its content. The task rewrites a file that may
+    /// be missing.
+    File { hash: u64, may_be_missing: bool },
+    /// A folder, with its entries, sorted, if the task listed it. The task
+    /// creates a folder that may be missing.
+    Dir { entries: Option<Vec<Str>>, may_be_missing: bool },
+    /// A path the task looked for and didn't find.
+    Missing,
 }
 
 /// A cache hit: the entry to replay, and the cache it came from.
@@ -124,6 +156,8 @@ pub struct ExecutionCache {
 pub struct CacheHit {
     pub value: CacheEntryValue,
     pub source: CacheHitSource,
+    /// With `vp run -vv`, what the entry depends on and its outputs.
+    pub baseline: Option<Arc<BaselineDetails>>,
 }
 
 /// The cache a hit came from.
@@ -162,6 +196,8 @@ pub struct Comparison {
     /// Other files may have changed too: the file check stopped at the first
     /// changed file, or couldn't check some of them.
     pub changes_partial: bool,
+    /// With `vp run -vv`, what the cached run depends on and its outputs.
+    pub baseline: Option<Arc<BaselineDetails>>,
 }
 
 impl Comparison {
@@ -174,13 +210,18 @@ impl Comparison {
     ) -> Self {
         changes.sort_by(|a, b| a.order_key().cmp(&b.order_key()));
         changes.dedup_by(|a, b| a.order_key() == b.order_key());
-        Self { changes, baseline_duration, changes_partial }
+        Self { changes, baseline_duration, changes_partial, baseline: None }
     }
 
     /// The miss for a cached run, `value`, that differs from the execution
     /// as `checked` found.
     fn of_value(value: &CacheEntryValue, checked: Checked) -> Self {
         Self::new(checked.changes, Some(value.duration), checked.partial)
+    }
+
+    /// The comparison, with `baseline` describing the cached run.
+    fn with_baseline(self, baseline: Option<Arc<BaselineDetails>>) -> Self {
+        Self { baseline, ..self }
     }
 }
 
@@ -269,6 +310,21 @@ pub enum FileCheck {
     First,
     /// Check every file, so the miss lists every change (`vp run -v`).
     All,
+    /// Check every file, and describe the cached run: everything it depends
+    /// on, changed or not, and its outputs (`vp run -vv`).
+    AllAndBaseline,
+}
+
+impl FileCheck {
+    /// The check that `-v` given `verbose` times asks for.
+    #[must_use]
+    pub const fn from_verbosity(verbose: u8) -> Self {
+        match verbose {
+            0 => Self::First,
+            1 => Self::All,
+            _ => Self::AllAndBaseline,
+        }
+    }
 }
 
 /// Where the cache records an env var.
@@ -443,6 +499,7 @@ impl ExecutionCache {
         // Lock is released when lock_file is dropped
         Ok(Self {
             conn: Mutex::new(conn),
+            dir: path.to_absolute_path_buf(),
             remote_clients: RemoteClients::default(),
             uploads: RemoteUploads::default(),
         })
@@ -492,7 +549,7 @@ impl ExecutionCache {
             )
             .await?
         {
-            Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Local })),
+            Ok(hit) => return Ok(Ok(hit)),
             Err(miss) => miss,
         };
         #[expect(
@@ -522,7 +579,7 @@ impl ExecutionCache {
                 cancel_token,
             )
             .await?;
-        Ok(hit.map(|value| CacheHit { value, source: CacheHitSource::Remote }))
+        Ok(hit)
     }
 
     async fn try_hit_local(
@@ -533,7 +590,7 @@ impl ExecutionCache {
         workspace_root: &AbsolutePath,
         run_kind: RunKind,
         file_check: FileCheck,
-    ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
+    ) -> anyhow::Result<Result<CacheHit, CacheMiss>> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
         // Try to find the cache entry by key (spawn fingerprint + input config)
@@ -546,15 +603,22 @@ impl ExecutionCache {
                 workspace_root,
                 file_check,
             )?;
+            let baseline =
+                self.describe(file_check, cache_key, &cache_value, CacheHitSource::Local);
             if !checked.changes.is_empty() {
-                return Ok(Err(CacheMiss::Changed(Comparison::of_value(&cache_value, checked))));
+                let comparison = Comparison::of_value(&cache_value, checked);
+                return Ok(Err(CacheMiss::Changed(comparison.with_baseline(baseline))));
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed
             if run_kind == RunKind::Real {
                 self.upsert_task_fingerprint(execution_cache_key, cache_key).await?;
             }
-            return Ok(Ok(cache_value));
+            return Ok(Ok(CacheHit {
+                value: cache_value,
+                source: CacheHitSource::Local,
+                baseline,
+            }));
         }
 
         // No cache found with the current cache entry key,
@@ -579,7 +643,13 @@ impl ExecutionCache {
                         workspace_root,
                         file_check,
                     )?;
-                    Comparison::of_value(&old_value, checked)
+                    let baseline = self.describe(
+                        file_check,
+                        &old_cache_key,
+                        &old_value,
+                        CacheHitSource::Local,
+                    );
+                    Comparison::of_value(&old_value, checked).with_baseline(baseline)
                 }
                 None => Comparison::new(old_cache_key.changes_to(cache_key), None, false),
             };
@@ -614,7 +684,7 @@ impl ExecutionCache {
         file_check: FileCheck,
         local_miss: CacheMiss,
         cancel_token: &CancellationToken,
-    ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
+    ) -> anyhow::Result<Result<CacheHit, CacheMiss>> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
         let fetched = self
             .remote_clients
@@ -630,41 +700,62 @@ impl ExecutionCache {
                 file_check,
             )
         };
-        let Restore { value: cache_value, blob_id } = match remote::resolve(fetched, validate) {
-            Ok(Resolved::Exact(restore)) => restore,
-            Ok(Resolved::Fallback(old_cache_key)) if matches!(local_miss, CacheMiss::NotFound) => {
-                let old_value = match self
-                    .remote_clients
-                    .fetch_value(remote_config, &old_cache_key, execution_cache_key, cancel_token)
-                    .await
-                {
-                    Ok(old_value) => old_value,
-                    Err(err) => return Ok(Err(err.into_miss())),
-                };
-                let comparison = match old_value {
-                    Some(old_value) => {
-                        let checked = old_value.validate(
-                            &old_cache_key,
-                            cache_key,
-                            globbed_inputs,
-                            &cache_metadata.unfiltered_envs,
-                            workspace_root,
-                            file_check,
-                        )?;
-                        Comparison::of_value(&old_value, checked)
-                    }
-                    None => Comparison::new(old_cache_key.changes_to(cache_key), None, false),
-                };
-                return Ok(Err(CacheMiss::Changed(comparison)));
-            }
-            Ok(Resolved::Fallback(_)) => return Ok(Err(local_miss)),
-            Err(remote_miss) => return Ok(Err(prefer_local_miss(local_miss, remote_miss))),
+        let describe = |cache_value: &CacheEntryValue| {
+            self.describe(file_check, cache_key, cache_value, CacheHitSource::Remote)
         };
+        let Restore { value: cache_value, blob_id, baseline } =
+            match remote::resolve(fetched, validate, describe) {
+                Ok(Resolved::Exact(restore)) => restore,
+                Ok(Resolved::Fallback(old_cache_key))
+                    if matches!(local_miss, CacheMiss::NotFound) =>
+                {
+                    let old_value = match self
+                        .remote_clients
+                        .fetch_value(
+                            remote_config,
+                            &old_cache_key,
+                            execution_cache_key,
+                            cancel_token,
+                        )
+                        .await
+                    {
+                        Ok(old_value) => old_value,
+                        Err(err) => return Ok(Err(err.into_miss())),
+                    };
+                    let comparison = match old_value {
+                        Some(old_value) => {
+                            let checked = old_value.validate(
+                                &old_cache_key,
+                                cache_key,
+                                globbed_inputs,
+                                &cache_metadata.unfiltered_envs,
+                                workspace_root,
+                                file_check,
+                            )?;
+                            let baseline = self.describe(
+                                file_check,
+                                &old_cache_key,
+                                &old_value,
+                                CacheHitSource::Remote,
+                            );
+                            Comparison::of_value(&old_value, checked).with_baseline(baseline)
+                        }
+                        None => Comparison::new(old_cache_key.changes_to(cache_key), None, false),
+                    };
+                    return Ok(Err(CacheMiss::Changed(comparison)));
+                }
+                Ok(Resolved::Fallback(_)) => return Ok(Err(local_miss)),
+                Err(remote_miss) => return Ok(Err(prefer_local_miss(local_miss, remote_miss))),
+            };
         // `resolve` checks that the entry has an archive exactly when it has a
         // blob to download, so the hit a dry run shows says whether it restores
         // outputs.
         if run_kind == RunKind::Dry {
-            return Ok(Ok(cache_value));
+            return Ok(Ok(CacheHit {
+                value: cache_value,
+                source: CacheHitSource::Remote,
+                baseline,
+            }));
         }
 
         let output_archive = match blob_id {
@@ -680,7 +771,70 @@ impl ExecutionCache {
             }
             None => None,
         };
-        Ok(Ok(CacheEntryValue { output_archive, ..cache_value }))
+        let value = CacheEntryValue { output_archive, ..cache_value };
+        Ok(Ok(CacheHit { value, source: CacheHitSource::Remote, baseline }))
+    }
+
+    /// With [`FileCheck::AllAndBaseline`], what `vp run -vv` shows of the
+    /// cached run `value`, stored under `key` in the cache `source`. A local
+    /// run's outputs are listed from its archive. A remote run's archive
+    /// isn't downloaded, so its outputs aren't listed.
+    fn describe(
+        &self,
+        file_check: FileCheck,
+        key: &CacheEntryKey,
+        value: &CacheEntryValue,
+        source: CacheHitSource,
+    ) -> Option<Arc<BaselineDetails>> {
+        if file_check != FileCheck::AllAndBaseline {
+            return None;
+        }
+        let fingerprint = &value.post_run_fingerprint;
+        // Env names compare by the platform's rules, so on Windows `FOO` in
+        // `cache.env` and a tool's `getEnv('foo')` are one name.
+        let mut envs: Vec<Str> = key
+            .spawn_fingerprint
+            .env_fingerprints()
+            .fingerprinted_envs
+            .keys()
+            .chain(fingerprint.tracked_envs.keys())
+            .chain(fingerprint.tracked_env_queries.values().flat_map(BTreeMap::keys))
+            .cloned()
+            .collect();
+        envs.sort_by(|a, b| EnvName::new(a.as_str()).cmp(&EnvName::new(b.as_str())));
+        envs.dedup_by(|a, b| EnvName::new(a.as_str()) == EnvName::new(b.as_str()));
+        let mut paths: BTreeMap<RelativePathBuf, BaselinePath> = value
+            .globbed_inputs
+            .iter()
+            .map(|(path, hash)| {
+                (path.clone(), BaselinePath::File { hash: *hash, may_be_missing: false })
+            })
+            .collect();
+        for (path, input) in &fingerprint.inferred_inputs {
+            let recorded = match &input.fingerprint {
+                PathFingerprint::FileContentHash(hash) => {
+                    BaselinePath::File { hash: *hash, may_be_missing: input.may_be_missing }
+                }
+                PathFingerprint::Folder(listing) => BaselinePath::Dir {
+                    entries: listing
+                        .as_ref()
+                        .map(|listing| listing.entries.keys().cloned().collect()),
+                    may_be_missing: input.may_be_missing,
+                },
+                PathFingerprint::NotFound => BaselinePath::Missing,
+            };
+            paths.insert(path.clone(), recorded);
+        }
+        let outputs = match (source, &value.output_archive) {
+            (CacheHitSource::Remote, _) => None,
+            (CacheHitSource::Local, None) => Some(Vec::new()),
+            (CacheHitSource::Local, Some(archive)) => {
+                archive::list_output_files(&self.dir.join(archive.as_str()))
+                    .inspect_err(|err| tracing::debug!(?err, "failed to list the outputs"))
+                    .ok()
+            }
+        };
+        Some(Arc::new(BaselineDetails { envs, paths, outputs }))
     }
 
     /// Record an entry locally.

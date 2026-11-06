@@ -12,8 +12,8 @@ use std::{
 };
 
 use document::{
-    Baseline, Cache, Change, Changed, CommandStep, Hit, HowChanged, NestedStep, PlanTask, RunPlan,
-    Setting, Step,
+    Baseline, Cache, Change, Changed, CommandStep, Fingerprint, Hit, HowChanged, NestedStep,
+    PathFingerprint, PlanTask, RunPlan, Setting, Step,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use vt_materialized_artifact::{Artifact, artifact};
@@ -29,7 +29,7 @@ use super::{
     LeafPath, PipeWriters, StdioConfig, StdioSuggestion,
 };
 use crate::session::{
-    cache::{self, CacheMiss, Comparison, InputChangeKind},
+    cache::{self, BaselineDetails, BaselinePath, CacheMiss, Comparison, InputChangeKind},
     event::{CacheDisabledReason, CacheStatus, CacheUpdateStatus, ExecutionError},
     json::{self, Version, path_key, task_id},
 };
@@ -383,10 +383,12 @@ fn mark_step_unknown(cache: &mut Cache) {
 /// How the plan shows a cache status. `None` for a built-in, which isn't cached.
 fn cache_of(status: &CacheStatus) -> Option<Cache> {
     Some(match status {
-        CacheStatus::Hit { replayed_duration, restores_outputs, .. } => Cache::Hit(Hit {
-            baseline: baseline(*replayed_duration),
-            restores_outputs: *restores_outputs,
-        }),
+        CacheStatus::Hit { replayed_duration, restores_outputs, baseline: details, .. } => {
+            Cache::Hit(Hit {
+                baseline: baseline(*replayed_duration, details.as_deref()),
+                restores_outputs: *restores_outputs,
+            })
+        }
         CacheStatus::Miss(CacheMiss::NotFound) => Cache::NoBaseline,
         CacheStatus::Miss(CacheMiss::Changed(comparison)) => changed(comparison),
         CacheStatus::Miss(CacheMiss::RemoteReadFailed(error)) => {
@@ -407,20 +409,54 @@ fn changed(comparison: &Comparison) -> Cache {
     // Untracked env names are one `untrackedEnv` setting.
     changes.dedup();
     Cache::Changed(Changed {
-        baseline: baseline(duration),
+        baseline: baseline(duration, comparison.baseline.as_deref()),
         changes,
         changes_partial: comparison.changes_partial,
     })
 }
 
-fn baseline(duration: Duration) -> Baseline {
-    Baseline { duration_ms: u64::try_from(duration.as_millis()).unwrap_or(u64::MAX) }
+/// The cached run a step is compared with, described with `-vv`. As
+/// everywhere in the document, an empty fingerprint or output list is left
+/// out.
+fn baseline(duration: Duration, details: Option<&BaselineDetails>) -> Baseline {
+    let duration_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
+    let Some(details) = details else {
+        return Baseline { duration_ms, fingerprint: None, outputs: None };
+    };
+    let paths = details
+        .paths
+        .iter()
+        .map(|(path, recorded)| {
+            let recorded = match recorded {
+                BaselinePath::File { hash, may_be_missing } => PathFingerprint::File {
+                    hash: vt_str::format!("{hash:016x}"),
+                    may_be_missing: *may_be_missing,
+                },
+                BaselinePath::Dir { entries, may_be_missing } => PathFingerprint::Dir {
+                    entries: entries.clone(),
+                    may_be_missing: *may_be_missing,
+                },
+                BaselinePath::Missing => PathFingerprint::Missing,
+            };
+            (relative_key(path), recorded)
+        })
+        .collect();
+    let fingerprint = Fingerprint { env: details.envs.clone(), paths };
+    let has_fingerprint = !fingerprint.env.is_empty() || !fingerprint.paths.is_empty();
+    Baseline {
+        duration_ms,
+        fingerprint: has_fingerprint.then_some(fingerprint),
+        outputs: details.outputs.clone().filter(|outputs| !outputs.is_empty()),
+    }
+}
+
+/// A path relative to the workspace root, with `"."` for the root itself.
+fn relative_key(path: &vt_path::RelativePathBuf) -> Str {
+    if path.as_str().is_empty() { Str::from(".") } else { Str::from(path.as_str()) }
 }
 
 fn change_of(change: &cache::Change) -> Change {
-    let relative = |path: &vt_path::RelativePathBuf| {
-        if path.as_str().is_empty() { Str::from(".") } else { Str::from(path.as_str()) }
-    };
+    let relative = relative_key;
     match change {
         cache::Change::Program { from, to } => {
             Change::Program { from: from.clone(), to: to.clone() }
@@ -516,6 +552,7 @@ mod tests {
             ],
             baseline_duration: Some(Duration::from_millis(1830)),
             changes_partial: false,
+            baseline: None,
         };
         let json = serde_json::to_value(changed(&comparison)).unwrap();
         assert_eq!(
@@ -544,7 +581,7 @@ mod tests {
     }
 
     fn hit(restores_outputs: bool) -> Cache {
-        Cache::Hit(Hit { baseline: baseline(Duration::ZERO), restores_outputs })
+        Cache::Hit(Hit { baseline: baseline(Duration::ZERO, None), restores_outputs })
     }
 
     fn task(depends_on: &[&str], steps: Vec<Step>) -> PlanTask {
@@ -615,6 +652,42 @@ mod tests {
         );
     }
 
+    /// A cached run that depends on nothing and has no outputs has neither
+    /// in its baseline: the document leaves out empty values.
+    #[test]
+    fn empty_fingerprint_and_outputs_are_left_out() {
+        let details =
+            BaselineDetails { envs: Vec::new(), paths: BTreeMap::new(), outputs: Some(Vec::new()) };
+        assert_eq!(
+            serde_json::to_value(baseline(Duration::ZERO, Some(&details))).unwrap(),
+            serde_json::json!({ "durationMs": 0 })
+        );
+    }
+
+    /// A path in the fingerprint is relative to the workspace root, and the
+    /// root itself is `"."`. A folder the task creates may be missing.
+    #[test]
+    fn fingerprint_paths_name_the_root_dot() {
+        let details = BaselineDetails {
+            envs: Vec::new(),
+            paths: BTreeMap::from([(
+                vt_path::RelativePathBuf::default(),
+                BaselinePath::Dir { entries: Some(Vec::new()), may_be_missing: true },
+            )]),
+            outputs: None,
+        };
+        let json = serde_json::to_value(baseline(Duration::ZERO, Some(&details))).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "durationMs": 0,
+                "fingerprint": {
+                    "paths": { ".": { "type": "dir", "entries": [], "mayBeMissing": true } },
+                },
+            })
+        );
+    }
+
     /// A key that points to a cached run that can't be read leaves nothing
     /// to compare with.
     #[test]
@@ -623,6 +696,7 @@ mod tests {
             changes: vec![cache::Change::InputConfig],
             baseline_duration: None,
             changes_partial: false,
+            baseline: None,
         };
         assert_eq!(
             serde_json::to_value(changed(&comparison)).unwrap(),

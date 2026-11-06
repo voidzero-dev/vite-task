@@ -255,7 +255,7 @@ impl PostRunFingerprint {
                 .find_map_any(|input| check_input(input, 1).pop())
                 .into_iter()
                 .collect(),
-            FileCheck::All => self
+            FileCheck::All | FileCheck::AllAndBaseline => self
                 .inferred_inputs
                 .par_iter()
                 .flat_map_iter(|input| check_input(input, usize::MAX))
