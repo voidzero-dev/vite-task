@@ -227,7 +227,7 @@ flowchart TD
       "oxlint"
     ],
     "resolved_options": {
-      "cwd": "<workspace>/packages/web/..",
+      "cwd": "<workspace>/packages/web",
       "cache_config": {
         "remote_cache_allowed": true,
         "env_config": {

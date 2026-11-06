@@ -67,7 +67,9 @@ mod tests {
         let mut schema = serde_json::to_string_pretty(&schema).unwrap();
         schema.push('\n');
 
-        let manifest_dir = AbsolutePath::new(env!("CARGO_MANIFEST_DIR")).unwrap();
+        // Read at runtime: CI builds the Windows tests on Linux, so `env!` would give a Linux path.
+        let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR").unwrap();
+        let manifest_dir = AbsolutePath::new(&manifest_dir).unwrap();
         let snapshots = Snapshots::new(manifest_dir.join("schemas").into_path_buf());
         snapshots.check_snapshot("task-graph.json", &schema).unwrap();
     }

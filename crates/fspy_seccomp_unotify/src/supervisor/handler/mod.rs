@@ -33,9 +33,11 @@ macro_rules! impl_handler {
         }
         fn handle_notify(&mut self, notify: &::libc::seccomp_notif) -> ::std::io::Result<()> {
             $crate::supervisor::handler::arg::Caller::with_pid(notify.pid as _, |caller| {
+                // The cast names its type: with `as _`, any `PartialEq<T> for c_int` impl in
+                // the dependency graph, such as serde_json's, makes the comparison ambiguous.
                 $(
                     $(#[$attr])?
-                    if notify.data.nr == $crate::supervisor::handler::Sysno::$syscall as _ {
+                    if notify.data.nr == $crate::supervisor::handler::Sysno::$syscall as ::libc::c_int {
                         return self.$syscall(caller, $crate::supervisor::handler::arg::FromNotify::from_notify(notify)?)
                     }
                 )*

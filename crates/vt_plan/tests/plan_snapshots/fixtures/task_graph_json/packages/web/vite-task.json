@@ -10,8 +10,7 @@
       "dependsOn": ["build"]
     },
     "lint": {
-      "command": "oxlint",
-      "cwd": ".."
+      "command": "oxlint"
     }
   }
 }

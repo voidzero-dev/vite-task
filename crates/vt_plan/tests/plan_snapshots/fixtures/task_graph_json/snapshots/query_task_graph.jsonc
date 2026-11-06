@@ -67,7 +67,6 @@
     "packages/web#lint": {
       "package": "packages/web",
       "name": "lint",
-      "cwd": "packages",
       "command": "oxlint"
     }
   }
