@@ -4,10 +4,18 @@ use core::{
 };
 
 use bitflags::bitflags;
-use windows_sys::Win32::System::Memory::{
-    CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
-    MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, PAGE_READWRITE, UnmapViewOfFile, VirtualAlloc,
-    VirtualFree,
+use windows_sys::Win32::{
+    Foundation::HANDLE,
+    System::{
+        LibraryLoader::GetProcAddress,
+        Memory::{
+            CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MEM_ADDRESS_REQUIREMENTS,
+            MEM_COMMIT, MEM_EXTENDED_PARAMETER, MEM_EXTENDED_PARAMETER_0,
+            MEM_EXTENDED_PARAMETER_1, MEM_RELEASE, MEM_RESERVE, MEMORY_MAPPED_VIEW_ADDRESS,
+            MapViewOfFile, MemExtendedParameterAddressRequirements, PAGE_READWRITE,
+            UnmapViewOfFile, VIRTUAL_ALLOCATION_TYPE, VirtualAlloc, VirtualFree,
+        },
+    },
 };
 
 use crate::{BorrowedHandle, OwnedHandle, Result, SecurityAttributes};
@@ -147,6 +155,86 @@ pub fn create_file_mapping(
     }
     // SAFETY: `CreateFileMappingW` returned a valid, newly owned handle.
     Ok(unsafe { OwnedHandle::from_raw_handle(mapping) })
+}
+
+/// `MapViewOfFile3`, which `kernelbase.dll` exports from Windows 10 1803 on.
+type MapViewOfFile3Fn = unsafe extern "system" fn(
+    file_mapping: HANDLE,
+    process: HANDLE,
+    base_address: *const c_void,
+    offset: u64,
+    view_size: usize,
+    allocation_type: VIRTUAL_ALLOCATION_TYPE,
+    page_protection: u32,
+    extended_parameters: *mut MEM_EXTENDED_PARAMETER,
+    parameter_count: u32,
+) -> MEMORY_MAPPED_VIEW_ADDRESS;
+
+/// Looks `MapViewOfFile3` up at run time rather than importing it, so this
+/// crate still loads on Windows releases that predate it.
+fn map_view_of_file3() -> Option<MapViewOfFile3Fn> {
+    let kernelbase = crate::windows::get_module_handle(crate::wide_cstr!("kernelbase.dll")).ok()?;
+    // SAFETY: `kernelbase` is a loaded module handle and the symbol name is a
+    // NUL-terminated ANSI string.
+    let symbol = unsafe { GetProcAddress(kernelbase.as_ptr(), c"MapViewOfFile3".as_ptr().cast()) }?;
+    // SAFETY: `MapViewOfFile3` has exactly the signature of `MapViewOfFile3Fn`.
+    Some(unsafe { core::mem::transmute::<unsafe extern "system" fn() -> isize, MapViewOfFile3Fn>(symbol) })
+}
+
+/// Maps the whole of `mapping` read-write, at an address no lower than
+/// `lowest_address`.
+///
+/// Returns `None` when this Windows has no `MapViewOfFile3` (before Windows 10
+/// 1803), so the caller can fall back to [`map_view_of_file`].
+///
+/// # Errors
+///
+/// Returns the error reported by `MapViewOfFile3`, for example when no free
+/// range of `bytes_to_map` bytes exists above `lowest_address`.
+pub fn map_view_of_file_above(
+    mapping: BorrowedHandle<'_>,
+    bytes_to_map: usize,
+    lowest_address: usize,
+) -> Option<Result<MappingView>> {
+    let map_view_of_file3 = map_view_of_file3()?;
+    let mut requirements = MEM_ADDRESS_REQUIREMENTS {
+        LowestStartingAddress: ptr::without_provenance_mut(lowest_address),
+        // Null means the highest address the process can use.
+        HighestEndingAddress: ptr::null_mut(),
+        // Zero means the allocation granularity.
+        Alignment: 0,
+    };
+    let mut parameter = MEM_EXTENDED_PARAMETER {
+        // The type occupies the low 8 bits.
+        Anonymous1: MEM_EXTENDED_PARAMETER_0 {
+            _bitfield: MemExtendedParameterAddressRequirements.cast_unsigned().into(),
+        },
+        Anonymous2: MEM_EXTENDED_PARAMETER_1 { Pointer: (&raw mut requirements).cast() },
+    };
+    // `GetCurrentProcess()`'s pseudo-handle, which never needs closing.
+    let current_process: HANDLE = ptr::without_provenance_mut(usize::MAX);
+    // SAFETY: `mapping` keeps the opaque handle open for the call, and
+    // `parameter` points at `requirements`, both of which outlive the call.
+    // Windows validates the handle, size, protection, and address range; any
+    // mismatch is reported as a null result.
+    let view = unsafe {
+        map_view_of_file3(
+            mapping.as_raw_handle(),
+            current_process,
+            ptr::null(),
+            0,
+            bytes_to_map,
+            0,
+            PAGE_READWRITE,
+            &raw mut parameter,
+            1,
+        )
+    };
+    Some(
+        core::ptr::NonNull::new(view.Value.cast::<u8>())
+            .map(|ptr| MappingView { ptr })
+            .ok_or_else(crate::Error::last_os_error),
+    )
 }
 
 /// Calls `MapViewOfFile` and returns the new owned view.

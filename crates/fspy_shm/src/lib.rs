@@ -252,6 +252,25 @@ mod tests {
         }
     }
 
+    /// A 4 GiB view placed by the system lands on Cygwin's fixed-address
+    /// shared regions, which breaks every MSYS2 program a tracked task starts
+    /// (vite-task#830). Windows 10 1803 and later can place it above them.
+    #[cfg(windows)]
+    #[test]
+    fn four_gib_mapping_lies_above_the_cygwin_fixed_layout() {
+        const PRODUCTION_SIZE: usize = 4 * 1024 * 1024 * 1024;
+
+        let path = BackingPath::new();
+        let handle = create(path.as_c_str(), PRODUCTION_SIZE).unwrap();
+        for mapping in [handle.map().unwrap(), open(path.as_c_str()).unwrap().map().unwrap()] {
+            assert!(
+                mapping.as_ptr() as usize >= super::windows::ABOVE_CYGWIN_FIXED_LAYOUT,
+                "view at {:p}",
+                mapping.as_ptr(),
+            );
+        }
+    }
+
     #[cfg(windows)]
     fn backing_file_sizes(path: &BackingPath) -> (u64, u64) {
         let file = File::open(&path.path).unwrap();
