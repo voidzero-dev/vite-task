@@ -24,7 +24,7 @@ use crate::{
         event::{
             CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, RunKind,
         },
-        reporter::{ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder},
+        reporter::{ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafPath},
     },
 };
 
@@ -90,8 +90,11 @@ impl ExecutionContext<'_> {
     /// (killing in-flight child processes). Ctrl-C cancels the `cancel_token`.
     /// Either cancellation causes this method to close the semaphore, drain
     /// remaining futures, and return.
+    ///
+    /// `path` is where `graph` is: empty for the root graph, and the path of
+    /// the item it expands for a nested one.
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute_expanded_graph(&self, graph: &ExecutionGraph) {
+    async fn execute_expanded_graph(&self, graph: &ExecutionGraph, path: &LeafPath) {
         if graph.graph.node_count() == 0 {
             return;
         }
@@ -111,7 +114,7 @@ impl ExecutionContext<'_> {
         // Schedule initially ready nodes (no dependencies).
         for (&node_ix, &count) in &dep_count {
             if count == 0 {
-                futures.push(self.spawn_node(graph, node_ix, &semaphore));
+                futures.push(self.spawn_node(graph, path, node_ix, &semaphore));
             }
         }
 
@@ -132,7 +135,7 @@ impl ExecutionContext<'_> {
                 let count = dep_count.get_mut(&dependent).expect("all nodes are in dep_count");
                 *count -= 1;
                 if *count == 0 {
-                    futures.push(self.spawn_node(graph, dependent, &semaphore));
+                    futures.push(self.spawn_node(graph, path, dependent, &semaphore));
                 }
             }
         }
@@ -146,6 +149,7 @@ impl ExecutionContext<'_> {
     fn spawn_node<'a>(
         &'a self,
         graph: &'a ExecutionGraph,
+        path: &'a LeafPath,
         node_ix: ExecutionNodeIndex,
         semaphore: &Arc<Semaphore>,
     ) -> LocalBoxFuture<'a, ExecutionNodeIndex> {
@@ -154,7 +158,7 @@ impl ExecutionContext<'_> {
             if let Ok(_permit) = sem.acquire_owned().await
                 && !self.cancelled()
             {
-                self.execute_node(graph, node_ix).await;
+                self.execute_node(graph, path, node_ix).await;
             }
             node_ix
         }
@@ -166,19 +170,27 @@ impl ExecutionContext<'_> {
     /// A node may have multiple items (from `&&`-split commands). Items are executed
     /// in order; if any item fails, `execute_leaf` cancels the `fast_fail_token`
     /// and remaining items are skipped (preserving `&&` semantics).
-    async fn execute_node(&self, graph: &ExecutionGraph, node_ix: ExecutionNodeIndex) {
+    async fn execute_node(
+        &self,
+        graph: &ExecutionGraph,
+        path: &LeafPath,
+        node_ix: ExecutionNodeIndex,
+    ) {
         let task_execution = &graph.graph[node_ix];
 
-        for item in &task_execution.items {
+        for (item_index, item) in task_execution.items.iter().enumerate() {
             if self.cancelled() {
                 return;
             }
+            let item_path: Vec<_> = path.iter().copied().chain([(node_ix, item_index)]).collect();
             match &item.kind {
                 ExecutionItemKind::Leaf(leaf_kind) => {
-                    self.execute_leaf(&item.execution_item_display, leaf_kind).boxed_local().await;
+                    self.execute_leaf(&item_path, &item.execution_item_display, leaf_kind)
+                        .boxed_local()
+                        .await;
                 }
                 ExecutionItemKind::Expanded(nested_graph) => {
-                    self.execute_expanded_graph(nested_graph).boxed_local().await;
+                    self.execute_expanded_graph(nested_graph, &item_path).boxed_local().await;
                 }
             }
         }
@@ -191,10 +203,16 @@ impl ExecutionContext<'_> {
     /// method. On failure (non-zero exit or infrastructure error), cancels the
     /// `fast_fail_token`.
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute_leaf(&self, display: &ExecutionItemDisplay, leaf_kind: &LeafExecutionKind) {
+    async fn execute_leaf(
+        &self,
+        path: &LeafPath,
+        display: &ExecutionItemDisplay,
+        leaf_kind: &LeafExecutionKind,
+    ) {
         // Borrow the reporter briefly to create the leaf reporter, then drop
         // the RefCell guard before any `.await` point.
-        let mut leaf_reporter = self.reporter.borrow_mut().new_leaf_execution(display, leaf_kind);
+        let mut leaf_reporter =
+            self.reporter.borrow_mut().new_leaf_execution(path, display, leaf_kind);
 
         let failed = match leaf_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
@@ -307,7 +325,7 @@ impl Session<'_> {
 
         // Execute the graph with fast-fail: if any task fails, remaining tasks
         // are skipped. Leaf-level errors are reported through the reporter.
-        execution_context.execute_expanded_graph(&execution_graph).await;
+        execution_context.execute_expanded_graph(&execution_graph, &[]).await;
 
         // Nested graphs share the cache, so this waits for their uploads too.
         // After Ctrl-C, the uploads are cancelled without a message.

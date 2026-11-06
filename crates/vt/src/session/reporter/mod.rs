@@ -3,10 +3,12 @@
 //! This module provides a typestate-based reporter system with three phases:
 //!
 //! 1. [`GraphExecutionReporterBuilder`] — created before execution begins.
-//!    Transitions to [`GraphExecutionReporter`] when `build()` is called.
+//!    Transitions to [`GraphExecutionReporter`] when `build()` is called with the graph to
+//!    execute.
 //!
 //! 2. [`GraphExecutionReporter`] — creates [`LeafExecutionReporter`]
-//!    instances for individual leaf executions via `new_leaf_execution()`. Finalized with `finish()`.
+//!    instances for individual leaf executions via `new_leaf_execution()`, each with its
+//!    [`LeafPath`] in the graph. Finalized with `finish()`.
 //!
 //! 3. [`LeafExecutionReporter`] — handles events for a single leaf execution (output streaming,
 //!    cache status, errors). Finalized with `finish()`.
@@ -42,7 +44,7 @@ pub use plain::PlainReporter;
 use retrying_writer::RetryingWriter;
 pub use summary_reporter::SummaryReporterBuilder;
 use vt_path::AbsolutePath;
-use vt_plan::{ExecutionItemDisplay, LeafExecutionKind};
+use vt_plan::{ExecutionItemDisplay, LeafExecutionKind, execution_graph::ExecutionNodeIndex};
 use vt_str::Str;
 
 use super::{
@@ -144,6 +146,11 @@ pub(super) fn maybe_strip_writer(writer: Box<dyn Write>, color_support: bool) ->
 // Typestate traits
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+/// Where a leaf is in the execution graph: its node and item index at each
+/// nesting level, outermost first. A nested `vp run` adds a level, so the same
+/// task in two nested plans has two paths.
+pub type LeafPath = [(ExecutionNodeIndex, usize)];
+
 /// Builder for creating a [`GraphExecutionReporter`].
 ///
 /// This is the initial state before the execution graph is known. The `build` method
@@ -158,9 +165,11 @@ pub trait GraphExecutionReporterBuilder {
 /// Creates [`LeafExecutionReporter`] instances for individual leaf executions
 /// and finalizes the session with `finish()`.
 pub trait GraphExecutionReporter {
-    /// Create a new leaf execution reporter for the given leaf.
+    /// Create a new leaf execution reporter for the leaf at `path` in the
+    /// graph being executed.
     fn new_leaf_execution(
         &mut self,
+        path: &LeafPath,
         display: &ExecutionItemDisplay,
         leaf_kind: &LeafExecutionKind,
     ) -> Box<dyn LeafExecutionReporter>;
