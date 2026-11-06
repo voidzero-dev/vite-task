@@ -24,6 +24,7 @@ use rusqlite::{Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use vt_glob::path::PathGlobSet;
 use vt_graph::config::ResolvedGlobConfig;
 use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::{
@@ -276,7 +277,7 @@ pub fn split_path(path: &str) -> (Option<&str>, &str) {
 /// its own cache warm across branch switches, and a cache from a different
 /// version is simply ignored (it lives in a directory this build never looks
 /// at) rather than aborting the run. Bumping the version starts a fresh cache.
-const CACHE_SCHEMA_VERSION: u32 = 20;
+const CACHE_SCHEMA_VERSION: u32 = 23;
 
 /// Name of the per-version subdirectory (e.g. `v14`) under the task-cache
 /// directory that holds the database and output archives for the current
@@ -363,9 +364,17 @@ impl ExecutionCache {
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheHit, CacheMiss>> {
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
+        // Part of the key, so the same as when the entry was created.
+        let input_negative_globs = PathGlobSet::new(&cache_metadata.input_config.negative_globs)?;
 
         let local_miss = match self
-            .try_hit_local(cache_metadata, &cache_key, globbed_inputs, workspace_root)
+            .try_hit_local(
+                cache_metadata,
+                &cache_key,
+                globbed_inputs,
+                &input_negative_globs,
+                workspace_root,
+            )
             .await?
         {
             Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Local })),
@@ -390,6 +399,7 @@ impl ExecutionCache {
                 cache_metadata,
                 &cache_key,
                 globbed_inputs,
+                &input_negative_globs,
                 workspace_root,
                 cache_dir,
                 cancel_token,
@@ -410,6 +420,7 @@ impl ExecutionCache {
         cache_metadata: &CacheMetadata,
         cache_key: &CacheEntryKey,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
+        input_negative_globs: &PathGlobSet<'_>,
         workspace_root: &AbsolutePath,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
@@ -419,6 +430,7 @@ impl ExecutionCache {
             if let Some(mismatch) = cache_value.validate(
                 &cache_metadata.unfiltered_envs,
                 globbed_inputs,
+                input_negative_globs,
                 workspace_root,
             )? {
                 return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
@@ -456,6 +468,7 @@ impl ExecutionCache {
         cache_metadata: &CacheMetadata,
         cache_key: &CacheEntryKey,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
+        input_negative_globs: &PathGlobSet<'_>,
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
         cancel_token: &CancellationToken,
@@ -465,7 +478,12 @@ impl ExecutionCache {
             .fetch(remote_config, cache_key, &cache_metadata.execution_cache_key, cancel_token)
             .await;
         let validate = |cache_value: &CacheEntryValue| {
-            cache_value.validate(&cache_metadata.unfiltered_envs, globbed_inputs, workspace_root)
+            cache_value.validate(
+                &cache_metadata.unfiltered_envs,
+                globbed_inputs,
+                input_negative_globs,
+                workspace_root,
+            )
         };
         let Restore { value: cache_value, blob_id } =
             match remote::resolve(fetched, cache_key, validate) {

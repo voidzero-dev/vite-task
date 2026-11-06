@@ -427,6 +427,7 @@ mod tests {
     use std::{collections::BTreeMap, io::Read as _, net::TcpListener, time::Duration};
 
     use tokio::sync::oneshot;
+    use vt_glob::path::PathGlobSet;
     use vt_graph::config::ResolvedGlobConfig;
     use vt_path::{AbsolutePathBuf, RelativePathBuf};
     use vt_plan::{
@@ -502,7 +503,12 @@ mod tests {
     ) -> impl FnOnce(&CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>> {
         move |value| {
             let workspace_root = vt_path::current_dir().unwrap();
-            value.validate(&FxHashMap::default(), &globbed_inputs, &workspace_root)
+            value.validate(
+                &FxHashMap::default(),
+                &globbed_inputs,
+                &PathGlobSet::default(),
+                &workspace_root,
+            )
         }
     }
 

@@ -197,6 +197,9 @@ Vite Task uses `fspy` to monitor file system access during task execution:
 │    • Check if file exists                                    │
 │    • If file: Hash contents with xxHash3                     │
 │    • If directory: Record structure                          │
+│      (skipped if it's an empty folder the task made, or      │
+│      holds only files the task wrote and such folders; a     │
+│      listing leaves out such files and folders)              │
 │    • If missing: Mark as NotFound                            │
 │         │                                                    │
 │         ▼                                                    │
@@ -205,7 +208,7 @@ Vite Task uses `fspy` to monitor file system access during task execution:
 │    enum PathFingerprint {                                    │
 │        NotFound,                   // File doesn't exist     │
 │        FileContentHash(u64),       // xxHash3 of content     │
-│        Folder(Option<BTreeMap<Str, DirEntryKind>>),          │
+│        Folder(Option<DirListing>), // entries, ignored names │
 │    }             ▲                                           │
 │                  │                                           │
 │  This value is `None` when fspy reports that the task is     │
@@ -214,7 +217,7 @@ Vite Task uses `fspy` to monitor file system access during task execution:
 │  `openat(2)`. In such case, the folder's entries don't need  │
 │  to be fingerprinted.                                        │
 │  Folders with empty entries fingerprinted are represented as │
-│  `Folder(Some(empty BTreeMap))`.                             │
+│  `Folder(Some(_))` with empty `entries`.                     │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -239,7 +242,7 @@ The `input` field under a task's `cache` controls which files are tracked for ca
 - **`[]`** (empty array): disables file tracking entirely
 - **Glob patterns** (e.g. `"src/**"`): select specific files
 - **`{auto: true}`**: enables automatic file tracking
-- **Negative patterns** (e.g. `"!dist/**"`): exclude matched files
+- **Negative patterns** (e.g. `"!dist/**"`): exclude matched files, and matching entries of the folders the task lists
 
 See [inputs.md](../../../docs/inputs.md) for full details.
 

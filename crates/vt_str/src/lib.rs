@@ -176,6 +176,29 @@ impl PartialEq<str> for Str {
     }
 }
 
+#[cfg(feature = "schemars")]
+mod schemars_impl {
+    use std::borrow::Cow;
+
+    use schemars::{JsonSchema, Schema, SchemaGenerator};
+
+    use super::Str;
+
+    impl JsonSchema for Str {
+        fn inline_schema() -> bool {
+            true
+        }
+
+        fn schema_name() -> Cow<'static, str> {
+            <str as JsonSchema>::schema_name()
+        }
+
+        fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+            <str as JsonSchema>::json_schema(generator)
+        }
+    }
+}
+
 #[cfg(feature = "ts-rs")]
 mod ts_impl {
     use ts_rs::TS;

@@ -62,6 +62,8 @@ Exclude files from tracking using `!` prefix:
 
 Negative patterns filter out files that would otherwise be matched by positive patterns or auto-inference.
 
+With auto-inference, they also keep matching entries out of the folders the command lists. When a command lists a folder, like a linter looking for files to check, the folder's entries are tracked, and an entry whose path a negative pattern matches is left out, so it can appear or disappear without invalidating the cache. A folder entry is left out when the pattern matches the folder itself: `!build/**` matches `build` as well as everything in it, while `!build/*` matches only what is in it and keeps the `build` entry tracked.
+
 ### Glob with Base Directory
 
 By default, glob patterns are resolved relative to the package directory. Use the object form to resolve patterns relative to a different base:
@@ -121,7 +123,7 @@ Track inferred files but exclude certain patterns:
 }
 ```
 
-Files in `dist/` and `node_modules/` won't trigger cache invalidation even if the command reads them.
+Files in `dist/` and `node_modules/` won't trigger cache invalidation even if the command reads them, and neither will a `dist` or `node_modules` folder appearing in or disappearing from a folder the command lists.
 
 ### Mixed Mode
 

@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt print built",
+      "dependsOn": ["lib#build"]
+    }
+  }
+}

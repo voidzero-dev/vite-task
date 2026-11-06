@@ -1,0 +1,34 @@
+[[e2e]]
+name = "list_folder_holding_output"
+comment = """
+The task makes `gen`, writes `gen/a.txt` and lists the package root, like a code generator listing the folder its output goes into.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    "gen",
+  ], comment = "remove the output folder, as on a clean checkout" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "write-file",
+    "notes.txt",
+    "x",
+  ], comment = "other entries of the listing still count" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+]

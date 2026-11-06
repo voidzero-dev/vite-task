@@ -150,6 +150,34 @@ fn write_sync(runtime: &str) -> anyhow::Result<()> {
 #[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
+fn symlink_junction_sync(runtime: &str) -> anyhow::Result<()> {
+    let tmpdir = tempfile::tempdir()?;
+    // Long names, as in `rust_std::symlink_destination`.
+    let tmp_path = tmpdir.path().canonicalize()?;
+    let target = tmp_path.join("target");
+    let link = tmp_path.join("link");
+    std::fs::create_dir(&target)?;
+    // A junction on Windows, as nf3 makes them; a symlink elsewhere.
+    let accesses = track_script(
+        runtime,
+        "try { fs.symlinkSync(process.argv.at(-2), process.argv.at(-1), 'junction') } catch {}",
+        &[target.as_os_str(), link.as_os_str()],
+    )?;
+    #[cfg(unix)]
+    assert_contains(&accesses, &link, PathAccess::Write);
+    // A junction is a folder, recorded as a mkdir, with a mount point set on
+    // it.
+    #[cfg(windows)]
+    test_utils::assert_includes(&accesses, &link, PathAccess::Write);
+    Ok(())
+}
+
+#[test_case("node")]
+#[ignore = "requires node"]
+#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
+#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
+#[cfg_attr(not(target_env = "musl"), test_case("deno"))]
+#[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn read_dir_sync(runtime: &str) -> anyhow::Result<()> {
     let accesses = track_script(runtime, "try { fs.readdirSync('.') } catch {}", &[])?;
     assert_contains(&accesses, &current_dir().unwrap(), PathAccess::ReadDir);

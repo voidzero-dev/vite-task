@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "crawl": {
+      "command": "vtt fs walk node_modules/.vite write out.txt built",
+      "cache": true
+    }
+  }
+}

@@ -6,7 +6,7 @@ pub mod relative;
 use std::{
     ffi::OsStr,
     io,
-    path::{Path, StripPrefixError},
+    path::{Path, PathBuf, StripPrefixError},
 };
 
 #[cfg(feature = "absolute-redaction")]
@@ -51,6 +51,25 @@ pub fn strip_path_prefix<'a>(path: &'a OsStr, base: &OsStr) -> Result<&'a Path, 
     let path = strip_windows_path_prefix(path);
     let base = strip_windows_path_prefix(base);
     Path::new(path).strip_prefix(base)
+}
+
+/// Strips `base` from `path` after resolving `.` and `..` in `path`.
+///
+/// Resolving is lexical, like [`AbsolutePath::clean`], and stripping is like
+/// [`strip_path_prefix`]. So `/repo/../site` isn't under `/repo`, and
+/// `/repo/../repo/a` is `a` under it.
+///
+/// # Errors
+///
+/// Returns an error if `base` is not a path prefix of the cleaned `path`.
+pub fn clean_and_strip_path_prefix(
+    path: &OsStr,
+    base: &OsStr,
+) -> Result<PathBuf, StripPrefixError> {
+    use path_clean::PathClean as _;
+
+    let path = Path::new(strip_windows_path_prefix(path)).clean();
+    path.strip_prefix(strip_windows_path_prefix(base)).map(Path::to_path_buf)
 }
 
 /// Strip the `\\?\`, `\\.\`, `\??\` prefix from a Windows path, if present.

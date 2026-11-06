@@ -36,6 +36,163 @@ async fn open_write() -> anyhow::Result<()> {
 }
 
 #[test(tokio::test)]
+async fn rename_destination() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    File::create(tmp_dir.path().join("source"))?;
+    let tmp_dir_str = tmp_dir.path().to_str().unwrap().to_owned();
+    let accesses = track_fn!(tmp_dir_str, |tmp_dir_str: String| {
+        let tmp_dir = std::path::Path::new(&tmp_dir_str);
+        fs::rename(tmp_dir.join("source"), tmp_dir.join("destination")).unwrap();
+    })
+    .await?;
+    assert_contains(
+        &accesses,
+        tmp_dir.path().join("destination").as_path(),
+        PathAccess::RenameTarget,
+    );
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn hard_link_destination() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    File::create(tmp_dir.path().join("original"))?;
+    let tmp_dir_str = tmp_dir.path().to_str().unwrap().to_owned();
+    let accesses = track_fn!(tmp_dir_str, |tmp_dir_str: String| {
+        let tmp_dir = std::path::Path::new(&tmp_dir_str);
+        fs::hard_link(tmp_dir.join("original"), tmp_dir.join("link")).unwrap();
+    })
+    .await?;
+    assert_contains(&accesses, tmp_dir.path().join("link").as_path(), PathAccess::Write);
+
+    Ok(())
+}
+
+/// glibc's `renameat2`, looked up at run time, since glibc added it in 2.28,
+/// with the destination relative to a descriptor for its folder.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[test(tokio::test)]
+async fn renameat2_destination() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let tmp_path = tmp_dir.path().canonicalize()?;
+    File::create(tmp_path.join("source"))?;
+    let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
+    let accesses = track_fn!(tmp_path_str, |tmp_path_str: String| {
+        use std::os::fd::AsRawFd as _;
+        type Renameat2 = unsafe extern "C" fn(
+            libc::c_int,
+            *const libc::c_char,
+            libc::c_int,
+            *const libc::c_char,
+            libc::c_uint,
+        ) -> libc::c_int;
+        // SAFETY: the name is a valid C string.
+        let symbol = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"renameat2".as_ptr()) };
+        assert!(!symbol.is_null(), "glibc has no renameat2");
+        // SAFETY: glibc's `renameat2` has this signature.
+        let renameat2 = unsafe { std::mem::transmute::<*mut libc::c_void, Renameat2>(symbol) };
+        let dir = File::open(tmp_path_str).unwrap();
+        let dir_fd = dir.as_raw_fd();
+        // SAFETY: the descriptor is open and the names are valid C strings.
+        let result =
+            unsafe { renameat2(dir_fd, c"source".as_ptr(), dir_fd, c"destination".as_ptr(), 0) };
+        assert_eq!(result, 0);
+    })
+    .await?;
+    assert_contains(&accesses, &tmp_path.join("destination"), PathAccess::RenameTarget);
+
+    Ok(())
+}
+
+/// macOS's `renamex_np`, and `renameatx_np` with the destination relative to
+/// a descriptor for its folder.
+#[cfg(target_os = "macos")]
+#[test(tokio::test)]
+async fn renamex_np_destination() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    // A descriptor's path is its real path, and `TMPDIR` is under the `/var`
+    // link.
+    let tmp_path = tmp_dir.path().canonicalize()?;
+    File::create(tmp_path.join("source"))?;
+    let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
+    let accesses = track_fn!(tmp_path_str, |tmp_path_str: String| {
+        use std::{ffi::CString, os::fd::AsRawFd as _};
+        let source = CString::new(format!("{tmp_path_str}/source")).unwrap();
+        let moved = CString::new(format!("{tmp_path_str}/moved")).unwrap();
+        // SAFETY: the paths are valid C strings.
+        assert_eq!(unsafe { libc::renamex_np(source.as_ptr(), moved.as_ptr(), 0) }, 0);
+        let dir = File::open(tmp_path_str).unwrap();
+        let dir_fd = dir.as_raw_fd();
+        // SAFETY: the descriptor is open and the names are valid C strings.
+        let result = unsafe {
+            libc::renameatx_np(dir_fd, c"moved".as_ptr(), dir_fd, c"destination".as_ptr(), 0)
+        };
+        assert_eq!(result, 0);
+    })
+    .await?;
+    for name in ["moved", "destination"] {
+        assert_contains(&accesses, &tmp_path.join(name), PathAccess::RenameTarget);
+    }
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn symlink_destination() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    // On Windows the link is recorded from its handle, by its long name, while
+    // `TEMP` may hold an 8.3 short name, so name the links by the long name.
+    let tmp_path = tmp_dir.path().canonicalize()?;
+    fs::create_dir(tmp_path.join("folder"))?;
+    let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
+    let accesses = track_fn!(tmp_path_str, |tmp_path_str: String| {
+        let tmp_dir = std::path::Path::new(&tmp_path_str);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("file", tmp_dir.join("file_link")).unwrap();
+            std::os::unix::fs::symlink("folder", tmp_dir.join("folder_link")).unwrap();
+        }
+        #[cfg(windows)]
+        {
+            std::os::windows::fs::symlink_file("file", tmp_dir.join("file_link")).unwrap();
+            std::os::windows::fs::symlink_dir("folder", tmp_dir.join("folder_link")).unwrap();
+        }
+    })
+    .await?;
+    for link in ["file_link", "folder_link"] {
+        let link = tmp_path.join(link);
+        #[cfg(unix)]
+        assert_contains(&accesses, &link, PathAccess::Write);
+        // `CreateSymbolicLinkW` creates the link with an open that lacks write
+        // access, recorded as a read, or as a mkdir for a folder link, before
+        // it sets the reparse point.
+        #[cfg(windows)]
+        test_utils::assert_includes(&accesses, &link, PathAccess::Write);
+    }
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn mkdir() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    fs::create_dir(tmp_dir.path().join("existing"))?;
+    let tmp_dir_str = tmp_dir.path().to_str().unwrap().to_owned();
+    let accesses = track_fn!(tmp_dir_str, |tmp_dir_str: String| {
+        let tmp_dir = std::path::Path::new(&tmp_dir_str);
+        fs::create_dir(tmp_dir.join("new")).unwrap();
+        // Fails, since the folder is there already; recorded anyway.
+        fs::create_dir(tmp_dir.join("existing")).unwrap_err();
+    })
+    .await?;
+    assert_contains(&accesses, tmp_dir.path().join("new").as_path(), PathAccess::Mkdir);
+    assert_contains(&accesses, tmp_dir.path().join("existing").as_path(), PathAccess::Mkdir);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
 async fn metadata() -> anyhow::Result<()> {
     let tmp_dir = tempfile::tempdir()?;
     let tmp_path = tmp_dir.path().join("hello");
