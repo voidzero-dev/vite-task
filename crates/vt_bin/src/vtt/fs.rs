@@ -21,8 +21,13 @@ const USAGE: &str = "Usage: vtt fs <op> <arg>... [<op> <arg>...]...";
 /// - `walk <dir>`: read every entry of the folder and of every folder under
 ///   it, without following symlinks, like a tool crawling a project. A
 ///   missing folder isn't an error.
+/// - `rm <path>`: remove the file, or the folder and everything in it, like
+///   `rm -r`. A missing path isn't an error, like a tool cleaning its output
+///   folder.
 /// - `mkdir <dir>`: create the folder and any missing parents, like
 ///   `mkdir -p`.
+/// - `rename <from> <to>`: move the file or folder `<from>` to `<to>`, like
+///   a tool writing under a temporary name and renaming it into place.
 ///
 /// Prints nothing. The first call that fails stops the sequence with an error
 /// naming the operation.
@@ -41,7 +46,9 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             ["stat", path, rest @ ..] => (allow_missing(fs::metadata(path)), rest),
             ["list", dir, rest @ ..] => (allow_missing(list(dir)), rest),
             ["walk", dir, rest @ ..] => (allow_missing(walk(Path::new(dir))), rest),
+            ["rm", path, rest @ ..] => (allow_missing(remove(path)), rest),
             ["mkdir", dir, rest @ ..] => (fs::create_dir_all(dir), rest),
+            ["rename", from, to, rest @ ..] => (fs::rename(from, to), rest),
             _ => return Err(format!("{USAGE}\nunexpected arguments: {}", ops.join(" ")).into()),
         };
         let op = &ops[..ops.len() - rest.len()];
@@ -63,6 +70,14 @@ fn walk(dir: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn remove(path: &str) -> io::Result<()> {
+    if fs::symlink_metadata(path)?.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
 }
 
 fn allow_missing<T>(result: io::Result<T>) -> io::Result<()> {

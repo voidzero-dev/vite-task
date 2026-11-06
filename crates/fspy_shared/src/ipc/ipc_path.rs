@@ -5,7 +5,7 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::{
     fmt::Debug,
     mem::MaybeUninit,
-    path::{Path, StripPrefixError},
+    path::{Path, PathBuf, StripPrefixError},
 };
 
 use bumpalo::Bump;
@@ -22,8 +22,9 @@ use wincode::{
 ///
 /// On Windows, tracked paths are NT Object Manager paths (`\??` prefix),
 /// whose raw data is not meaningful for direct consumption. The only way
-/// to use the path is through [`strip_path_prefix`](IpcPath::strip_path_prefix),
-/// which normalizes platform differences and extracts a workspace-relative path.
+/// to use the path is through [`strip_path_prefix`](IpcPath::strip_path_prefix)
+/// or [`clean_and_strip_path_prefix`](IpcPath::clean_and_strip_path_prefix),
+/// which normalize platform differences and extract a workspace-relative path.
 #[derive(TransparentWrapper, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct IpcPath {
@@ -73,6 +74,25 @@ impl IpcPath {
     ) -> R {
         let me = self.inner.to_cow_os_str();
         f(vt_path::strip_path_prefix(&me, base.as_ref().as_os_str()))
+    }
+
+    /// Like [`strip_path_prefix`](IpcPath::strip_path_prefix), but resolves
+    /// `.` and `..` in the path lexically first.
+    ///
+    /// On Unix, a relative path is tracked as the working directory joined
+    /// with it, `..` included: opening `../site` in `/repo` is tracked as
+    /// `/repo/../site`, which isn't under `/repo`. On Windows, `..` is
+    /// resolved before fspy sees the path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `base` is not a path prefix of the cleaned path.
+    pub fn clean_and_strip_path_prefix<P: AsRef<Path>>(
+        &self,
+        base: P,
+    ) -> Result<PathBuf, StripPrefixError> {
+        let me = self.inner.to_cow_os_str();
+        vt_path::clean_and_strip_path_prefix(&me, base.as_ref().as_os_str())
     }
 }
 

@@ -1,0 +1,14 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt fs mkdir out/empty write out/a.txt hi stat out",
+      "cache": true
+    },
+    "build-globs": {
+      "command": "vtt fs mkdir out/empty write out/a.txt hi stat out",
+      "cache": {
+        "output": ["out/**"]
+      }
+    }
+  }
+}

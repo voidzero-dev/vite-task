@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::{env::JoinPathsError, ffi::OsStr, sync::Arc};
 
-use vt_graph::display::TaskDisplay;
+use vt_graph::{display::TaskDisplay, query::TaskQueryError};
 use vt_path::{AbsolutePath, relative::InvalidPathDataError};
 use vt_str::Str;
 
@@ -195,4 +195,13 @@ pub enum Error {
     /// as a closed loop (the first and last elements are the same).
     #[error("Cycle dependency detected: {}", _0.iter().map(std::string::ToString::to_string).collect::<Vec<_>>().join(" -> "))]
     CycleDependencyDetected(Vec<TaskDisplay>),
+}
+
+impl From<TaskQueryError> for Error {
+    fn from(error: TaskQueryError) -> Self {
+        match error {
+            TaskQueryError::PackageQueryResolve(error) => Self::PackageQueryResolve(error),
+            TaskQueryError::TaskGraphLoad(error) => Self::TaskGraphLoad(error),
+        }
+    }
 }

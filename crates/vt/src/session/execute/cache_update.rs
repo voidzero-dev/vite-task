@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use rustc_hash::FxHashSet;
 use tokio_util::sync::CancellationToken;
+use vt_glob::path::PathGlobSet;
 use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::cache_metadata::{CacheMetadata, EnvValueHash};
 use vt_server::Reports;
@@ -30,11 +31,17 @@ use crate::{
 /// value is only ever `Some` when tracking happened (see [`observe_fspy`]).
 struct TrackingOutcome {
     path_reads: HashMap<RelativePathBuf, PathRead>,
-    /// Auto-output writes after output exclusions are applied. Empty when
-    /// `output_config.includes_auto` is false.
+    /// Auto-output writes, `rebuildable`'s written files after output
+    /// exclusions are applied. Empty when `output_config.includes_auto` is
+    /// false.
     path_writes: FxHashSet<RelativePathBuf>,
-    /// Every write fspy recorded, before output exclusions and `ignoreOutput`
-    /// paths are applied.
+    /// `rebuildable`'s empty folders after output exclusions are applied,
+    /// archived as folders: all of them when `output_config.includes_auto`,
+    /// otherwise those a positive output glob matches.
+    empty_folders: FxHashSet<RelativePathBuf>,
+    /// What the task can rebuild, from every write, rename target and mkdir
+    /// fspy recorded before output exclusions and `ignoreOutput` paths are
+    /// applied, with the files under a renamed folder in place of the folder.
     rebuildable: Rebuildable,
 }
 
@@ -139,9 +146,14 @@ pub(super) async fn update_cache(
     let path_reads = fspy_outcome.as_ref().map_or(&empty_path_reads, |o| &o.path_reads);
     let no_writes = Rebuildable::default();
     let rebuildable = fspy_outcome.as_ref().map_or(&no_writes, |o| &o.rebuildable);
+    // Listings leave out the entries input exclusions match, as reads do.
+    let no_globs = PathGlobSet::default();
+    let input_negative_globs = fspy.map_or(&no_globs, |fspy| &fspy.input_negative_globs);
     let post_run_fingerprint = match PostRunFingerprint::create(
         path_reads,
         rebuildable,
+        input_negative_globs,
+        &ignored_input_rels,
         workspace_root,
         &globbed_inputs,
         tracked_envs,
@@ -194,11 +206,14 @@ pub(super) async fn update_cache(
 ///
 /// `path_reads` is gated on `input_config.includes_auto`, filtered by
 /// user-configured input negatives, and by tool-reported `ignoreInput` paths.
-/// `path_writes` is filtered by user-configured output negatives and
-/// tool-reported `ignoreOutput` paths, which decide what is archived.
-/// `rebuildable` takes every write unfiltered, since what the task can
-/// rebuild doesn't depend on what is archived. Accesses in the task cache, the
-/// parent of the schema version folder `cache_dir`, are left out of all three.
+/// `rebuildable` takes every write, rename target and mkdir unfiltered, since
+/// what the task can rebuild doesn't depend on what is archived, and expands
+/// renamed folders into the files under them. `path_writes` and
+/// `empty_folders` are its written files and empty folders filtered by
+/// user-configured output negatives and tool-reported `ignoreOutput` paths,
+/// which decide what is archived; `path_writes` is gated on
+/// `output_config.includes_auto`. Accesses in the task cache, the parent of
+/// the schema version folder `cache_dir`, are left out of all of them.
 #[cfg_attr(
     not(fspy),
     expect(clippy::missing_const_for_fn, reason = "the body is a no-op without fspy")
@@ -220,6 +235,12 @@ fn observe_fspy(
         let cache_root = cache_dir.parent().unwrap_or(cache_dir);
         path_accesses.map(|raw| {
             let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, cache_root);
+            let mut rebuildable = Rebuildable::new(
+                tracked.path_writes,
+                tracked.rename_targets,
+                tracked.mkdirs,
+                workspace_root,
+            );
             let filtered_path_reads: HashMap<RelativePathBuf, PathRead> =
                 // fspy can be attached for auto-output-only tasks. In that
                 // mode reads must not become inferred inputs.
@@ -238,28 +259,38 @@ fn observe_fspy(
                 } else {
                     HashMap::default()
                 };
-            let filtered_path_writes: FxHashSet<RelativePathBuf> =
-                // fspy can also be attached for auto-input-only tasks. In that
-                // mode writes must not become auto outputs.
-                if metadata.output_config.includes_auto
-                    && let Some(fspy) = fspy
-                {
-                    tracked
-                        .path_writes
-                        .iter()
-                        .filter(|path| {
-                            !fspy.output_negative_globs.is_match(path.as_str())
-                                && !is_ignored(path, ignored_output_rels)
-                        })
-                        .cloned()
-                        .collect()
-                } else {
-                    FxHashSet::default()
+            let filter_outputs = |paths: &FxHashSet<RelativePathBuf>| {
+                let Some(fspy) = fspy else {
+                    return FxHashSet::default();
                 };
+                paths
+                    .iter()
+                    .filter(|path| {
+                        !fspy.output_negative_globs.is_match(path.as_str())
+                            && !is_ignored(path, ignored_output_rels)
+                    })
+                    .cloned()
+                    .collect()
+            };
+            // Only fingerprints of the paths the task read ask about folders;
+            // without them, the archive still takes the empty folders the
+            // task made.
+            rebuildable = if filtered_path_reads.is_empty() {
+                rebuildable.with_empty_folders(workspace_root)
+            } else {
+                rebuildable.with_folders(workspace_root)
+            };
             TrackingOutcome {
                 path_reads: filtered_path_reads,
-                path_writes: filtered_path_writes,
-                rebuildable: Rebuildable::new(tracked.path_writes),
+                // fspy can also be attached for auto-input-only tasks. In that
+                // mode writes must not become auto outputs.
+                path_writes: if metadata.output_config.includes_auto {
+                    filter_outputs(rebuildable.written())
+                } else {
+                    FxHashSet::default()
+                },
+                empty_folders: filter_outputs(rebuildable.empty_folders()),
+                rebuildable,
             }
         })
     }
@@ -380,7 +411,12 @@ fn collect_tracked_env_queries(reports: &Reports) -> anyhow::Result<TrackedEnvQu
 /// - Negative output globs and tool-reported `ignoreOutput` paths filter
 ///   fspy-tracked writes before this function receives them
 ///
-/// Returns `Some(archive_filename)` if files were archived, `None` if no output files.
+/// The empty folders the task made are archived as folders, filtered the
+/// same way: all of them when `output_config.includes_auto`, otherwise those
+/// a positive output glob matches, since the glob walk yields files only.
+///
+/// Returns `Some(archive_filename)` if files or folders were archived, `None`
+/// if there are no outputs.
 fn collect_and_archive_outputs(
     cache_metadata: &CacheMetadata,
     tracking: Option<&TrackingOutcome>,
@@ -390,9 +426,18 @@ fn collect_and_archive_outputs(
     let output_config = &cache_metadata.output_config;
 
     let mut output_files: FxHashSet<RelativePathBuf> = FxHashSet::default();
+    let mut output_folders: Vec<RelativePathBuf> = Vec::new();
 
     if let Some(t) = tracking {
         output_files.extend(t.path_writes.iter().cloned());
+        if output_config.includes_auto {
+            output_folders.extend(t.empty_folders.iter().cloned());
+        } else if !output_config.positive_globs.is_empty() && !t.empty_folders.is_empty() {
+            let positive_globs = PathGlobSet::new(&output_config.positive_globs)?;
+            output_folders.extend(
+                t.empty_folders.iter().filter(|dir| positive_globs.is_match(dir.as_str())).cloned(),
+            );
+        }
     }
 
     if !output_config.positive_globs.is_empty() {
@@ -404,17 +449,18 @@ fn collect_and_archive_outputs(
         output_files.extend(glob_paths);
     }
 
-    if output_files.is_empty() {
+    if output_files.is_empty() && output_folders.is_empty() {
         return Ok(None);
     }
 
     let mut sorted_files: Vec<RelativePathBuf> = output_files.into_iter().collect();
     sorted_files.sort();
+    output_folders.sort();
 
     let archive_name: Str = vt_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
     let archive_path = cache_dir.join(archive_name.as_str());
 
-    archive::create_output_archive(workspace_root, &sorted_files, &archive_path)?;
+    archive::create_output_archive(workspace_root, &sorted_files, &output_folders, &archive_path)?;
 
     Ok(Some(archive_name))
 }

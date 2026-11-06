@@ -1144,6 +1144,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55dd888a213fc57e957abf2aa305ee3e8a28dbe05687a251f33b637cd46b0070"
 
 [[package]]
+name = "elsa"
+version = "1.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9abf33c656a7256451ebb7d0082c5a471820c31269e49d807c538c252352186e"
+dependencies = [
+ "stable_deref_trait",
+]
+
+[[package]]
 name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5061,6 +5070,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "elsa",
  "hashbrown 0.16.1",
  "petgraph",
  "pretty_assertions",
@@ -5069,6 +5079,7 @@ dependencies = [
  "serde-untagged",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "ts-rs",
  "vec1",
