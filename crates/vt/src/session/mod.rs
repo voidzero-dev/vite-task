@@ -14,8 +14,8 @@ use std::{
 };
 
 use anyhow::Context as _;
-use cache::ExecutionCache;
 pub use cache::{CacheMiss, Change, Comparison};
+use cache::{ExecutionCache, FileCheck};
 use clap::Parser as _;
 use event::RunKind;
 use once_cell::sync::OnceCell;
@@ -446,10 +446,14 @@ impl<'a> Session<'a> {
                     it.cancel();
                 })?;
 
+                // `-v` lists every change, so the file check checks every file.
+                let file_check =
+                    if run_command.flags.verbose { FileCheck::All } else { FileCheck::First };
                 self.execute_graph(
                     graph,
                     builder,
                     run_kind,
+                    file_check,
                     fast_fail_token,
                     cancel_token,
                     interrupt_token,
@@ -769,6 +773,7 @@ impl<'a> Session<'a> {
             &self.cache_path,
             self.program_name.as_str(),
             RunKind::Real,
+            FileCheck::First,
             fast_fail_token,
             cancel_token,
         )

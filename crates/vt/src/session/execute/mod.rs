@@ -33,7 +33,7 @@ use self::{
     spawn::{ChildHandle, ChildOutcome, SpawnStdio, spawn},
 };
 use super::{
-    cache::{CacheHit, CacheHitSource, CacheMiss, ExecutionCache},
+    cache::{CacheHit, CacheHitSource, CacheMiss, ExecutionCache, FileCheck},
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
         ExecutionError, RunKind,
@@ -358,6 +358,8 @@ impl Report {
 /// A dry run (`RunKind::Dry`) only looks: the lookup in step 1 writes
 /// nothing, and steps 3 and 4 are skipped.
 ///
+/// `file_check` says how many changed files a cache miss lists.
+///
 /// Cancelling `fast_fail_token` kills the process. `cancel_token` must be a
 /// child of `fast_fail_token` that Ctrl-C also cancels: cancelling it stops
 /// remote cache lookups and prevents caching. A cached run's upload to the
@@ -380,6 +382,7 @@ pub async fn execute_spawn(
     cache_dir: &AbsolutePath,
     program_name: &str,
     run_kind: RunKind,
+    file_check: FileCheck,
     fast_fail_token: CancellationToken,
     cancel_token: CancellationToken,
 ) -> SpawnOutcome {
@@ -391,6 +394,7 @@ pub async fn execute_spawn(
         cache_dir,
         program_name,
         run_kind,
+        file_check,
         fast_fail_token,
         cancel_token,
     );
@@ -417,6 +421,7 @@ async fn run(
     cache_dir: &AbsolutePath,
     program_name: &str,
     run_kind: RunKind,
+    file_check: FileCheck,
     fast_fail_token: CancellationToken,
     cancel_token: CancellationToken,
 ) -> Result<Report, Report> {
@@ -427,9 +432,16 @@ async fn run(
     //    error, `start()` is never called — there is no valid status to show.
     //    A lookup can take a while, especially a remote one. If the run was
     //    cancelled meanwhile, neither start the process nor restore outputs.
-    let lookup =
-        lookup_cache(cache_metadata, cache, workspace_root, cache_dir, run_kind, &cancel_token)
-            .await?;
+    let lookup = lookup_cache(
+        cache_metadata,
+        cache,
+        workspace_root,
+        cache_dir,
+        run_kind,
+        file_check,
+        &cancel_token,
+    )
+    .await?;
     if cancel_token.is_cancelled() {
         return Err(Report::Cancelled);
     }
@@ -584,6 +596,7 @@ async fn lookup_cache<'a>(
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     run_kind: RunKind,
+    file_check: FileCheck,
     cancel_token: &CancellationToken,
 ) -> Result<CacheLookup<'a>, Report> {
     let Some(cache_metadata) = cache_metadata else {
@@ -602,7 +615,15 @@ async fn lookup_cache<'a>(
     })?;
 
     match cache
-        .try_hit(cache_metadata, &globbed_inputs, workspace_root, cache_dir, run_kind, cancel_token)
+        .try_hit(
+            cache_metadata,
+            &globbed_inputs,
+            workspace_root,
+            cache_dir,
+            run_kind,
+            file_check,
+            cancel_token,
+        )
         .await
     {
         Ok(Ok(hit)) => Ok(CacheLookup::Hit { hit, metadata: cache_metadata }),

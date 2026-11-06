@@ -20,7 +20,7 @@ use super::{SpawnOutcome, execute_spawn};
 use crate::{
     Session,
     session::{
-        cache::ExecutionCache,
+        cache::{ExecutionCache, FileCheck},
         event::{
             CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, RunKind,
         },
@@ -60,6 +60,8 @@ struct ExecutionContext<'a> {
     /// In a dry run, each leaf is looked up and reported as in a real run, but
     /// nothing runs: see [`execute_spawn`].
     run_kind: RunKind,
+    /// How many changed files a cache miss lists.
+    file_check: FileCheck,
     /// Token cancelled when a task fails. Kills in-flight child processes
     /// (via `start_kill` in spawn.rs).
     fast_fail_token: CancellationToken,
@@ -224,6 +226,7 @@ impl ExecutionContext<'_> {
                     self.cache_dir,
                     self.program_name,
                     self.run_kind,
+                    self.file_check,
                     self.fast_fail_token.clone(),
                     self.cancel_token.clone(),
                 )
@@ -252,6 +255,7 @@ impl Session<'_> {
     ///
     /// In a dry run (`RunKind::Dry`), each leaf only reports what a real run
     /// would do: nothing runs, and no cache entry is written.
+    /// `file_check` says how many changed files a cache miss lists.
     ///
     /// `fast_fail_token` and `cancel_token` are described on [`ExecutionContext`].
     ///
@@ -264,11 +268,13 @@ impl Session<'_> {
     /// Returns `Err(ExitStatus)` to indicate the caller should exit with the given status code.
     /// Returns `Ok(())` when all tasks succeeded.
     #[tracing::instrument(level = "debug", skip_all)]
+    #[expect(clippy::too_many_arguments, reason = "each argument sets how the graph is executed")]
     pub(crate) async fn execute_graph(
         &self,
         execution_graph: ExecutionGraph,
         builder: Box<dyn GraphExecutionReporterBuilder>,
         run_kind: RunKind,
+        file_check: FileCheck,
         fast_fail_token: CancellationToken,
         cancel_token: CancellationToken,
         interrupt_token: CancellationToken,
@@ -294,6 +300,7 @@ impl Session<'_> {
             cache_dir: &self.cache_path,
             program_name: self.program_name.as_str(),
             run_kind,
+            file_check,
             fast_fail_token,
             cancel_token,
         };

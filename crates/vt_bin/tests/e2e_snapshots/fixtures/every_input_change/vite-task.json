@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "read": {
+      "command": "vtt print-file a.txt b.txt c.txt",
+      "cache": true
+    }
+  }
+}

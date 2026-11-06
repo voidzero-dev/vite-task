@@ -534,7 +534,7 @@ pub(super) mod tests {
 
     use super::*;
     use crate::session::{
-        cache::InputChangeKind,
+        cache::{FileCheck, InputChangeKind},
         execute::{
             fingerprint::{PostRunFingerprint, TrackedEnvQuery},
             pipe::{OutputKind, StdOutput},
@@ -630,7 +630,14 @@ pub(super) mod tests {
         move |value| {
             let workspace_root = vt_path::current_dir().unwrap();
             let key = cache_key(ResolvedGlobConfig::default_auto());
-            value.validate(&key, &key, &globbed_inputs, &FxHashMap::default(), &workspace_root)
+            value.validate(
+                &key,
+                &key,
+                &globbed_inputs,
+                &FxHashMap::default(),
+                &workspace_root,
+                FileCheck::First,
+            )
         }
     }
 
