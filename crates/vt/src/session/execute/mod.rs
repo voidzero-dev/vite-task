@@ -36,7 +36,7 @@ use super::{
     cache::{CacheHit, CacheHitSource, CacheMiss, ExecutionCache},
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
-        ExecutionError,
+        ExecutionError, RunKind,
     },
     reporter::{LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion},
 };
@@ -47,8 +47,12 @@ use super::{
 /// already reported through `LeafExecutionReporter::finish()` before this
 /// value is returned — the caller does not need to handle error display.
 pub enum SpawnOutcome {
-    /// Cache hit — no process was spawned. Cached outputs were replayed.
+    /// Cache hit — no process was spawned. Cached outputs were replayed, except
+    /// in a dry run.
     CacheHit,
+    /// In a dry run, the cache missed or is disabled, so a real run would
+    /// spawn the process. Nothing was spawned.
+    WouldSpawn,
     /// Process was spawned and exited with this status.
     Spawned(std::process::ExitStatus),
     /// An infrastructure error prevented the process from running
@@ -271,8 +275,11 @@ enum Report {
     /// An infrastructure error prevented the process from running (or from
     /// being observed to completion).
     Failed { cache_update: CacheUpdateStatus, error: ExecutionError },
-    /// Cache hit: captured outputs were replayed, no process ran.
+    /// Cache hit: no process ran. Captured outputs were replayed, except in a
+    /// dry run.
     CacheHit,
+    /// In a dry run, a miss or a task without caching: nothing ran.
+    WouldSpawn,
     /// The process ran to completion; its exit status is reported regardless
     /// of how the cache update went.
     Spawned {
@@ -309,6 +316,14 @@ impl Report {
                 );
                 SpawnOutcome::CacheHit
             }
+            Self::WouldSpawn => {
+                reporter.finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::DryRun),
+                    None,
+                );
+                SpawnOutcome::WouldSpawn
+            }
             Self::Spawned { exit_status, cache_update, error } => {
                 reporter.finish(Some(exit_status), cache_update, error);
                 SpawnOutcome::Spawned(exit_status)
@@ -340,6 +355,9 @@ impl Report {
 ///    via [`run_child`], then decide the cache update
 ///    ([`cache_update::update_cache`])
 ///
+/// A dry run (`RunKind::Dry`) only looks: the lookup in step 1 writes
+/// nothing, and steps 3 and 4 are skipped.
+///
 /// Cancelling `fast_fail_token` kills the process. `cancel_token` must be a
 /// child of `fast_fail_token` that Ctrl-C also cancels: cancelling it stops
 /// remote cache lookups and prevents caching. A cached run's upload to the
@@ -361,6 +379,7 @@ pub async fn execute_spawn(
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     program_name: &str,
+    run_kind: RunKind,
     fast_fail_token: CancellationToken,
     cancel_token: CancellationToken,
 ) -> SpawnOutcome {
@@ -371,6 +390,7 @@ pub async fn execute_spawn(
         workspace_root,
         cache_dir,
         program_name,
+        run_kind,
         fast_fail_token,
         cancel_token,
     );
@@ -388,6 +408,7 @@ pub async fn execute_spawn(
 /// unwraps both into the same single `finish()`, so the distinction is pure
 /// control flow and a value on either side is equally valid.
 #[expect(clippy::too_many_arguments, reason = "forwarded verbatim from `execute_spawn`")]
+#[expect(clippy::too_many_lines, reason = "the phases of one spawn, in order")]
 async fn run(
     reporter: &mut dyn LeafExecutionReporter,
     spawn_execution: &SpawnExecution,
@@ -395,6 +416,7 @@ async fn run(
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     program_name: &str,
+    run_kind: RunKind,
     fast_fail_token: CancellationToken,
     cancel_token: CancellationToken,
 ) -> Result<Report, Report> {
@@ -406,7 +428,8 @@ async fn run(
     //    A lookup can take a while, especially a remote one. If the run was
     //    cancelled meanwhile, neither start the process nor restore outputs.
     let lookup =
-        lookup_cache(cache_metadata, cache, workspace_root, cache_dir, &cancel_token).await?;
+        lookup_cache(cache_metadata, cache, workspace_root, cache_dir, run_kind, &cancel_token)
+            .await?;
     if cancel_token.is_cancelled() {
         return Err(Report::Cancelled);
     }
@@ -420,6 +443,9 @@ async fn run(
                 replayed_duration: hit.value.duration,
                 source: hit.source,
             });
+            if run_kind == RunKind::Dry {
+                return Ok(Report::CacheHit);
+            }
             return Ok(replay_cache_hit(
                 &mut stdio_config,
                 &hit,
@@ -439,6 +465,9 @@ async fn run(
             BTreeMap::new(),
         ),
     };
+    if run_kind == RunKind::Dry {
+        return Ok(Report::WouldSpawn);
+    }
 
     // 4. Fold the cache/fspy/stdio decisions into the typed mode.
     let mut mode = ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs)
@@ -546,13 +575,14 @@ enum CacheLookup<'a> {
 }
 
 /// Phase 1: compute the globbed inputs and try to hit the cache. A remote hit
-/// downloads its output archive into `cache_dir`. Remote requests stop when
-/// `cancel_token` is cancelled.
+/// downloads its output archive into `cache_dir`, except in a dry run.
+/// Remote requests stop when `cancel_token` is cancelled.
 async fn lookup_cache<'a>(
     cache_metadata: Option<&'a CacheMetadata>,
     cache: &ExecutionCache,
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
+    run_kind: RunKind,
     cancel_token: &CancellationToken,
 ) -> Result<CacheLookup<'a>, Report> {
     let Some(cache_metadata) = cache_metadata else {
@@ -571,7 +601,7 @@ async fn lookup_cache<'a>(
     })?;
 
     match cache
-        .try_hit(cache_metadata, &globbed_inputs, workspace_root, cache_dir, cancel_token)
+        .try_hit(cache_metadata, &globbed_inputs, workspace_root, cache_dir, run_kind, cancel_token)
         .await
     {
         Ok(Ok(hit)) => Ok(CacheLookup::Hit { hit, metadata: cache_metadata }),

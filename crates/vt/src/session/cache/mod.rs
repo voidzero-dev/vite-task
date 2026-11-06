@@ -39,9 +39,12 @@ use wincode::{
 };
 
 use self::remote::{ReadError, RemoteClients, RemoteUploads, Restore, UploadError};
-use super::execute::{
-    fingerprint::{PostRunFingerprint, TrackedEnvQuery},
-    pipe::StdOutput,
+use super::{
+    event::RunKind,
+    execute::{
+        fingerprint::{PostRunFingerprint, TrackedEnvQuery},
+        pipe::StdOutput,
+    },
 };
 
 const TASK_CACHE_PREALLOCATION_SIZE_LIMIT: usize = 256 * 1024 * 1024;
@@ -354,6 +357,9 @@ impl ExecutionCache {
     /// local cache has an entry for the task, its miss reason is kept.
     /// Otherwise the reason comes from the remote cache. Remote requests stop
     /// when `cancel_token` is cancelled.
+    ///
+    /// A dry run (`RunKind::Dry`) writes nothing: a local hit isn't recorded,
+    /// and a remote hit's archive isn't downloaded.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn try_hit(
         &self,
@@ -361,6 +367,7 @@ impl ExecutionCache {
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
+        run_kind: RunKind,
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheHit, CacheMiss>> {
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
@@ -374,6 +381,7 @@ impl ExecutionCache {
                 globbed_inputs,
                 &input_negative_globs,
                 workspace_root,
+                run_kind,
             )
             .await?
         {
@@ -402,6 +410,7 @@ impl ExecutionCache {
                 &input_negative_globs,
                 workspace_root,
                 cache_dir,
+                run_kind,
                 cancel_token,
             )
             .await?
@@ -422,6 +431,7 @@ impl ExecutionCache {
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         input_negative_globs: &PathGlobSet<'_>,
         workspace_root: &AbsolutePath,
+        run_kind: RunKind,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
@@ -437,7 +447,9 @@ impl ExecutionCache {
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed
-            self.upsert_task_fingerprint(execution_cache_key, cache_key).await?;
+            if run_kind == RunKind::Real {
+                self.upsert_task_fingerprint(execution_cache_key, cache_key).await?;
+            }
             return Ok(Ok(cache_value));
         }
 
@@ -457,7 +469,7 @@ impl ExecutionCache {
 
     /// Fetch the entry from the remote cache that `remote_config` configures.
     /// An exact entry that passes validation is a hit once its output archive
-    /// is downloaded.
+    /// is downloaded, or right away in a dry run.
     /// A fallback entry, a failed validation, or a failed read is a miss. An
     /// error while validating counts as a failed read, so the remote entry
     /// never fails the task.
@@ -471,6 +483,7 @@ impl ExecutionCache {
         input_negative_globs: &PathGlobSet<'_>,
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
+        run_kind: RunKind,
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
         let fetched = self
@@ -490,6 +503,12 @@ impl ExecutionCache {
                 Ok(restore) => restore,
                 Err(miss) => return Ok(Err(miss)),
             };
+        // `resolve` checks that the entry has an archive exactly when it has a
+        // blob to download, so the hit a dry run shows says whether it restores
+        // outputs.
+        if run_kind == RunKind::Dry {
+            return Ok(Ok(cache_value));
+        }
 
         let output_archive = match blob_id {
             Some(blob_id) => {

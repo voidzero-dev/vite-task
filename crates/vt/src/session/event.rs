@@ -88,6 +88,9 @@ pub enum CacheDisabledReason {
 pub enum CacheNotUpdatedReason {
     /// Cache was hit - task was replayed from cache, no update needed
     CacheHit,
+    /// A dry run (`vp run --dry-run`) checked the cache without running the
+    /// command.
+    DryRun,
     /// Caching was disabled for this task
     CacheDisabled,
     /// Execution exited with non-zero status
@@ -136,6 +139,14 @@ pub enum CacheUpdateStatus {
     /// The reason is part of the `LeafExecutionReporter` trait contract — reporters
     /// can use it for detailed logging, even if current implementations don't.
     NotUpdated(CacheNotUpdatedReason),
+}
+
+/// Whether a run runs its commands, or is a dry run (`vp run --dry-run`),
+/// which plans them and checks the cache without running anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunKind {
+    Real,
+    Dry,
 }
 
 #[derive(Debug, Clone)]

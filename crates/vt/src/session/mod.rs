@@ -17,6 +17,7 @@ use anyhow::Context as _;
 use cache::ExecutionCache;
 pub use cache::{CacheMiss, FingerprintMismatch};
 use clap::Parser as _;
+use event::RunKind;
 use once_cell::sync::OnceCell;
 pub use reporter::ExitStatus;
 use reporter::{
@@ -142,6 +143,13 @@ impl vt_plan::PlanRequestParser for PlanRequestParser<'_> {
                 | ResolvedCommand::TaskGraphJson => Ok(Some(PlanRequest::Synthetic(
                     command.to_synthetic_plan_request(UserCacheConfig::disabled()),
                 ))),
+                // A nested dry run isn't inlined. It runs as a process, which
+                // prints its own dry run, so an enclosing dry run doesn't run it.
+                ResolvedCommand::Run(run_command) if run_command.flags.dry_run => {
+                    Ok(Some(PlanRequest::Synthetic(
+                        command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                    )))
+                }
                 ResolvedCommand::Run(run_command) => {
                     match run_command.into_query_plan_request(&command.cwd) {
                         Ok((query_plan_request, _)) => {
@@ -369,14 +377,18 @@ impl<'a> Session<'a> {
                     stderr: stderr_supports_color(),
                 };
 
-                let inner: Box<dyn reporter::GraphExecutionReporterBuilder> = match run_command
-                    .flags
-                    .log
-                {
+                let run_kind = if run_command.flags.dry_run { RunKind::Dry } else { RunKind::Real };
+                // `--log` only shapes task output, and a dry run has none.
+                let log = match run_kind {
+                    RunKind::Real => run_command.flags.log,
+                    RunKind::Dry => crate::cli::LogMode::Interleaved,
+                };
+                let inner: Box<dyn reporter::GraphExecutionReporterBuilder> = match log {
                     crate::cli::LogMode::Interleaved => Box::new(InterleavedReporterBuilder::new(
                         Arc::clone(&workspace_path),
                         writer,
                         color_support,
+                        run_kind,
                     )),
                     crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
                         Arc::clone(&workspace_path),
@@ -395,9 +407,9 @@ impl<'a> Session<'a> {
                     workspace_path,
                     Box::new(std::io::stdout()),
                     run_command.flags.verbose,
-                    Some(self.make_summary_writer()),
+                    (run_kind == RunKind::Real).then(|| self.make_summary_writer()),
                     self.program_name.clone(),
-                    color_support,
+                    run_kind,
                 ));
                 // Don't let SIGINT/CTRL_C kill the runner. Child tasks receive
                 // the signal directly from the terminal driver and handle it
@@ -434,9 +446,16 @@ impl<'a> Session<'a> {
                     it.cancel();
                 })?;
 
-                self.execute_graph(graph, builder, fast_fail_token, cancel_token, interrupt_token)
-                    .await
-                    .map_err(SessionError::EarlyExit)
+                self.execute_graph(
+                    graph,
+                    builder,
+                    run_kind,
+                    fast_fail_token,
+                    cancel_token,
+                    interrupt_token,
+                )
+                .await
+                .map_err(SessionError::EarlyExit)
             }
         }
     }
@@ -665,7 +684,7 @@ impl<'a> Session<'a> {
                 // styled span via `ColorizeExt` (which consults
                 // `supports-color`), so the buffer already matches the
                 // terminal's capability and we write it to stdout directly.
-                let buf = format_full_summary(&summary);
+                let buf = format_full_summary(&summary, RunKind::Real);
                 {
                     use std::io::Write;
                     let mut stdout = std::io::stdout().lock();
@@ -749,6 +768,7 @@ impl<'a> Session<'a> {
             &self.workspace_path,
             &self.cache_path,
             self.program_name.as_str(),
+            RunKind::Real,
             fast_fail_token,
             cancel_token,
         )
@@ -757,8 +777,11 @@ impl<'a> Session<'a> {
         // summary, so it isn't told about the upload or its result.
         cache.wait_for_uploads(&tokio_util::sync::CancellationToken::new()).await;
         match outcome {
-            // Cache hit — no process was spawned, success
-            execute::SpawnOutcome::CacheHit => Ok(ExitStatus::SUCCESS),
+            // Cache hit — no process was spawned, success. This is a real run,
+            // so nothing is `WouldSpawn`.
+            execute::SpawnOutcome::CacheHit | execute::SpawnOutcome::WouldSpawn => {
+                Ok(ExitStatus::SUCCESS)
+            }
             // Process ran successfully
             execute::SpawnOutcome::Spawned(status) if status.success() => Ok(ExitStatus::SUCCESS),
             // Process ran but exited with non-zero status

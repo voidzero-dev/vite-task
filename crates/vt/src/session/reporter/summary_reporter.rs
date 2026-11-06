@@ -18,12 +18,12 @@ use vt_plan::{ExecutionItemDisplay, LeafExecutionKind};
 use vt_str::Str;
 
 use super::{
-    ColorSupport, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
-    LeafExecutionReporter, StdioConfig,
+    ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
+    StdioConfig,
 };
 use crate::session::{
     cache::remote::UploadError,
-    event::{CacheStatus, CacheUpdateStatus, ExecutionError},
+    event::{CacheStatus, CacheUpdateStatus, ExecutionError, RunKind},
     reporter::summary::{
         LastRunSummary, SavedError, SpawnOutcome, TaskResult, TaskSummary, format_compact_summary,
         format_full_summary, format_uploads_pending,
@@ -41,6 +41,7 @@ pub struct SummaryReporterBuilder {
     show_details: bool,
     write_summary: Option<WriteSummaryFn>,
     program_name: Str,
+    run_kind: RunKind,
 }
 
 impl SummaryReporterBuilder {
@@ -48,6 +49,9 @@ impl SummaryReporterBuilder {
     /// owns per-stream stripping of the child-process pipe writers; the
     /// reporter's own summary text picks colour-vs-plain at format time
     /// via `ColorizeExt`, so `writer` is stored unwrapped.
+    ///
+    /// A dry run (`RunKind::Dry`) passes no `write_summary`: its summary isn't
+    /// saved, so `vp run --last-details` still shows the last real run.
     pub fn new(
         inner: Box<dyn GraphExecutionReporterBuilder>,
         workspace_path: Arc<AbsolutePath>,
@@ -55,9 +59,9 @@ impl SummaryReporterBuilder {
         show_details: bool,
         write_summary: Option<WriteSummaryFn>,
         program_name: Str,
-        _color_support: ColorSupport,
+        run_kind: RunKind,
     ) -> Self {
-        Self { inner, workspace_path, writer, show_details, write_summary, program_name }
+        Self { inner, workspace_path, writer, show_details, write_summary, program_name, run_kind }
     }
 }
 
@@ -71,6 +75,7 @@ impl GraphExecutionReporterBuilder for SummaryReporterBuilder {
             show_details: self.show_details,
             write_summary: self.write_summary,
             program_name: self.program_name,
+            run_kind: self.run_kind,
         })
     }
 }
@@ -92,6 +97,7 @@ struct SummaryGraphReporter {
     show_details: bool,
     write_summary: Option<WriteSummaryFn>,
     program_name: Str,
+    run_kind: RunKind,
 }
 
 impl GraphExecutionReporter for SummaryGraphReporter {
@@ -166,9 +172,9 @@ impl GraphExecutionReporter for SummaryGraphReporter {
         let summary = LastRunSummary { tasks, exit_code };
 
         let summary_buf = if self.show_details {
-            format_full_summary(&summary)
+            format_full_summary(&summary, self.run_kind)
         } else {
-            format_compact_summary(&summary, &self.program_name)
+            format_compact_summary(&summary, &self.program_name, self.run_kind)
         };
 
         if let Some(write_summary) = self.write_summary {
@@ -254,33 +260,10 @@ mod tests {
     use crate::session::{
         cache::CacheMiss,
         reporter::{
-            InterleavedReporterBuilder,
-            test_fixtures::{spawn_task, test_path},
+            ColorSupport, InterleavedReporterBuilder,
+            test_fixtures::{SharedBuffer, spawn_task, test_path},
         },
     };
-
-    /// A writer whose output stays readable after it's moved into a reporter.
-    #[derive(Clone, Default)]
-    struct SharedBuffer(Rc<RefCell<Vec<u8>>>);
-
-    impl Write for SharedBuffer {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.borrow_mut().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl SharedBuffer {
-        fn text(&self) -> Str {
-            let bytes = self.0.borrow();
-            let text = std::str::from_utf8(&bytes).unwrap();
-            vt_str::format!("{}", anstream::adapter::strip_str(text))
-        }
-    }
 
     #[test]
     fn upload_error_set_after_the_task_finishes_is_in_the_summary() {
@@ -293,20 +276,23 @@ mod tests {
         let saved = SharedBuffer::default();
         let write_summary: WriteSummaryFn = Box::new({
             let mut saved = saved.clone();
-            move |summary| saved.write_all(&format_compact_summary(summary, "vp")).unwrap()
+            move |summary| {
+                saved.write_all(&format_compact_summary(summary, "vp", RunKind::Real)).unwrap();
+            }
         });
         let mut reporter = Box::new(SummaryReporterBuilder::new(
             Box::new(InterleavedReporterBuilder::new(
                 test_path(),
                 Box::new(std::io::sink()),
                 ColorSupport::uniform(false),
+                RunKind::Real,
             )),
             test_path(),
             Box::new(output.clone()),
             false,
             Some(write_summary),
             Str::from("vp"),
-            ColorSupport::uniform(false),
+            RunKind::Real,
         ))
         .build();
 
