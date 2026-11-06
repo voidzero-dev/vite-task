@@ -15,15 +15,12 @@ use std::{
 };
 
 // Re-export display functions for convenience
-pub use display::format_cache_status_inline;
-pub use display::{
-    SpawnFingerprintChange, detect_spawn_fingerprint_changes, format_input_change_str,
-    format_spawn_change,
-};
+pub use display::{format_cache_status_inline, format_change};
 use rusqlite::{Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use vt_casefold::EnvName;
 use vt_glob::path::PathGlobSet;
 use vt_graph::config::ResolvedGlobConfig;
 use vt_path::{AbsolutePath, RelativePathBuf};
@@ -41,10 +38,7 @@ use wincode::{
 use self::remote::{ReadError, RemoteClients, RemoteUploads, Restore, UploadError};
 use super::{
     event::RunKind,
-    execute::{
-        fingerprint::{PostRunFingerprint, TrackedEnvQuery},
-        pipe::StdOutput,
-    },
+    execute::{fingerprint::PostRunFingerprint, pipe::StdOutput},
 };
 
 const TASK_CACHE_PREALLOCATION_SIZE_LIMIT: usize = 256 * 1024 * 1024;
@@ -145,19 +139,114 @@ pub enum CacheHitSource {
 }
 
 #[derive(Debug, Clone)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "FingerprintMismatch contains SpawnFingerprint which is intentionally large; boxing would add unnecessary indirection for a short-lived enum"
-)]
 pub enum CacheMiss {
     NotFound,
-    FingerprintMismatch(FingerprintMismatch),
+    /// The cache has a run of the task to compare with, and it differs.
+    Changed(Comparison),
     /// Reading the remote cache failed, and the local cache has no entry for
     /// the task.
     RemoteReadFailed(Arc<ReadError>),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+/// How the current execution differs from the cached run a lookup compared
+/// it with.
+#[derive(Debug, Clone)]
+pub struct Comparison {
+    /// Every difference found, sorted by kind, then by name or path, never
+    /// empty. Command, config and env changes are complete. The file check
+    /// stops at the first changed file it finds, so at most one file is
+    /// listed.
+    pub changes: Vec<Change>,
+}
+
+impl Comparison {
+    /// Sort `changes` and drop duplicates, such as an env var that two
+    /// tracked queries match. Of two duplicates, the one found first is kept.
+    fn new(mut changes: Vec<Change>) -> Self {
+        changes.sort_by(|a, b| a.order_key().cmp(&b.order_key()));
+        changes.dedup_by(|a, b| a.order_key() == b.order_key());
+        Self { changes }
+    }
+}
+
+/// One difference between the current execution and the cached run it's
+/// compared with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Change {
+    /// The program the command runs changed.
+    Program,
+    /// The command's arguments changed.
+    Args,
+    /// The directory the command runs in changed.
+    Cwd,
+    /// The task's `input` setting changed.
+    InputConfig,
+    /// The task's `output` setting changed.
+    OutputConfig,
+    /// A name was added to the task's `untrackedEnv` setting.
+    UntrackedEnvAdded { name: Str },
+    /// A name was removed from the task's `untrackedEnv` setting.
+    UntrackedEnvRemoved { name: Str },
+    /// An env var was added, removed, or changed value.
+    Env { mismatch: EnvMismatch, source: EnvSource },
+    /// An input file or folder was added, removed, or modified.
+    File { kind: InputChangeKind, path: RelativePathBuf },
+}
+
+impl Change {
+    /// The order changes are listed in: by kind in the order of the
+    /// variants, then by name or path, then by how it changed. Env names
+    /// compare by the platform's rules, so on Windows a tool's `getEnv('a')`
+    /// and a query matching `A` name the same env.
+    fn order_key(&self) -> (u8, OrderName<'_>, u8) {
+        let exact = OrderName::Exact;
+        match self {
+            Self::Program => (0, exact(""), 0),
+            Self::Args => (1, exact(""), 0),
+            Self::Cwd => (2, exact(""), 0),
+            Self::InputConfig => (3, exact(""), 0),
+            Self::OutputConfig => (4, exact(""), 0),
+            Self::UntrackedEnvAdded { name } => (5, exact(name), 0),
+            Self::UntrackedEnvRemoved { name } => (5, exact(name), 1),
+            Self::Env { mismatch, .. } => {
+                let how = match mismatch {
+                    EnvMismatch::Added { .. } => 0,
+                    EnvMismatch::Removed { .. } => 1,
+                    EnvMismatch::Changed { .. } => 2,
+                };
+                (6, OrderName::Env(EnvName::new(mismatch.name().as_str())), how)
+            }
+            Self::File { kind, path } => {
+                let how = match kind {
+                    InputChangeKind::ContentModified => 0,
+                    InputChangeKind::Added => 1,
+                    InputChangeKind::Removed => 2,
+                };
+                (7, exact(path.as_str()), how)
+            }
+        }
+    }
+}
+
+/// A change's name or path, as [`Change::order_key`] compares it.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum OrderName<'a> {
+    Exact(&'a str),
+    Env(EnvName<&'a str>),
+}
+
+/// Where the cache records an env var.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EnvSource {
+    /// The task's `cache.env` names it, so its value is part of the cache
+    /// key.
+    Fingerprinted,
+    /// A runner-aware tool read it with `tracked: true`, by name or with a
+    /// query.
+    Tracked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InputChangeKind {
     /// File content changed but path is the same
     ContentModified,
@@ -206,6 +295,19 @@ impl EnvMismatch {
             _ => None,
         }
     }
+
+    /// Every env added, removed or changed between `stored` and `current`, in
+    /// name order: those in `stored` first, then those only in `current`.
+    pub fn diff<'a, T: Eq>(
+        stored: &'a BTreeMap<Str, T>,
+        current: &'a BTreeMap<Str, T>,
+    ) -> impl Iterator<Item = Self> + 'a {
+        let added = current.keys().filter(|name| !stored.contains_key(*name));
+        stored
+            .keys()
+            .chain(added)
+            .filter_map(|name| Self::compare(name, stored.get(name), current.get(name)))
+    }
 }
 
 impl Display for EnvMismatch {
@@ -214,47 +316,6 @@ impl Display for EnvMismatch {
             Self::Added { name } => write!(f, "env '{name}' added"),
             Self::Removed { name } => write!(f, "env '{name}' removed"),
             Self::Changed { name } => write!(f, "env '{name}' changed"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub enum FingerprintMismatch {
-    /// Found a previous cache entry key for the same task, but the spawn fingerprint differs.
-    /// This happens when the command itself or an env changes.
-    SpawnFingerprint {
-        /// The fingerprint from the cached entry
-        old: SpawnFingerprint,
-        /// The fingerprint of the current execution
-        new: SpawnFingerprint,
-    },
-    /// Found a previous cache entry key for the same task, but `input_config` differs.
-    InputConfig,
-    /// Found a previous cache entry key for the same task, but `output_config` differs.
-    OutputConfig,
-
-    InputChanged {
-        kind: InputChangeKind,
-        path: RelativePathBuf,
-    },
-    /// A runner-aware tool-tracked env var changed between runs.
-    TrackedEnvChanged(EnvMismatch),
-    /// A runner-aware tool-tracked bulk env query's match-set changed between runs.
-    TrackedEnvQueryChanged {
-        query: TrackedEnvQuery,
-        mismatch: EnvMismatch,
-    },
-}
-
-impl From<crate::session::execute::fingerprint::PostRunMismatch> for FingerprintMismatch {
-    fn from(mismatch: crate::session::execute::fingerprint::PostRunMismatch) -> Self {
-        use crate::session::execute::fingerprint::PostRunMismatch;
-        match mismatch {
-            PostRunMismatch::Input { kind, path } => Self::InputChanged { kind, path },
-            PostRunMismatch::TrackedEnv(mismatch) => Self::TrackedEnvChanged(mismatch),
-            PostRunMismatch::TrackedEnvQuery { query, mismatch } => {
-                Self::TrackedEnvQueryChanged { query, mismatch }
-            }
         }
     }
 }
@@ -437,13 +498,14 @@ impl ExecutionCache {
 
         // Try to find the cache entry by key (spawn fingerprint + input config)
         if let Some(cache_value) = self.get_by_cache_key(cache_key).await? {
-            if let Some(mismatch) = cache_value.validate(
+            let changes = cache_value.validate(
                 &cache_metadata.unfiltered_envs,
                 globbed_inputs,
                 input_negative_globs,
                 workspace_root,
-            )? {
-                return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
+            )?;
+            if !changes.is_empty() {
+                return Ok(Err(CacheMiss::Changed(Comparison::new(changes))));
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed
@@ -460,8 +522,8 @@ impl ExecutionCache {
         {
             // `get_by_cache_key` above returned None for the *current* cache key,
             // so the associated key must differ.
-            let mismatch = old_cache_key.into_mismatch(cache_key);
-            return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
+            let changes = old_cache_key.changes_to(cache_key);
+            return Ok(Err(CacheMiss::Changed(Comparison::new(changes))));
         }
 
         Ok(Err(CacheMiss::NotFound))
@@ -854,6 +916,26 @@ mod tests {
             .query_one("SELECT COUNT(*) FROM cache_entries", (), |r| r.get(0))
             .unwrap();
         assert_eq!(count_b, 0);
+    }
+
+    fn tracked_env_changed(name: &str) -> Change {
+        Change::Env {
+            mismatch: EnvMismatch::Changed { name: Str::from(name) },
+            source: EnvSource::Tracked,
+        }
+    }
+
+    /// Env names compare by the platform's rules: on Windows, a tool's
+    /// `getEnv('probe_env')` and a query that matches `PROBE_ENV` name the
+    /// same env, so its change is listed once.
+    #[test]
+    fn env_changes_dedupe_by_platform_rules() {
+        let comparison = Comparison::new(vec![
+            tracked_env_changed("probe_env"),
+            tracked_env_changed("PROBE_ENV"),
+            tracked_env_changed("probe_env"),
+        ]);
+        assert_eq!(comparison.changes.len(), if cfg!(windows) { 1 } else { 2 });
     }
 
     /// `synchronous` is `NORMAL` only when the database is in WAL mode (see `enable_wal` for why).

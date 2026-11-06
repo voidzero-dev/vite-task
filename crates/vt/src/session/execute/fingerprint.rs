@@ -24,7 +24,7 @@ use wincode::{SchemaRead, SchemaWrite};
 use super::rebuildable::Rebuildable;
 use crate::{
     collections::HashMap,
-    session::cache::{EnvMismatch, InputChangeKind},
+    session::cache::{Change, EnvMismatch, EnvSource, InputChangeKind},
 };
 
 #[derive(
@@ -67,18 +67,6 @@ pub struct PostRunFingerprint {
     /// and cache-hit validation treats a currently matched non-UTF-8 value as
     /// a changed mismatch so stale cached output is not replayed.
     pub tracked_env_queries: BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>,
-}
-
-/// A mismatch between the stored post-run fingerprint and the current state.
-#[derive(Debug, Clone)]
-pub enum PostRunMismatch {
-    /// An inferred input file or directory changed.
-    Input { kind: InputChangeKind, path: RelativePathBuf },
-    /// A tool-tracked env var changed value, appeared, or disappeared.
-    TrackedEnv(EnvMismatch),
-    /// A tool-tracked bulk env query's match-set changed between runs. Carries
-    /// the first differing entry in env-name order.
-    TrackedEnvQuery { query: TrackedEnvQuery, mismatch: EnvMismatch },
 }
 
 /// A path the task read, as the task left it.
@@ -202,25 +190,18 @@ impl PostRunFingerprint {
         Ok(Self { inferred_inputs, tracked_envs, tracked_env_queries })
     }
 
-    /// Validates the fingerprint against current filesystem state and the
-    /// unfiltered env context used by runner-aware IPC. `unfiltered_envs` must
-    /// be the same plan env context that served the original `getEnv` request,
-    /// not the filtered env passed to the spawned process.
-    /// `input_negative_globs` are the task's input negative globs, part of the
-    /// cache key and so the same as when the fingerprint was created.
-    ///
-    /// Returns `Some(mismatch)` if anything changed, `None` if all valid.
-    /// Returns an error if a tracked env is currently present but cannot be
-    /// represented as UTF-8; treating that value as unset would make cache
-    /// validation unsound.
-    #[tracing::instrument(level = "debug", skip_all, name = "validate_post_run_fingerprint")]
-    pub fn validate(
+    /// The first inferred input that differs from the filesystem now, if any.
+    /// The inputs are checked in parallel, so when several changed, which one
+    /// is found isn't defined. `input_negative_globs` are the task's input
+    /// negative globs, part of the cache key and so the same as when the
+    /// fingerprint was created.
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn first_input_change(
         &self,
         base_dir: &AbsolutePath,
         input_negative_globs: &PathGlobSet<'_>,
-        unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
-    ) -> anyhow::Result<Option<PostRunMismatch>> {
-        let input_mismatch =
+    ) -> anyhow::Result<Option<Change>> {
+        let input_change =
             self.inferred_inputs.par_iter().find_map_any(|(input_relative_path, input)| {
                 let InferredInput { fingerprint: path_fingerprint, may_be_missing } = input;
                 let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
@@ -260,13 +241,27 @@ impl PostRunFingerprint {
                     } else {
                         input_relative_path.clone()
                     };
-                    Some(Ok(PostRunMismatch::Input { kind, path }))
+                    Some(Ok(Change::File { kind, path }))
                 }
             });
-        if let Some(result) = input_mismatch {
-            return result.map(Some);
-        }
+        input_change.transpose()
+    }
 
+    /// Every tracked env var and tracked query match that differs from the
+    /// unfiltered env context used by runner-aware IPC, one result per change,
+    /// or per env or query that can't be compared, so one that can't doesn't
+    /// hide the others' changes. `unfiltered_envs` must be the same plan env
+    /// context that served the original `getEnv` request, not the filtered
+    /// env passed to the spawned process.
+    ///
+    /// A tracked env that's currently present but can't be represented as
+    /// UTF-8 is an error; treating that value as unset would make cache
+    /// validation unsound.
+    pub fn env_changes(
+        &self,
+        unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
+    ) -> Vec<anyhow::Result<Change>> {
+        let mut checked = Vec::new();
         for (name, stored_value) in &self.tracked_envs {
             let current_value = unfiltered_envs
                 .get(EnvName::from_ref(OsStr::new(name.as_str())))
@@ -276,43 +271,40 @@ impl PostRunFingerprint {
                     })?;
                     Ok::<_, anyhow::Error>(EnvValueHash::new(value_str))
                 })
-                .transpose()?;
-            if let Some(mismatch) =
-                EnvMismatch::compare(name, stored_value.as_ref(), current_value.as_ref())
-            {
-                return Ok(Some(PostRunMismatch::TrackedEnv(mismatch)));
+                .transpose();
+            match current_value {
+                Ok(current_value) => checked.extend(
+                    EnvMismatch::compare(name, stored_value.as_ref(), current_value.as_ref())
+                        .map(Ok),
+                ),
+                Err(err) => checked.push(Err(err)),
             }
         }
 
         for (query, stored_matches) in &self.tracked_env_queries {
-            let current_matches = match match_env_query(query, unfiltered_envs)? {
-                EnvQueryValidation::Matches(matches) => matches,
-                EnvQueryValidation::NonUtf8Value(mismatch) => {
-                    return Ok(Some(PostRunMismatch::TrackedEnvQuery {
-                        query: query.clone(),
-                        mismatch,
-                    }));
-                }
-            };
-            if let Some(mismatch) = first_env_glob_mismatch(stored_matches, &current_matches) {
-                return Ok(Some(PostRunMismatch::TrackedEnvQuery {
-                    query: query.clone(),
-                    mismatch,
-                }));
+            match match_env_query(query, unfiltered_envs) {
+                Ok(current_matches) => checked.extend(
+                    env_query_mismatches(stored_matches, &current_matches).into_iter().map(Ok),
+                ),
+                Err(err) => checked.push(Err(err)),
             }
         }
 
-        Ok(None)
+        checked
+            .into_iter()
+            .map(|mismatch| {
+                mismatch.map(|mismatch| Change::Env { mismatch, source: EnvSource::Tracked })
+            })
+            .collect()
     }
 }
 
 /// Build the current match-set for `query` by enumerating the given env
-/// snapshot and keeping matching UTF-8 names. If a matching env has a non-UTF-8
-/// value, return a changed mismatch so the stale cache entry is not replayed.
+/// snapshot and keeping matching UTF-8 names.
 fn match_env_query(
     query: &TrackedEnvQuery,
     envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
-) -> anyhow::Result<EnvQueryValidation> {
+) -> anyhow::Result<EnvQueryMatches> {
     Ok(match query {
         TrackedEnvQuery::Glob(pattern) => {
             let glob = vt_glob::env::EnvGlob::new(pattern.as_str())?;
@@ -327,8 +319,8 @@ fn match_env_query(
 fn collect_matching_envs(
     envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     is_match: impl Fn(&str) -> bool,
-) -> EnvQueryValidation {
-    let mut matches = BTreeMap::new();
+) -> EnvQueryMatches {
+    let mut matches = EnvQueryMatches::default();
     for (name, value) in envs {
         let Some(name_str) = name.inner().to_str() else {
             continue;
@@ -336,52 +328,43 @@ fn collect_matching_envs(
         if !is_match(name_str) {
             continue;
         }
-        let Some(value_str) = value.to_str() else {
-            return EnvQueryValidation::NonUtf8Value(EnvMismatch::Changed {
-                name: Str::from(name_str),
-            });
-        };
-        matches.insert(Str::from(name_str), EnvValueHash::new(value_str));
-    }
-    EnvQueryValidation::Matches(matches)
-}
-
-enum EnvQueryValidation {
-    Matches(BTreeMap<Str, EnvValueHash>),
-    NonUtf8Value(EnvMismatch),
-}
-
-/// Find the first deterministic difference between stored and current env
-/// glob match-sets.
-fn first_env_glob_mismatch(
-    stored: &BTreeMap<Str, EnvValueHash>,
-    current: &BTreeMap<Str, EnvValueHash>,
-) -> Option<EnvMismatch> {
-    let mut stored_iter = stored.iter();
-    let mut current_iter = current.iter();
-    let mut s = stored_iter.next();
-    let mut c = current_iter.next();
-
-    loop {
-        match (s, c) {
-            (None, None) => return None,
-            (Some((name, _)), None) => return Some(EnvMismatch::Removed { name: name.clone() }),
-            (None, Some((name, _))) => return Some(EnvMismatch::Added { name: name.clone() }),
-            (Some((sn, sv)), Some((cn, cv))) => match sn.cmp(cn) {
-                std::cmp::Ordering::Equal => {
-                    if sv != cv {
-                        return Some(EnvMismatch::Changed { name: sn.clone() });
-                    }
-                    s = stored_iter.next();
-                    c = current_iter.next();
-                }
-                std::cmp::Ordering::Less => return Some(EnvMismatch::Removed { name: sn.clone() }),
-                std::cmp::Ordering::Greater => {
-                    return Some(EnvMismatch::Added { name: cn.clone() });
-                }
-            },
+        if let Some(value_str) = value.to_str() {
+            matches.values.insert(Str::from(name_str), EnvValueHash::new(value_str));
+        } else {
+            matches.non_utf8_values.insert(Str::from(name_str));
         }
     }
+    matches
+}
+
+/// The envs a tracked query matches now.
+#[derive(Default)]
+struct EnvQueryMatches {
+    /// The matched envs with UTF-8 values.
+    values: BTreeMap<Str, EnvValueHash>,
+    /// The matched envs whose values aren't UTF-8. The JS client errors when
+    /// it queries such a value, so each one is a change, which keeps a stale
+    /// cache entry from being replayed.
+    non_utf8_values: BTreeSet<Str>,
+}
+
+/// Every difference between the stored match-set of a tracked env query and
+/// the current one, in env-name order, after the envs whose values aren't
+/// UTF-8.
+fn env_query_mismatches(
+    stored: &BTreeMap<Str, EnvValueHash>,
+    current: &EnvQueryMatches,
+) -> Vec<EnvMismatch> {
+    let mut mismatches: Vec<EnvMismatch> = current
+        .non_utf8_values
+        .iter()
+        .map(|name| EnvMismatch::Changed { name: name.clone() })
+        .collect();
+    mismatches.extend(
+        EnvMismatch::diff(stored, &current.values)
+            .filter(|mismatch| !current.non_utf8_values.contains(mismatch.name())),
+    );
+    mismatches
 }
 
 /// Determine the kind of change between two differing path fingerprints.
@@ -643,6 +626,13 @@ mod tests {
 
     use super::*;
 
+    /// The tracked envs' changes, or the first env that can't be compared.
+    fn env_changes(
+        fingerprint: &PostRunFingerprint,
+        unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
+    ) -> anyhow::Result<Vec<Change>> {
+        fingerprint.env_changes(unfiltered_envs).into_iter().collect()
+    }
     #[cfg(unix)]
     fn non_utf8_os_string() -> OsString {
         use std::os::unix::ffi::OsStringExt;
@@ -669,9 +659,7 @@ mod tests {
             Arc::<OsStr>::from(non_utf8_os_string()),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let err = fingerprint
-            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
+        let err = env_changes(&fingerprint, &unfiltered_envs)
             .expect_err("non-UTF-8 tracked env values must error");
 
         assert!(err.to_string().contains("tracked env value for PROBE_ENV is not valid UTF-8"));
@@ -690,19 +678,12 @@ mod tests {
             Arc::<OsStr>::from(non_utf8_os_string()),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch = fingerprint
-            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
-            .expect("validation succeeds");
+        let changes = env_changes(&fingerprint, &unfiltered_envs).expect("validation succeeds");
 
-        match mismatch {
-            Some(PostRunMismatch::TrackedEnvQuery {
-                query,
-                mismatch: EnvMismatch::Changed { name },
-            }) => {
-                assert_eq!(query, TrackedEnvQuery::Glob(Str::from("PROBE_*")));
-                assert_eq!(name.as_str(), "PROBE_BAD");
-            }
+        match changes.as_slice() {
+            [
+                Change::Env { mismatch: EnvMismatch::Changed { name }, source: EnvSource::Tracked },
+            ] => assert_eq!(name.as_str(), "PROBE_BAD"),
             other => panic!("expected changed tracked env query mismatch, got {other:?}"),
         }
     }
@@ -726,12 +707,9 @@ mod tests {
             Arc::<OsStr>::from(OsStr::new("wildcard if interpreted as glob")),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch = fingerprint
-            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
-            .expect("validation succeeds");
+        let changes = env_changes(&fingerprint, &unfiltered_envs).expect("validation succeeds");
 
-        assert!(mismatch.is_none());
+        assert!(changes.is_empty());
     }
 
     #[test]
@@ -747,12 +725,9 @@ mod tests {
             Arc::<OsStr>::from(OsStr::new("value")),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch = fingerprint
-            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
-            .expect("validation succeeds");
+        let changes = env_changes(&fingerprint, &unfiltered_envs).expect("validation succeeds");
 
-        assert!(mismatch.is_none());
+        assert!(changes.is_empty());
     }
 
     #[test]
@@ -767,12 +742,9 @@ mod tests {
             Arc::<OsStr>::from(OsStr::new("value")),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch = fingerprint
-            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
-            .expect("validation succeeds");
+        let changes = env_changes(&fingerprint, &unfiltered_envs).expect("validation succeeds");
 
-        assert_eq!(mismatch.is_none(), cfg!(windows));
+        assert_eq!(changes.is_empty(), cfg!(windows));
     }
 
     #[test]
@@ -790,12 +762,9 @@ mod tests {
             Arc::<OsStr>::from(OsStr::new("value")),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch = fingerprint
-            .validate(&workspace_root, &PathGlobSet::default(), &unfiltered_envs)
-            .expect("validation succeeds");
+        let changes = env_changes(&fingerprint, &unfiltered_envs).expect("validation succeeds");
 
-        assert_eq!(mismatch.is_none(), cfg!(windows));
+        assert_eq!(changes.is_empty(), cfg!(windows));
     }
 
     #[test]
@@ -828,22 +797,20 @@ mod tests {
         let written = create(FxHashSet::from_iter([path]));
         let read_only = create(FxHashSet::default());
         let validate = |fingerprint: &PostRunFingerprint| {
-            fingerprint
-                .validate(&workspace_root, &PathGlobSet::default(), &FxHashMap::default())
-                .unwrap()
+            fingerprint.first_input_change(&workspace_root, &PathGlobSet::default()).unwrap()
         };
 
         std::fs::remove_file(full_path.as_path()).unwrap();
         assert!(validate(&written).is_none());
         assert!(matches!(
             validate(&read_only),
-            Some(PostRunMismatch::Input { kind: InputChangeKind::Removed, .. })
+            Some(Change::File { kind: InputChangeKind::Removed, .. })
         ));
 
         std::fs::write(full_path.as_path(), "garbage").unwrap();
         assert!(matches!(
             validate(&written),
-            Some(PostRunMismatch::Input { kind: InputChangeKind::ContentModified, .. })
+            Some(Change::File { kind: InputChangeKind::ContentModified, .. })
         ));
     }
 
@@ -1133,11 +1100,8 @@ mod tests {
             }))
         );
 
-        let validate = || {
-            fingerprint
-                .validate(&workspace_root, &PathGlobSet::default(), &FxHashMap::default())
-                .unwrap()
-        };
+        let validate =
+            || fingerprint.first_input_change(&workspace_root, &PathGlobSet::default()).unwrap();
         assert!(validate().is_none());
         std::fs::remove_dir_all(workspace_root.join("pkg/gen").as_path()).unwrap();
         std::fs::remove_file(workspace_root.join("pkg/out.txt").as_path()).unwrap();
@@ -1145,7 +1109,7 @@ mod tests {
 
         std::fs::write(workspace_root.join("pkg/notes.txt").as_path(), "x").unwrap();
         match validate() {
-            Some(PostRunMismatch::Input { kind: InputChangeKind::Added, path }) => {
+            Some(Change::File { kind: InputChangeKind::Added, path }) => {
                 assert_eq!(path.as_str(), "pkg/notes.txt");
             }
             other => panic!("expected `pkg/notes.txt` added, got {other:?}"),
@@ -1191,11 +1155,8 @@ mod tests {
             }))
         );
 
-        let validate = || {
-            fingerprint
-                .validate(&workspace_root, &input_negative_globs, &FxHashMap::default())
-                .unwrap()
-        };
+        let validate =
+            || fingerprint.first_input_change(&workspace_root, &input_negative_globs).unwrap();
         std::fs::create_dir(workspace_root.join("pkg/out").as_path()).unwrap();
         std::fs::create_dir(workspace_root.join("pkg/.cache").as_path()).unwrap();
         std::fs::remove_file(workspace_root.join("pkg/tool.log").as_path()).unwrap();
@@ -1203,7 +1164,7 @@ mod tests {
 
         std::fs::write(workspace_root.join("pkg/notes.txt").as_path(), "x").unwrap();
         match validate() {
-            Some(PostRunMismatch::Input { kind: InputChangeKind::Added, path }) => {
+            Some(Change::File { kind: InputChangeKind::Added, path }) => {
                 assert_eq!(path.as_str(), "pkg/notes.txt");
             }
             other => panic!("expected `pkg/notes.txt` added, got {other:?}"),

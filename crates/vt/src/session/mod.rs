@@ -15,7 +15,7 @@ use std::{
 
 use anyhow::Context as _;
 use cache::ExecutionCache;
-pub use cache::{CacheMiss, FingerprintMismatch};
+pub use cache::{CacheMiss, Change, Comparison};
 use clap::Parser as _;
 use event::RunKind;
 use once_cell::sync::OnceCell;
