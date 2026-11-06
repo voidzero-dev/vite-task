@@ -150,10 +150,6 @@ pub enum RunKind {
 }
 
 #[derive(Debug, Clone)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "CacheMiss variant is intentionally large and infrequently cloned"
-)]
 pub enum CacheStatus {
     Disabled(CacheDisabledReason),
     Miss(CacheMiss),

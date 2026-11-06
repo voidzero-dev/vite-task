@@ -41,7 +41,7 @@ use wincode::{
 };
 
 use super::{
-    CACHE_SCHEMA_VERSION, CacheEntryKey, CacheEntryValue, CacheMiss, FingerprintMismatch,
+    CACHE_SCHEMA_VERSION, CacheEntryKey, CacheEntryValue, CacheMiss, Change, Comparison,
     TaskCacheConfig, archive, deserialize_cache, serialize_cache,
 };
 
@@ -121,25 +121,21 @@ pub(super) struct Restore {
 /// Turn the result of a fetch into an entry to restore or a miss. An exact
 /// match's entries are checked newest first, and the first that passes is
 /// restored. `validate` checks an entry against the current execution. If no
-/// entry passes, the miss is the newest entry's: a fingerprint mismatch, or a
+/// entry passes, the miss is the newest entry's: the changes it found, or a
 /// read failure if it doesn't decode, its blob doesn't match its value, or it
 /// can't be validated. A fallback's miss reason compares its key with
 /// `cache_key`, and no match is a miss without an entry. A failed fetch is a
 /// read failure.
-#[expect(
-    clippy::result_large_err,
-    reason = "`CacheMiss` is intentionally large, and a lookup returns it once"
-)]
 pub(super) fn resolve(
     fetched: Result<Option<Fetched>, ReadError>,
     cache_key: &CacheEntryKey,
-    mut validate: impl FnMut(&CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>>,
+    mut validate: impl FnMut(&CacheEntryValue) -> anyhow::Result<Vec<Change>>,
 ) -> Result<Restore, CacheMiss> {
     let entries = match fetched.map_err(ReadError::into_miss)? {
         Some(Fetched::Exact { entries }) => entries,
         Some(Fetched::Fallback { key }) => {
             let key = decode_key(&key).map_err(ReadError::into_miss)?;
-            return Err(CacheMiss::FingerprintMismatch(key.into_mismatch(cache_key)));
+            return Err(CacheMiss::Changed(Comparison::new(key.changes_to(cache_key))));
         }
         None => return Err(CacheMiss::NotFound),
     };
@@ -167,21 +163,17 @@ pub(super) fn resolve(
 }
 
 /// Check one entry of an exact match, as [`resolve`] describes.
-#[expect(
-    clippy::result_large_err,
-    reason = "`CacheMiss` is intentionally large, and a lookup checks only a few entries"
-)]
 fn check_entry(
     Entry { value, blob_id }: Entry,
-    validate: &mut impl FnMut(&CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>>,
+    validate: &mut impl FnMut(&CacheEntryValue) -> anyhow::Result<Vec<Change>>,
 ) -> Result<Restore, CacheMiss> {
     let value = decode_value(&value).map_err(|err| ReadError::CorruptValue(err).into_miss())?;
     if value.output_archive.is_some() != blob_id.is_some() {
         return Err(ReadError::MismatchedBlob.into_miss());
     }
     match validate(&value) {
-        Ok(None) => Ok(Restore { value, blob_id }),
-        Ok(Some(mismatch)) => Err(CacheMiss::FingerprintMismatch(mismatch)),
+        Ok(changes) if changes.is_empty() => Ok(Restore { value, blob_id }),
+        Ok(changes) => Err(CacheMiss::Changed(Comparison::new(changes))),
         Err(err) => Err(ReadError::Validate(err).into_miss()),
     }
 }
@@ -644,10 +636,10 @@ mod tests {
     /// The path of an added input, which `miss` must be.
     fn added_input(miss: &CacheMiss) -> &str {
         match miss {
-            CacheMiss::FingerprintMismatch(FingerprintMismatch::InputChanged {
-                kind: InputChangeKind::Added,
-                path,
-            }) => path.as_str(),
+            CacheMiss::Changed(comparison) => match comparison.changes.as_slice() {
+                [Change::File { kind: InputChangeKind::Added, path }] => path.as_str(),
+                changes => panic!("expected an added input, got {changes:?}"),
+            },
             miss => panic!("expected an added input, got {miss:?}"),
         }
     }
@@ -656,7 +648,7 @@ mod tests {
     /// the current inputs.
     fn validate_against(
         globbed_inputs: BTreeMap<RelativePathBuf, u64>,
-    ) -> impl FnMut(&CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>> {
+    ) -> impl FnMut(&CacheEntryValue) -> anyhow::Result<Vec<Change>> {
         move |value| {
             let workspace_root = vt_path::current_dir().unwrap();
             value.validate(
@@ -668,7 +660,7 @@ mod tests {
         }
     }
 
-    fn not_validated(_: &CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>> {
+    fn not_validated(_: &CacheEntryValue) -> anyhow::Result<Vec<Change>> {
         panic!("only exact entries that decode and match their blob are validated")
     }
 
@@ -713,13 +705,11 @@ mod tests {
             validate_against(current_inputs),
         )
         .unwrap_err();
+        let CacheMiss::Changed(comparison) = &miss else { panic!("{miss:?}") };
         assert!(
             matches!(
-                &miss,
-                CacheMiss::FingerprintMismatch(FingerprintMismatch::InputChanged {
-                    kind: InputChangeKind::Added,
-                    path,
-                }) if path.as_str() == "src/a.txt"
+                comparison.changes.as_slice(),
+                [Change::File { kind: InputChangeKind::Added, path }] if path.as_str() == "src/a.txt"
             ),
             "{miss:?}"
         );
@@ -811,7 +801,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(miss, CacheMiss::FingerprintMismatch(FingerprintMismatch::InputConfig)),
+            matches!(&miss, CacheMiss::Changed(comparison) if comparison.changes == [Change::InputConfig]),
             "{miss:?}"
         );
     }
