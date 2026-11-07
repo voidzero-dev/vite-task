@@ -32,6 +32,7 @@ The entry stored for this task has a different key. The miss reason compares it 
 $ vtt write-file dist/output.txt rebuilt ○ cache miss: args changed, executing
 
 [remote-cache] POST /fetch 200 fallback
+[remote-cache] POST /fetch 200 exact [1]
 ```
 
 ## `remote-cache-server stop`

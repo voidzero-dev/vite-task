@@ -9,33 +9,83 @@ use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::cache_metadata::SpawnFingerprint;
 
 use super::{CacheEntryKey, CacheEntryValue, Change, EnvMismatch, EnvSource, InputChangeKind};
+use crate::session::execute::glob::compute_globbed_inputs;
 
 impl CacheEntryValue {
-    /// Compare the entry with the current execution: explicit inputs, then
+    /// Compare this cached run, stored under `stored_key`, with the execution,
+    /// whose key is `current_key`: the key's changes, explicit inputs, then
     /// inferred inputs, and tracked environment values against
     /// `unfiltered_envs`, the execution's `CacheMetadata::unfiltered_envs`.
-    /// `input_negative_globs`, compiled from the entry key's input config,
-    /// leave entries out of listings. Returns every env change and the first
-    /// changed file found, or nothing when the entry is valid.
+    /// Returns every key and env change and the first changed file found, or
+    /// nothing when the entry is valid.
+    ///
+    /// The entry stored under the execution's key has no key changes. The
+    /// task's previous entry, stored under another key, is compared to tell
+    /// whether reverting the key changes is enough: its explicit inputs are
+    /// globbed with its own key's input config, so the listed changes are
+    /// exactly what reverting needs. `globbed_inputs` are the execution's,
+    /// reused when the input configs are the same.
     ///
     /// # Errors
     ///
     /// Propagates errors from post-run fingerprint validation. Once a file
     /// changed, the entry misses whatever the envs are, so an error comparing
-    /// them only leaves the env changes out.
+    /// them only leaves the env changes out. The previous entry is only
+    /// compared with, so an error comparing it leaves just the key changes.
     pub(crate) fn validate(
         &self,
-        unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
+        stored_key: &CacheEntryKey,
+        current_key: &CacheEntryKey,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
-        input_negative_globs: &PathGlobSet<'_>,
+        unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
         workspace_root: &AbsolutePath,
     ) -> anyhow::Result<Vec<Change>> {
+        let mut changes = stored_key.changes_to(current_key);
+        match self.run_changes(
+            stored_key,
+            current_key,
+            globbed_inputs,
+            unfiltered_envs,
+            workspace_root,
+        ) {
+            Ok(run_changes) => changes.extend(run_changes),
+            Err(err) if stored_key != current_key => {
+                tracing::debug!(?err, "failed to compare with the previous cached run");
+            }
+            Err(err) => return Err(err),
+        }
+        Ok(changes)
+    }
+
+    /// The changes to the run's files and tracked envs: see [`Self::validate`].
+    fn run_changes(
+        &self,
+        stored_key: &CacheEntryKey,
+        current_key: &CacheEntryKey,
+        globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
+        unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
+        workspace_root: &AbsolutePath,
+    ) -> anyhow::Result<Vec<Change>> {
+        let input_config = &stored_key.input_config;
+        let own_globbed_inputs;
+        let globbed_inputs = if *input_config == current_key.input_config {
+            globbed_inputs
+        } else {
+            own_globbed_inputs = compute_globbed_inputs(
+                workspace_root,
+                &input_config.positive_globs,
+                &input_config.negative_globs,
+            )?;
+            &own_globbed_inputs
+        };
+        // Listings leave out the entries the stored key's input exclusions match.
+        let input_negative_globs = PathGlobSet::new(&input_config.negative_globs)?;
         let mut changes: Vec<Change> =
             detect_globbed_input_change(&self.globbed_inputs, globbed_inputs).into_iter().collect();
         if changes.is_empty() {
             changes.extend(
                 self.post_run_fingerprint
-                    .first_input_change(workspace_root, input_negative_globs)?,
+                    .first_input_change(workspace_root, &input_negative_globs)?,
             );
         }
         let env_changes = self.post_run_fingerprint.env_changes(unfiltered_envs);
@@ -164,10 +214,13 @@ fn detect_globbed_input_change(
 mod tests {
     use std::{ffi::OsString, time::Duration};
 
+    use vt_graph::config::ResolvedGlobConfig;
     use vt_str::Str;
 
     use super::*;
-    use crate::session::execute::fingerprint::PostRunFingerprint;
+    use crate::session::{
+        cache::remote::tests::cache_key, execute::fingerprint::PostRunFingerprint,
+    };
 
     #[cfg(unix)]
     fn non_utf8_os_string() -> OsString {
@@ -203,9 +256,9 @@ mod tests {
             Arc::<OsStr>::from(non_utf8_os_string()),
         )]);
         let workspace_root = vt_path::current_dir().unwrap();
-        let validate = |inputs| {
-            value.validate(&unfiltered_envs, &inputs, &PathGlobSet::default(), &workspace_root)
-        };
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let validate =
+            |inputs| value.validate(&key, &key, &inputs, &unfiltered_envs, &workspace_root);
 
         assert!(validate(BTreeMap::from([(path.clone(), 1)])).is_err());
         let changes = validate(BTreeMap::from([(path.clone(), 2)])).unwrap();
@@ -237,8 +290,9 @@ mod tests {
             env("PROBE_ENV", non_utf8_os_string()),
         ]);
         let workspace_root = vt_path::current_dir().unwrap();
+        let key = cache_key(ResolvedGlobConfig::default_auto());
         let changes = value
-            .validate(&unfiltered_envs, &BTreeMap::new(), &PathGlobSet::default(), &workspace_root)
+            .validate(&key, &key, &BTreeMap::new(), &unfiltered_envs, &workspace_root)
             .unwrap();
         assert_eq!(
             changes,

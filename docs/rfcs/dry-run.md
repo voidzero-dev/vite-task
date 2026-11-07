@@ -515,6 +515,7 @@ type RunPlan = {
 - **Exit codes.** A dry run exits 0 when planning succeeds, whatever it predicts, unless a step's cache can't be checked. When planning fails, the error goes to stderr and the exit code is non-zero.
 - **Summary.** A dry run's summary follows a real run's rules, with "nothing was run" in place of the successful count and the time saved. A single task gets a summary line only when it would hit: `vp run: cache hit, nothing was run.` There is no `--last-details` hint, since that shows the last real run. The detailed summary has no ✓ or exit codes, and a hit's line is just `→ Cache hit`.
 - **Cache errors.** When a step's cache can't be checked, for example because the cache database can't be read, the error is printed under that step's command, and the dry run stops and fails as a real run does. A cache folder that can't be opened, for example because it's read-only, fails the dry run as it fails a real run.
+- **Remote baseline.** When the remote cache has no run with the step's command, config and env, it returns only the key of the step's most recent cached run, so `vp run` fetches that run too, to compare with. If that fetch fails, the step is an `error`, as when the first fetch fails.
 - **`--last-details`.** After a run with `-v`, it shows every change.
 
 ## Changes to existing behaviour
