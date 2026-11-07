@@ -120,14 +120,16 @@ Task Details:
   [1] @acme/ui#build: ~/packages/ui$ tsdown
       → Cache miss: 'packages/ui/src/button.tsx' modified
                     'packages/ui/src/theme.css' modified
-        Unchanged: 'packages/ui/package.json'
+        Unchanged: 'packages/ui/.browserslistrc' (missing)
+                   'packages/ui/package.json'
                    'packages/ui/src' (listing)
                    'packages/ui/src/index.ts'
                    'packages/ui/tsdown.config.ts'
-                   'packages/ui/.browserslistrc' (missing)
         Outputs:   'packages/ui/dist/index.d.ts'
                    'packages/ui/dist/index.js'
 ```
+
+Both lists are in path order. A folder the task listed reads `(listing)`, one it only opened `(folder)`, and a path it looked for and didn't find `(missing)`; the env names it depends on follow, as `env 'NODE_ENV'`. A cached run from the remote cache has no `Outputs:`, since its archive isn't downloaded.
 
 ### `--json`
 
@@ -366,7 +368,7 @@ type RunPlan = {
 
                     /**
                      * With `-vv`: everything the cached run depends on, changed or not: the env
-                     * names and paths the cache records for this step.
+                     * names and paths the cache records for this step. Absent when it depends on none.
                      */
                     fingerprint?: {
                       /** Env names. */
@@ -402,6 +404,12 @@ type RunPlan = {
                                * task opened the directory without listing it: then only that it exists is checked.
                                */
                               entries?: string[];
+
+                              /**
+                               * The task creates this directory, as a folder or a link, so it may be missing, as
+                               * on a fresh checkout. When it is there, it is still checked.
+                               */
+                              mayBeMissing?: true;
                             }
                           | {
                               /** A path the task looked for and didn't find. Creating it is a change. */
@@ -413,7 +421,8 @@ type RunPlan = {
                     /**
                      * With `-vv`: the files the cached run archived as its outputs, which a hit restores.
                      * Only files are listed: `packages/ui/dist/index.js` appears, but its directory
-                     * `packages/ui/dist` doesn't get an entry of its own.
+                     * `packages/ui/dist` doesn't get an entry of its own. Absent when there are none, and for
+                     * a cached run from the remote cache, whose archive a dry run doesn't download.
                      */
                     outputs?: string[];
                   };

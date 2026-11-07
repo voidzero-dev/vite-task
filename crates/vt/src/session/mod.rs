@@ -365,8 +365,7 @@ impl<'a> Session<'a> {
                 })?;
 
                 // `-v` lists every change, so the file check checks every file.
-                let file_check =
-                    if run_command.flags.verbose { FileCheck::All } else { FileCheck::First };
+                let file_check = FileCheck::from_verbosity(run_command.flags.verbose);
                 self.execute_graph(
                     graph,
                     builder,
@@ -849,7 +848,7 @@ impl<'a> Session<'a> {
             inner,
             workspace_path,
             Box::new(std::io::stdout()),
-            run_command.flags.verbose,
+            run_command.flags.verbose > 0,
             (run_kind == RunKind::Real).then(|| self.make_summary_writer()),
             self.program_name.clone(),
             run_kind,
@@ -890,7 +889,7 @@ impl<'a> Session<'a> {
         writer: Box<dyn std::io::Write>,
     ) -> anyhow::Result<ExitStatus> {
         let command = command.into_resolved();
-        let file_check = if command.flags.verbose { FileCheck::All } else { FileCheck::First };
+        let file_check = FileCheck::from_verbosity(command.flags.verbose);
         let graph = match self.plan_run(&command).await {
             Ok(Some(graph)) => graph,
             // Only a run without `--json` has nothing to plan.

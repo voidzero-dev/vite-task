@@ -7,7 +7,7 @@ use std::{
 use vt_server::Error as IpcServerError;
 use vt_str::Str;
 
-use super::cache::{CacheHitSource, CacheMiss, remote::UploadError};
+use super::cache::{BaselineDetails, CacheHitSource, CacheMiss, remote::UploadError};
 
 /// The cache operation that failed.
 #[derive(Debug)]
@@ -158,6 +158,8 @@ pub enum CacheStatus {
         source: CacheHitSource,
         /// The hit has output files, which a real run restores.
         restores_outputs: bool,
+        /// With `vp run -vv`, what the cached run depends on and its outputs.
+        baseline: Option<Arc<BaselineDetails>>,
     },
 }
 

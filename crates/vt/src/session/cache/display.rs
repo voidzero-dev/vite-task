@@ -197,6 +197,7 @@ mod tests {
             replayed_duration: std::time::Duration::ZERO,
             source,
             restores_outputs: false,
+            baseline: None,
         };
 
         assert_eq!(

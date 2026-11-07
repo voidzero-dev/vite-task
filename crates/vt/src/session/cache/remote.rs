@@ -39,8 +39,8 @@ use wincode::{
 };
 
 use super::{
-    CACHE_SCHEMA_VERSION, CacheEntryKey, CacheEntryValue, CacheMiss, Checked, Comparison,
-    TaskCacheConfig, archive, deserialize_cache, serialize_cache,
+    BaselineDetails, CACHE_SCHEMA_VERSION, CacheEntryKey, CacheEntryValue, CacheMiss, Checked,
+    Comparison, TaskCacheConfig, archive, deserialize_cache, serialize_cache,
 };
 
 /// Why an entry wasn't uploaded.
@@ -114,6 +114,8 @@ pub enum DecodeValueError {
 pub(super) struct Restore {
     pub value: CacheEntryValue,
     pub blob_id: Option<Str>,
+    /// With `vp run -vv`, what the entry depends on.
+    pub baseline: Option<Arc<BaselineDetails>>,
 }
 
 /// What a fetch found that isn't a miss yet.
@@ -129,13 +131,15 @@ pub(super) enum Resolved {
 /// Turn the result of a fetch into an entry to restore, a fallback key, or a
 /// miss. An exact match's entries are checked newest first, and the first
 /// that passes is restored. `validate` checks an entry against the current
-/// execution. If no entry passes, the miss is the newest entry's: the changes
-/// it found, or a read failure if it doesn't decode, its blob doesn't match
-/// its value, or it can't be validated. No match is a miss without an entry.
-/// A failed fetch is a read failure.
+/// execution, and `describe` describes it for `vp run -vv`. If no entry
+/// passes, the miss is the newest entry's: the changes it found, or a read
+/// failure if it doesn't decode, its blob doesn't match its value, or it
+/// can't be validated. No match is a miss without an entry. A failed fetch is
+/// a read failure.
 pub(super) fn resolve(
     fetched: Result<Option<Fetched>, ReadError>,
     mut validate: impl FnMut(&CacheEntryValue) -> anyhow::Result<Checked>,
+    mut describe: impl FnMut(&CacheEntryValue) -> Option<Arc<BaselineDetails>>,
 ) -> Result<Resolved, CacheMiss> {
     let entries = match fetched.map_err(ReadError::into_miss)? {
         Some(Fetched::Exact { entries }) => entries,
@@ -146,7 +150,7 @@ pub(super) fn resolve(
     };
     let mut newest_miss = None;
     for entry in entries {
-        match check_entry(entry, &mut validate) {
+        match check_entry(entry, &mut validate, &mut describe) {
             Ok(restore) => return Ok(Resolved::Exact(restore)),
             Err(miss) => {
                 newest_miss.get_or_insert(miss);
@@ -161,14 +165,21 @@ pub(super) fn resolve(
 fn check_entry(
     Entry { value, blob_id }: Entry,
     validate: &mut impl FnMut(&CacheEntryValue) -> anyhow::Result<Checked>,
+    describe: &mut impl FnMut(&CacheEntryValue) -> Option<Arc<BaselineDetails>>,
 ) -> Result<Restore, CacheMiss> {
     let value = decode_value(&value).map_err(|err| ReadError::CorruptValue(err).into_miss())?;
     if value.output_archive.is_some() != blob_id.is_some() {
         return Err(ReadError::MismatchedBlob.into_miss());
     }
     match validate(&value) {
-        Ok(checked) if checked.changes.is_empty() => Ok(Restore { value, blob_id }),
-        Ok(checked) => Err(CacheMiss::Changed(Comparison::of_value(&value, checked))),
+        Ok(checked) if checked.changes.is_empty() => {
+            let baseline = describe(&value);
+            Ok(Restore { value, blob_id, baseline })
+        }
+        Ok(checked) => {
+            let baseline = describe(&value);
+            Err(CacheMiss::Changed(Comparison::of_value(&value, checked).with_baseline(baseline)))
+        }
         Err(err) => Err(ReadError::Validate(err).into_miss()),
     }
 }
@@ -383,7 +394,7 @@ async fn download_checked(
     let (sender, receiver) = mpsc::channel(CHECK_BUFFER_CHUNKS);
     let check = tokio::task::spawn_blocking(move || {
         let mut reader = DownloadReader { receiver, chunk: Bytes::new(), file, write_error: None };
-        let checked = archive::check_output_archive(&mut reader);
+        let checked = archive::read_output_archive(&mut reader, |_| {});
         if let Some(err) = reader.write_error {
             return Err(ReadError::WriteArchive(err));
         }
@@ -641,6 +652,10 @@ pub(super) mod tests {
         }
     }
 
+    const fn no_baseline(_: &CacheEntryValue) -> Option<Arc<BaselineDetails>> {
+        None
+    }
+
     fn not_validated(_: &CacheEntryValue) -> anyhow::Result<Checked> {
         panic!("only exact entries that decode and match their blob are validated")
     }
@@ -656,7 +671,7 @@ pub(super) mod tests {
     /// a blob. It must be "remote cache value is corrupt".
     fn corrupt_value(value: Vec<u8>) -> Arc<ReadError> {
         let fetched = Ok(Some(Fetched::Exact { entries: vec![Entry { value, blob_id: None }] }));
-        match resolve(fetched, not_validated).unwrap_err() {
+        match resolve(fetched, not_validated, no_baseline).unwrap_err() {
             CacheMiss::RemoteReadFailed(error) => {
                 assert_eq!(vt_str::format!("{error}"), "remote cache value is corrupt");
                 error
@@ -678,7 +693,12 @@ pub(super) mod tests {
     #[test]
     fn exact_entry_that_validates_is_restored() {
         let restore = restored(
-            resolve(Ok(Some(exact(&cache_value()))), validate_against(BTreeMap::new())).unwrap(),
+            resolve(
+                Ok(Some(exact(&cache_value()))),
+                validate_against(BTreeMap::new()),
+                no_baseline,
+            )
+            .unwrap(),
         );
         assert_eq!(restore.blob_id.as_deref(), Some("1"));
         assert_eq!(restore.value.std_outputs[0].content, b"built\n");
@@ -689,7 +709,8 @@ pub(super) mod tests {
     fn exact_entry_that_fails_validation_is_a_mismatch() {
         let current_inputs = BTreeMap::from([(RelativePathBuf::new("src/a.txt").unwrap(), 1)]);
         let miss =
-            resolve(Ok(Some(exact(&cache_value()))), validate_against(current_inputs)).unwrap_err();
+            resolve(Ok(Some(exact(&cache_value()))), validate_against(current_inputs), no_baseline)
+                .unwrap_err();
         let CacheMiss::Changed(comparison) = &miss else { panic!("{miss:?}") };
         assert!(
             matches!(
@@ -704,8 +725,12 @@ pub(super) mod tests {
     fn newest_entry_that_validates_is_restored() {
         let entries = vec![entry(&cache_value(), "2"), entry(&cache_value(), "1")];
         let restore = restored(
-            resolve(Ok(Some(Fetched::Exact { entries })), validate_against(BTreeMap::new()))
-                .unwrap(),
+            resolve(
+                Ok(Some(Fetched::Exact { entries })),
+                validate_against(BTreeMap::new()),
+                no_baseline,
+            )
+            .unwrap(),
         );
         assert_eq!(restore.blob_id.as_deref(), Some("2"));
     }
@@ -721,10 +746,14 @@ pub(super) mod tests {
         let mut validated = 0;
         let mut validate = validate_against(inputs(&["src/a.txt"]));
         let restore = restored(
-            resolve(Ok(Some(Fetched::Exact { entries })), |value| {
-                validated += 1;
-                validate(value)
-            })
+            resolve(
+                Ok(Some(Fetched::Exact { entries })),
+                |value| {
+                    validated += 1;
+                    validate(value)
+                },
+                no_baseline,
+            )
             .unwrap(),
         );
         assert_eq!(restore.blob_id.as_deref(), Some("2"));
@@ -736,18 +765,24 @@ pub(super) mod tests {
     #[test]
     fn newest_entry_explains_the_miss_when_none_validates() {
         let entries = vec![entry(&cache_value(), "2"), entry(&with_inputs(&["src/b.txt"]), "1")];
-        let miss =
-            resolve(Ok(Some(Fetched::Exact { entries })), validate_against(inputs(&["src/a.txt"])))
-                .unwrap_err();
+        let miss = resolve(
+            Ok(Some(Fetched::Exact { entries })),
+            validate_against(inputs(&["src/a.txt"])),
+            no_baseline,
+        )
+        .unwrap_err();
         assert_eq!(added_input(&miss), "src/a.txt");
 
         let entries = vec![
             Entry { value: b"not a cache value".to_vec(), blob_id: None },
             entry(&cache_value(), "1"),
         ];
-        let miss =
-            resolve(Ok(Some(Fetched::Exact { entries })), validate_against(inputs(&["src/a.txt"])))
-                .unwrap_err();
+        let miss = resolve(
+            Ok(Some(Fetched::Exact { entries })),
+            validate_against(inputs(&["src/a.txt"])),
+            no_baseline,
+        )
+        .unwrap_err();
         assert_eq!(read_failure(miss), "remote cache value is corrupt");
     }
 
@@ -759,7 +794,8 @@ pub(super) mod tests {
             .post_run_fingerprint
             .tracked_env_queries
             .insert(TrackedEnvQuery::Glob(Str::from("PROBE_[")), BTreeMap::new());
-        let miss = resolve(Ok(Some(exact(&value))), validate_against(BTreeMap::new())).unwrap_err();
+        let miss = resolve(Ok(Some(exact(&value))), validate_against(BTreeMap::new()), no_baseline)
+            .unwrap_err();
         assert_eq!(read_failure(miss), "remote cache entry couldn't be validated");
     }
 
@@ -768,20 +804,21 @@ pub(super) mod tests {
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let stored_key = encode_key(&key).unwrap();
         let resolved =
-            resolve(Ok(Some(Fetched::Fallback { key: stored_key })), not_validated).unwrap();
+            resolve(Ok(Some(Fetched::Fallback { key: stored_key })), not_validated, no_baseline)
+                .unwrap();
         assert!(matches!(&resolved, Resolved::Fallback(stored) if *stored == key), "{resolved:?}");
     }
 
     #[test]
     fn no_match_is_a_miss_without_an_entry() {
-        let miss = resolve(Ok(None), not_validated).unwrap_err();
+        let miss = resolve(Ok(None), not_validated, no_baseline).unwrap_err();
         assert!(matches!(miss, CacheMiss::NotFound), "{miss:?}");
     }
 
     #[test]
     fn failed_fetch_is_a_read_failure() {
         let fetched = Err(ReadError::Fetch(vt_remote_cache::Error::InvalidEndpoint(None)));
-        let miss = resolve(fetched, not_validated).unwrap_err();
+        let miss = resolve(fetched, not_validated, no_baseline).unwrap_err();
         assert_eq!(read_failure(miss), "remote cache fetch failed");
     }
 
@@ -847,7 +884,7 @@ pub(super) mod tests {
         for (value, blob_id) in [(cache_value(), None), (without_archive, Some(Str::from("1")))] {
             let value = encode_value(&value).unwrap();
             let fetched = Ok(Some(Fetched::Exact { entries: vec![Entry { value, blob_id }] }));
-            let miss = resolve(fetched, not_validated).unwrap_err();
+            let miss = resolve(fetched, not_validated, no_baseline).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache entry's blob doesn't match its value");
         }
     }
@@ -872,7 +909,7 @@ pub(super) mod tests {
         garbage.extend(b"not a cache key");
         for stored_key in [b"not a cache key".to_vec(), other_schema, other_format, garbage] {
             let fetched = Ok(Some(Fetched::Fallback { key: stored_key }));
-            let miss = resolve(fetched, not_validated).unwrap_err();
+            let miss = resolve(fetched, not_validated, no_baseline).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache key is corrupt");
         }
     }
