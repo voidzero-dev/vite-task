@@ -152,9 +152,9 @@ pub enum CacheMiss {
 #[derive(Debug, Clone)]
 pub struct Comparison {
     /// Every difference found, sorted by kind, then by name or path, never
-    /// empty. Command, config and env changes are complete. The file check
-    /// stops at the first changed file it finds, so at most one file is
-    /// listed.
+    /// empty. Command, config and env changes are complete. Without `-v`, the
+    /// file check stops at the first changed file it finds, so at most one
+    /// file is listed.
     pub changes: Vec<Change>,
 }
 
@@ -232,6 +232,15 @@ impl Change {
 enum OrderName<'a> {
     Exact(&'a str),
     Env(EnvName<&'a str>),
+}
+
+/// How far a cache lookup checks a cached run's files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileCheck {
+    /// Stop at the first changed file, which is enough to know it's a miss.
+    First,
+    /// Check every file, so the miss lists every change (`vp run -v`).
+    All,
 }
 
 /// Where the cache records an env var.
@@ -428,8 +437,10 @@ impl ExecutionCache {
     /// when `cancel_token` is cancelled.
     ///
     /// A dry run (`RunKind::Dry`) writes nothing: a local hit isn't recorded,
-    /// and a remote hit's archive isn't downloaded.
+    /// and a remote hit's archive isn't downloaded. `file_check` says how many
+    /// changed files a miss lists.
     #[tracing::instrument(level = "debug", skip_all)]
+    #[expect(clippy::too_many_arguments, reason = "each argument is part of one lookup")]
     pub async fn try_hit(
         &self,
         cache_metadata: &CacheMetadata,
@@ -437,12 +448,20 @@ impl ExecutionCache {
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
         run_kind: RunKind,
+        file_check: FileCheck,
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheHit, CacheMiss>> {
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
 
         let local_miss = match self
-            .try_hit_local(cache_metadata, &cache_key, globbed_inputs, workspace_root, run_kind)
+            .try_hit_local(
+                cache_metadata,
+                &cache_key,
+                globbed_inputs,
+                workspace_root,
+                run_kind,
+                file_check,
+            )
             .await?
         {
             Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Local })),
@@ -470,6 +489,7 @@ impl ExecutionCache {
                 workspace_root,
                 cache_dir,
                 run_kind,
+                file_check,
                 local_miss,
                 cancel_token,
             )
@@ -484,6 +504,7 @@ impl ExecutionCache {
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         workspace_root: &AbsolutePath,
         run_kind: RunKind,
+        file_check: FileCheck,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
@@ -495,6 +516,7 @@ impl ExecutionCache {
                 globbed_inputs,
                 &cache_metadata.unfiltered_envs,
                 workspace_root,
+                file_check,
             )?;
             if !changes.is_empty() {
                 return Ok(Err(CacheMiss::Changed(Comparison::new(changes))));
@@ -526,6 +548,7 @@ impl ExecutionCache {
                     globbed_inputs,
                     &cache_metadata.unfiltered_envs,
                     workspace_root,
+                    file_check,
                 )?,
                 None => old_cache_key.changes_to(cache_key),
             };
@@ -557,6 +580,7 @@ impl ExecutionCache {
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
         run_kind: RunKind,
+        file_check: FileCheck,
         local_miss: CacheMiss,
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
@@ -572,6 +596,7 @@ impl ExecutionCache {
                 globbed_inputs,
                 &cache_metadata.unfiltered_envs,
                 workspace_root,
+                file_check,
             )
         };
         let Restore { value: cache_value, blob_id } = match remote::resolve(fetched, validate) {
@@ -592,6 +617,7 @@ impl ExecutionCache {
                         globbed_inputs,
                         &cache_metadata.unfiltered_envs,
                         workspace_root,
+                        file_check,
                     )?,
                     None => old_cache_key.changes_to(cache_key),
                 };
