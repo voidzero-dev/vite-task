@@ -21,13 +21,8 @@ use vt_str::Str;
 
 use super::{CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt};
 use crate::session::{
-    cache::{
-        CacheHitSource, CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind,
-        SpawnFingerprintChange, detect_spawn_fingerprint_changes, format_input_change_str,
-        format_spawn_change,
-    },
+    cache::{CacheHitSource, CacheMiss, Change, format_change},
     event::{CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, RunKind},
-    execute::fingerprint::TrackedEnvQuery,
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -146,17 +141,11 @@ pub enum SpawnOutcome {
 pub enum SavedCacheMissReason {
     /// No previous cache entry for this task.
     NotFound,
-    /// Spawn fingerprint changed (command, envs, cwd, etc.).
-    SpawnFingerprintChanged(Vec<SpawnFingerprintChange>),
-    /// Task configuration changed (`input_config` or `glob_base`).
-    ConfigChanged,
-    /// An input file or folder changed.
-    InputChanged { kind: InputChangeKind, path: Str },
-    /// A runner-aware tool reported a tracked env var that changed between runs.
-    TrackedEnvChanged(EnvMismatch),
-    /// A runner-aware tool reported a tracked bulk env query whose match-set changed
-    /// between runs. Carries the first differing entry.
-    TrackedEnvQueryChanged { query: TrackedEnvQuery, mismatch: EnvMismatch },
+    /// The task's cached run differs.
+    Changed {
+        /// Each change, in the order they're listed.
+        changes: Vec<Change>,
+    },
     /// Reading the remote cache failed, and the local cache had no entry.
     RemoteReadFailed(SavedError),
 }
@@ -269,26 +258,7 @@ impl SavedCacheMissReason {
     fn from_cache_miss(cache_miss: &CacheMiss) -> Self {
         match cache_miss {
             CacheMiss::NotFound => Self::NotFound,
-            CacheMiss::FingerprintMismatch(mismatch) => match mismatch {
-                FingerprintMismatch::SpawnFingerprint { old, new } => {
-                    Self::SpawnFingerprintChanged(detect_spawn_fingerprint_changes(old, new))
-                }
-                FingerprintMismatch::InputConfig | FingerprintMismatch::OutputConfig => {
-                    Self::ConfigChanged
-                }
-                FingerprintMismatch::InputChanged { kind, path } => {
-                    Self::InputChanged { kind: *kind, path: Str::from(path.as_str()) }
-                }
-                FingerprintMismatch::TrackedEnvChanged(mismatch) => {
-                    Self::TrackedEnvChanged(mismatch.clone())
-                }
-                FingerprintMismatch::TrackedEnvQueryChanged { query, mismatch } => {
-                    Self::TrackedEnvQueryChanged {
-                        query: query.clone(),
-                        mismatch: mismatch.clone(),
-                    }
-                }
-            },
+            CacheMiss::Changed(comparison) => Self::Changed { changes: comparison.changes.clone() },
             CacheMiss::RemoteReadFailed(error) => {
                 Self::RemoteReadFailed(SavedError::new(error.as_ref()))
             }
@@ -524,7 +494,8 @@ impl TaskResult {
     }
 
     /// Format the cache status detail line for the full summary, with the
-    /// causes to show below it. Only a remote read failure has causes. The
+    /// lines below it: the other changes of a miss, each aligned under the
+    /// first, and the causes. Only a remote read failure has causes. The
     /// caller shows [`Self::ipc_server_error`] instead, if there is one.
     ///
     /// Examples:
@@ -534,14 +505,14 @@ impl TaskResult {
     /// - "→ Cache hit, but the outputs couldn't be restored"
     /// - "→ Cache miss: no previous cache entry found"
     /// - "→ Cache disabled in task configuration"
-    fn format_cache_detail(&self, run_kind: RunKind) -> (Str, &[Str]) {
+    fn format_cache_detail(&self, run_kind: RunKind) -> (Str, Vec<Str>, &[Str]) {
         // Tool-reported cache disable — the tool said it shouldn't be cached.
         if let Self::Spawned {
             outcome: SpawnOutcome::Success { tool_disabled_cache: true, .. },
             ..
         } = self
         {
-            return (Str::from("→ Not cached: the task opted out of caching"), &[]);
+            return (Str::from("→ Not cached: the task opted out of caching"), Vec::new(), &[]);
         }
 
         // Tracking came up short, so the inferred inputs and outputs would
@@ -555,6 +526,7 @@ impl TaskResult {
                 Str::from(
                     "→ Not cached: this task used more files than automatic tracking can record. Configure `input` and `output` manually to enable caching.",
                 ),
+                Vec::new(),
                 &[],
             );
         }
@@ -567,6 +539,7 @@ impl TaskResult {
                 Str::from(
                     "→ Not cached: `input` auto-inference isn't supported on this OS. Configure `input` manually to enable caching.",
                 ),
+                Vec::new(),
                 &[],
             );
         }
@@ -593,34 +566,23 @@ impl TaskResult {
                     SavedCacheMissReason::NotFound => {
                         Str::from("→ Cache miss: no previous cache entry found")
                     }
-                    SavedCacheMissReason::SpawnFingerprintChanged(changes) => {
-                        let formatted: Vec<Str> = changes.iter().map(format_spawn_change).collect();
-                        if formatted.is_empty() {
-                            Str::from("→ Cache miss: configuration changed")
-                        } else {
-                            let joined =
-                                formatted.iter().map(Str::as_str).collect::<Vec<_>>().join("; ");
-                            vt_str::format!("→ Cache miss: {joined}")
-                        }
-                    }
-                    SavedCacheMissReason::ConfigChanged => {
-                        Str::from("→ Cache miss: input configuration changed")
-                    }
-                    SavedCacheMissReason::InputChanged { kind, path } => {
-                        let desc = format_input_change_str(*kind, path.as_str());
-                        vt_str::format!("→ Cache miss: {desc}")
-                    }
-                    SavedCacheMissReason::TrackedEnvChanged(mismatch)
-                    | SavedCacheMissReason::TrackedEnvQueryChanged { mismatch, .. } => {
-                        vt_str::format!("→ Cache miss: {mismatch}")
+                    SavedCacheMissReason::Changed { changes } => {
+                        let mut lines = changes.iter().map(format_change);
+                        let first =
+                            lines.next().unwrap_or_else(|| Str::from("configuration changed"));
+                        return (vt_str::format!("→ Cache miss: {first}"), lines.collect(), &[]);
                     }
                     SavedCacheMissReason::RemoteReadFailed(error) => {
-                        return (vt_str::format!("→ Cache miss: {}", error.message), &error.causes);
+                        return (
+                            vt_str::format!("→ Cache miss: {}", error.message),
+                            Vec::new(),
+                            &error.causes,
+                        );
                     }
                 },
             },
         };
-        (detail, &[])
+        (detail, Vec::new(), &[])
     }
 
     /// The [`Style`] for the cache detail line.
@@ -846,8 +808,12 @@ pub fn format_full_summary(summary: &LastRunSummary, run_kind: RunKind) -> Vec<u
                 detail_style,
             );
         } else {
-            let (cache_detail, causes) = task.result.format_cache_detail(run_kind);
+            let (cache_detail, more_changes, causes) = task.result.format_cache_detail(run_kind);
             let _ = writeln!(buf, "      {}", cache_detail.style(detail_style));
+            for change in more_changes {
+                // Aligned under the first change, after "→ Cache miss: ".
+                let _ = writeln!(buf, "                    {}", change.style(detail_style));
+            }
             write_causes(&mut buf, causes, detail_style);
         }
 
@@ -1164,6 +1130,26 @@ mod tests {
 
     fn full_summary(tasks: Vec<TaskSummary>) -> Str {
         strip(&format_full_summary(&LastRunSummary { tasks, exit_code: 0 }, RunKind::Real))
+    }
+
+    #[test]
+    fn full_summary_lists_each_change_on_its_own_line() {
+        let mut task = cache_miss_task("a");
+        if let TaskResult::Spawned { cache_status, .. } = &mut task.result {
+            *cache_status = SpawnedCacheStatus::Miss(SavedCacheMissReason::Changed {
+                changes: vec![Change::InputConfig, Change::OutputConfig],
+            });
+        }
+        let summary = full_summary(vec![task]);
+        let lines: Vec<&str> = summary.as_str().lines().collect();
+        assert!(
+            lines.windows(2).any(|pair| pair
+                == [
+                    "      → Cache miss: input configuration changed",
+                    "                    output configuration changed",
+                ]),
+            "{summary}"
+        );
     }
 
     /// A dry run whose tasks all have caching disabled still gets its
