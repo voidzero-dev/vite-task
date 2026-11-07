@@ -65,7 +65,7 @@ export default defineConfig({
 
 ```json
 {
-  "$schema": "file:///tmp/vp-schemas-1000/task-graph_80cde1ad99307ef3eea7a658d7c95f88.json",
+  "$schema": "file:///tmp/vp_run-1000/task-graph_80cde1ad99307ef3eea7a658d7c95f88.json",
   "version": 1,
   "workspaceRoot": "/home/me/acme",
   "packages": {
@@ -189,11 +189,11 @@ A path inside the workspace is relative to `workspaceRoot`, with `/` on every pl
 
 ### `$schema`
 
-`$schema` points to the document's JSON Schema (draft-07), so an agent can read what each field means, and an editor shows the descriptions and checks the document when it is opened as JSON. Each time it prints a document, vp writes the schema to a folder in the system temp directory that only the current user can write to, such as `/tmp/vp-schemas-1000`, unless it is already there. The file is named by a hash of its content, such as `task-graph_80cde1ad99307ef3eea7a658d7c95f88.json`, so documents printed by different vp versions point to their own schemas.
+`$schema` points to the document's JSON Schema (draft-07), so an agent can read what each field means, and an editor shows the descriptions and checks the document when it is opened as JSON. Each time it prints a document, vp writes the schema to a folder in the system temp directory that only the current user can write to, such as `/tmp/vp_run-1000`, unless it is already there. The file is named by a hash of its content, such as `task-graph_80cde1ad99307ef3eea7a658d7c95f88.json`, so documents printed by different vp versions point to their own schemas.
 
 Its value uses a form that VS Code and JetBrains IDEs both read on every platform:
 
-- `file://`, then the absolute path with `/` separators, with a `/` before a Windows drive: `file:///tmp/vp-schemas-1000/task-graph_80cde1ad99307ef3eea7a658d7c95f88.json`, `file:///C:/Users/me/AppData/Local/Temp/vp-schemas/task-graph_80cde1ad99307ef3eea7a658d7c95f88.json`.
+- `file://`, then the absolute path with `/` separators, with a `/` before a Windows drive: `file:///tmp/vp_run-1000/task-graph_80cde1ad99307ef3eea7a658d7c95f88.json`, `file:///C:/Users/me/AppData/Local/Temp/vp_run/task-graph_80cde1ad99307ef3eea7a658d7c95f88.json`.
 - Not percent-encoded. JetBrains IDEs look the path up as written, so they wouldn't find a space written as `%20`; VS Code reads both.
 
 A plain path wouldn't work on Windows: neither editor reads `C:\Users\…` as a schema location.

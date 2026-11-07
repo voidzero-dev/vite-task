@@ -140,7 +140,7 @@ vp run --dry-run --json -r build
 
 ```json
 {
-  "$schema": "file:///tmp/vp-schemas-1000/run-plan_3b5d5c3712955042212316173ccf37be.json",
+  "$schema": "file:///tmp/vp_run-1000/run-plan_3b5d5c3712955042212316173ccf37be.json",
   "version": 1,
   "workspaceRoot": "/home/me/acme",
   "plan": {

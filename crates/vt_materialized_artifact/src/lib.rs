@@ -9,9 +9,10 @@
 //! the value-add over a bare `include_bytes!`.
 //!
 //! Materialized files are named `{name}_{hash}{suffix}` in the caller-chosen
-//! directory, normally one from [`user_temp_dir`], which no other user can
-//! write to. The hash (computed at macro-expansion time by [`artifact!`])
-//! gives three properties without any coordination between processes:
+//! directory, normally the current user's own folder in the system temp dir,
+//! which no other user can write to (see [`Materialize::at_user_temp_dir`]).
+//! The hash (computed at macro-expansion time by [`artifact!`]) gives three
+//! properties without any coordination between processes:
 //!
 //! - **No repeated writes.** [`Materialize::at`] returns the existing path if
 //!   the file is already there; repeated calls and re-runs skip I/O.
@@ -28,22 +29,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// A folder named after `name` in the system temp dir that only the current
-/// user can write to, for materializing artifacts. It's created if missing.
-///
-/// - On Unix, it's `{temp}/{name}-{uid}`, created with mode `0o700`, since the
-///   temp dir can be shared by every user (`/tmp` on Linux). An existing path
-///   must be a directory, not a symlink, owned by the current user, and not
-///   writable by anyone else; otherwise this returns an error, so another user
-///   can't plant files there.
-/// - On Windows, it's `{temp}\{name}`: the temp dir is already the user's own.
-///
-/// # Errors
-///
-/// Returns an error if the folder can't be created, or, on Unix, if the
-/// existing path isn't a directory only the current user can write to.
-pub fn user_temp_dir(name: &str) -> io::Result<PathBuf> {
-    user_dir_in(&env::temp_dir(), name)
+/// The folder named after `prefix` in the system temp dir that only the
+/// current user can write to, created if missing: see
+/// [`Materialize::at_user_temp_dir`].
+fn user_temp_dir(prefix: &str) -> io::Result<PathBuf> {
+    user_dir_in(&env::temp_dir(), prefix)
 }
 
 #[cfg(unix)]
@@ -86,8 +76,8 @@ fn user_dir_in(temp_dir: &Path, name: &str) -> io::Result<PathBuf> {
 /// A file embedded into the executable at compile time.
 ///
 /// Construct with [`artifact!`]; materialize to disk via
-/// [`Artifact::materialize`] + [`Materialize::at`]. See the [crate docs] for
-/// the design rationale.
+/// [`Artifact::materialize`] + [`Materialize::at_user_temp_dir`] or
+/// [`Materialize::at`]. See the [crate docs] for the design rationale.
 ///
 /// [crate docs]: crate
 #[derive(Clone, Copy)]
@@ -110,7 +100,7 @@ impl Artifact {
 
     /// Start a fluent materialize chain. Supply optional [`Materialize::suffix`]
     /// / [`Materialize::executable`] knobs, then terminate with
-    /// [`Materialize::at`].
+    /// [`Materialize::at_user_temp_dir`] or [`Materialize::at`].
     pub const fn materialize(&self) -> Materialize<'static> {
         Materialize {
             artifact: *self,
@@ -122,9 +112,9 @@ impl Artifact {
 }
 
 /// Builder returned by [`Artifact::materialize`]. Terminate with
-/// [`Materialize::at`] to write the file.
+/// [`Materialize::at_user_temp_dir`] or [`Materialize::at`] to write the file.
 #[derive(Clone, Copy)]
-#[must_use = "materialize() only configures — call .at(dir) to write the file"]
+#[must_use = "materialize() only configures — call .at_user_temp_dir(prefix) or .at(dir) to write the file"]
 pub struct Materialize<'a> {
     artifact: Artifact,
     suffix: &'a str,
@@ -156,6 +146,27 @@ impl Materialize<'_> {
         self
     }
 
+    /// Materialize the artifact, as [`Self::at`] does, in the folder named
+    /// after `prefix` in the system temp dir that only the current user can
+    /// write to. The folder is created if missing.
+    ///
+    /// - On Unix, it's `{temp}/{prefix}-{uid}`, created with mode `0o700`,
+    ///   since the temp dir can be shared by every user (`/tmp` on Linux). An
+    ///   existing path must be a directory, not a symlink, owned by the
+    ///   current user, and not writable by anyone else; otherwise this returns
+    ///   an error, so another user can't plant files there.
+    /// - On Windows, it's `{temp}\{prefix}`: the temp dir is already the
+    ///   user's own.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the folder can't be created, or, on Unix, if the
+    /// existing path isn't a directory only the current user can write to,
+    /// and otherwise as [`Self::at`] does.
+    pub fn at_user_temp_dir(self, prefix: &str) -> io::Result<PathBuf> {
+        self.at(user_temp_dir(prefix)?)
+    }
+
     /// Materialize the artifact in `dir` under a content-addressed filename,
     /// writing it if missing.
     ///
@@ -166,7 +177,8 @@ impl Materialize<'_> {
     /// # Preconditions
     ///
     /// `dir` must already exist and be writable only by the current user, as
-    /// [`user_temp_dir`] ensures — this method does not create it.
+    /// [`Self::at_user_temp_dir`]'s folder is — this method does not create
+    /// it.
     ///
     /// # Errors
     ///

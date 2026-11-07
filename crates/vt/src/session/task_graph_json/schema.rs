@@ -2,7 +2,7 @@
 
 use std::io;
 
-use vt_materialized_artifact::{artifact, user_temp_dir};
+use vt_materialized_artifact::artifact;
 use vt_path::{AbsolutePath, AbsolutePathBuf};
 use vt_str::Str;
 
@@ -14,9 +14,10 @@ pub fn schema_url() -> io::Result<Str> {
 }
 
 fn materialize() -> io::Result<AbsolutePathBuf> {
-    let dir = user_temp_dir("vp-schemas")?;
-    let path =
-        artifact!("task-graph", "VT_TASK_GRAPH_SCHEMA").materialize().suffix(".json").at(&dir)?;
+    let path = artifact!("task-graph", "VT_TASK_GRAPH_SCHEMA")
+        .materialize()
+        .suffix(".json")
+        .at_user_temp_dir("vp_run")?;
     AbsolutePathBuf::new(path)
         .ok_or_else(|| io::Error::other("the system temp directory isn't an absolute path"))
 }
@@ -101,8 +102,8 @@ mod tests {
     #[cfg(not(windows))]
     #[test]
     fn file_urls() {
-        let path = AbsolutePath::new("/var/my tmp/vp-schemas-501/task-graph_0123.json").unwrap();
-        assert_eq!(file_url(path), "file:///var/my tmp/vp-schemas-501/task-graph_0123.json");
+        let path = AbsolutePath::new("/var/my tmp/vp_run-501/task-graph_0123.json").unwrap();
+        assert_eq!(file_url(path), "file:///var/my tmp/vp_run-501/task-graph_0123.json");
     }
 
     #[cfg(windows)]
@@ -110,8 +111,8 @@ mod tests {
     fn file_urls() {
         let url = |path: &str| file_url(AbsolutePath::new(path).unwrap());
         assert_eq!(
-            url(r"C:\Users\me\App Data\Temp\vp-schemas\task-graph_0123.json"),
-            "file:///C:/Users/me/App Data/Temp/vp-schemas/task-graph_0123.json"
+            url(r"C:\Users\me\App Data\Temp\vp_run\task-graph_0123.json"),
+            "file:///C:/Users/me/App Data/Temp/vp_run/task-graph_0123.json"
         );
         assert_eq!(
             url(r"\\?\C:\Temp\task-graph_0123.json"),

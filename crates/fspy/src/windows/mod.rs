@@ -5,7 +5,6 @@ use std::{
         ffi::OsStrExt,
         io::{AsRawHandle, BorrowedHandle},
     },
-    path::Path,
     sync::Arc,
 };
 
@@ -56,8 +55,10 @@ pub struct SpyImpl {
 }
 
 impl SpyImpl {
-    pub fn init_in(path: &Path) -> io::Result<Self> {
-        let dll_path = INTERPOSE_CDYLIB.materialize().suffix(".dll").at(path)?;
+    /// Initialize the fs access spy by writing the interpose DLL on disk, in the
+    /// current user's own `vp_run` folder in the system temp dir.
+    pub fn init() -> io::Result<Self> {
+        let dll_path = INTERPOSE_CDYLIB.materialize().suffix(".dll").at_user_temp_dir("vp_run")?;
 
         let wide_dll_path = dll_path.as_os_str().encode_wide().collect::<Vec<u16>>();
         let mut ansi_dll_path =
