@@ -135,8 +135,8 @@ vp run --dry-run --json -r build
           "args": ["build"],
           "cache": {
             "status": "unknown",
-            "baseline": { "durationMs": 9120 },
-            "changes": [{ "kind": "env", "name": "NODE_ENV", "change": "changed" }]
+            "changes": [{ "kind": "env", "name": "NODE_ENV", "change": "changed" }],
+            "changesPartial": true
           }
         }
       ]
@@ -269,7 +269,8 @@ type RunPlan = {
 
   /**
    * The tasks this run would run, keyed by task ID. The IDs are the same as in `vp run --json`,
-   * which has each task's package name and dependencies.
+   * which has each task's package name and dependencies. Empty when `--filter` matches no
+   * package.
    */
   plan: {
     [id: string]: {
@@ -339,9 +340,11 @@ type RunPlan = {
 
                   /**
                    * The cached run the step is compared with: the one with the same command,
-                   * config and env, or, if there is none, the step's most recent cached run.
+                   * config and env. Absent when the command, config or env changed: then only the
+                   * key of the step's most recent cached run is compared, not the run itself, so its
+                   * files aren't checked.
                    */
-                  baseline: {
+                  baseline?: {
                     /** How long the cached run took, in milliseconds. On a hit, the time a replay saves. */
                     durationMs: number;
 
@@ -400,9 +403,10 @@ type RunPlan = {
                   };
 
                   /**
-                   * Everything that differs from `baseline`, in the order the kinds are listed
-                   * below, then by name or path.
-                   * Undoing all of them would make the step a hit. Present for `changed`, and for
+                   * Everything that differs from `baseline`, or, without one, from the most recent
+                   * cached run's command, config and env, in the order the kinds are listed below,
+                   * then by name or path. Undoing all of them would make the step a hit, unless
+                   * `changesPartial` is set. Present for `changed`, and for
                    * `unknown` when today's check found differences. Absent for `hit`.
                    */
                   changes?: (
@@ -441,8 +445,9 @@ type RunPlan = {
 
                   /**
                    * Other files may have changed too: without `-v`, the file check stops at the
-                   * first changed file. Command, config and env changes are always listed in
-                   * full. Absent with `-v`.
+                   * first changed file, and after a command, config or env change, the files aren't
+                   * checked. Command, config and env changes are always listed in full. Absent with
+                   * `-v`, unless the command, config or env changed.
                    */
                   changesPartial?: true;
                 }
@@ -496,7 +501,7 @@ type RunPlan = {
 - **Nested dry runs.** A task whose command runs `vp run --dry-run …` isn't inlined like other nested `vp run` commands: that command is started as a process, and it prints its own dry run.
 - **Exit codes.** A dry run exits 0 when planning succeeds, whatever it predicts, unless a step's cache can't be checked. When planning fails, the error goes to stderr and the exit code is non-zero.
 - **Summary.** A dry run's summary follows a real run's rules, with "nothing was run" in place of the successful count and the time saved. A single task gets a summary line only when it would hit: `vp run: cache hit, nothing was run.` There is no `--last-details` hint, since that shows the last real run. The detailed summary has no ✓ or exit codes, and a hit's line is just `→ Cache hit`.
-- **Cache errors.** When a step's cache can't be checked, for example because the cache database can't be read, the error is printed under that step's command, and the dry run stops and fails as a real run does. A cache folder that can't be opened, for example because it's read-only, fails the dry run as it fails a real run.
+- **Cache errors.** When a step's cache can't be checked, for example because the cache database can't be read, the error is printed under that step's command, and the dry run stops and fails as a real run does. With `--json`, the error goes to stderr and no plan is printed. A cache folder that can't be opened, for example because it's read-only, fails the dry run as it fails a real run.
 - **`--last-details`.** After a run with `-v`, it shows every change.
 
 ## Changes to existing behaviour

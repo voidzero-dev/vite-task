@@ -1,0 +1,6 @@
+{
+  "name": "p-q",
+  "scripts": {
+    "build": "echo built"
+  }
+}

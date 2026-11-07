@@ -136,8 +136,10 @@ pub struct RunCommand {
     #[clap(long, exclusive = true)]
     pub(crate) last_details: bool,
 
-    /// Print every package and task in the workspace as JSON, and run nothing.
-    #[clap(long, exclusive = true)]
+    /// Print JSON instead of text. Without a task, print every package and task
+    /// in the workspace, and run nothing. With a task, print what the run would
+    /// do, which requires `--dry-run`.
+    #[clap(long, conflicts_with = "log")]
     pub(crate) json: bool,
 
     #[clap(
@@ -171,13 +173,14 @@ impl Command {
     /// When `--last-details` is set on the `run` subcommand, this produces
     /// [`ResolvedCommand::RunLastDetails`] instead of [`ResolvedCommand::Run`],
     /// making the exclusivity enforced at the type level.
-    #[must_use]
-    pub(crate) fn into_resolved(self) -> ResolvedCommand {
+    ///
+    /// # Errors
+    ///
+    /// Returns the clap error of [`RunCommand::resolve`].
+    pub(crate) fn into_resolved(self, program_name: &str) -> Result<ResolvedCommand, clap::Error> {
         match self {
-            Self::Run(run) if run.last_details => ResolvedCommand::RunLastDetails,
-            Self::Run(run) if run.json => ResolvedCommand::TaskGraphJson,
-            Self::Run(run) => ResolvedCommand::Run(run.into_resolved()),
-            Self::Cache { subcmd } => ResolvedCommand::Cache { subcmd },
+            Self::Run(run) => run.resolve(program_name),
+            Self::Cache { subcmd } => Ok(ResolvedCommand::Cache { subcmd }),
         }
     }
 }
@@ -229,27 +232,101 @@ pub enum RunMode {
     Real { log: LogMode },
     /// `--dry-run`: show what the run would do, without running anything.
     Dry,
+    /// `--dry-run --json`: print the run plan as JSON, without running
+    /// anything.
+    DryJson,
+}
+
+impl ResolvedRunCommand {
+    /// What bare `vp run`, with no argument, resolves to.
+    ///
+    /// # Panics
+    ///
+    /// Panics if parsing a hardcoded bare `RunCommand` fails (should never happen).
+    pub(crate) fn bare() -> Self {
+        let bare = RunCommand::try_parse_from::<_, &str>([])
+            .expect("parsing hardcoded bare command should never fail");
+        let mode = RunMode::Real { log: bare.log };
+        bare.into_run(mode)
+    }
 }
 
 impl RunCommand {
-    /// Whether `--json` is set, asking for the task graph as JSON instead of a run.
+    /// Whether `--json` is the only argument, asking for the task graph as JSON.
+    ///
+    /// # Panics
+    ///
+    /// Panics if parsing a hardcoded bare `RunCommand` fails (should never happen).
     #[must_use]
-    pub const fn is_task_graph_json(&self) -> bool {
-        self.json
+    pub fn is_task_graph_json(&self) -> bool {
+        let bare = Self::try_parse_from::<_, &str>([])
+            .expect("parsing hardcoded bare command should never fail");
+        self.json && !self.dry_run && self.task_and_args.is_empty() && self.flags == bare.flags
     }
 
-    /// Convert to the resolved run command, stripping the `last_details` flag.
+    /// Resolve the parsed arguments into what the command line asks for,
+    /// checking the combinations that clap can't: `--json` alone asks for the
+    /// task graph, which takes no other argument, and `--json` with a task
+    /// requires `--dry-run`, which asks for the run plan. `--dry-run --json`
+    /// without a task fails when it's planned, as `--dry-run` does.
+    /// `program_name`, such as `vp`, names the command in an error's usage
+    /// line.
     ///
-    /// Splits `task_and_args` into `task_specifier` (the first element) and
-    /// `additional_args` (everything that follows).
-    #[must_use]
-    pub(crate) fn into_resolved(self) -> ResolvedRunCommand {
+    /// # Errors
+    ///
+    /// Returns a clap error, formatted like the ones clap reports while parsing.
+    pub(crate) fn resolve(self, program_name: &str) -> Result<ResolvedCommand, clap::Error> {
+        use clap::error::ErrorKind;
+
+        if self.last_details {
+            return Ok(ResolvedCommand::RunLastDetails);
+        }
+        if self.is_task_graph_json() {
+            return Ok(ResolvedCommand::TaskGraphJson);
+        }
+        let mode = match (self.json, self.dry_run) {
+            (false, false) => RunMode::Real { log: self.log },
+            (false, true) => RunMode::Dry,
+            (true, true) => RunMode::DryJson,
+            (true, false) => {
+                let (kind, message) = if self.task_and_args.is_empty() {
+                    (
+                        ErrorKind::ArgumentConflict,
+                        "the argument '--json' cannot be used with one or more of the other specified arguments",
+                    )
+                } else {
+                    (
+                        ErrorKind::MissingRequiredArgument,
+                        "with a task, '--json' is only supported with '--dry-run' for now",
+                    )
+                };
+                return Err(run_usage_error(program_name, kind, message));
+            }
+        };
+        Ok(ResolvedCommand::Run(self.into_run(mode)))
+    }
+
+    /// The run command with `mode`, its task specifier split from the args
+    /// after it.
+    fn into_run(self, mode: RunMode) -> ResolvedRunCommand {
         let mut iter = self.task_and_args.into_iter();
         let task_specifier = iter.next();
         let additional_args: Vec<Str> = iter.collect();
-        let mode = if self.dry_run { RunMode::Dry } else { RunMode::Real { log: self.log } };
         ResolvedRunCommand { task_specifier, flags: self.flags, additional_args, mode }
     }
+}
+
+/// A clap error with `message`, whose usage line is that of `program_name run`.
+fn run_usage_error(
+    program_name: &str,
+    kind: clap::error::ErrorKind,
+    message: &'static str,
+) -> clap::Error {
+    use clap::CommandFactory as _;
+
+    let mut command = Command::command().bin_name(program_name);
+    command.build();
+    command.find_subcommand_mut("run").expect("`run` is a subcommand").error(kind, message)
 }
 
 #[derive(thiserror::Error, Debug)]
