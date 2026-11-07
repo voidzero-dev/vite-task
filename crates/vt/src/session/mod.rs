@@ -1,6 +1,7 @@
 mod cache;
 mod event;
 mod execute;
+mod json;
 pub(crate) mod reporter;
 mod task_graph_json;
 

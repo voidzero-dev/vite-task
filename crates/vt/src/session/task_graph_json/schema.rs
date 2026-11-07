@@ -2,47 +2,19 @@
 
 use std::io;
 
-use vt_materialized_artifact::{artifact, user_temp_dir};
-use vt_path::{AbsolutePath, AbsolutePathBuf};
+use vt_materialized_artifact::{Artifact, artifact};
 use vt_str::Str;
+
+use crate::session::json;
+
+/// The task graph's JSON Schema, `schemas/task-graph.json`.
+const SCHEMA: Artifact = artifact!("task-graph", "VT_TASK_GRAPH_SCHEMA");
 
 /// The `$schema` URL of the task graph document. Its JSON Schema is copied into the user's own
 /// folder in the system temp dir, at a path named by a hash of its content, unless an earlier
 /// run already did.
 pub fn schema_url() -> io::Result<Str> {
-    Ok(file_url(&materialize()?))
-}
-
-fn materialize() -> io::Result<AbsolutePathBuf> {
-    let dir = user_temp_dir("vp-schemas")?;
-    let path =
-        artifact!("task-graph", "VT_TASK_GRAPH_SCHEMA").materialize().suffix(".json").at(&dir)?;
-    AbsolutePathBuf::new(path)
-        .ok_or_else(|| io::Error::other("the system temp directory isn't an absolute path"))
-}
-
-/// `file://`, then the path with `/` separators, not percent-encoded, which both
-/// VS Code and `JetBrains` IDEs read as a `$schema` location.
-#[cfg(not(windows))]
-fn file_url(path: &AbsolutePath) -> Str {
-    vt_str::format!("file://{}", path.as_path().to_string_lossy())
-}
-
-/// `file:///C:/…` for a path on a drive, and `file://host/share/…` for a UNC path.
-#[cfg(windows)]
-fn file_url(path: &AbsolutePath) -> Str {
-    use cow_utils::CowUtils as _;
-
-    let path = path.as_path().to_string_lossy();
-    let path = path.cow_replace('\\', "/");
-    if let Some(unc) = path.strip_prefix("//?/UNC/") {
-        return vt_str::format!("file://{unc}");
-    }
-    let path = path.strip_prefix("//?/").unwrap_or(&path);
-    if let Some(unc) = path.strip_prefix("//") {
-        return vt_str::format!("file://{unc}");
-    }
-    vt_str::format!("file:///{path}")
+    json::schema_url(SCHEMA)
 }
 
 #[cfg(test)]
@@ -50,6 +22,7 @@ mod tests {
     use std::fs;
 
     use schemars::{Schema, generate::SchemaSettings, transform::RecursiveTransform};
+    use vt_path::AbsolutePath;
     use vt_snapshot_test::Snapshots;
 
     use super::*;
@@ -89,41 +62,12 @@ mod tests {
 
     #[test]
     fn materializes_the_committed_schema() {
-        let path = materialize().unwrap();
+        let path = json::materialize(SCHEMA).unwrap();
         let file_name = path.as_path().file_name().unwrap().to_str().unwrap();
         let hash =
             file_name.strip_prefix("task-graph_").and_then(|rest| rest.strip_suffix(".json"));
         assert!(hash.is_some_and(|hash| hash.len() == 32), "{file_name}");
         assert_eq!(fs::read(&path).unwrap(), include_bytes!("../../../schemas/task-graph.json"));
-        assert_eq!(materialize().unwrap(), path);
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn file_urls() {
-        let path = AbsolutePath::new("/var/my tmp/vp-schemas-501/task-graph_0123.json").unwrap();
-        assert_eq!(file_url(path), "file:///var/my tmp/vp-schemas-501/task-graph_0123.json");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn file_urls() {
-        let url = |path: &str| file_url(AbsolutePath::new(path).unwrap());
-        assert_eq!(
-            url(r"C:\Users\me\App Data\Temp\vp-schemas\task-graph_0123.json"),
-            "file:///C:/Users/me/App Data/Temp/vp-schemas/task-graph_0123.json"
-        );
-        assert_eq!(
-            url(r"\\?\C:\Temp\task-graph_0123.json"),
-            "file:///C:/Temp/task-graph_0123.json"
-        );
-        assert_eq!(
-            url(r"\\host\share\task-graph_0123.json"),
-            "file://host/share/task-graph_0123.json"
-        );
-        assert_eq!(
-            url(r"\\?\UNC\host\share\task-graph_0123.json"),
-            "file://host/share/task-graph_0123.json"
-        );
+        assert_eq!(json::materialize(SCHEMA).unwrap(), path);
     }
 }

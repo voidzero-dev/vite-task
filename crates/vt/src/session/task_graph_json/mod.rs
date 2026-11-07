@@ -6,13 +6,15 @@ mod schema;
 use std::{collections::BTreeMap, sync::Arc};
 
 pub use document::TaskGraph;
-use document::{Command, Package, Task, Version, task_id};
+use document::{Command, Package, Task};
 use petgraph::visit::{EdgeRef as _, IntoNodeReferences as _};
 pub use schema::schema_url;
 use vt_graph::{IndexedTaskGraph, TaskGraphLoadError};
 use vt_path::AbsolutePath;
 use vt_str::Str;
 use vt_workspace::{DependencyType, PackageNodeIndex};
+
+use crate::session::json::{Version, path_key, task_id};
 
 /// Builds the document from the task graph, loading every package's config, as listing
 /// the tasks does.
@@ -84,14 +86,4 @@ pub async fn build(
         packages,
         tasks,
     })
-}
-
-/// `path` relative to the workspace root, with `/` separators and `"."` for the root
-/// itself, or absolute if it's outside the workspace.
-fn path_key(path: &AbsolutePath, workspace_root: &AbsolutePath) -> Str {
-    match path.strip_prefix(workspace_root) {
-        Ok(Some(relative)) if relative.as_str().is_empty() => Str::from("."),
-        Ok(Some(relative)) => Str::from(relative.as_str()),
-        Ok(None) | Err(_) => Str::from(path.as_path().to_string_lossy().as_ref()),
-    }
 }
