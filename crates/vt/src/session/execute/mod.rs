@@ -454,6 +454,7 @@ async fn run(
             let mut stdio_config = reporter.start(CacheStatus::Hit {
                 replayed_duration: hit.value.duration,
                 source: hit.source,
+                restores_outputs: hit.value.output_archive.is_some(),
             });
             if run_kind == RunKind::Dry {
                 return Ok(Report::CacheHit);

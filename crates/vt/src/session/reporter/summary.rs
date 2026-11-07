@@ -300,7 +300,7 @@ impl TaskResult {
 
         match cache_status {
             // The only error a cache hit can have is a failed restore.
-            CacheStatus::Hit { replayed_duration, source } => saved_error.map_or_else(
+            CacheStatus::Hit { replayed_duration, source, .. } => saved_error.map_or_else(
                 || Self::CacheHit {
                     saved_duration_ms: duration_to_ms(*replayed_duration),
                     source: *source,
