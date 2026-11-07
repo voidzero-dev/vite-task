@@ -1,7 +1,13 @@
 import { decode } from 'cbor2/decoder';
 import { once } from 'node:events';
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, request as forward, type IncomingHttpHeaders, type Server } from 'node:http';
+import {
+  createServer,
+  request as forward,
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  type Server,
+} from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { startBackend } from './backend.ts';
 import { createSigningKey, repository } from './github.ts';
@@ -65,10 +71,12 @@ const tap = createServer((request, response) => {
   const route = path.startsWith(basePath) ? path.slice(basePath.length) : path;
   const label = `${request.method} ${numbered(route)}`;
   let clientGone = false;
+  let backendReply: IncomingMessage | undefined;
   const upstream = forward(
     `${backend.origin}${request.url}`,
     { method: request.method!, headers: endToEnd(request.headers) },
     (reply) => {
+      backendReply = reply;
       const status = reply.statusCode!;
       if (status >= 500) anomalies.push(`${label} got ${status} from the backend`);
       response.writeHead(status, endToEnd(reply.headers));
@@ -88,7 +96,9 @@ const tap = createServer((request, response) => {
     },
   );
   upstream.on('error', (error) => {
-    if (clientGone) return;
+    // The Worker rejects an upload by its headers, answering before it reads
+    // the body, and then closes the connection, so sending the rest fails.
+    if (clientGone || backendReply?.complete) return;
     anomalies.push(`${label} failed: ${error.message}`);
     if (response.headersSent) response.destroy();
     else response.writeHead(502).end();

@@ -11,6 +11,7 @@ allowBuilds:
   # so their build scripts aren't needed.
   esbuild: false
   sharp: false
+  workerd: true
 
 minimumReleaseAgeExclude:
   - vite-plus
@@ -18,7 +19,6 @@ minimumReleaseAgeExclude:
 
 catalog:
   '@anthropic-ai/sandbox-runtime': 0.0.78
-  '@fastify/busboy': 3.2.2
   '@openai/codex': 0.160.0
   '@tsconfig/strictest': ^2.0.8
   '@types/cross-spawn': 6.0.6
