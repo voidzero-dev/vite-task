@@ -29,7 +29,7 @@ use vt_plan::{
     remote_cache::{RemoteCacheAuth, ResolvedRemoteCacheConfig},
 };
 use vt_remote_cache::{
-    Client, Download, Fetched,
+    Client, Download, Entry, Fetched,
     auth::{Anonymous, Auth, GithubOidc},
 };
 use vt_str::Str;
@@ -100,11 +100,14 @@ pub(super) struct Restore {
     pub blob_id: Option<Str>,
 }
 
-/// Turn the result of a fetch into an entry to restore or a miss. `validate`
-/// checks an exact entry against the current execution. A fallback's miss
-/// reason compares its key with `cache_key`, and no match is a miss without
-/// an entry. A failed fetch, an entry that doesn't decode or whose blob
-/// doesn't match its value, or a validation error is a read failure.
+/// Turn the result of a fetch into an entry to restore or a miss. An exact
+/// match's entries are checked newest first, and the first that passes is
+/// restored. `validate` checks an entry against the current execution. If no
+/// entry passes, the miss is the newest entry's: a fingerprint mismatch, or a
+/// read failure if it doesn't decode, its blob doesn't match its value, or it
+/// can't be validated. A fallback's miss reason compares its key with
+/// `cache_key`, and no match is a miss without an entry. A failed fetch is a
+/// read failure.
 #[expect(
     clippy::result_large_err,
     reason = "`CacheMiss` is intentionally large, and a lookup returns it once"
@@ -112,23 +115,43 @@ pub(super) struct Restore {
 pub(super) fn resolve(
     fetched: Result<Option<Fetched>, ReadError>,
     cache_key: &CacheEntryKey,
-    validate: impl FnOnce(&CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>>,
+    mut validate: impl FnMut(&CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>>,
 ) -> Result<Restore, CacheMiss> {
-    let (value, blob_id) = match fetched.map_err(ReadError::into_miss)? {
-        Some(Fetched::Exact { value, blob_id }) => {
-            let value: CacheEntryValue = deserialize_cache(&value)
-                .map_err(|err| ReadError::CorruptValue(err).into_miss())?;
-            if value.output_archive.is_some() != blob_id.is_some() {
-                return Err(ReadError::MismatchedBlob.into_miss());
-            }
-            (value, blob_id)
-        }
+    let entries = match fetched.map_err(ReadError::into_miss)? {
+        Some(Fetched::Exact { entries }) => entries,
         Some(Fetched::Fallback { key }) => {
             let key = decode_key(&key).map_err(ReadError::into_miss)?;
             return Err(CacheMiss::FingerprintMismatch(key.into_mismatch(cache_key)));
         }
         None => return Err(CacheMiss::NotFound),
     };
+    let mut newest_miss = None;
+    for entry in entries {
+        match check_entry(entry, &mut validate) {
+            Ok(restore) => return Ok(restore),
+            Err(miss) => {
+                newest_miss.get_or_insert(miss);
+            }
+        }
+    }
+    // An exact match has at least one entry, so there is a newest miss.
+    Err(newest_miss.unwrap_or(CacheMiss::NotFound))
+}
+
+/// Check one entry of an exact match, as [`resolve`] describes.
+#[expect(
+    clippy::result_large_err,
+    reason = "`CacheMiss` is intentionally large, and a lookup checks only a few entries"
+)]
+fn check_entry(
+    Entry { value, blob_id }: Entry,
+    validate: &mut impl FnMut(&CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>>,
+) -> Result<Restore, CacheMiss> {
+    let value: CacheEntryValue =
+        deserialize_cache(&value).map_err(|err| ReadError::CorruptValue(err).into_miss())?;
+    if value.output_archive.is_some() != blob_id.is_some() {
+        return Err(ReadError::MismatchedBlob.into_miss());
+    }
     match validate(&value) {
         Ok(None) => Ok(Restore { value, blob_id }),
         Ok(Some(mismatch)) => Err(CacheMiss::FingerprintMismatch(mismatch)),
@@ -167,8 +190,8 @@ impl RemoteClients {
         Ok(client)
     }
 
-    /// Fetch the entry stored under `cache_key` in the remote cache that
-    /// `remote_config` configures, falling back to the entry last stored for
+    /// Fetch the entries stored under `cache_key` in the remote cache that
+    /// `remote_config` configures, falling back to the key last stored for
     /// `execution_cache_key`. Returns `None` if neither key matched. Stops
     /// when `cancel_token` is cancelled.
     pub(super) async fn fetch(
@@ -492,15 +515,42 @@ mod tests {
         }
     }
 
+    /// An entry with `value` and the blob `blob_id`.
+    fn entry(value: &CacheEntryValue, blob_id: &str) -> Entry {
+        Entry { value: serialize_cache(value).unwrap(), blob_id: Some(Str::from(blob_id)) }
+    }
+
     fn exact(value: &CacheEntryValue) -> Fetched {
-        Fetched::Exact { value: serialize_cache(value).unwrap(), blob_id: Some(Str::from("1")) }
+        Fetched::Exact { entries: vec![entry(value, "1")] }
+    }
+
+    /// `cache_value()` with `inputs` as its globbed inputs, each with hash 1.
+    fn with_inputs(inputs: &[&str]) -> CacheEntryValue {
+        let globbed_inputs =
+            inputs.iter().map(|path| (RelativePathBuf::new(*path).unwrap(), 1)).collect();
+        CacheEntryValue { globbed_inputs, ..cache_value() }
+    }
+
+    fn inputs(paths: &[&str]) -> BTreeMap<RelativePathBuf, u64> {
+        with_inputs(paths).globbed_inputs
+    }
+
+    /// The path of an added input, which `miss` must be.
+    fn added_input(miss: &CacheMiss) -> &str {
+        match miss {
+            CacheMiss::FingerprintMismatch(FingerprintMismatch::InputChanged {
+                kind: InputChangeKind::Added,
+                path,
+            }) => path.as_str(),
+            miss => panic!("expected an added input, got {miss:?}"),
+        }
     }
 
     /// Validate as `try_hit_remote` does, with no envs and `globbed_inputs` as
     /// the current inputs.
     fn validate_against(
         globbed_inputs: BTreeMap<RelativePathBuf, u64>,
-    ) -> impl FnOnce(&CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>> {
+    ) -> impl FnMut(&CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>> {
         move |value| {
             let workspace_root = vt_path::current_dir().unwrap();
             value.validate(
@@ -553,6 +603,63 @@ mod tests {
             ),
             "{miss:?}"
         );
+    }
+
+    #[test]
+    fn newest_entry_that_validates_is_restored() {
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let entries = vec![entry(&cache_value(), "2"), entry(&cache_value(), "1")];
+        let restore =
+            resolve(Ok(Some(Fetched::Exact { entries })), &key, validate_against(BTreeMap::new()))
+                .unwrap();
+        assert_eq!(restore.blob_id.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn older_entry_that_validates_is_restored_after_newer_ones_fail() {
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let entries = vec![
+            entry(&with_inputs(&["src/c.txt"]), "4"),
+            Entry { value: b"not a cache value".to_vec(), blob_id: Some(Str::from("3")) },
+            entry(&with_inputs(&["src/a.txt"]), "2"),
+            entry(&with_inputs(&["src/a.txt"]), "1"),
+        ];
+        let mut validated = 0;
+        let mut validate = validate_against(inputs(&["src/a.txt"]));
+        let restore = resolve(Ok(Some(Fetched::Exact { entries })), &key, |value| {
+            validated += 1;
+            validate(value)
+        })
+        .unwrap();
+        assert_eq!(restore.blob_id.as_deref(), Some("2"));
+        // The corrupt entry isn't validated, and the entry after the restored
+        // one isn't checked.
+        assert_eq!(validated, 2);
+    }
+
+    #[test]
+    fn newest_entry_explains_the_miss_when_none_validates() {
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let entries = vec![entry(&cache_value(), "2"), entry(&with_inputs(&["src/b.txt"]), "1")];
+        let miss = resolve(
+            Ok(Some(Fetched::Exact { entries })),
+            &key,
+            validate_against(inputs(&["src/a.txt"])),
+        )
+        .unwrap_err();
+        assert_eq!(added_input(&miss), "src/a.txt");
+
+        let entries = vec![
+            Entry { value: b"not a cache value".to_vec(), blob_id: None },
+            entry(&cache_value(), "1"),
+        ];
+        let miss = resolve(
+            Ok(Some(Fetched::Exact { entries })),
+            &key,
+            validate_against(inputs(&["src/a.txt"])),
+        )
+        .unwrap_err();
+        assert_eq!(read_failure(miss), "remote cache value is corrupt");
     }
 
     #[test]
@@ -610,7 +717,8 @@ mod tests {
         let mut trailing = serialize_cache(&cache_value()).unwrap();
         trailing.push(0);
         for value in [b"not a cache value".to_vec(), trailing] {
-            let fetched = Ok(Some(Fetched::Exact { value, blob_id: None }));
+            let fetched =
+                Ok(Some(Fetched::Exact { entries: vec![Entry { value, blob_id: None }] }));
             let miss = resolve(fetched, &key, not_validated).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache value is corrupt");
         }
@@ -622,7 +730,7 @@ mod tests {
         let without_archive = CacheEntryValue { output_archive: None, ..cache_value() };
         for (value, blob_id) in [(cache_value(), None), (without_archive, Some(Str::from("1")))] {
             let value = serialize_cache(&value).unwrap();
-            let fetched = Ok(Some(Fetched::Exact { value, blob_id }));
+            let fetched = Ok(Some(Fetched::Exact { entries: vec![Entry { value, blob_id }] }));
             let miss = resolve(fetched, &key, not_validated).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache entry's blob doesn't match its value");
         }

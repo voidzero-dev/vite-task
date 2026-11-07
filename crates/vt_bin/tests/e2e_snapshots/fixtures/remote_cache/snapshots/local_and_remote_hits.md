@@ -40,7 +40,7 @@ checked
 
 ---
 vt run: 2/2 cache hit (100%, 1 remote), 2/2 successful. (Run `vt run --last-details` for full details)
-[remote-cache] POST /fetch 200 exact
+[remote-cache] POST /fetch 200 exact [1]
 [remote-cache] GET /blob/1 200
 ```
 

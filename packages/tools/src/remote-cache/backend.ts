@@ -19,6 +19,8 @@ export interface Backend {
   origin: string;
   /** Replace the contents of the blob with ID `id`. */
   writeBlob(id: string, contents: Uint8Array): Promise<void>;
+  /** Make the entry whose blob has ID `id` expire now. */
+  expireEntry(id: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -45,7 +47,9 @@ async function bundle(main: string): Promise<string> {
  * `wrangler.jsonc`. Its namespaces are only the one in `basePath`.
  *
  * Like a deployment, the database has every migration applied, and the
- * namespace is registered for `endpoint` and the repository `registered`. The
+ * namespace is registered for `endpoint` and the repository `registered`. It
+ * keeps the newest `entriesPerKey` entries of each key, or the Worker's
+ * default number. The
  * Worker fetches GitHub's key set to verify upload tokens, and gets one with
  * `key` instead. Any other outbound request fails.
  */
@@ -53,12 +57,14 @@ export async function startBackend({
   basePath,
   directory,
   endpoint,
+  entriesPerKey,
   key,
   registered,
 }: {
   basePath: string;
   directory: string;
   endpoint: string;
+  entriesPerKey: number | undefined;
   key: TrustedKey;
   registered: typeof repository;
 }): Promise<Backend> {
@@ -104,19 +110,21 @@ export async function startBackend({
       const statements = unstable_splitSqlQuery(readFileSync(join(migrations, file), 'utf8'));
       await database.batch(statements.map((sql) => database.prepare(sql)));
     }
+    const scope: Record<string, string | number> = {
+      scope_id: namespace,
+      endpoint,
+      repository: registered.name,
+      repository_id: registered.id,
+      repository_owner_id: registered.ownerId,
+      branch: registered.branch,
+      ...(entriesPerKey === undefined ? {} : { entries_per_key: entriesPerKey }),
+    };
+    const columns = Object.keys(scope);
     await database
       .prepare(
-        `INSERT INTO scopes (scope_id, endpoint, repository, repository_id, repository_owner_id, branch)
-        VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO scopes (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
       )
-      .bind(
-        namespace,
-        endpoint,
-        registered.name,
-        registered.id,
-        registered.ownerId,
-        registered.branch,
-      )
+      .bind(...Object.values(scope))
       .run();
     const bucket = await miniflare.getR2Bucket('ARTIFACTS');
 
@@ -134,6 +142,13 @@ export async function startBackend({
           .prepare('UPDATE generations SET blob_size = ? WHERE blob_id = ?')
           .bind(contents.length, id)
           .run();
+      },
+      async expireEntry(id) {
+        const { meta } = await database
+          .prepare('UPDATE generations SET expires_at = unixepoch() WHERE blob_id = ?')
+          .bind(id)
+          .run();
+        if (meta.changes === 0) throw new Error(`No blob ${id} is stored`);
       },
       close: () => miniflare.dispose(),
     };
