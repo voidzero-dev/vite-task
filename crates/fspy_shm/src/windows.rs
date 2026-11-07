@@ -23,6 +23,12 @@ use windows_sys::Win32::{
     System::{IO::DeviceIoControl, Ioctl::FSCTL_SET_SPARSE},
 };
 
+/// The top of Cygwin's mmap arena (`MMAP_STORAGE_HIGH` in
+/// `winsup/cygwin/local_includes/memory_layout.h`). Everything Cygwin places
+/// at a fixed address, from the executable at `0x100400000` up through the
+/// arena, lies below it, and user space continues to `0x7FFF_FFFE_FFFF`.
+pub const ABOVE_CYGWIN_FIXED_LAYOUT: usize = 0x7000_0000_0000;
+
 const SHARE_ALL: FileShare = FileShare::READ.union(FileShare::WRITE).union(FileShare::DELETE);
 
 /// Opened shared memory that is not mapped yet.
@@ -237,13 +243,25 @@ impl ShmHandle {
             0,
             0,
         )?;
-        let view = fspy_nostd::mm::map_view_of_file(
+        // Keep the view out of every range an MSYS2/Cygwin process maps at a
+        // fixed address. The injected DLL maps it before msys-2.0.dll starts,
+        // and a 4 GiB view placed by the system lands on Cygwin's shared
+        // regions, so `sh.exe` dies with Win32 error 487 (vite-task#830).
+        let view = match fspy_nostd::mm::map_view_of_file_above(
             mapping.as_handle(),
-            MappingAccess::READ | MappingAccess::WRITE,
-            0,
-            0,
             len,
-        )?;
+            ABOVE_CYGWIN_FIXED_LAYOUT,
+        ) {
+            Some(Ok(view)) => view,
+            // No `MapViewOfFile3`, or no room up there: let the system choose.
+            None | Some(Err(_)) => fspy_nostd::mm::map_view_of_file(
+                mapping.as_handle(),
+                MappingAccess::READ | MappingAccess::WRITE,
+                0,
+                0,
+                len,
+            )?,
+        };
         // The view remains valid after its mapping-object handle closes.
         Ok(Mapping { view, len })
     }
