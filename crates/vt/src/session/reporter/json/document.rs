@@ -46,8 +46,8 @@ pub struct PlanTask {
     /// The task name, such as `build`.
     pub name: Str,
 
-    /// IDs of the tasks in `plan` that must finish before this one starts. Absent when there
-    /// are none.
+    /// IDs of the tasks in the same `plan` that must finish before this one starts. Absent
+    /// when there are none.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<Str>,
 
@@ -57,11 +57,34 @@ pub struct PlanTask {
     pub steps: Vec<Step>,
 }
 
+/// A step of a task: a command, or a nested `vp run`.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(untagged)]
+pub enum Step {
+    Command(CommandStep),
+    Nested(NestedStep),
+}
+
+/// A nested `vp run`, which runs a plan of its own.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct NestedStep {
+    /// The `vp run …` command this step stands for, as written, with any arguments given
+    /// after the task name: `vp run -r test`.
+    pub expanded_from: Str,
+
+    /// The plan of that nested `vp run`, in the same shape. Its tasks' `dependsOn` refer only
+    /// to tasks in it, so the same ID can appear in more than one plan.
+    pub plan: BTreeMap<Str, PlanTask>,
+}
+
 /// A command the task runs.
 #[derive(Debug, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct Step {
+pub struct CommandStep {
     /// The executable that would be started: a path relative to the workspace root if it is
     /// inside it, such as `apps/web/node_modules/.bin/vite`,
     /// otherwise an absolute path. A command with shell syntax, such as a pipe, runs through
