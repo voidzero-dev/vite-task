@@ -74,9 +74,13 @@ pub enum TaskGraphLoadError {
 
     #[error(
         "Task {task_display} conflicts with a package.json script of the same name. \
-         Remove the script from package.json or rename the task"
+         Remove the script from package.json, rename the task, or configure the script in \
+         `run.scripts`"
     )]
     ScriptConflict { task_display: TaskDisplay },
+
+    #[error("`run.scripts` configures {task_display}, but package.json has no such script")]
+    ScriptNotFound { task_display: TaskDisplay },
 
     #[error("Failed to resolve task config for task {task_display}")]
     ResolveConfigError {

@@ -1,0 +1,84 @@
+// run build
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "build"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "vtt print prebuild",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null
+                }
+              }
+            }
+          },
+          {
+            "execution_item_display": {
+              "command": "vtt print build",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null
+                }
+              }
+            }
+          },
+          {
+            "execution_item_display": {
+              "command": "vtt print postbuild",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": [
+        [
+          "<workspace>/",
+          "lint"
+        ]
+      ]
+    },
+    {
+      "key": [
+        "<workspace>/",
+        "lint"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "vtt print lint",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ]
+}

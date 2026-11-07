@@ -1,1 +1,1 @@
-Task @test/script-conflict#build conflicts with a package.json script of the same name. Remove the script from package.json or rename the task
+Task @test/script-conflict#build conflicts with a package.json script of the same name. Remove the script from package.json, rename the task, or configure the script in `run.scripts`

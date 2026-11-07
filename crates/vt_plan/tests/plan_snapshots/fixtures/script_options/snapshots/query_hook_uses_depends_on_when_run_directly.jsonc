@@ -1,0 +1,58 @@
+// run prebuild
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "prebuild"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "vtt print prebuild",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": [
+        [
+          "<workspace>/",
+          "setup"
+        ]
+      ]
+    },
+    {
+      "key": [
+        "<workspace>/",
+        "setup"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "vtt print setup",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ]
+}

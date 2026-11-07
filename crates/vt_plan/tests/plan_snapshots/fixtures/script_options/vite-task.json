@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "build": {
+      "dependsOn": ["lint"],
+      "cache": { "env": ["APP_ENV"], "input": ["src/**"] }
+    },
+    "prebuild": { "dependsOn": ["setup"] },
+    "deploy": { "cache": false },
+    "where": { "cwd": "src" }
+  }
+}
