@@ -1,8 +1,10 @@
 import { Busboy } from '@fastify/busboy';
 import { decode } from 'cbor2/decoder';
 import { encode } from 'cbor2/encoder';
+import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 
 interface Entry {
@@ -94,23 +96,26 @@ function cbor(response: ServerResponse, value: unknown): void {
   response.end(encode(value));
 }
 
+/** A running backend. */
+export interface Backend {
+  /** Where the backend listens, e.g. `http://127.0.0.1:1234`, without a path. */
+  origin: string;
+  close(): Promise<void>;
+}
+
 /**
- * A test backend that keeps its state in `directory`: entries and associations
- * in `state.json`, and each blob in `blobs/` under its ID. Keys, values, and
- * blobs remain opaque bytes. A fetch that matches neither key gets a plain-text
- * 404. After each response, `logRequest` receives a line with the method, the
- * route below `basePath`, the status, and for successful fetch responses, the
- * kind.
+ * Start a test backend on a free loopback port that keeps its state in
+ * `directory`: entries and associations in `state.json`, and each blob in
+ * `blobs/` under its ID. Keys, values, and blobs remain opaque bytes. A fetch
+ * that matches neither key gets a plain-text 404.
  */
-export function createCacheServer({
+export async function startBackend({
   basePath,
   directory,
-  logRequest,
 }: {
   basePath: string;
   directory: string;
-  logRequest: (line: string) => void;
-}) {
+}): Promise<Backend> {
   const stateFile = join(directory, 'state.json');
   const blobDirectory = join(directory, 'blobs');
   const state: State = existsSync(stateFile)
@@ -120,18 +125,17 @@ export function createCacheServer({
   const associations = new Map(Object.entries(state.associations));
   let nextBlobId = state.next_blob_id;
 
-  /** Respond to `request`, returning the kind of a successful fetch response. */
   async function handle(
     request: IncomingMessage,
     response: ServerResponse,
     path: string,
-  ): Promise<string | undefined> {
+  ): Promise<void> {
     if (request.method === 'GET' && path.startsWith(`${basePath}/blob/`)) {
       const file = join(blobDirectory, path.slice(`${basePath}/blob/`.length));
       if (!existsSync(file)) throw new RequestError(404, 'Blob not found');
       response.writeHead(200, { 'content-type': 'application/octet-stream' });
       response.end(readFileSync(file));
-      return undefined;
+      return;
     }
     if (request.method !== 'POST' || ![`${basePath}/fetch`, `${basePath}/store`].includes(path)) {
       throw new RequestError(404, 'Route not found');
@@ -149,7 +153,7 @@ export function createCacheServer({
       const fallback = associatedKey === undefined ? undefined : entries.get(associatedKey);
       if (exact) {
         cbor(response, { kind: 'exact', value: fromHex(exact.value), blob_id: exact.blob_id });
-        return 'exact';
+        return;
       }
       if (fallback) {
         cbor(response, {
@@ -158,7 +162,7 @@ export function createCacheServer({
           value: fromHex(fallback.value),
           blob_id: fallback.blob_id,
         });
-        return 'fallback';
+        return;
       }
       throw new RequestError(404, 'Not found');
     }
@@ -189,16 +193,11 @@ export function createCacheServer({
     };
     writeFileSync(stateFile, `${JSON.stringify(saved, null, 2)}\n`);
     cbor(response, { blob_id: blobId });
-    return undefined;
   }
 
-  return createServer((request, response) => {
+  const server = createServer((request, response) => {
     const path = new URL(request.url ?? '/', 'http://localhost').pathname;
-    const log = (kind?: string) => {
-      const parts = [request.method, path.slice(basePath.length), response.statusCode, kind];
-      logRequest(parts.filter((part) => part !== undefined).join(' '));
-    };
-    void handle(request, response, path).then(log, (error: unknown) => {
+    handle(request, response, path).catch((error: unknown) => {
       const known = error instanceof RequestError;
       if (!known) console.error(error);
       response.writeHead(known ? error.status : 500, {
@@ -206,7 +205,17 @@ export function createCacheServer({
       });
       response.end(known ? error.message : 'Internal server error');
       request.resume();
-      log();
     });
   });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const { port } = server.address() as AddressInfo;
+  return {
+    origin: `http://127.0.0.1:${port}`,
+    close: () =>
+      new Promise((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      }),
+  };
 }

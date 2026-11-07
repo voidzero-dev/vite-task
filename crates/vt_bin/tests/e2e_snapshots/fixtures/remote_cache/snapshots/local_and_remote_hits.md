@@ -1,6 +1,11 @@
 # local_and_remote_hits
 
-## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server vt run build`
+## `remote-cache-server start`
+
+```
+```
+
+## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server run vt run build`
 
 ```
 $ vtt write-file dist/output.txt built
@@ -23,7 +28,7 @@ $ vtt print checked
 checked
 ```
 
-## `remote-cache-server vt run all`
+## `remote-cache-server run vt run all`
 
 build is a remote hit, and check is a local hit. The summary counts the remote hit.
 
@@ -60,4 +65,9 @@ Task Details:
   [2] remote-cache#check: $ vtt print checked ✓
       → Cache hit - output replayed -
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+## `remote-cache-server stop`
+
+```
 ```

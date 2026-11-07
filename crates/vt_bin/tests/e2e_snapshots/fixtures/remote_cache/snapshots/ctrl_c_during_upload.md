@@ -1,6 +1,11 @@
 # ctrl_c_during_upload
 
-## `VP_REMOTE_CACHE=read-write remote-cache-server vtt stalled-remote-cache --stall /store vt run build`
+## `remote-cache-server start`
+
+```
+```
+
+## `VP_REMOTE_CACHE=read-write remote-cache-server run vtt stalled-remote-cache --stall /store vt run build`
 
 The proxy forwards the fetch to the backend, which has no entry, but never forwards the upload. Ctrl-C cancels it while vt run waits.
 
@@ -53,4 +58,9 @@ $ vtt write-file dist/output.txt built ◉ cache hit, replaying
 
 ---
 vt run: cache hit.
+```
+
+## `remote-cache-server stop`
+
+```
 ```
