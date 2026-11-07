@@ -50,8 +50,8 @@ pub struct PlanTask {
 
     /// The tasks that must finish before this one starts, by ID: the task's own `dependsOn`,
     /// plus, with `-r`, `-t` or `--filter`, the same task in the packages this package
-    /// depends on. A package without that task is skipped over. Each ID is a key of `plan`.
-    /// Absent when there are none.
+    /// depends on. A package without that task is skipped over. Each ID is a key of the same
+    /// `plan` as this task. Absent when there are none.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<Str>,
 
@@ -61,11 +61,37 @@ pub struct PlanTask {
     pub steps: Vec<Step>,
 }
 
+/// A step of a task: a command, or a nested `vp run`.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(untagged)]
+pub enum Step {
+    Command(CommandStep),
+    Nested(NestedStep),
+}
+
+/// A nested `vp run`, which runs a plan of its own.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct NestedStep {
+    /// The `vp run …` command this step stands for, as written, with any arguments given
+    /// after the task name: `vp run -r test`.
+    pub expanded_from: Str,
+
+    /// The plan of that nested `vp run`, in the same shape, so the plan is a tree. Its tasks
+    /// start when this step does, after the task's earlier steps, and their `dependsOn`
+    /// refers only to tasks in this nested plan: the same ID can appear in more than one
+    /// plan. A nested run isn't started as a separate process, so the step has no
+    /// `program`, `cwd` or `cache`.
+    pub plan: BTreeMap<Str, PlanTask>,
+}
+
 /// A command the task runs.
 #[derive(Debug, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct Step {
+pub struct CommandStep {
     /// The executable that would be started, as `vp run` finds it: a path relative to the
     /// workspace root if it is inside it, such as `apps/web/node_modules/.bin/vite`,
     /// otherwise an absolute path. A command with shell syntax, such as a pipe, runs through

@@ -39,13 +39,3 @@ A task that isn't found is an error, not a task list.
 ```
 error: Task "typo" not found
 ```
-
-## `vt run --dry-run --json nested`
-
-Nested runs aren't in the run plan yet.
-
-**Exit code:** 1
-
-```
-error: `vt run --dry-run --json` doesn't support tasks that run `vt run` yet
-```

@@ -45,7 +45,7 @@
           "type": "string"
         },
         "dependsOn": {
-          "description": "The tasks that must finish before this one starts, by ID: the task's own `dependsOn`, plus, with `-r`, `-t` or `--filter`, the same task in the packages this package depends on. A package without that task is skipped over. Each ID is a key of `plan`. Absent when there are none.",
+          "description": "The tasks that must finish before this one starts, by ID: the task's own `dependsOn`, plus, with `-r`, `-t` or `--filter`, the same task in the packages this package depends on. A package without that task is skipped over. Each ID is a key of the same `plan` as this task. Absent when there are none.",
           "type": "array",
           "items": {
             "type": "string"
@@ -66,6 +66,17 @@
       ]
     },
     "Step": {
+      "description": "A step of a task: a command, or a nested `vp run`.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CommandStep"
+        },
+        {
+          "$ref": "#/definitions/NestedStep"
+        }
+      ]
+    },
+    "CommandStep": {
       "description": "A command the task runs.",
       "type": "object",
       "properties": {
@@ -397,6 +408,27 @@
       "required": [
         "baseline",
         "changes"
+      ]
+    },
+    "NestedStep": {
+      "description": "A nested `vp run`, which runs a plan of its own.",
+      "type": "object",
+      "properties": {
+        "expandedFrom": {
+          "description": "The `vp run …` command this step stands for, as written, with any arguments given after the task name: `vp run -r test`.",
+          "type": "string"
+        },
+        "plan": {
+          "description": "The plan of that nested `vp run`, in the same shape, so the plan is a tree. Its tasks start when this step does, after the task's earlier steps, and their `dependsOn` refers only to tasks in this nested plan: the same ID can appear in more than one plan. A nested run isn't started as a separate process, so the step has no `program`, `cwd` or `cache`.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/PlanTask"
+          }
+        }
+      },
+      "required": [
+        "expandedFrom",
+        "plan"
       ]
     }
   }

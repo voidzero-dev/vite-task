@@ -863,20 +863,13 @@ impl<'a> Session<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an error if a task runs a nested `vp run`, which the run plan
-    /// doesn't show yet, or if the schema can't be written.
+    /// Returns an error if the schema can't be written.
     fn run_plan_reporter(
         &self,
         graph: &ExecutionGraph,
         writer: Box<dyn std::io::Write>,
         pretty: bool,
     ) -> anyhow::Result<Box<dyn reporter::GraphExecutionReporterBuilder>> {
-        if has_nested_run(graph) {
-            let program = &self.program_name;
-            return Err(anyhow::Error::msg(vt_str::format!(
-                "`{program} run --dry-run --json` doesn't support tasks that run `{program} run` yet"
-            )));
-        }
         let schema = json::schema_url(RUN_PLAN_SCHEMA)
             .context("Failed to write the JSON Schema that `$schema` points to")?;
         Ok(Box::new(JsonReporterBuilder::new(graph, &self.workspace_path, writer, pretty, schema)))
@@ -889,8 +882,7 @@ impl<'a> Session<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an error if planning fails, if a task runs a nested `vp run`,
-    /// which the run plan doesn't show yet, or if the JSON Schema can't be
+    /// Returns an error if planning fails, or if the JSON Schema can't be
     /// written. A run plan that can't be written is a failed status.
     pub async fn write_run_plan(
         &mut self,
@@ -997,14 +989,6 @@ impl<'a> Session<'a> {
         .await?;
         Ok(plan_result.graph)
     }
-}
-
-/// Whether a task in `graph` runs a nested `vp run`, which is planned as part
-/// of the graph.
-fn has_nested_run(graph: &ExecutionGraph) -> bool {
-    graph.graph.node_weights().any(|task| {
-        task.items.iter().any(|item| matches!(item.kind, vt_plan::ExecutionItemKind::Expanded(_)))
-    })
 }
 
 /// Print `error` to stderr formatted as the `vp` CLI does:

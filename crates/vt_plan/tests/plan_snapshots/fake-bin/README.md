@@ -8,3 +8,4 @@ never actually executed during plan tests — only its resolved path appears in 
 
 - `vtt` — Unix stub (executable shell script)
 - `vtt.cmd` — Windows stub (looked up via `PATHEXT`)
+- `vt`, `vt.cmd` — the same stubs for `vt`, which a nested `vt run --dry-run` spawns

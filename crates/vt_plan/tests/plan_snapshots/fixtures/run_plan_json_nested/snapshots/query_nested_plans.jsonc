@@ -1,0 +1,102 @@
+// run --dry-run --json ci
+{
+  "$schema": "<schema>",
+  "version": 1,
+  "workspaceRoot": "<workspace>",
+  "plan": {
+    "ci": {
+      "package": ".",
+      "name": "ci",
+      "steps": [
+        {
+          "expandedFrom": "vt run -r build",
+          "plan": {
+            "build": {
+              "package": ".",
+              "name": "build",
+              "steps": [
+                {
+                  "expandedFrom": "vt run --filter a build",
+                  "plan": {
+                    "packages/a#build": {
+                      "package": "packages/a",
+                      "name": "build",
+                      "steps": [
+                        {
+                          "program": "<tools>/vtt",
+                          "args": [
+                            "print",
+                            "a"
+                          ],
+                          "cache": {
+                            "status": "disabled"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "packages/a#build": {
+              "package": "packages/a",
+              "name": "build",
+              "steps": [
+                {
+                  "program": "<tools>/vtt",
+                  "args": [
+                    "print",
+                    "a"
+                  ],
+                  "cache": {
+                    "status": "disabled"
+                  }
+                }
+              ]
+            },
+            "packages/b#build": {
+              "package": "packages/b",
+              "name": "build",
+              "dependsOn": [
+                "packages/a#build"
+              ],
+              "steps": [
+                {
+                  "program": "<tools>/vtt",
+                  "args": [
+                    "print",
+                    "b"
+                  ],
+                  "cache": {
+                    "status": "disabled"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "expandedFrom": "vt run lint",
+          "plan": {
+            "lint": {
+              "package": ".",
+              "name": "lint",
+              "steps": [
+                {
+                  "program": "<tools>/vtt",
+                  "args": [
+                    "print",
+                    "lint"
+                  ],
+                  "cache": {
+                    "status": "disabled"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
