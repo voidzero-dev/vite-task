@@ -5,7 +5,7 @@
 ```
 ```
 
-## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server run vt run build`
+## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server run --github-actions vt run build`
 
 ```
 $ vtt write-file dist/output.txt built

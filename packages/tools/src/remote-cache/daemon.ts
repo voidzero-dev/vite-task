@@ -4,6 +4,7 @@ import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request as forward, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { startBackend } from './backend.ts';
+import { createSigningKey, repository } from './github.ts';
 import { basePath, serverFile, type ServerInfo } from './state.ts';
 
 // The process that `remote-cache-server start` leaves running for one e2e case.
@@ -11,7 +12,8 @@ import { basePath, serverFile, type ServerInfo } from './state.ts';
 // and responses unchanged and records a line for each response. Blob IDs in
 // the lines become numbers in upload order, so they're the same on every run.
 // A control server hands the lines to `remote-cache-server run` and `stop`,
-// and changes blobs for `remote-cache-server corrupt-blob`.
+// changes blobs for `remote-cache-server corrupt-blob`, and stands in for
+// GitHub Actions' token service.
 
 const directory = process.argv[2]!;
 /** Stop after this long without requests, e.g. when a case timed out before its stop step. */
@@ -25,7 +27,7 @@ const hopByHop = new Set([
   'upgrade',
 ]);
 
-const backend = await startBackend({ basePath, directory });
+const signingKey = createSigningKey();
 /** Request lines that no `run` or `stop` has taken yet. */
 const requests: string[] = [];
 /** Problems on the backend's side, which make `stop` fail. */
@@ -107,6 +109,19 @@ const control = createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify(value));
   };
+  const url = new URL(request.url ?? '/', 'http://localhost');
+  if (request.method === 'GET' && url.pathname === '/token') {
+    // The request token stands for the workflow run, as in GitHub Actions.
+    const requestToken = /^Bearer (.+)$/.exec(request.headers.authorization ?? '')?.[1];
+    const audience = url.searchParams.get('audience');
+    const value =
+      requestToken === undefined || audience === null
+        ? undefined
+        : signingKey.issue(requestToken, audience);
+    if (value === undefined) response.writeHead(401).end();
+    else reply({ count: 1, value });
+    return;
+  }
   const corrupt = /^\/corrupt-blob\/(\d+)$/.exec(request.url ?? '')?.[1];
   if (request.method === 'POST' && request.url === '/take') {
     reply(requests.splice(0));
@@ -149,10 +164,21 @@ async function stop(): Promise<void> {
   process.exit(0);
 }
 
+const controlOrigin = `http://127.0.0.1:${await listen(control)}`;
 const info: ServerInfo = {
   url: `http://127.0.0.1:${await listen(tap)}${basePath}`,
-  control: `http://127.0.0.1:${await listen(control)}`,
+  control: controlOrigin,
+  tokenRequestUrl: `${controlOrigin}/token?api-version=2.0`,
 };
+// Upload tokens carry the endpoint as their audience, so the backend learns it
+// before the first request.
+const backend = await startBackend({
+  basePath,
+  directory,
+  endpoint: info.url,
+  key: signingKey,
+  registered: repository,
+});
 writeFileSync(serverFile(directory), `${JSON.stringify(info, null, 2)}\n`);
 process.on('SIGTERM', () => void stop());
 setInterval(() => {

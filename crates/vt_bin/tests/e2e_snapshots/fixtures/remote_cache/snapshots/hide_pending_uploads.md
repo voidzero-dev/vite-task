@@ -5,7 +5,7 @@
 ```
 ```
 
-## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server run vtt stalled-remote-cache --stall /store vt run build`
+## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server run --github-actions vtt stalled-remote-cache --stall /store vt run build`
 
 The proxy never forwards the upload. vt run waits for it until Ctrl-C, without the message about pending uploads.
 

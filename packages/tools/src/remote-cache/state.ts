@@ -12,6 +12,8 @@ export interface ServerInfo {
   url: string;
   /** The origin of the control server, e.g. `http://127.0.0.1:1235`. */
   control: string;
+  /** Where to request GitHub Actions OIDC tokens, as `ACTIONS_ID_TOKEN_REQUEST_URL`. */
+  tokenRequestUrl: string;
 }
 
 export function serverFile(directory: string): string {
