@@ -26,7 +26,7 @@ use crate::session::{
         SpawnFingerprintChange, detect_spawn_fingerprint_changes, format_input_change_str,
         format_spawn_change,
     },
-    event::{CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus},
+    event::{CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, RunKind},
     execute::fingerprint::TrackedEnvQuery,
 };
 
@@ -530,10 +530,11 @@ impl TaskResult {
     /// Examples:
     /// - "→ Cache hit - output replayed - 102.96ms saved"
     /// - "→ Remote cache hit - output replayed - 102.96ms saved"
+    /// - "→ Cache hit" (in a dry run, which replays nothing)
     /// - "→ Cache hit, but the outputs couldn't be restored"
     /// - "→ Cache miss: no previous cache entry found"
     /// - "→ Cache disabled in task configuration"
-    fn format_cache_detail(&self) -> (Str, &[Str]) {
+    fn format_cache_detail(&self, run_kind: RunKind) -> (Str, &[Str]) {
         // Tool-reported cache disable — the tool said it shouldn't be cached.
         if let Self::Spawned {
             outcome: SpawnOutcome::Success { tool_disabled_cache: true, .. },
@@ -572,10 +573,15 @@ impl TaskResult {
 
         let detail = match self {
             Self::CacheHit { saved_duration_ms, source } => {
-                let d = Duration::from_millis(*saved_duration_ms);
-                let formatted_duration = format_summary_duration(d);
                 let hit = format_hit(*source);
-                vt_str::format!("→ {hit} - output replayed - {formatted_duration} saved")
+                match run_kind {
+                    RunKind::Real => {
+                        let d = Duration::from_millis(*saved_duration_ms);
+                        let formatted_duration = format_summary_duration(d);
+                        vt_str::format!("→ {hit} - output replayed - {formatted_duration} saved")
+                    }
+                    RunKind::Dry => vt_str::format!("→ {hit}"),
+                }
             }
             Self::RestoreFailed { source, .. } => {
                 vt_str::format!("→ {}, but the outputs couldn't be restored", format_hit(*source))
@@ -678,12 +684,13 @@ const fn format_hit(source: CacheHitSource) -> &'static str {
 
 /// Render the full detailed execution summary.
 ///
-/// Used by both `--verbose` (live) and `--last-details` (from file).
+/// Used by both `--verbose` (live) and `--last-details` (from file). A dry
+/// run's summary has no exit icons and no saved time, since nothing ran.
 #[expect(
     clippy::too_many_lines,
     reason = "summary formatting is inherently verbose with many write calls"
 )]
-pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
+pub fn format_full_summary(summary: &LastRunSummary, run_kind: RunKind) -> Vec<u8> {
     let mut buf = Vec::new();
 
     let stats = SummaryStats::compute(&summary.tasks);
@@ -779,7 +786,7 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
         );
     }
 
-    if stats.total_saved > Duration::ZERO {
+    if run_kind == RunKind::Real && stats.total_saved > Duration::ZERO {
         let formatted_total_saved = format_summary_duration(stats.total_saved);
         let _ = write!(
             buf,
@@ -811,7 +818,9 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
         let _ = write!(buf, ": {}", task.format_command_display().style(COMMAND_STYLE));
 
         // Exit icon
-        if task.result.is_success() {
+        if run_kind == RunKind::Dry {
+            // Nothing ran, so there is no exit status.
+        } else if task.result.is_success() {
             let _ = write!(buf, " {}", "✓".style(Style::new().green().bold()));
         } else if let TaskResult::Spawned { outcome: SpawnOutcome::Failed { exit_code }, .. } =
             &task.result
@@ -837,7 +846,7 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
                 detail_style,
             );
         } else {
-            let (cache_detail, causes) = task.result.format_cache_detail();
+            let (cache_detail, causes) = task.result.format_cache_detail(run_kind);
             let _ = writeln!(buf, "      {}", cache_detail.style(detail_style));
             write_causes(&mut buf, causes, detail_style);
         }
@@ -916,7 +925,15 @@ fn write_causes(buf: &mut Vec<u8>, causes: &[Str], style: Style) {
 ///   with caching disabled, and `successful` includes cache hits. The hit count is left out
 ///   when `cacheable` is 0, and has an optional remote hit count ("({rate}%, {remote} remote)").
 ///   Followed by the `--last-details` hint.
-pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> Vec<u8> {
+///
+/// A dry run's summary follows the same rules, with "nothing was run" in place of the
+/// successful count and saved time. Its tasks print no output, so a blank line comes before the
+/// thin line, and there is no `--last-details` hint: that shows the last real run.
+pub fn format_compact_summary(
+    summary: &LastRunSummary,
+    program_name: &str,
+    run_kind: RunKind,
+) -> Vec<u8> {
     if summary.tasks.is_empty() {
         return Vec::new();
     }
@@ -932,21 +949,32 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
 
     let mut buf = Vec::new();
 
+    if run_kind == RunKind::Dry {
+        let _ = writeln!(buf);
+    }
+
     // Thin line separator
     let _ = writeln!(buf, "{}", "---".style(Style::new().bright_black()));
 
     let run_label = vt_str::format!("{program_name} run:");
-    let mut show_last_details_hint = true;
+    let mut show_last_details_hint = run_kind == RunKind::Real;
     if is_single_task && stats.cache_hits > 0 {
         // Single task cache hit — no need for --last-details hint
-        let formatted_total_saved = format_summary_duration(stats.total_saved);
         let hit = if stats.remote_cache_hits > 0 { "remote cache hit" } else { "cache hit" };
-        let _ = write!(
-            buf,
-            "{} {hit}, {} saved.",
-            run_label.as_str().style(Style::new().blue().bold()),
-            formatted_total_saved.style(Style::new().green().bold()),
-        );
+        let _ = write!(buf, "{} {hit}, ", run_label.as_str().style(Style::new().blue().bold()));
+        match run_kind {
+            RunKind::Real => {
+                let formatted_total_saved = format_summary_duration(stats.total_saved);
+                let _ = write!(
+                    buf,
+                    "{} saved.",
+                    formatted_total_saved.style(Style::new().green().bold())
+                );
+            }
+            RunKind::Dry => {
+                let _ = write!(buf, "nothing was run.");
+            }
+        }
         show_last_details_hint = false;
     } else if !is_single_task {
         // Multi-task
@@ -975,19 +1003,30 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
             let _ = write!(buf, "),");
         }
 
-        let total = stats.total;
-        let successful = total - stats.failed;
-        let successful_style = if successful < total { Style::new().red() } else { Style::new() };
-        let _ = write!(
-            buf,
-            " {} successful",
-            vt_str::format!("{successful}/{total}").style(successful_style)
-        );
+        match run_kind {
+            RunKind::Real => {
+                let total = stats.total;
+                let successful = total - stats.failed;
+                let successful_style =
+                    if successful < total { Style::new().red() } else { Style::new() };
+                let _ = write!(
+                    buf,
+                    " {} successful",
+                    vt_str::format!("{successful}/{total}").style(successful_style)
+                );
 
-        if stats.total_saved > Duration::ZERO {
-            let formatted_total_saved = format_summary_duration(stats.total_saved);
-            let _ =
-                write!(buf, ", {} saved", formatted_total_saved.style(Style::new().green().bold()));
+                if stats.total_saved > Duration::ZERO {
+                    let formatted_total_saved = format_summary_duration(stats.total_saved);
+                    let _ = write!(
+                        buf,
+                        ", {} saved",
+                        formatted_total_saved.style(Style::new().green().bold())
+                    );
+                }
+            }
+            RunKind::Dry => {
+                let _ = write!(buf, " nothing was run");
+            }
         }
 
         let _ = write!(buf, ".");
@@ -1120,11 +1159,22 @@ mod tests {
     }
 
     fn compact_summary(tasks: Vec<TaskSummary>) -> Str {
-        strip(&format_compact_summary(&LastRunSummary { tasks, exit_code: 0 }, "vp"))
+        strip(&format_compact_summary(&LastRunSummary { tasks, exit_code: 0 }, "vp", RunKind::Real))
     }
 
     fn full_summary(tasks: Vec<TaskSummary>) -> Str {
-        strip(&format_full_summary(&LastRunSummary { tasks, exit_code: 0 }))
+        strip(&format_full_summary(&LastRunSummary { tasks, exit_code: 0 }, RunKind::Real))
+    }
+
+    /// A dry run whose tasks all have caching disabled still gets its
+    /// summary line. The other dry-run summaries are in the `dry_run` e2e
+    /// snapshots.
+    #[test]
+    fn dry_run_without_caching_says_nothing_was_run() {
+        let tasks = vec![cache_disabled_task("a"), cache_disabled_task("b")];
+        let summary =
+            format_compact_summary(&LastRunSummary { tasks, exit_code: 0 }, "vp", RunKind::Dry);
+        assert_eq!(strip(&summary).as_str(), "\n---\nvp run: nothing was run.\n");
     }
 
     #[test]
@@ -1257,8 +1307,10 @@ mod tests {
             "a",
             saved_error("network error", &["error sending request", "connection refused"]),
         );
-        let summary =
-            strip(&format_full_summary(&LastRunSummary { tasks: vec![task], exit_code: 0 }));
+        let summary = strip(&format_full_summary(
+            &LastRunSummary { tasks: vec![task], exit_code: 0 },
+            RunKind::Real,
+        ));
         assert!(
             summary.as_str().contains(
                 "\n      ⚠ Not uploaded to the remote cache: network error\n        \

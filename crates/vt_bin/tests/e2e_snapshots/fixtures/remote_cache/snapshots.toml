@@ -907,3 +907,70 @@ steps = [
     "stop",
   ],
 ]
+
+[[e2e]]
+name = "dry_run_remote_hit"
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "--dry-run",
+    "build",
+  ], comment = "A dry run reads the remote cache, as a real run does." },
+  { argv = [
+    "vtt",
+    "list-dir",
+    "node_modules/.vite/task-cache",
+    "--recursive",
+  ], comment = "The hit's archive wasn't downloaded." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "dry_run_read_failure"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE_URL",
+      "http://127.0.0.1:0/projects/test",
+    ],
+  ], comment = "Nothing can listen on port 0. The failed fetch is a miss, as in a real run." },
+]
