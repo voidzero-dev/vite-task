@@ -353,6 +353,61 @@ steps = [
 ]
 
 [[e2e]]
+name = "expired_after_fetch"
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "expire-entry",
+    "--before-download",
+    "1",
+  ], comment = "The entry expires after the next fetch returns it, before its archive is downloaded." },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The fetch finds the entry, but its archive is gone, so the task reruns." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details include the underlying error." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
 name = "restore_failure"
 cfg = 'not(target_env = "musl")'
 ignore = true
