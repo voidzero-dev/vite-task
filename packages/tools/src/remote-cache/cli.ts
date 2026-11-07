@@ -11,7 +11,7 @@ import { defaultRequestToken } from './github.ts';
 import { logFile, serverFile, stateDirectory, type ServerInfo } from './state.ts';
 
 const usage =
-  'Usage: remote-cache-server start | run [--github-actions] COMMAND [ARGS...] | corrupt-blob NUMBER | stop';
+  'Usage: remote-cache-server start [--entries-per-key N] | run [--github-actions] COMMAND [ARGS...] | corrupt-blob NUMBER | expire-entry NUMBER | stop';
 const directory = resolve(stateDirectory);
 
 function fail(message: string): never {
@@ -53,7 +53,16 @@ function printRequests(lines: string[]): void {
   for (const line of lines) console.error(`[remote-cache] ${line}`);
 }
 
-async function start(): Promise<void> {
+async function start(argv: string[]): Promise<void> {
+  // The daemon takes the number of entries per key after the directory.
+  const [option, entriesPerKey] = argv;
+  if (
+    argv.length > 0 &&
+    (argv.length !== 2 || option !== '--entries-per-key' || !/^[1-9]\d*$/.test(entriesPerKey!))
+  ) {
+    fail(usage);
+  }
+  const options = argv.length > 0 ? [entriesPerKey!] : [];
   if (existsSync(serverFile(directory))) fail('a backend is already running here.');
   mkdirSync(directory, { recursive: true });
   const log = openSync(logFile(directory), 'a');
@@ -62,7 +71,12 @@ async function start(): Promise<void> {
   // exits, and Ctrl-C in later steps doesn't reach the backend.
   const daemon = spawn(
     process.execPath,
-    [...process.execArgv, fileURLToPath(new URL('daemon.ts', import.meta.url)), directory],
+    [
+      ...process.execArgv,
+      fileURLToPath(new URL('daemon.ts', import.meta.url)),
+      directory,
+      ...options,
+    ],
     { cwd: tmpdir(), detached: true, stdio: ['ignore', log, log, 'ipc'] },
   );
   closeSync(log);
@@ -95,9 +109,10 @@ async function run(argv: string[]): Promise<void> {
   process.exitCode = code;
 }
 
-async function corruptBlob([number]: string[]): Promise<void> {
-  if (number === undefined || !/^[1-9]\d*$/.test(number)) fail(usage);
-  await control(readInfo(), `/corrupt-blob/${number}`, `no blob ${number} has been stored.`);
+/** Change what the backend stores for blob `number`, numbered as in the request lines. */
+async function changeBlob(change: string, [number, ...rest]: string[]): Promise<void> {
+  if (number === undefined || !/^[1-9]\d*$/.test(number) || rest.length > 0) fail(usage);
+  await control(readInfo(), `/${change}/${number}`, `no blob ${number} has been stored.`);
 }
 
 async function stop(): Promise<void> {
@@ -111,8 +126,9 @@ async function stop(): Promise<void> {
 }
 
 const [subcommand, ...args] = process.argv.slice(2);
-if (subcommand === 'start') await start();
+if (subcommand === 'start') await start(args);
 else if (subcommand === 'run') await run(args);
-else if (subcommand === 'corrupt-blob') await corruptBlob(args);
-else if (subcommand === 'stop') await stop();
+else if (subcommand === 'corrupt-blob' || subcommand === 'expire-entry') {
+  await changeBlob(subcommand, args);
+} else if (subcommand === 'stop') await stop();
 else fail(usage);

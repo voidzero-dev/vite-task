@@ -18,10 +18,12 @@ import { basePath, serverFile, type ServerInfo } from './state.ts';
 // and responses unchanged and records a line for each response. Blob IDs in
 // the lines become numbers in upload order, so they're the same on every run.
 // A control server hands the lines to `remote-cache-server run` and `stop`,
-// changes blobs for `remote-cache-server corrupt-blob`, and stands in for
-// GitHub Actions' token service.
+// changes blobs and entries for `remote-cache-server corrupt-blob` and
+// `expire-entry`, and stands in for GitHub Actions' token service.
 
 const directory = process.argv[2]!;
+/** The number of entries the namespace keeps per key, if not the Worker's default. */
+const entriesPerKey = process.argv[3] === undefined ? undefined : Number(process.argv[3]);
 /** Stop after this long without requests, e.g. when a case timed out before its stop step. */
 const idleTimeout = 10 * 60 * 1000;
 /** Headers about a single connection. Node sets them for each hop itself. */
@@ -154,16 +156,20 @@ const control = createServer((request, response) => {
     else reply({ count: 1, value });
     return;
   }
-  const corrupt = /^\/corrupt-blob\/(\d+)$/.exec(request.url ?? '')?.[1];
+  const [, change, number] = /^\/(corrupt-blob|expire-entry)\/(\d+)$/.exec(request.url ?? '') ?? [];
   if (request.method === 'POST' && request.url === '/take') {
     reply(requests.splice(0));
-  } else if (request.method === 'POST' && corrupt !== undefined) {
-    const id = blobs[Number(corrupt) - 1];
+  } else if (request.method === 'POST' && number !== undefined) {
+    const id = blobs[Number(number) - 1];
     if (id === undefined) {
       response.writeHead(404).end();
       return;
     }
-    backend.writeBlob(id, Buffer.from('corrupt')).then(
+    const changed =
+      change === 'corrupt-blob'
+        ? backend.writeBlob(id, Buffer.from('corrupt'))
+        : backend.expireEntry(id);
+    changed.then(
       () => reply(null),
       (error: unknown) => {
         console.error(error);
@@ -208,6 +214,7 @@ const backend = await startBackend({
   basePath,
   directory,
   endpoint: info.url,
+  entriesPerKey,
   key: signingKey,
   registered: repository,
 });
