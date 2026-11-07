@@ -6,16 +6,16 @@
 //! | --------------- | ------------------------------------- |
 //! | `key`           | Header + wincode(`CacheEntryKey`)     |
 //! | `secondary_key` | Header + wincode(`ExecutionCacheKey`) |
-//! | `value`         | wincode(`CacheEntryValue`)            |
+//! | `value`         | zstd(wincode(`CacheEntryValue`))      |
 //! | blob            | The `.tar.zst` output archive         |
 //!
-//! Both keys start with a header containing the cache schema version and the
-//! target OS and architecture. Platforms share an endpoint's namespace, but
-//! their keys differ.
+//! Both keys start with a header containing the cache schema version, the
+//! remote value format, and the target OS and architecture. Platforms share an
+//! endpoint's namespace, but their keys differ.
 
 use std::{
     fs::File,
-    io::{self, Write as _},
+    io::{self, Read as _, Write as _},
     sync::{Arc, Mutex, OnceLock, PoisonError},
 };
 
@@ -50,6 +50,11 @@ pub enum UploadError {
     Remote(#[from] vt_remote_cache::Error),
     #[error("failed to encode the cache entry")]
     Encode(#[from] WriteError),
+    #[error("failed to compress the cache entry")]
+    Compress(#[source] io::Error),
+    /// The entry's value is larger than any client reads back.
+    #[error("cache entry is larger than {} MiB", MAX_VALUE_SIZE >> 20)]
+    TooLarge,
     /// Ctrl-C cancelled the upload before it finished.
     #[error("interrupted")]
     Interrupted,
@@ -65,7 +70,7 @@ pub enum ReadError {
     #[error("remote cache download failed")]
     Download(#[source] vt_remote_cache::Error),
     #[error("remote cache value is corrupt")]
-    CorruptValue(#[source] wincode::error::ReadError),
+    CorruptValue(#[source] DecodeValueError),
     #[error("remote cache key is corrupt")]
     CorruptKey(#[source] Option<wincode::error::ReadError>),
     /// The value has an output archive but the entry has no blob, or the
@@ -90,6 +95,17 @@ impl ReadError {
     pub(super) fn into_miss(self) -> CacheMiss {
         CacheMiss::RemoteReadFailed(Arc::new(self))
     }
+}
+
+/// Why a fetched value is corrupt.
+#[derive(Debug, thiserror::Error)]
+pub enum DecodeValueError {
+    #[error(transparent)]
+    Decompress(io::Error),
+    #[error("value decompresses to more than {} MiB", MAX_VALUE_SIZE >> 20)]
+    TooLarge,
+    #[error(transparent)]
+    Decode(wincode::error::ReadError),
 }
 
 /// An exact entry that passed validation. It's a hit once its blob, if any,
@@ -147,8 +163,7 @@ fn check_entry(
     Entry { value, blob_id }: Entry,
     validate: &mut impl FnMut(&CacheEntryValue) -> anyhow::Result<Option<FingerprintMismatch>>,
 ) -> Result<Restore, CacheMiss> {
-    let value: CacheEntryValue =
-        deserialize_cache(&value).map_err(|err| ReadError::CorruptValue(err).into_miss())?;
+    let value = decode_value(&value).map_err(|err| ReadError::CorruptValue(err).into_miss())?;
     if value.output_archive.is_some() != blob_id.is_some() {
         return Err(ReadError::MismatchedBlob.into_miss());
     }
@@ -256,7 +271,7 @@ impl RemoteClients {
         let client = self.client(remote_config)?;
         let key = encode_key(cache_key)?;
         let secondary_key = encode_key(execution_cache_key)?;
-        let value = serialize_cache(cache_value)?;
+        let value = encode_value(cache_value)?;
         let archive = cache_value.output_archive.as_ref().map(|name| cache_dir.join(name.as_str()));
         Ok(async move {
             client.store(&key, &secondary_key, &value, archive.as_deref()).await?;
@@ -415,9 +430,50 @@ impl io::Read for DownloadReader {
     }
 }
 
+/// The zstd level values are compressed at: the default, as for output
+/// archives. A value is compressed when its task finishes, and this level
+/// shrinks even the largest about 7x in milliseconds. Higher levels shrink
+/// values only about a fifth more, at several times the cost.
+const VALUE_COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
+
+/// The most bytes a value may take before compression. Values are at most a
+/// few MB, so this only stops a value from a broken or hostile server, such as
+/// a zstd bomb, from exhausting memory. Larger values aren't uploaded, since
+/// no client would read them back.
+const MAX_VALUE_SIZE: u64 = 32 << 20;
+
+/// Encode a value as it's stored in the remote cache.
+fn encode_value(value: &CacheEntryValue) -> Result<Vec<u8>, UploadError> {
+    let serialized = serialize_cache(value)?;
+    if u64::try_from(serialized.len()).map_or(true, |len| len > MAX_VALUE_SIZE) {
+        return Err(UploadError::TooLarge);
+    }
+    zstd::bulk::compress(&serialized, VALUE_COMPRESSION_LEVEL).map_err(UploadError::Compress)
+}
+
+/// Decode a value stored in the remote cache. It's decompressed through a
+/// reader that stops after [`MAX_VALUE_SIZE`] bytes, whatever size its frame
+/// declares.
+fn decode_value(bytes: &[u8]) -> Result<CacheEntryValue, DecodeValueError> {
+    let decoder = zstd::Decoder::with_buffer(bytes).map_err(DecodeValueError::Decompress)?;
+    let mut reader = decoder.take(MAX_VALUE_SIZE + 1);
+    let mut decompressed = Vec::new();
+    reader.read_to_end(&mut decompressed).map_err(DecodeValueError::Decompress)?;
+    if reader.limit() == 0 {
+        return Err(DecodeValueError::TooLarge);
+    }
+    deserialize_cache(&decompressed).map_err(DecodeValueError::Decode)
+}
+
+/// Bump this whenever the remote value encoding changes incompatibly. Both
+/// keys carry it, so clients that encode values differently never share
+/// entries, and never push out each other's.
+const REMOTE_VALUE_FORMAT: u32 = 1;
+
 #[derive(SchemaWrite)]
 struct KeyHeader {
     cache_schema_version: u32,
+    remote_value_format: u32,
     os: Str,
     arch: Str,
 }
@@ -426,6 +482,7 @@ struct KeyHeader {
 fn encode_header() -> WriteResult<Vec<u8>> {
     serialize_cache(&KeyHeader {
         cache_schema_version: CACHE_SCHEMA_VERSION,
+        remote_value_format: REMOTE_VALUE_FORMAT,
         os: Str::from(std::env::consts::OS),
         arch: Str::from(std::env::consts::ARCH),
     })
@@ -447,7 +504,7 @@ fn decode_key(bytes: &[u8]) -> Result<CacheEntryKey, ReadError> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, io::Read as _, net::TcpListener, time::Duration};
+    use std::{collections::BTreeMap, net::TcpListener, time::Duration};
 
     use tokio::sync::oneshot;
     use vt_glob::path::PathGlobSet;
@@ -515,9 +572,10 @@ mod tests {
         }
     }
 
-    /// An entry with `value` and the blob `blob_id`.
+    /// An entry with `value`, encoded as uploads encode it, and the blob
+    /// `blob_id`.
     fn entry(value: &CacheEntryValue, blob_id: &str) -> Entry {
-        Entry { value: serialize_cache(value).unwrap(), blob_id: Some(Str::from(blob_id)) }
+        Entry { value: encode_value(value).unwrap(), blob_id: Some(Str::from(blob_id)) }
     }
 
     fn exact(value: &CacheEntryValue) -> Fetched {
@@ -569,6 +627,20 @@ mod tests {
     fn read_failure(miss: CacheMiss) -> Str {
         match miss {
             CacheMiss::RemoteReadFailed(error) => vt_str::format!("{error}"),
+            miss => panic!("expected a read failure, got {miss:?}"),
+        }
+    }
+
+    /// The read failure of an exact match whose only entry is `value`, without
+    /// a blob. It must be "remote cache value is corrupt".
+    fn corrupt_value(value: Vec<u8>) -> Arc<ReadError> {
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let fetched = Ok(Some(Fetched::Exact { entries: vec![Entry { value, blob_id: None }] }));
+        match resolve(fetched, &key, not_validated).unwrap_err() {
+            CacheMiss::RemoteReadFailed(error) => {
+                assert_eq!(vt_str::format!("{error}"), "remote cache value is corrupt");
+                error
+            }
             miss => panic!("expected a read failure, got {miss:?}"),
         }
     }
@@ -712,15 +784,58 @@ mod tests {
     }
 
     #[test]
-    fn value_that_does_not_decode_is_a_corrupt_entry() {
-        let key = cache_key(ResolvedGlobConfig::default_auto());
+    fn uploaded_value_round_trips() {
+        let value = cache_value();
+        let encoded = encode_value(&value).unwrap();
+        let serialized = serialize_cache(&value).unwrap();
+        assert_eq!(zstd::decode_all(encoded.as_slice()).unwrap(), serialized);
+        assert_eq!(serialize_cache(&decode_value(&encoded).unwrap()).unwrap(), serialized);
+    }
+
+    #[test]
+    fn value_that_is_not_zstd_is_corrupt() {
+        let uncompressed = serialize_cache(&cache_value()).unwrap();
+        let encoded = encode_value(&cache_value()).unwrap();
+        let truncated = encoded[..encoded.len() - 1].to_vec();
+        let trailing = [encoded.as_slice(), b"\0"].concat();
+        for value in [b"not a cache value".to_vec(), uncompressed, truncated, trailing] {
+            let error = corrupt_value(value);
+            assert!(
+                matches!(*error, ReadError::CorruptValue(DecodeValueError::Decompress(_))),
+                "{error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn value_past_the_limit_is_not_uploaded_and_reads_as_corrupt() {
+        let content = vec![b'a'; usize::try_from(MAX_VALUE_SIZE).unwrap()];
+        let value = CacheEntryValue {
+            std_outputs: Arc::new([StdOutput { kind: OutputKind::StdOut, content }]),
+            output_archive: None,
+            ..cache_value()
+        };
+        assert!(matches!(encode_value(&value), Err(UploadError::TooLarge)));
+        // As a broken server could send it. It would decode if it weren't too
+        // large.
+        let compressed =
+            zstd::bulk::compress(&serialize_cache(&value).unwrap(), VALUE_COMPRESSION_LEVEL)
+                .unwrap();
+        let error = corrupt_value(compressed);
+        assert!(matches!(*error, ReadError::CorruptValue(DecodeValueError::TooLarge)), "{error:?}");
+    }
+
+    #[test]
+    fn compressed_bytes_that_are_not_a_cache_value_are_corrupt() {
         let mut trailing = serialize_cache(&cache_value()).unwrap();
         trailing.push(0);
-        for value in [b"not a cache value".to_vec(), trailing] {
-            let fetched =
-                Ok(Some(Fetched::Exact { entries: vec![Entry { value, blob_id: None }] }));
-            let miss = resolve(fetched, &key, not_validated).unwrap_err();
-            assert_eq!(read_failure(miss), "remote cache value is corrupt");
+        for bytes in [b"not a cache value".as_slice(), &trailing] {
+            let value = zstd::bulk::compress(bytes, VALUE_COMPRESSION_LEVEL).unwrap();
+            let error = corrupt_value(value);
+            assert!(
+                matches!(*error, ReadError::CorruptValue(DecodeValueError::Decode(_))),
+                "{error:?}"
+            );
         }
     }
 
@@ -729,7 +844,7 @@ mod tests {
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let without_archive = CacheEntryValue { output_archive: None, ..cache_value() };
         for (value, blob_id) in [(cache_value(), None), (without_archive, Some(Str::from("1")))] {
-            let value = serialize_cache(&value).unwrap();
+            let value = encode_value(&value).unwrap();
             let fetched = Ok(Some(Fetched::Exact { entries: vec![Entry { value, blob_id }] }));
             let miss = resolve(fetched, &key, not_validated).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache entry's blob doesn't match its value");
@@ -739,16 +854,22 @@ mod tests {
     #[test]
     fn fallback_key_that_does_not_decode_is_a_corrupt_entry() {
         let key = cache_key(ResolvedGlobConfig::default_auto());
-        let mut other_header = serialize_cache(&KeyHeader {
-            cache_schema_version: CACHE_SCHEMA_VERSION + 1,
-            os: Str::from(std::env::consts::OS),
-            arch: Str::from(std::env::consts::ARCH),
-        })
-        .unwrap();
-        other_header.extend(serialize_cache(&key).unwrap());
+        let other_header = |cache_schema_version, remote_value_format| {
+            let mut stored_key = serialize_cache(&KeyHeader {
+                cache_schema_version,
+                remote_value_format,
+                os: Str::from(std::env::consts::OS),
+                arch: Str::from(std::env::consts::ARCH),
+            })
+            .unwrap();
+            stored_key.extend(serialize_cache(&key).unwrap());
+            stored_key
+        };
+        let other_schema = other_header(CACHE_SCHEMA_VERSION + 1, REMOTE_VALUE_FORMAT);
+        let other_format = other_header(CACHE_SCHEMA_VERSION, REMOTE_VALUE_FORMAT + 1);
         let mut garbage = encode_header().unwrap();
         garbage.extend(b"not a cache key");
-        for stored_key in [b"not a cache key".to_vec(), other_header, garbage] {
+        for stored_key in [b"not a cache key".to_vec(), other_schema, other_format, garbage] {
             let fetched = Ok(Some(Fetched::Fallback { key: stored_key }));
             let miss = resolve(fetched, &key, not_validated).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache key is corrupt");
