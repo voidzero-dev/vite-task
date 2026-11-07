@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "prebuild": { "dependsOn": ["setup"] },
+    "postbuild": { "dependsOn": ["setup"] }
+  }
+}
