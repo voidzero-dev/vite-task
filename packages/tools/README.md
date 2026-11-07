@@ -12,19 +12,20 @@ remote-cache-server stop
 
 An E2E case starts its own backend in its first step and stops it in its last, so the backend keeps its state for the whole case. Each subcommand works in the current directory, the case's directory:
 
-- `remote-cache-server start` starts the backend in the background on free loopback ports and returns once it's ready. The backend runs in its own session and doesn't use the terminal, so the step can finish and Ctrl-C in later steps doesn't reach it. It writes its endpoint, `http://127.0.0.1:<port>/projects/test`, to `remote-cache/server.json`, and its output to `remote-cache/server.log`.
+- `remote-cache-server start [--entries-per-key N]` starts the backend in the background on free loopback ports and returns once it's ready. The namespace keeps the newest `N` entries of each key, or the Worker's default of 8. The backend runs in its own session and doesn't use the terminal, so the step can finish and Ctrl-C in later steps doesn't reach it. It writes its endpoint, `http://127.0.0.1:<port>/projects/test`, to `remote-cache/server.json`, and its output to `remote-cache/server.log`.
 - `remote-cache-server run [--github-actions] COMMAND [ARGS...]` runs the command with `VP_REMOTE_CACHE_URL` set to the endpoint. The fixed base path gives the endpoint a namespace path. With `--github-actions`, the command runs as if in a GitHub Actions job with `id-token: write`: `ACTIONS_ID_TOKEN_REQUEST_URL` points to the backend's stand-in for GitHub's token service, and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` defaults to `main-push`. The command inherits stdio and handles Ctrl-C, which `run` ignores. `run` exits with the command's exit code.
 - `remote-cache-server corrupt-blob NUMBER` overwrites a stored blob, numbered as in the request lines, with other bytes.
+- `remote-cache-server expire-entry NUMBER` makes the entry whose blob has that number expire now, as if its retention had passed. Nothing removes it, as before the Worker's scheduled cleanup.
 - `remote-cache-server stop` stops the backend. It fails if the backend answered a request with a 5xx status or couldn't be reached.
 
 A backend whose case directory disappears stops by itself, as does one that has had no requests for ten minutes, e.g. because its case timed out before the stop step.
 
-The endpoint is a tap in front of the backend. It forwards every request and response unchanged and records a line for each response, in the order of the responses. Each line has the method, the path below the base path, and the status. Successful fetch responses add their kind. Blob IDs are random, so blob paths show the blob's number in upload order instead, keeping snapshots deterministic. After the command exits, `run` prints the lines for the requests it caused to stderr, and `stop` prints any that are left:
+The endpoint is a tap in front of the backend. It forwards every request and response unchanged and records a line for each response, in the order of the responses. Each line has the method, the path below the base path, and the status. Successful fetch responses add their kind, and exact matches add their entries, newest first, by the number of each entry's blob, or `-` for an entry without one. Blob IDs are random, so blob paths and entries show the blob's number in upload order instead, keeping snapshots deterministic. After the command exits, `run` prints the lines for the requests it caused to stderr, and `stop` prints any that are left:
 
 ```text
 [remote-cache] POST /fetch 404
 [remote-cache] POST /store 200
-[remote-cache] POST /fetch 200 exact
+[remote-cache] POST /fetch 200 exact [1]
 [remote-cache] GET /blob/1 200
 ```
 

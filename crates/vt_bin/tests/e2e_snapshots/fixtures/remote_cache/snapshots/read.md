@@ -26,7 +26,7 @@ An endpoint without a mode selects read. The task reruns without uploading.
 ```
 $ vtt write-file dist/output.txt built ○ cache miss: 'src/a.txt' modified, executing
 
-[remote-cache] POST /fetch 200 exact
+[remote-cache] POST /fetch 200 exact [1]
 ```
 
 ## `remote-cache-server stop`

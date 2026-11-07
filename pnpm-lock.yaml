@@ -129,8 +129,8 @@ importers:
         specifier: 'catalog:'
         version: 5.0.3(playwright@1.63.0)(vite@8.3.2(@types/node@25.0.3)(esbuild@0.28.1)(yaml@2.9.1))(vitest@5.0.3)
       '@voidzero-dev/vite-plus-remote-cache-cloudflare':
-        specifier: github:voidzero-dev/vite-plus-remote-cache-cloudflare#43603a62673dd61619e72dfec4990fe7ac5da110
-        version: https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/43603a62673dd61619e72dfec4990fe7ac5da110
+        specifier: github:voidzero-dev/vite-plus-remote-cache-cloudflare#78764c66432639b5215171e3186cec2120d55cc2
+        version: https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/78764c66432639b5215171e3186cec2120d55cc2
       '@voidzero-dev/vite-task-client':
         specifier: workspace:*
         version: link:../vite-task-client
@@ -2127,10 +2127,10 @@ packages:
     os: [linux]
     libc: [musl]
 
-  '@voidzero-dev/vite-plus-remote-cache-cloudflare@https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/43603a62673dd61619e72dfec4990fe7ac5da110':
-    resolution: {gitHosted: true, integrity: sha512-hw7Lh08g7mF2TpQvO8cLBozopX5YRtE5wPTNHTX18oMfGwbzK+0wR15dmxgSaWJkbmo/zvz+75XTcvNdlYmhsg==, tarball: https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/43603a62673dd61619e72dfec4990fe7ac5da110}
+  '@voidzero-dev/vite-plus-remote-cache-cloudflare@https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/78764c66432639b5215171e3186cec2120d55cc2':
+    resolution: {gitHosted: true, integrity: sha512-XuUNsHBk1X8+yohToh4u4wkf95Lybz18RuKSb9rvvW6texENy72j8lxj1DNVjEPvZ1Qr+tAlB+CMskWdNRArGA==, tarball: https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/78764c66432639b5215171e3186cec2120d55cc2}
     version: 0.0.0
-    engines: {node: '>=22.12.0'}
+    engines: {node: ^22.18.0 || ^24.11.0 || >=26.0.0}
 
   '@voidzero-dev/vite-plus-win32-arm64-msvc@1.1.0':
     resolution: {integrity: sha512-EXWz8Tt7skmI0fLMSq5zYcuHo6SCF0reG55qDB/NMvWVIAca6Dborq7D1HyKA8v6p39zOl8r07gR7yXuYv7eeQ==}
@@ -2752,8 +2752,8 @@ packages:
   isexe@2.0.0:
     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
 
-  jose@6.2.12:
-    resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
+  jose@6.2.15:
+    resolution: {integrity: sha512-qdF6ewcZARtef63fJ9AKKZPgxw+t7USH6HLXYcD4CrdmSvDp79rpJSPFEKc90QBeGS63u1KQtN2MZQHC0yDIzA==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -5067,9 +5067,9 @@ snapshots:
   '@voidzero-dev/vite-plus-linux-x64-musl@1.1.0':
     optional: true
 
-  '@voidzero-dev/vite-plus-remote-cache-cloudflare@https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/43603a62673dd61619e72dfec4990fe7ac5da110':
+  '@voidzero-dev/vite-plus-remote-cache-cloudflare@https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/78764c66432639b5215171e3186cec2120d55cc2':
     dependencies:
-      jose: 6.2.12
+      jose: 6.2.15
 
   '@voidzero-dev/vite-plus-win32-arm64-msvc@1.1.0':
     optional: true
@@ -5615,7 +5615,7 @@ snapshots:
 
   isexe@2.0.0: {}
 
-  jose@6.2.12: {}
+  jose@6.2.15: {}
 
   js-tokens@4.0.0: {}
 

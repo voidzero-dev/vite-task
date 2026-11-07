@@ -18,10 +18,12 @@ import { basePath, serverFile, type ServerInfo } from './state.ts';
 // and responses unchanged and records a line for each response. Blob IDs in
 // the lines become numbers in upload order, so they're the same on every run.
 // A control server hands the lines to `remote-cache-server run` and `stop`,
-// changes blobs for `remote-cache-server corrupt-blob`, and stands in for
-// GitHub Actions' token service.
+// changes blobs and entries for `remote-cache-server corrupt-blob` and
+// `expire-entry`, and stands in for GitHub Actions' token service.
 
 const directory = process.argv[2]!;
+/** The number of entries the namespace keeps per key, if not the Worker's default. */
+const entriesPerKey = process.argv[3] === undefined ? undefined : Number(process.argv[3]);
 /** Stop after this long without requests, e.g. when a case timed out before its stop step. */
 const idleTimeout = 10 * 60 * 1000;
 /** Headers about a single connection. Node sets them for each hop itself. */
@@ -58,6 +60,24 @@ function cborFields(body: Buffer): Record<string, unknown> {
   return {};
 }
 
+/**
+ * The blob numbers of an exact fetch's entries, newest first, e.g. `[3, 1]`.
+ * An entry without a blob shows `-`.
+ */
+function entryBlobs(entries: unknown): string | undefined {
+  if (!Array.isArray(entries)) return undefined;
+  const numbers = entries.map((entry: unknown) => {
+    const id =
+      typeof entry === 'object' && entry !== null
+        ? (entry as Record<string, unknown>)['blob_id']
+        : undefined;
+    if (id === null) return '-';
+    const index = typeof id === 'string' ? blobs.indexOf(id) : -1;
+    return index === -1 ? '?' : String(index + 1);
+  });
+  return `[${numbers.join(', ')}]`;
+}
+
 /** `route` with a stored blob's ID replaced by its number. */
 function numbered(route: string): string {
   const id = /^\/blob\/(.+)$/.exec(route)?.[1];
@@ -80,7 +100,8 @@ const tap = createServer((request, response) => {
       const status = reply.statusCode!;
       if (status >= 500) anomalies.push(`${label} got ${status} from the backend`);
       response.writeHead(status, endToEnd(reply.headers));
-      // Fetch and store responses are small CBOR maps with the kind or blob ID.
+      // Fetch and store responses are CBOR maps with the kind and entries, or
+      // the blob ID.
       const chunks: Buffer[] = [];
       if ((route === '/fetch' || route === '/store') && status === 200) {
         reply.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -91,7 +112,10 @@ const tap = createServer((request, response) => {
         const blobId = fields['blob_id'];
         if (route === '/store' && typeof blobId === 'string') blobs.push(blobId);
         const kind = route === '/fetch' ? fields['kind'] : undefined;
-        requests.push([label, status, kind].filter((part) => part !== undefined).join(' '));
+        const entries = route === '/fetch' ? entryBlobs(fields['entries']) : undefined;
+        requests.push(
+          [label, status, kind, entries].filter((part) => part !== undefined).join(' '),
+        );
       });
     },
   );
@@ -132,16 +156,20 @@ const control = createServer((request, response) => {
     else reply({ count: 1, value });
     return;
   }
-  const corrupt = /^\/corrupt-blob\/(\d+)$/.exec(request.url ?? '')?.[1];
+  const [, change, number] = /^\/(corrupt-blob|expire-entry)\/(\d+)$/.exec(request.url ?? '') ?? [];
   if (request.method === 'POST' && request.url === '/take') {
     reply(requests.splice(0));
-  } else if (request.method === 'POST' && corrupt !== undefined) {
-    const id = blobs[Number(corrupt) - 1];
+  } else if (request.method === 'POST' && number !== undefined) {
+    const id = blobs[Number(number) - 1];
     if (id === undefined) {
       response.writeHead(404).end();
       return;
     }
-    backend.writeBlob(id, Buffer.from('corrupt')).then(
+    const changed =
+      change === 'corrupt-blob'
+        ? backend.writeBlob(id, Buffer.from('corrupt'))
+        : backend.expireEntry(id);
+    changed.then(
       () => reply(null),
       (error: unknown) => {
         console.error(error);
@@ -186,6 +214,7 @@ const backend = await startBackend({
   basePath,
   directory,
   endpoint: info.url,
+  entriesPerKey,
   key: signingKey,
   registered: repository,
 });
