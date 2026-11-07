@@ -11,7 +11,7 @@ import { defaultRequestToken } from './github.ts';
 import { logFile, serverFile, stateDirectory, type ServerInfo } from './state.ts';
 
 const usage =
-  'Usage: remote-cache-server start [--entries-per-key N] | run [--github-actions] COMMAND [ARGS...] | corrupt-blob NUMBER | expire-entry NUMBER | stop';
+  'Usage: remote-cache-server start [--entries-per-key N] | run [--github-actions] COMMAND [ARGS...] | corrupt-blob NUMBER | expire-entry [--before-download] NUMBER | stop';
 const directory = resolve(stateDirectory);
 
 function fail(message: string): never {
@@ -128,7 +128,9 @@ async function stop(): Promise<void> {
 const [subcommand, ...args] = process.argv.slice(2);
 if (subcommand === 'start') await start(args);
 else if (subcommand === 'run') await run(args);
-else if (subcommand === 'corrupt-blob' || subcommand === 'expire-entry') {
+else if (subcommand === 'expire-entry' && args[0] === '--before-download') {
+  await changeBlob('expire-before-download', args.slice(1));
+} else if (subcommand === 'corrupt-blob' || subcommand === 'expire-entry') {
   await changeBlob(subcommand, args);
 } else if (subcommand === 'stop') await stop();
 else fail(usage);

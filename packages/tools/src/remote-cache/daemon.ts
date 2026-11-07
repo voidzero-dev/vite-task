@@ -7,6 +7,7 @@ import {
   type IncomingHttpHeaders,
   type IncomingMessage,
   type Server,
+  type ServerResponse,
 } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { startBackend } from './backend.ts';
@@ -42,6 +43,8 @@ const requests: string[] = [];
 const anomalies: string[] = [];
 /** The ID of each stored blob, in upload order. Blob number `n` is at `n - 1`. */
 const blobs: string[] = [];
+/** The blobs whose entries expire when the blob is next requested. */
+const expireBeforeDownload = new Set<string>();
 let lastUse = Date.now();
 let stopping = false;
 
@@ -90,6 +93,29 @@ const tap = createServer((request, response) => {
   const path = new URL(request.url ?? '/', 'http://localhost').pathname;
   const route = path.startsWith(basePath) ? path.slice(basePath.length) : path;
   const label = `${request.method} ${numbered(route)}`;
+  const id = /^\/blob\/(.+)$/.exec(route)?.[1];
+  if (id !== undefined && expireBeforeDownload.delete(id)) {
+    // The client sent this request after the fetch's response, so the entry
+    // expires between the two.
+    backend.expireEntry(id).then(
+      () => pass(request, response, route, label),
+      (error: unknown) => {
+        anomalies.push(`${label} failed to expire its entry: ${String(error)}`);
+        response.writeHead(502).end();
+      },
+    );
+  } else {
+    pass(request, response, route, label);
+  }
+});
+
+/** Forward a request to the backend and its response back, recording the response's line. */
+function pass(
+  request: IncomingMessage,
+  response: ServerResponse,
+  route: string,
+  label: string,
+): void {
   let clientGone = false;
   let backendReply: IncomingMessage | undefined;
   const upstream = forward(
@@ -134,7 +160,7 @@ const tap = createServer((request, response) => {
     upstream.destroy();
   });
   request.pipe(upstream);
-});
+}
 
 const control = createServer((request, response) => {
   lastUse = Date.now();
@@ -156,13 +182,19 @@ const control = createServer((request, response) => {
     else reply({ count: 1, value });
     return;
   }
-  const [, change, number] = /^\/(corrupt-blob|expire-entry)\/(\d+)$/.exec(request.url ?? '') ?? [];
+  const [, change, number] =
+    /^\/(corrupt-blob|expire-entry|expire-before-download)\/(\d+)$/.exec(request.url ?? '') ?? [];
   if (request.method === 'POST' && request.url === '/take') {
     reply(requests.splice(0));
   } else if (request.method === 'POST' && number !== undefined) {
     const id = blobs[Number(number) - 1];
     if (id === undefined) {
       response.writeHead(404).end();
+      return;
+    }
+    if (change === 'expire-before-download') {
+      expireBeforeDownload.add(id);
+      reply(null);
       return;
     }
     const changed =
