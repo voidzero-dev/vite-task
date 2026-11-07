@@ -1,0 +1,76 @@
+// run --dry-run --json -r build
+{
+  "$schema": "<schema>",
+  "version": 1,
+  "workspaceRoot": "<workspace>",
+  "plan": {
+    "packages/p%23q#build": {
+      "package": "packages/p#q",
+      "name": "build",
+      "steps": [
+        {
+          "program": "echo",
+          "args": [
+            "built"
+          ]
+        }
+      ]
+    },
+    "packages/ui#build": {
+      "package": "packages/ui",
+      "name": "build",
+      "steps": [
+        {
+          "program": "<tools>/vtt",
+          "args": [
+            "print",
+            "pre"
+          ],
+          "hook": "prebuild",
+          "cache": {
+            "status": "disabled"
+          }
+        },
+        {
+          "program": "<tools>/vtt",
+          "args": [
+            "print",
+            "build"
+          ],
+          "cache": {
+            "status": "disabled"
+          }
+        },
+        {
+          "program": "<tools>/vtt",
+          "args": [
+            "print",
+            "post"
+          ],
+          "hook": "postbuild",
+          "cache": {
+            "status": "disabled"
+          }
+        }
+      ]
+    },
+    "packages/web#build": {
+      "package": "packages/web",
+      "name": "build",
+      "dependsOn": [
+        "packages/ui#build"
+      ],
+      "steps": [
+        {
+          "program": "packages/web/node_modules/.bin/tool",
+          "args": [
+            "build"
+          ],
+          "cache": {
+            "status": "noBaseline"
+          }
+        }
+      ]
+    }
+  }
+}

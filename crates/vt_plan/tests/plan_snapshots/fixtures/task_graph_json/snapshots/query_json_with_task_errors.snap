@@ -1,4 +1,4 @@
-error: the argument '--json' cannot be used with one or more of the other specified arguments
+error: the argument '--json' requires '--dry-run' when a task is given
 
 Usage: vt run [OPTIONS] [TASK_SPECIFIER] [ADDITIONAL_ARGS]...
 

@@ -1,0 +1,24 @@
+// run --dry-run --json build --watch
+{
+  "$schema": "<schema>",
+  "version": 1,
+  "workspaceRoot": "<workspace>",
+  "plan": {
+    "packages/web#build": {
+      "package": "packages/web",
+      "name": "build",
+      "steps": [
+        {
+          "program": "packages/web/node_modules/.bin/tool",
+          "args": [
+            "build",
+            "--watch"
+          ],
+          "cache": {
+            "status": "noBaseline"
+          }
+        }
+      ]
+    }
+  }
+}

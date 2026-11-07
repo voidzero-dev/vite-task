@@ -9,7 +9,8 @@ use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::cache_metadata::SpawnFingerprint;
 
 use super::{
-    CacheEntryKey, CacheEntryValue, Change, EnvMismatch, EnvSource, FileCheck, InputChangeKind,
+    CacheEntryKey, CacheEntryValue, Change, Checked, EnvMismatch, EnvSource, FileCheck,
+    InputChangeKind,
 };
 use crate::session::execute::glob::compute_globbed_inputs;
 
@@ -20,7 +21,8 @@ impl CacheEntryValue {
     /// `unfiltered_envs`, the execution's `CacheMetadata::unfiltered_envs`.
     /// Returns every key and env change and, with [`FileCheck::First`], the
     /// first changed file found, or with [`FileCheck::All`], every changed
-    /// file. Nothing when the entry is valid.
+    /// file. Nothing when the entry is valid. The changes are partial when the
+    /// file check stopped early or couldn't check some files.
     ///
     /// The entry stored under the execution's key has no key changes. The
     /// task's previous entry, stored under another key, is compared to tell
@@ -35,7 +37,7 @@ impl CacheEntryValue {
     /// changed, the entry misses whatever else changed, so an error checking
     /// the other files or the envs only leaves their changes out. The previous
     /// entry is only compared with, so an error comparing it leaves just the
-    /// key changes.
+    /// key changes, as a partial list.
     pub(crate) fn validate(
         &self,
         stored_key: &CacheEntryKey,
@@ -44,7 +46,7 @@ impl CacheEntryValue {
         unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
         workspace_root: &AbsolutePath,
         file_check: FileCheck,
-    ) -> anyhow::Result<Vec<Change>> {
+    ) -> anyhow::Result<Checked> {
         let mut changes = stored_key.changes_to(current_key);
         let run_changes = self.run_changes(
             stored_key,
@@ -54,17 +56,22 @@ impl CacheEntryValue {
             workspace_root,
             file_check,
         );
-        match run_changes {
-            Ok(run_changes) => changes.extend(run_changes),
+        let partial = match run_changes {
+            Ok(checked) => {
+                changes.extend(checked.changes);
+                checked.partial
+            }
             Err(err) if stored_key != current_key => {
                 tracing::debug!(?err, "failed to compare with the previous cached run");
+                true
             }
             Err(err) => return Err(err),
-        }
-        Ok(changes)
+        };
+        Ok(Checked { changes, partial })
     }
 
-    /// The changes to the run's files and tracked envs: see [`Self::validate`].
+    /// The changes to the run's files and tracked envs, and whether they're
+    /// partial: see [`Self::validate`].
     fn run_changes(
         &self,
         stored_key: &CacheEntryKey,
@@ -73,7 +80,7 @@ impl CacheEntryValue {
         unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
         workspace_root: &AbsolutePath,
         file_check: FileCheck,
-    ) -> anyhow::Result<Vec<Change>> {
+    ) -> anyhow::Result<Checked> {
         let input_config = &stored_key.input_config;
         let own_globbed_inputs;
         let globbed_inputs = if *input_config == current_key.input_config {
@@ -91,41 +98,48 @@ impl CacheEntryValue {
         // Without `-v`, the first changed file is enough to know it's a miss.
         let limit = if file_check == FileCheck::First { 1 } else { usize::MAX };
         let mut changes = globbed_input_changes(&self.globbed_inputs, globbed_inputs, limit);
+        let mut partial = false;
         if changes.is_empty() || file_check == FileCheck::All {
             let input_changes = self.post_run_fingerprint.input_changes(
                 workspace_root,
                 &input_negative_globs,
                 file_check,
             );
-            add_checked(&mut changes, input_changes, "inferred inputs")?;
+            partial |= add_checked(&mut changes, input_changes, "inferred inputs")?;
         }
         let env_changes = self.post_run_fingerprint.env_changes(unfiltered_envs);
-        add_checked(&mut changes, env_changes, "tracked envs")?;
-        Ok(changes)
+        partial |= add_checked(&mut changes, env_changes, "tracked envs")?;
+        // Without `-v`, the file check stops at the first changed file.
+        partial |= file_check == FileCheck::First
+            && changes.iter().any(|change| matches!(change, Change::File { .. }));
+        Ok(Checked { changes, partial })
     }
 }
 
 /// Add to `changes` what a later check of `what` found, one result per change
 /// or per thing it couldn't check, or fail with its first error. Once a
 /// change is known, the entry misses whatever else changed, so an error then
-/// only leaves out what that check would have found.
+/// only leaves out what that check would have found, and the returned `true`
+/// says the list is partial.
 fn add_checked(
     changes: &mut Vec<Change>,
     mut checked: Vec<anyhow::Result<Change>>,
     what: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     // Changes first, so they're known before any error.
     checked.sort_by_key(Result::is_err);
+    let mut partial = false;
     for checked in checked {
         match checked {
             Ok(change) => changes.push(change),
             Err(err) if !changes.is_empty() => {
                 tracing::debug!(?err, "failed to check the {what} of a changed entry");
+                partial = true;
             }
             Err(err) => return Err(err),
         }
     }
-    Ok(())
+    Ok(partial)
 }
 
 impl CacheEntryKey {
@@ -167,13 +181,13 @@ fn spawn_changes(old: &SpawnFingerprint, new: &SpawnFingerprint) -> Vec<Change> 
     }
 
     if old.program_fingerprint_debug() != new.program_fingerprint_debug() {
-        changes.push(Change::Program);
+        changes.push(Change::Program { from: old.program(), to: new.program() });
     }
     if old.args() != new.args() {
-        changes.push(Change::Args);
+        changes.push(Change::Args { from: Arc::clone(old.args()), to: Arc::clone(new.args()) });
     }
     if old.cwd() != new.cwd() {
-        changes.push(Change::Cwd);
+        changes.push(Change::Cwd { from: old.cwd().clone(), to: new.cwd().clone() });
     }
 
     changes
@@ -279,8 +293,12 @@ mod tests {
         };
 
         assert!(validate(BTreeMap::from([(path.clone(), 1)])).is_err());
-        let changes = validate(BTreeMap::from([(path.clone(), 2)])).unwrap();
-        assert_eq!(changes, [Change::File { kind: InputChangeKind::ContentModified, path }]);
+        let checked = validate(BTreeMap::from([(path.clone(), 2)])).unwrap();
+        assert_eq!(
+            checked.changes,
+            [Change::File { kind: InputChangeKind::ContentModified, path }]
+        );
+        assert!(checked.partial);
     }
 
     /// A tracked env that can't be compared after another one changed keeps
@@ -320,12 +338,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            changes,
+            changes.changes,
             [Change::Env {
                 mismatch: EnvMismatch::Added { name: Str::from("CHANGED_ENV") },
                 source: EnvSource::Tracked,
             }]
         );
+        assert!(changes.partial);
     }
 
     /// Without `-v`, the file check stops at the first changed explicit
@@ -350,15 +369,19 @@ mod tests {
         };
         let file = |kind, path| Change::File { kind, path: rel(path) };
 
-        assert_eq!(validate(FileCheck::First), [file(InputChangeKind::ContentModified, "a.txt")]);
+        let first = validate(FileCheck::First);
+        assert_eq!(first.changes, [file(InputChangeKind::ContentModified, "a.txt")]);
+        assert!(first.partial);
+        let all = validate(FileCheck::All);
         assert_eq!(
-            validate(FileCheck::All),
+            all.changes,
             [
                 file(InputChangeKind::ContentModified, "a.txt"),
                 file(InputChangeKind::Removed, "b.txt"),
                 file(InputChangeKind::Added, "c.txt"),
             ]
         );
+        assert!(!all.partial);
     }
 
     /// With `-v`, a listed folder that gains a valid entry and one whose name
@@ -407,10 +430,11 @@ mod tests {
             )
         };
 
-        let changes = validate(FileCheck::All).unwrap();
+        let checked = validate(FileCheck::All).unwrap();
         assert_eq!(
-            changes,
+            checked.changes,
             [Change::File { kind: InputChangeKind::Added, path: rel("dir/a.txt") }]
         );
+        assert!(checked.partial);
     }
 }

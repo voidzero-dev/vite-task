@@ -1,0 +1,30 @@
+// run --dry-run --json steps
+{
+  "$schema": "<schema>",
+  "version": 1,
+  "workspaceRoot": "<workspace>",
+  "plan": {
+    "packages/web#steps": {
+      "package": "packages/web",
+      "name": "steps",
+      "steps": [
+        {
+          "program": "<tools>/vtt",
+          "args": [
+            "print",
+            "one"
+          ],
+          "cache": {
+            "status": "noBaseline"
+          }
+        },
+        {
+          "program": "echo",
+          "args": [
+            "two"
+          ]
+        }
+      ]
+    }
+  }
+}

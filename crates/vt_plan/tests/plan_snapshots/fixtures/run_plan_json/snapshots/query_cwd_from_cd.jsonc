@@ -1,0 +1,25 @@
+// run --dry-run --json cd
+{
+  "$schema": "<schema>",
+  "version": 1,
+  "workspaceRoot": "<workspace>",
+  "plan": {
+    "packages/web#cd": {
+      "package": "packages/web",
+      "name": "cd",
+      "steps": [
+        {
+          "program": "<tools>/vtt",
+          "args": [
+            "print",
+            "in-src"
+          ],
+          "cwd": "packages/web/src",
+          "cache": {
+            "status": "noBaseline"
+          }
+        }
+      ]
+    }
+  }
+}

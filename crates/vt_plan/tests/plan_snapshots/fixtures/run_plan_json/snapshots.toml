@@ -1,0 +1,52 @@
+# `vt run --dry-run --json` prints the run plan. Nothing is cached in a
+# fixture, so every cached step is `noBaseline`.
+
+# Package edges from `-r`, hooks, programs inside and outside the workspace,
+# and a package path with `#` in its ID.
+[[plan]]
+name = "recursive"
+args = ["run", "--dry-run", "--json", "-r", "build"]
+
+# `--parallel` drops the edges.
+[[plan]]
+name = "parallel"
+args = ["run", "--dry-run", "--json", "--parallel", "-r", "build"]
+
+# `--no-cache` disables caching for every step.
+[[plan]]
+name = "no_cache"
+args = ["run", "--dry-run", "--json", "--no-cache", "--filter", "@acme/web", "build"]
+
+# Args after the task name are part of the step's args.
+[[plan]]
+name = "forwarded_args"
+args = ["run", "--dry-run", "--json", "build", "--watch"]
+cwd = "packages/web"
+
+# A command with shell syntax runs through the shell.
+[[plan]]
+name = "shell_fallback"
+args = ["run", "--dry-run", "--json", "pipe"]
+cwd = "packages/web"
+
+# A `cd` changes the cwd of the steps after it, and so does the `cwd` setting.
+[[plan]]
+name = "cwd_from_cd"
+args = ["run", "--dry-run", "--json", "cd"]
+cwd = "packages/web"
+
+[[plan]]
+name = "cwd_from_setting"
+args = ["run", "--dry-run", "--json", "in-src"]
+cwd = "packages/web"
+
+# Each `&&` part is a step; a built-in has no `cache`.
+[[plan]]
+name = "steps"
+args = ["run", "--dry-run", "--json", "steps"]
+cwd = "packages/web"
+
+# `%` in a task name is encoded in its ID.
+[[plan]]
+name = "encoded_task_id"
+args = ["run", "--dry-run", "--json", "b%c"]

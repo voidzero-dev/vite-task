@@ -1,0 +1,25 @@
+// run --dry-run --json in-src
+{
+  "$schema": "<schema>",
+  "version": 1,
+  "workspaceRoot": "<workspace>",
+  "plan": {
+    "packages/web#in-src": {
+      "package": "packages/web",
+      "name": "in-src",
+      "steps": [
+        {
+          "program": "<tools>/vtt",
+          "args": [
+            "print",
+            "in-src"
+          ],
+          "cwd": "packages/web/src",
+          "cache": {
+            "status": "noBaseline"
+          }
+        }
+      ]
+    }
+  }
+}

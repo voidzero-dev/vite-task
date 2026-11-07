@@ -21,10 +21,6 @@ pub fn schema_url() -> io::Result<Str> {
 mod tests {
     use std::fs;
 
-    use schemars::{Schema, generate::SchemaSettings, transform::RecursiveTransform};
-    use vt_path::AbsolutePath;
-    use vt_snapshot_test::Snapshots;
-
     use super::*;
     use crate::session::task_graph_json::TaskGraph;
 
@@ -32,32 +28,7 @@ mod tests {
     /// `UPDATE_SNAPSHOTS=1` after changing them.
     #[test]
     fn schema_matches_the_document_types() {
-        let schema = SchemaSettings::draft07()
-            .for_serialize()
-            .with_transform(RecursiveTransform(unwrap_description))
-            .into_generator()
-            .into_root_schema_for::<TaskGraph>();
-        let mut schema = serde_json::to_string_pretty(&schema).unwrap();
-        schema.push('\n');
-
-        // Read at runtime: CI builds the Windows tests on Linux, so `env!` would give a Linux path.
-        let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR").unwrap();
-        let manifest_dir = AbsolutePath::new(&manifest_dir).unwrap();
-        let snapshots = Snapshots::new(manifest_dir.join("schemas").into_path_buf());
-        snapshots.check_snapshot("task-graph.json", &schema).unwrap();
-    }
-
-    /// Joins the lines of each paragraph in a description, which come from wrapped doc
-    /// comments.
-    #[expect(clippy::disallowed_types, reason = "serde_json stores strings as `String`")]
-    fn unwrap_description(schema: &mut Schema) {
-        if let Some(serde_json::Value::String(description)) = schema.get_mut("description") {
-            let paragraphs: Vec<String> = description
-                .split("\n\n")
-                .map(|paragraph| paragraph.lines().map(str::trim).collect::<Vec<_>>().join(" "))
-                .collect();
-            *description = paragraphs.join("\n\n");
-        }
+        json::check_schema::<TaskGraph>("task-graph.json");
     }
 
     #[test]

@@ -25,6 +25,21 @@ use vt_plan::{ExecutionGraph, ExecutionItemKind};
 use vt_str::Str;
 use vt_workspace::find_workspace_root;
 
+/// A writer whose output stays readable after it's moved into a reporter.
+#[derive(Clone, Default)]
+struct SharedBuffer(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+
+impl std::io::Write for SharedBuffer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Local parser wrapper for `BuiltInCommand`
 #[derive(Parser)]
 #[command(name = "vt")]
@@ -250,10 +265,19 @@ fn run_case_inner(
             let args_display =
                 plan.args.iter().map(vt_str::Str::as_str).collect::<Vec<_>>().join(" ");
 
-            let cli = match Cli::try_parse_from(
+            let cli = Cli::try_parse_from(
                 std::iter::once("vt") // dummy program name
                     .chain(plan.args.iter().map(vt_str::Str::as_str)),
-            ) {
+            )
+            .and_then(|cli| {
+                let Cli::Command(parsed) = cli;
+                let Command::Run(run_command) = parsed else {
+                    panic!("only `run` commands supported in plan tests")
+                };
+                run_command.validate("vt")?;
+                Ok(run_command)
+            });
+            let run_command = match cli {
                 Ok(ok) => ok,
                 Err(err) => {
                     snapshots.check_snapshot(
@@ -262,10 +286,6 @@ fn run_case_inner(
                     )?;
                     continue;
                 }
-            };
-            let Cli::Command(parsed) = cli;
-            let Command::Run(run_command) = parsed else {
-                panic!("only `run` commands supported in plan tests")
             };
 
             // Create a fresh session per plan case with case-specific env vars and cwd.
@@ -285,6 +305,21 @@ fn run_case_inner(
                 let document = case_session.task_graph_json().await.unwrap();
                 let mut json = redact_snapshot(&document, workspace_root_str);
                 // The schema is copied into the system temp dir; unit tests cover its URL.
+                json["$schema"] = serde_json::Value::from("<schema>");
+                snapshots.check_json_snapshot(
+                    snapshot_base.as_str(),
+                    vt_str::format!("{args_display}").as_str(),
+                    &json,
+                )?;
+                continue;
+            }
+            if run_command.is_run_plan_json() {
+                // A dry run through the JSON reporter, as `vt run --dry-run --json` prints it.
+                let output = SharedBuffer::default();
+                case_session.write_run_plan(run_command, Box::new(output.clone())).await.unwrap();
+                let document: serde_json::Value =
+                    serde_json::from_slice(&output.0.borrow()).unwrap();
+                let mut json = redact_snapshot(&document, workspace_root_str);
                 json["$schema"] = serde_json::Value::from("<schema>");
                 snapshots.check_json_snapshot(
                     snapshot_base.as_str(),

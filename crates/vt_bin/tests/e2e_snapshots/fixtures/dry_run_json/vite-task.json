@@ -1,0 +1,19 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt print-file a.txt b.txt",
+      "cache": true
+    },
+    "other": {
+      "command": "vtt print other",
+      "cache": true
+    },
+    "uncached": {
+      "command": "vtt print uncached",
+      "cache": false
+    },
+    "nested": {
+      "command": "vt run build"
+    }
+  }
+}

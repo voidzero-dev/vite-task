@@ -1,0 +1,8 @@
+{
+  "name": "@acme/ui",
+  "scripts": {
+    "prebuild": "vtt print pre",
+    "build": "vtt print build",
+    "postbuild": "vtt print post"
+  }
+}
