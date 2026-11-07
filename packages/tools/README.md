@@ -19,12 +19,12 @@ An E2E case starts its own backend in its first step and stops it in its last, s
 
 A backend whose case directory disappears stops by itself, as does one that has had no requests for ten minutes, e.g. because its case timed out before the stop step.
 
-The endpoint is a tap in front of the backend. It forwards every request and response unchanged and records a line for each response, in the order of the responses. Each line has the method, the path below the base path, and the status. Successful fetch responses add their kind. Blob IDs are random, so blob paths show the blob's number in upload order instead, keeping snapshots deterministic. After the command exits, `run` prints the lines for the requests it caused to stderr, and `stop` prints any that are left:
+The endpoint is a tap in front of the backend. It forwards every request and response unchanged and records a line for each response, in the order of the responses. Each line has the method, the path below the base path, and the status. Successful fetch responses add their kind, and exact matches add their entries, newest first, by the number of each entry's blob, or `-` for an entry without one. Blob IDs are random, so blob paths and entries show the blob's number in upload order instead, keeping snapshots deterministic. After the command exits, `run` prints the lines for the requests it caused to stderr, and `stop` prints any that are left:
 
 ```text
 [remote-cache] POST /fetch 404
 [remote-cache] POST /store 200
-[remote-cache] POST /fetch 200 exact
+[remote-cache] POST /fetch 200 exact [1]
 [remote-cache] GET /blob/1 200
 ```
 

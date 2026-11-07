@@ -58,6 +58,24 @@ function cborFields(body: Buffer): Record<string, unknown> {
   return {};
 }
 
+/**
+ * The blob numbers of an exact fetch's entries, newest first, e.g. `[3, 1]`.
+ * An entry without a blob shows `-`.
+ */
+function entryBlobs(entries: unknown): string | undefined {
+  if (!Array.isArray(entries)) return undefined;
+  const numbers = entries.map((entry: unknown) => {
+    const id =
+      typeof entry === 'object' && entry !== null
+        ? (entry as Record<string, unknown>)['blob_id']
+        : undefined;
+    if (id === null) return '-';
+    const index = typeof id === 'string' ? blobs.indexOf(id) : -1;
+    return index === -1 ? '?' : String(index + 1);
+  });
+  return `[${numbers.join(', ')}]`;
+}
+
 /** `route` with a stored blob's ID replaced by its number. */
 function numbered(route: string): string {
   const id = /^\/blob\/(.+)$/.exec(route)?.[1];
@@ -80,7 +98,8 @@ const tap = createServer((request, response) => {
       const status = reply.statusCode!;
       if (status >= 500) anomalies.push(`${label} got ${status} from the backend`);
       response.writeHead(status, endToEnd(reply.headers));
-      // Fetch and store responses are small CBOR maps with the kind or blob ID.
+      // Fetch and store responses are CBOR maps with the kind and entries, or
+      // the blob ID.
       const chunks: Buffer[] = [];
       if ((route === '/fetch' || route === '/store') && status === 200) {
         reply.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -91,7 +110,10 @@ const tap = createServer((request, response) => {
         const blobId = fields['blob_id'];
         if (route === '/store' && typeof blobId === 'string') blobs.push(blobId);
         const kind = route === '/fetch' ? fields['kind'] : undefined;
-        requests.push([label, status, kind].filter((part) => part !== undefined).join(' '));
+        const entries = route === '/fetch' ? entryBlobs(fields['entries']) : undefined;
+        requests.push(
+          [label, status, kind, entries].filter((part) => part !== undefined).join(' '),
+        );
       });
     },
   );

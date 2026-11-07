@@ -33,7 +33,7 @@ The downloaded archive doesn't decode, so the task reruns.
 ```
 $ vtt write-file dist/output.txt built ○ cache miss: downloaded archive is corrupt, executing
 
-[remote-cache] POST /fetch 200 exact
+[remote-cache] POST /fetch 200 exact [1]
 [remote-cache] GET /blob/1 200
 ```
 
