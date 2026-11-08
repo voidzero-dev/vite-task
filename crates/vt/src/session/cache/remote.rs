@@ -279,9 +279,14 @@ impl RemoteClients {
             );
             let joined =
                 cancel_token.run_until_cancelled(early_fetch).await.ok_or(ReadError::Cancelled)?;
-            // The fetch is only aborted when it's dropped, and its future
-            // doesn't panic, so it has finished.
-            return joined.unwrap_or_else(|err| std::panic::resume_unwind(err.into_panic()));
+            // The fetch is aborted only when it's dropped, or when the runtime
+            // shuts down.
+            return joined.unwrap_or_else(|err| {
+                err.try_into_panic().map_or_else(
+                    |_| Err(ReadError::Cancelled),
+                    |panic| std::panic::resume_unwind(panic),
+                )
+            });
         }
         let client = self.client(remote_config).map_err(ReadError::Fetch)?;
         send_fetch(&client, &target.key, &target.secondary_key, cancel_token).await
