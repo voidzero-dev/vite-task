@@ -2,7 +2,7 @@
 //! (dependency order, concurrency limits, fast-fail), and hands each leaf to
 //! [`execute_spawn`] which owns *how* a single spawn runs.
 
-use std::{cell::RefCell, ffi::OsStr, io::Write as _, num::NonZeroUsize, sync::Arc};
+use std::{cell::RefCell, ffi::OsStr, io::Write as _, num::NonZeroUsize, sync::Arc, time::Instant};
 
 use futures_util::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
 use petgraph::Direction;
@@ -83,7 +83,11 @@ impl ExecutionContext<'_> {
     /// (killing in-flight child processes). Ctrl-C cancels the `cancel_token`.
     /// Either cancellation causes this method to close the semaphore, drain
     /// remaining futures, and return.
-    #[tracing::instrument(level = "debug", skip_all)]
+    #[tracing::instrument(
+        level = "debug",
+        skip_all,
+        fields(tasks = graph.graph.node_count(), concurrency_limit = graph.concurrency_limit)
+    )]
     async fn execute_expanded_graph(&self, graph: &ExecutionGraph) {
         if graph.graph.node_count() == 0 {
             return;
@@ -144,9 +148,15 @@ impl ExecutionContext<'_> {
     ) -> LocalBoxFuture<'a, ExecutionNodeIndex> {
         let sem = semaphore.clone();
         async move {
+            let start = Instant::now();
             if let Ok(_permit) = sem.acquire_owned().await
                 && !self.cancelled()
             {
+                tracing::debug!(
+                    task = %graph.graph[node_ix].task_display,
+                    waited = ?start.elapsed(),
+                    "acquired a concurrency permit"
+                );
                 self.execute_node(graph, node_ix).await;
             }
             node_ix
@@ -183,11 +193,21 @@ impl ExecutionContext<'_> {
     /// from the graph reporter and delegates to the appropriate execution
     /// method. On failure (non-zero exit or infrastructure error), cancels the
     /// `fast_fail_token`.
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute_leaf(&self, display: &ExecutionItemDisplay, leaf_kind: &LeafExecutionKind) {
+    #[tracing::instrument(
+        level = "debug",
+        skip_all,
+        fields(task = %item_display.task_display, command = %item_display.command)
+    )]
+    async fn execute_leaf(
+        &self,
+        item_display: &ExecutionItemDisplay,
+        leaf_kind: &LeafExecutionKind,
+    ) {
+        let start = Instant::now();
         // Borrow the reporter briefly to create the leaf reporter, then drop
         // the RefCell guard before any `.await` point.
-        let mut leaf_reporter = self.reporter.borrow_mut().new_leaf_execution(display, leaf_kind);
+        let mut leaf_reporter =
+            self.reporter.borrow_mut().new_leaf_execution(item_display, leaf_kind);
 
         let failed = match leaf_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
@@ -226,6 +246,7 @@ impl ExecutionContext<'_> {
                 }
             }
         };
+        tracing::debug!(failed, elapsed = ?start.elapsed(), "finished the task item");
         if failed {
             self.fast_fail_token.cancel();
         }

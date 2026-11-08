@@ -11,7 +11,7 @@ use std::{
     fs::File,
     io::Write,
     sync::{Arc, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 // Re-export display functions for convenience
@@ -31,6 +31,7 @@ use vt_plan::{
     cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint},
     remote_cache::{RemoteCacheAccess, ResolvedRemoteCacheConfig},
 };
+use vt_remote_cache::Fetched;
 use vt_str::Str;
 use wincode::{
     SchemaRead, SchemaReadOwned, SchemaWrite,
@@ -367,7 +368,8 @@ impl ExecutionCache {
         // Part of the key, so the same as when the entry was created.
         let input_negative_globs = PathGlobSet::new(&cache_metadata.input_config.negative_globs)?;
 
-        let local_miss = match self
+        let start = Instant::now();
+        let local_lookup = self
             .try_hit_local(
                 cache_metadata,
                 &cache_key,
@@ -375,8 +377,17 @@ impl ExecutionCache {
                 &input_negative_globs,
                 workspace_root,
             )
-            .await?
-        {
+            .await?;
+        tracing::debug!(
+            outcome = match &local_lookup {
+                Ok(_) => "hit",
+                Err(CacheMiss::NotFound) => "not_found",
+                Err(_) => "mismatch",
+            },
+            elapsed = ?start.elapsed(),
+            "looked up the local cache"
+        );
+        let local_miss = match local_lookup {
             Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Local })),
             Err(miss) => miss,
         };
@@ -393,7 +404,8 @@ impl ExecutionCache {
             ) => remote_config,
             None => return Ok(Err(local_miss)),
         };
-        let remote_miss = match self
+        let start = Instant::now();
+        let remote_lookup = self
             .try_hit_remote(
                 remote_config,
                 cache_metadata,
@@ -404,8 +416,18 @@ impl ExecutionCache {
                 cache_dir,
                 cancel_token,
             )
-            .await?
-        {
+            .await?;
+        tracing::debug!(
+            outcome = match &remote_lookup {
+                Ok(_) => "hit",
+                Err(CacheMiss::NotFound) => "not_found",
+                Err(CacheMiss::FingerprintMismatch(_)) => "mismatch",
+                Err(CacheMiss::RemoteReadFailed(_)) => "read_failed",
+            },
+            elapsed = ?start.elapsed(),
+            "looked up the remote cache"
+        );
+        let remote_miss = match remote_lookup {
             Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Remote })),
             Err(miss) => miss,
         };
@@ -473,10 +495,24 @@ impl ExecutionCache {
         cache_dir: &AbsolutePath,
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
+        let start = Instant::now();
         let fetched = self
             .remote_clients
             .fetch(remote_config, cache_key, &cache_metadata.execution_cache_key, cancel_token)
             .await;
+        let (outcome, entries) = match &fetched {
+            Ok(Some(Fetched::Exact { entries })) => ("exact", entries.len()),
+            Ok(Some(Fetched::Fallback { .. })) => ("fallback", 0),
+            Ok(None) => ("not_found", 0),
+            Err(_) => ("failed", 0),
+        };
+        tracing::debug!(
+            outcome,
+            entries,
+            error = fetched.as_ref().err().map(tracing::field::debug),
+            elapsed = ?start.elapsed(),
+            "fetched from the remote cache"
+        );
         let validate = |cache_value: &CacheEntryValue| {
             cache_value.validate(
                 &cache_metadata.unfiltered_envs,
@@ -555,7 +591,9 @@ impl ExecutionCache {
 
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
 
+        let start = Instant::now();
         self.record(&cache_key, execution_cache_key, &cache_value, cache_dir).await?;
+        tracing::debug!(elapsed = ?start.elapsed(), "recorded the cache entry locally");
 
         let upload_error = Arc::new(OnceLock::new());
         let remote_config = match &cache_metadata.remote_cache {
@@ -611,6 +649,7 @@ impl ExecutionCache {
         workspace_root: &AbsolutePath,
         cache_dir: &AbsolutePath,
     ) -> anyhow::Result<()> {
+        let start = Instant::now();
         if let Some(archive_name) = &hit.value.output_archive {
             let archive_path = cache_dir.join(archive_name.as_str());
             if let Err(err) = archive::extract_output_archive(workspace_root, &archive_path) {
@@ -620,6 +659,11 @@ impl ExecutionCache {
                 }
                 return Err(err.context("failed to extract the output archive"));
             }
+            tracing::debug!(
+                bytes = archive::file_size(&archive_path),
+                elapsed = ?start.elapsed(),
+                "extracted the output archive"
+            );
         }
 
         if hit.source == CacheHitSource::Remote {
@@ -633,6 +677,7 @@ impl ExecutionCache {
                 tracing::warn!(?err, "failed to record a remote cache hit locally");
             }
         }
+        tracing::debug!(source = ?hit.source, elapsed = ?start.elapsed(), "restored the outputs");
         Ok(())
     }
 }
