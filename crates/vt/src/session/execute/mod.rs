@@ -459,6 +459,7 @@ async fn run(
     )
     .await
     .map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
+    tracing::debug!(fspy = fspy_enabled, elapsed = ?start.elapsed(), "spawned the task process");
 
     // 6. Drain the pipes and wait for exit, concurrently with the IPC driver.
     //    The driver must be polled during pipe drain — otherwise a tool doing
@@ -561,6 +562,7 @@ async fn lookup_cache<'a>(
 
     // Compute globbed inputs from positive globs at execution time.
     // Globs are already workspace-root-relative (resolved at task graph stage).
+    let start = Instant::now();
     let globbed_inputs = compute_globbed_inputs(
         workspace_root,
         &cache_metadata.input_config.positive_globs,
@@ -569,6 +571,11 @@ async fn lookup_cache<'a>(
     .map_err(|err| {
         Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err })
     })?;
+    tracing::debug!(
+        files = globbed_inputs.len(),
+        elapsed = ?start.elapsed(),
+        "hashed the globbed inputs"
+    );
 
     match cache
         .try_hit(cache_metadata, &globbed_inputs, workspace_root, cache_dir, cancel_token)
@@ -634,6 +641,7 @@ async fn run_child(
     stop_accepting: Option<&StopAccepting>,
     fast_fail_token: CancellationToken,
 ) -> Result<ChildOutcome, ExecutionError> {
+    let start = Instant::now();
     let pipe_result: Result<(), ExecutionError> = if let Some(sinks) = sinks {
         let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
         let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
@@ -662,6 +670,14 @@ async fn run_child(
 
     if let Some(stop_accepting) = stop_accepting {
         stop_accepting.signal();
+    }
+    if let Ok(outcome) = &wait_result {
+        tracing::debug!(
+            success = outcome.exit_status.success(),
+            exit_code = outcome.exit_status.code(),
+            elapsed = ?start.elapsed(),
+            "the task process exited"
+        );
     }
     wait_result
 }

@@ -9,6 +9,7 @@ use std::{
     fs::File,
     io::{self, BufRead},
     sync::Arc,
+    time::Instant,
 };
 
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -167,6 +168,7 @@ impl PostRunFingerprint {
         tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
         tracked_env_queries: BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>,
     ) -> anyhow::Result<Self> {
+        let start = Instant::now();
         let inferred_inputs = inferred_path_reads
             .par_iter()
             .filter(|(path, _)| {
@@ -175,6 +177,7 @@ impl PostRunFingerprint {
             .map(|(relative_path, path_read)| {
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
                 let mut fingerprint = fingerprint_path(&full_path, *path_read)?;
+                tracing::trace!(path = relative_path.as_str(), "fingerprinted an inferred input");
                 if let PathFingerprint::Folder(Some(listing)) = &mut fingerprint {
                     if !rebuildable.is_empty() {
                         let DirListing { entries, ignored_entries } = listing;
@@ -198,6 +201,12 @@ impl PostRunFingerprint {
                 Ok((relative_path.clone(), InferredInput { fingerprint, may_be_missing }))
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
+        tracing::debug!(
+            reads = inferred_path_reads.len(),
+            inputs = inferred_inputs.len(),
+            elapsed = ?start.elapsed(),
+            "created the post-run fingerprint"
+        );
 
         Ok(Self { inferred_inputs, tracked_envs, tracked_env_queries })
     }
@@ -220,6 +229,7 @@ impl PostRunFingerprint {
         input_negative_globs: &PathGlobSet<'_>,
         unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     ) -> anyhow::Result<Option<PostRunMismatch>> {
+        let start = Instant::now();
         let input_mismatch =
             self.inferred_inputs.par_iter().find_map_any(|(input_relative_path, input)| {
                 let InferredInput { fingerprint: path_fingerprint, may_be_missing } = input;
@@ -243,9 +253,14 @@ impl PostRunFingerprint {
                     current.ignored_entries.clone_from(&stored.ignored_entries);
                     leave_out_excluded_entries(current, input_relative_path, input_negative_globs);
                 }
-                if path_fingerprint == &current_path_fingerprint
-                    || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound)
-                {
+                let unchanged = path_fingerprint == &current_path_fingerprint
+                    || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound);
+                tracing::trace!(
+                    path = input_relative_path.as_str(),
+                    unchanged,
+                    "validated an inferred input"
+                );
+                if unchanged {
                     None
                 } else {
                     let (kind, entry_name) =
@@ -263,6 +278,12 @@ impl PostRunFingerprint {
                     Some(Ok(PostRunMismatch::Input { kind, path }))
                 }
             });
+        tracing::debug!(
+            inputs = self.inferred_inputs.len(),
+            valid = input_mismatch.is_none(),
+            elapsed = ?start.elapsed(),
+            "validated the inferred inputs"
+        );
         if let Some(result) = input_mismatch {
             return result.map(Some);
         }
