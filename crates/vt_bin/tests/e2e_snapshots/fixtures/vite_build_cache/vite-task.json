@@ -6,6 +6,10 @@
       // every `VITE_*` env via `getEnvs`, so the glob + match-set are
       // fingerprinted automatically.
       "cache": true
+    },
+    "build-load-all-env": {
+      "command": "vite build --config vite.load-all-env.config.js",
+      "cache": { "env": ["APP_LABEL"] }
     }
   }
 }

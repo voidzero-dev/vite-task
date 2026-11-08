@@ -116,6 +116,10 @@ export function getEnv(name, options) {
  * dependency, so adding, removing, or changing a matching env invalidates
  * this run's cache entry.
  *
+ * A query that matches every env name, `{ prefix: '' }` or `*`, returns an
+ * empty object and records nothing: read the task's own env from
+ * `process.env` instead.
+ *
  * Has no effect on `process.env`; the caller decides what to do with the
  * returned values. Returns an empty object when not running inside a runner.
  *

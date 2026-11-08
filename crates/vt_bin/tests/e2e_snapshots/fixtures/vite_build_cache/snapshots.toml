@@ -179,3 +179,57 @@ steps = [
     ],
   ], comment = "cache miss: envs changed (NODE_ENV changed)" },
 ]
+
+[[e2e]]
+name = "vite_load_env_without_prefix_ignores_unrelated_env"
+comment = """
+A config calling `loadEnv(mode, dir, '')` makes Vite send `getEnvs({ prefix: '' })`, a query that matches every env name. The runner answers it with nothing and records nothing, so `loadEnv` returns the task's own env from `process.env`: `APP_LABEL`, which the task declares, but not `UNRELATED`. A change to `UNRELATED` doesn't make the next run miss.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build-load-all-env",
+  ], envs = [
+    [
+      "APP_LABEL",
+      "alpha",
+    ],
+    [
+      "UNRELATED",
+      "one",
+    ],
+  ], comment = "first run: loadEnv sees the declared APP_LABEL only" },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build-load-all-env",
+  ], envs = [
+    [
+      "APP_LABEL",
+      "alpha",
+    ],
+    [
+      "UNRELATED",
+      "two",
+    ],
+  ], comment = "cache hit: UNRELATED changed, but it isn't in the cache key" },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build-load-all-env",
+  ], envs = [
+    [
+      "APP_LABEL",
+      "bravo",
+    ],
+    [
+      "UNRELATED",
+      "two",
+    ],
+  ], comment = "cache miss: the declared APP_LABEL changed" },
+]
