@@ -14,7 +14,7 @@
     "@openai/codex": "catalog:",
     "@playwright/browser-chromium": "catalog:",
     "@vitest/browser-playwright": "catalog:",
-    "@voidzero-dev/vite-plus-remote-cache-cloudflare": "github:voidzero-dev/vite-plus-remote-cache-cloudflare#57e257b79a5e9c9c4b2151ed2b4e56f8e93527d3",
+    "@voidzero-dev/vite-plus-remote-cache-cloudflare": "github:voidzero-dev/vite-plus-remote-cache-cloudflare#2f0c821158e674d5660bc10f6b16c0ef101273a5",
     "@voidzero-dev/vite-task-client": "workspace:*",
     "astro": "catalog:",
     "bun": "catalog:",
