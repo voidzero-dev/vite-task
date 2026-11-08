@@ -765,7 +765,7 @@ steps = [
       "http://127.0.0.1:0/projects/test",
     ],
   ], interactions = [
-    { "expect-milestone" = "stalled" },
+    { "expect-milestone" = "stalled:1" },
     { "write-key" = "ctrl-c" },
   ], comment = "The proxy never answers the fetch, so nothing needs to listen behind it. Ctrl-C stops the fetch, and the task doesn't start." },
 ]
@@ -787,6 +787,29 @@ steps = [
       "http://127.0.0.1:0/projects/test",
     ],
   ], comment = "The proxy never answers the fetch. fail exits while build's fetch is in flight, which stops the fetch, and build doesn't start." },
+]
+
+[[e2e]]
+name = "fetch_before_dependencies"
+steps = [
+  { argv = [
+    "vtt",
+    "stalled-remote-cache",
+    "--stall",
+    "/fetch",
+    "--milestone",
+    "vt",
+    "run",
+    "test",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE_URL",
+      "http://127.0.0.1:0/projects/test",
+    ],
+  ], interactions = [
+    { "expect-milestone" = "stalled:2" },
+    { "write-key" = "ctrl-c" },
+  ], comment = "The proxy never answers a fetch. test depends on build, so it can only run after build, but both fetches start when the run starts. Ctrl-C stops them, and neither task starts." },
 ]
 
 [[e2e]]

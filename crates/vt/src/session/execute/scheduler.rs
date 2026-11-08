@@ -13,7 +13,7 @@ use vt_casefold::EnvName;
 use vt_path::AbsolutePath;
 use vt_plan::{
     ExecutionGraph, ExecutionItemDisplay, ExecutionItemKind, LeafExecutionKind,
-    execution_graph::ExecutionNodeIndex,
+    cache_metadata::CacheMetadata, execution_graph::ExecutionNodeIndex,
 };
 
 use super::{SpawnOutcome, execute_spawn};
@@ -70,6 +70,23 @@ impl ExecutionContext<'_> {
     /// failure (fast-fail) or by Ctrl-C (interrupt).
     fn cancelled(&self) -> bool {
         self.cancel_token.is_cancelled()
+    }
+
+    /// Start the remote cache fetches of the cached tasks in `graph`, nested
+    /// graphs included, in the order they run, as
+    /// [`ExecutionCache::fetch_early`] describes. A task's fetch then runs
+    /// while the tasks it depends on do, instead of after them.
+    async fn fetch_early(&self, graph: &ExecutionGraph) {
+        let start = Instant::now();
+        let mut cached = Vec::new();
+        collect_cache_metadata(graph, &mut cached);
+        let mut started = 0_usize;
+        for cache_metadata in cached {
+            if self.cache.fetch_early(cache_metadata, &self.cancel_token).await {
+                started += 1;
+            }
+        }
+        tracing::debug!(started, elapsed = ?start.elapsed(), "started early remote cache fetches");
     }
 
     /// Execute all tasks in an execution graph concurrently, respecting dependencies.
@@ -253,6 +270,26 @@ impl ExecutionContext<'_> {
     }
 }
 
+/// Push the cache metadata of the cached spawns in `graph` and its nested
+/// graphs onto `out`, dependencies before their dependents.
+fn collect_cache_metadata<'g>(graph: &'g ExecutionGraph, out: &mut Vec<&'g CacheMetadata>) {
+    // Edges point from a task to its dependencies, so the reverse of the
+    // topological order puts dependencies first.
+    for node_ix in graph.graph.compute_topological_order().into_iter().rev() {
+        for item in &graph.graph[node_ix].items {
+            match &item.kind {
+                ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution)) => {
+                    out.extend(&spawn_execution.cache_metadata);
+                }
+                ExecutionItemKind::Leaf(LeafExecutionKind::InProcess(_)) => {}
+                ExecutionItemKind::Expanded(nested_graph) => {
+                    collect_cache_metadata(nested_graph, out);
+                }
+            }
+        }
+    }
+}
+
 impl Session<'_> {
     /// Execute an execution graph, reporting events through the provided reporter builder.
     ///
@@ -303,9 +340,12 @@ impl Session<'_> {
             cancel_token,
         };
 
+        execution_context.fetch_early(&execution_graph).await;
+
         // Execute the graph with fast-fail: if any task fails, remaining tasks
         // are skipped. Leaf-level errors are reported through the reporter.
         execution_context.execute_expanded_graph(&execution_graph).await;
+        cache.discard_early_fetches();
 
         // Nested graphs share the cache, so this waits for their uploads too.
         // After Ctrl-C, the uploads are cancelled without a message.

@@ -4,7 +4,7 @@
 
 The proxy never answers the fetch, so nothing needs to listen behind it. Ctrl-C stops the fetch, and the task doesn't start.
 
-**→ expect-milestone:** `stalled`
+**→ expect-milestone:** `stalled:1`
 
 ```
 ```

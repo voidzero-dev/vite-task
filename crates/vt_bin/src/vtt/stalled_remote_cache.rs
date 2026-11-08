@@ -1,7 +1,7 @@
 use std::{
     io::{Read as _, Write as _},
     net::{Shutdown, TcpListener, TcpStream},
-    sync::Arc,
+    sync::{Arc, Mutex, PoisonError},
 };
 
 /// stalled-remote-cache \[`--stall` `<route>`\]... \[`--milestone`\] `<command>` \[`<args>`...\]
@@ -14,8 +14,9 @@ use std::{
 /// them. Other requests are forwarded, each on its own connection. Ctrl-C is
 /// left to the command.
 ///
-/// With `--milestone`, each stalled request emits a "stalled" milestone when it
-/// arrives. Leave it out when the test waits for a milestone from the command:
+/// With `--milestone`, each stalled request emits a `stalled:<n>` milestone when
+/// it arrives, where `<n>` counts the stalled requests so far, from 1. Leave it
+/// out when the test waits for a milestone from the command:
 /// on Windows a milestone is the console title, which `ConPTY` sends when it
 /// next renders, so if the command sets one at about the same time, the
 /// earlier title can be lost.
@@ -53,6 +54,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         base_path: std::format!("/{}", path.trim_end_matches('/')),
         stalled_routes,
         milestone,
+        stalled: Mutex::new(0),
     });
     ctrlc::set_handler(|| {})?;
 
@@ -79,8 +81,11 @@ struct Proxy {
     base_path: String,
     /// Routes below `base_path` whose requests stall.
     stalled_routes: Vec<String>,
-    /// Whether a stalled request emits a "stalled" milestone.
+    /// Whether a stalled request emits a `stalled:<n>` milestone.
     milestone: bool,
+    /// The number of requests stalled so far. Its lock is held while the
+    /// milestone is emitted, so the milestones go out in order.
+    stalled: Mutex<usize>,
 }
 
 impl Proxy {
@@ -98,7 +103,11 @@ impl Proxy {
             .is_some_and(|route| self.stalled_routes.iter().any(|stalled| stalled == route))
         {
             if self.milestone {
-                vt_pty_terminal_test_client::mark_milestone("stalled");
+                let mut stalled = self.stalled.lock().unwrap_or_else(PoisonError::into_inner);
+                *stalled += 1;
+                vt_pty_terminal_test_client::mark_milestone(&std::format!("stalled:{stalled}"));
+                // Only now, so the milestones go out in order.
+                drop(stalled);
             }
             let mut buf = [0; 4096];
             while client.read(&mut buf).is_ok_and(|n| n > 0) {}

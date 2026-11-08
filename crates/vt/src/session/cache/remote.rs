@@ -1,6 +1,8 @@
 //! The remote cache tier. After a local miss, the entry is fetched from the
 //! remote cache, and after a local update in `read-write` mode, the entry is
-//! uploaded to it. Entries are opaque bytes to the remote cache:
+//! uploaded to it. A task without a local entry has its fetch started when the
+//! run starts, so its entries are on their way before its dependencies finish.
+//! Entries are opaque bytes to the remote cache:
 //!
 //! | Field           | Contents                              |
 //! | --------------- | ------------------------------------- |
@@ -23,7 +25,10 @@ use std::{
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use tokio::sync::mpsc;
-use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use tokio_util::{
+    sync::CancellationToken,
+    task::{AbortOnDropHandle, TaskTracker},
+};
 use tracing::Instrument as _;
 use vt_path::AbsolutePath;
 use vt_plan::{
@@ -193,11 +198,45 @@ struct ClientKey {
     auth: RemoteCacheAuth,
 }
 
+impl ClientKey {
+    fn new(remote_config: &ResolvedRemoteCacheConfig) -> Self {
+        Self { url: Arc::clone(&remote_config.url), auth: remote_config.auth.clone() }
+    }
+}
+
+/// What a fetch asks for: the endpoint and auth it's sent with, and its
+/// encoded keys.
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct FetchTarget {
+    client: ClientKey,
+    key: Vec<u8>,
+    secondary_key: Vec<u8>,
+}
+
+impl FetchTarget {
+    fn new(
+        remote_config: &ResolvedRemoteCacheConfig,
+        cache_key: &CacheEntryKey,
+        execution_cache_key: &ExecutionCacheKey,
+    ) -> WriteResult<Self> {
+        Ok(Self {
+            client: ClientKey::new(remote_config),
+            key: encode_key(cache_key)?,
+            secondary_key: encode_key(execution_cache_key)?,
+        })
+    }
+}
+
+/// A fetch running in the background. Dropping it stops the fetch.
+type EarlyFetch = AbortOnDropHandle<Result<Option<Fetched>, ReadError>>;
+
 /// Remote cache clients, each created when its endpoint is first used with
-/// its auth.
+/// its auth, and the fetches started before their tasks are ready.
 #[derive(Debug, Default)]
 pub struct RemoteClients {
     clients: Mutex<FxHashMap<ClientKey, Arc<Client>>>,
+    /// Each is taken by the first [`Self::fetch`] of its target.
+    early_fetches: Mutex<FxHashMap<FetchTarget, EarlyFetch>>,
 }
 
 impl RemoteClients {
@@ -205,8 +244,7 @@ impl RemoteClients {
         &self,
         remote_config: &ResolvedRemoteCacheConfig,
     ) -> Result<Arc<Client>, vt_remote_cache::Error> {
-        let key =
-            ClientKey { url: Arc::clone(&remote_config.url), auth: remote_config.auth.clone() };
+        let key = ClientKey::new(remote_config);
         let mut clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(client) = clients.get(&key) {
             return Ok(Arc::clone(client));
@@ -221,6 +259,9 @@ impl RemoteClients {
     /// `remote_config` configures, falling back to the key last stored for
     /// `execution_cache_key`. Returns `None` if neither key matched. Stops
     /// when `cancel_token` is cancelled.
+    ///
+    /// If [`Self::fetch_early`] started the same fetch, this waits for it
+    /// instead of sending another.
     pub(super) async fn fetch(
         &self,
         remote_config: &ResolvedRemoteCacheConfig,
@@ -228,14 +269,64 @@ impl RemoteClients {
         execution_cache_key: &ExecutionCacheKey,
         cancel_token: &CancellationToken,
     ) -> Result<Option<Fetched>, ReadError> {
+        let target = FetchTarget::new(remote_config, cache_key, execution_cache_key)?;
+        let early_fetch =
+            self.early_fetches.lock().unwrap_or_else(PoisonError::into_inner).remove(&target);
+        if let Some(early_fetch) = early_fetch {
+            tracing::debug!(
+                arrived = early_fetch.is_finished(),
+                "took an early remote cache fetch"
+            );
+            let joined =
+                cancel_token.run_until_cancelled(early_fetch).await.ok_or(ReadError::Cancelled)?;
+            // The fetch is only aborted when it's dropped, and its future
+            // doesn't panic, so it has finished.
+            return joined.unwrap_or_else(|err| std::panic::resume_unwind(err.into_panic()));
+        }
         let client = self.client(remote_config).map_err(ReadError::Fetch)?;
-        let key = encode_key(cache_key)?;
-        let secondary_key = encode_key(execution_cache_key)?;
-        cancel_token
-            .run_until_cancelled(client.fetch(&key, &secondary_key))
-            .await
-            .ok_or(ReadError::Cancelled)?
-            .map_err(ReadError::Fetch)
+        send_fetch(&client, &target.key, &target.secondary_key, cancel_token).await
+    }
+
+    /// Start the fetch that [`Self::fetch`] would send in the background, so
+    /// that it has arrived, or is on its way, when [`Self::fetch`] is called.
+    /// It stops when `cancel_token` is cancelled, or when
+    /// [`Self::discard_early_fetches`] is called before it's taken. If the
+    /// client can't be created or the keys can't be encoded, nothing starts,
+    /// and [`Self::fetch`] reports the error.
+    pub(super) fn fetch_early(
+        &self,
+        remote_config: &ResolvedRemoteCacheConfig,
+        cache_key: &CacheEntryKey,
+        execution_cache_key: &ExecutionCacheKey,
+        cancel_token: &CancellationToken,
+    ) {
+        let Ok(target) = FetchTarget::new(remote_config, cache_key, execution_cache_key) else {
+            return;
+        };
+        let Ok(client) = self.client(remote_config) else {
+            return;
+        };
+        let mut early_fetches = self.early_fetches.lock().unwrap_or_else(PoisonError::into_inner);
+        if early_fetches.contains_key(&target) {
+            return;
+        }
+        let (key, secondary_key) = (target.key.clone(), target.secondary_key.clone());
+        let cancel_token = cancel_token.clone();
+        let handle = tokio::spawn(
+            async move { send_fetch(&client, &key, &secondary_key, &cancel_token).await }
+                .in_current_span(),
+        );
+        early_fetches.insert(target, AbortOnDropHandle::new(handle));
+    }
+
+    /// Stop the fetches started by [`Self::fetch_early`] that haven't been
+    /// taken, such as those of tasks that hit the local cache.
+    pub(super) fn discard_early_fetches(&self) {
+        let early_fetches =
+            std::mem::take(&mut *self.early_fetches.lock().unwrap_or_else(PoisonError::into_inner));
+        if !early_fetches.is_empty() {
+            tracing::debug!(fetches = early_fetches.len(), "discarded early remote cache fetches");
+        }
     }
 
     /// Download the blob `blob_id` from the remote cache that `remote_config`
@@ -390,6 +481,21 @@ impl RemoteUploads {
         }
         self.tracker.reopen();
     }
+}
+
+/// Send a fetch of `key`, falling back to `secondary_key`, with `client`,
+/// until `cancel_token` is cancelled.
+async fn send_fetch(
+    client: &Client,
+    key: &[u8],
+    secondary_key: &[u8],
+    cancel_token: &CancellationToken,
+) -> Result<Option<Fetched>, ReadError> {
+    cancel_token
+        .run_until_cancelled(client.fetch(key, secondary_key))
+        .await
+        .ok_or(ReadError::Cancelled)?
+        .map_err(ReadError::Fetch)
 }
 
 /// Chunks buffered between the download and the archive check.

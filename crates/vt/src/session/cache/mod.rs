@@ -346,10 +346,55 @@ impl ExecutionCache {
         Ok(())
     }
 
+    /// Start fetching the entries of a task that runs later from its remote
+    /// cache, so they're on their way while the tasks it depends on run. The
+    /// task's lookup in [`Self::try_hit`] then takes this fetch instead of
+    /// sending its own. Returns whether the fetch started.
+    ///
+    /// Nothing starts if the task doesn't read a remote cache, or if the local
+    /// cache has an entry under the task's key: then the task most likely hits
+    /// locally and never fetches. The fetch stops when `cancel_token` is
+    /// cancelled, or when [`Self::discard_early_fetches`] is called before the
+    /// task takes it.
+    pub async fn fetch_early(
+        &self,
+        cache_metadata: &CacheMetadata,
+        cancel_token: &CancellationToken,
+    ) -> bool {
+        let Some(
+            remote_config @ ResolvedRemoteCacheConfig {
+                access: RemoteCacheAccess::Read | RemoteCacheAccess::ReadWrite,
+                ..
+            },
+        ) = &cache_metadata.remote_cache
+        else {
+            return false;
+        };
+        let cache_key = CacheEntryKey::from_metadata(cache_metadata);
+        // If the local cache can't be read, the task's own lookup reports it.
+        if self.has_cache_key(&cache_key).await.unwrap_or(true) {
+            return false;
+        }
+        self.remote_clients.fetch_early(
+            remote_config,
+            &cache_key,
+            &cache_metadata.execution_cache_key,
+            cancel_token,
+        );
+        true
+    }
+
+    /// Stop the fetches started by [`Self::fetch_early`] that no task took,
+    /// such as those of tasks that didn't run.
+    pub fn discard_early_fetches(&self) {
+        self.remote_clients.discard_early_fetches();
+    }
+
     /// Try to hit cache by looking up the cache entry key and validating inputs.
     /// Returns `Ok(Ok(cache_hit))` on cache hit, `Ok(Err(cache_miss))` on miss.
     ///
-    /// After a local miss, the remote cache is queried if the task has one. A
+    /// After a local miss, the remote cache is queried if the task has one,
+    /// with the fetch that [`Self::fetch_early`] started if it did. A
     /// remote hit has its output archive downloaded into `cache_dir`, is
     /// recorded locally by [`Self::restore`], and is never uploaded. If the
     /// local cache has an entry for the task, its miss reason is kept.
@@ -721,6 +766,18 @@ impl ExecutionCache {
         cache_key: &CacheEntryKey,
     ) -> anyhow::Result<Option<CacheEntryValue>> {
         self.get_key_by_value("cache_entries", cache_key).await
+    }
+
+    /// Whether there is an entry under `cache_key`, without decoding it.
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "lock guard cannot be dropped earlier because prepared statement borrows connection"
+    )]
+    async fn has_cache_key(&self, cache_key: &CacheEntryKey) -> anyhow::Result<bool> {
+        let key_blob = serialize_cache(cache_key)?;
+        let conn = self.conn.lock().await;
+        let mut select_stmt = conn.prepare_cached("SELECT 1 FROM cache_entries WHERE key=?")?;
+        Ok(select_stmt.exists([key_blob])?)
     }
 
     async fn get_cache_key_by_execution_key(
