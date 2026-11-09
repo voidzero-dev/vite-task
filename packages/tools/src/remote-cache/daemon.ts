@@ -147,7 +147,8 @@ function pass(
   );
   upstream.on('error', (error) => {
     // The Worker rejects an upload by its headers, answering before it reads
-    // the body, and then closes the connection, so sending the rest fails.
+    // the body, and then closes the connection, which can reset it after the
+    // answer.
     if (clientGone || backendReply?.complete) return;
     anomalies.push(`${label} failed: ${error.message}`);
     if (response.headersSent) response.destroy();
@@ -159,7 +160,13 @@ function pass(
     clientGone = true;
     upstream.destroy();
   });
-  request.pipe(upstream);
+  // Send the body once it has all arrived, so it goes out with the headers
+  // before the Worker can answer. Sending part of it after a rejection fails
+  // if the connection was reset, and that can lose the answer before it's
+  // read.
+  const body: Buffer[] = [];
+  request.on('data', (chunk: Buffer) => body.push(chunk));
+  request.on('end', () => upstream.end(Buffer.concat(body)));
 }
 
 const control = createServer((request, response) => {
