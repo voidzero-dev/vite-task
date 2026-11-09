@@ -57,7 +57,8 @@ pub struct RunFlags {
     #[clap(default_value = "false", long)]
     pub ignore_depends_on: bool,
 
-    /// Show full detailed summary after execution.
+    /// Show full detailed summary after execution. A cache miss checks every
+    /// input, so the summary lists every change.
     #[clap(default_value = "false", short = 'v', long)]
     pub verbose: bool,
 

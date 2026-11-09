@@ -66,7 +66,7 @@ vp run: 0/2 cache hit (0%), 2/2 successful. (Run `vp run --last-details` for ful
 
 - Nothing runs and nothing is written: no process, no cache entry, no change to `vp run --last-details`.
 - Everything else is a real run's: the plan, the cache check, every run flag and the args after the task name. The remote cache is read exactly when a real run would read it. Outputs are never downloaded or restored, since that would write files.
-- Each step is checked against the files as they are now. In the JSON, a step that waits on one that would write files first, by running or by restoring outputs on a hit, is `unknown`: its files may change before it starts. The text shows today's check for it, and the real run below shows what can change.
+- Each step is checked against the files as they are now. In the JSON, a step that waits on one that would write files first, by running or by restoring outputs on a hit, is `unknown`: its files may change before it starts. The text shows today's check for it.
 
 ### `-v`
 
@@ -87,25 +87,7 @@ Task Details:
       → Cache miss: env 'NODE_ENV' changed
 ```
 
-The list is complete: reverting every listed change would make the command a hit. Without `-v`, only the file check stops early; command, config and env changes are always listed in full.
-
-In a real run:
-
-```
-$ vp run -v -r build
-…
-Task Details:
-────────────────────────────────────────────────
-  [1] @acme/ui#build: ~/packages/ui$ tsdown ✓
-      → Cache miss: 'packages/ui/src/button.tsx' modified
-                    'packages/ui/src/theme.css' modified
-  ·······················································
-  [2] @acme/web#build: ~/apps/web$ vite build ✓
-      → Cache miss: env 'NODE_ENV' changed
-                    'packages/ui/dist/index.js' modified
-```
-
-`packages/ui/dist/index.js` changed because `@acme/ui#build` rebuilt it first. The dry run, checking today's files, couldn't see that, which is why its JSON marks `@acme/web#build` as `unknown`.
+Without `-v`, only the file check stops early; command, config and env changes are always listed in full. When the command, config or env changed, as for `@acme/web#build`, the list is just those changes: the cache has no run with the new ones to compare the files with. Otherwise the list is complete: reverting every listed change would make the command a hit.
 
 ### `-vv`
 

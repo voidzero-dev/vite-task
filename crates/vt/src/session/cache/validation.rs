@@ -8,35 +8,42 @@ use vt_glob::path::PathGlobSet;
 use vt_path::{AbsolutePath, RelativePathBuf};
 use vt_plan::cache_metadata::SpawnFingerprint;
 
-use super::{CacheEntryKey, CacheEntryValue, Change, EnvMismatch, EnvSource, InputChangeKind};
+use super::{
+    CacheEntryKey, CacheEntryValue, Change, EnvMismatch, EnvSource, FileCheck, InputChangeKind,
+};
 
 impl CacheEntryValue {
     /// Compare the entry with the current execution: explicit inputs, then
     /// inferred inputs, and tracked environment values against
     /// `unfiltered_envs`, the execution's `CacheMetadata::unfiltered_envs`.
     /// `input_negative_globs`, compiled from the entry key's input config,
-    /// leave entries out of listings. Returns every env change and the first
-    /// changed file found, or nothing when the entry is valid.
+    /// leave entries out of listings. Returns every env change and, with
+    /// [`FileCheck::First`], the first changed file found, or with
+    /// [`FileCheck::All`], every changed file. Nothing when the entry is valid.
     ///
     /// # Errors
     ///
     /// Propagates errors from post-run fingerprint validation. Once a file
-    /// changed, the entry misses whatever the envs are, so an error comparing
-    /// them only leaves the env changes out.
+    /// changed, the entry misses whatever else changed, so an error checking
+    /// the other files or the envs only leaves their changes out.
     pub(crate) fn validate(
         &self,
         unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         input_negative_globs: &PathGlobSet<'_>,
         workspace_root: &AbsolutePath,
+        file_check: FileCheck,
     ) -> anyhow::Result<Vec<Change>> {
-        let mut changes: Vec<Change> =
-            detect_globbed_input_change(&self.globbed_inputs, globbed_inputs).into_iter().collect();
-        if changes.is_empty() {
-            changes.extend(
-                self.post_run_fingerprint
-                    .first_input_change(workspace_root, input_negative_globs)?,
+        // Without `-v`, the first changed file is enough to know it's a miss.
+        let limit = if file_check == FileCheck::First { 1 } else { usize::MAX };
+        let mut changes = globbed_input_changes(&self.globbed_inputs, globbed_inputs, limit);
+        if changes.is_empty() || file_check == FileCheck::All {
+            let input_changes = self.post_run_fingerprint.input_changes(
+                workspace_root,
+                input_negative_globs,
+                file_check,
             );
+            add_checked(&mut changes, input_changes, "inferred inputs")?;
         }
         let env_changes = self.post_run_fingerprint.env_changes(unfiltered_envs);
         add_checked(&mut changes, env_changes, "tracked envs")?;
@@ -118,46 +125,52 @@ fn spawn_changes(old: &SpawnFingerprint, new: &SpawnFingerprint) -> Vec<Change> 
     changes
 }
 
-/// Compare stored and current globbed inputs, returning the first changed path.
-/// Both maps are `BTreeMap` so we iterate them in sorted lockstep.
-fn detect_globbed_input_change(
+/// Compare stored and current globbed inputs, returning the first `limit`
+/// changed paths, in path order. Both maps are `BTreeMap` so we iterate them
+/// in sorted lockstep.
+fn globbed_input_changes(
     stored: &BTreeMap<RelativePathBuf, u64>,
     current: &BTreeMap<RelativePathBuf, u64>,
-) -> Option<Change> {
+    limit: usize,
+) -> Vec<Change> {
+    let mut changes = Vec::new();
     let mut stored_iter = stored.iter();
     let mut current_iter = current.iter();
     let mut s = stored_iter.next();
     let mut c = current_iter.next();
+    let change = |kind, path: &RelativePathBuf| Change::File { kind, path: path.clone() };
 
-    loop {
+    while changes.len() < limit {
         match (s, c) {
-            (None, None) => return None,
+            (None, None) => break,
             (Some((sp, _)), None) => {
-                return Some(Change::File { kind: InputChangeKind::Removed, path: sp.clone() });
+                changes.push(change(InputChangeKind::Removed, sp));
+                s = stored_iter.next();
             }
             (None, Some((cp, _))) => {
-                return Some(Change::File { kind: InputChangeKind::Added, path: cp.clone() });
+                changes.push(change(InputChangeKind::Added, cp));
+                c = current_iter.next();
             }
             (Some((sp, sh)), Some((cp, ch))) => match sp.cmp(cp) {
                 std::cmp::Ordering::Equal => {
                     if sh != ch {
-                        return Some(Change::File {
-                            kind: InputChangeKind::ContentModified,
-                            path: sp.clone(),
-                        });
+                        changes.push(change(InputChangeKind::ContentModified, sp));
                     }
                     s = stored_iter.next();
                     c = current_iter.next();
                 }
                 std::cmp::Ordering::Less => {
-                    return Some(Change::File { kind: InputChangeKind::Removed, path: sp.clone() });
+                    changes.push(change(InputChangeKind::Removed, sp));
+                    s = stored_iter.next();
                 }
                 std::cmp::Ordering::Greater => {
-                    return Some(Change::File { kind: InputChangeKind::Added, path: cp.clone() });
+                    changes.push(change(InputChangeKind::Added, cp));
+                    c = current_iter.next();
                 }
             },
         }
     }
+    changes
 }
 
 #[cfg(test)]
@@ -204,7 +217,13 @@ mod tests {
         )]);
         let workspace_root = vt_path::current_dir().unwrap();
         let validate = |inputs| {
-            value.validate(&unfiltered_envs, &inputs, &PathGlobSet::default(), &workspace_root)
+            value.validate(
+                &unfiltered_envs,
+                &inputs,
+                &PathGlobSet::default(),
+                &workspace_root,
+                FileCheck::First,
+            )
         };
 
         assert!(validate(BTreeMap::from([(path.clone(), 1)])).is_err());
@@ -238,7 +257,13 @@ mod tests {
         ]);
         let workspace_root = vt_path::current_dir().unwrap();
         let changes = value
-            .validate(&unfiltered_envs, &BTreeMap::new(), &PathGlobSet::default(), &workspace_root)
+            .validate(
+                &unfiltered_envs,
+                &BTreeMap::new(),
+                &PathGlobSet::default(),
+                &workspace_root,
+                FileCheck::First,
+            )
             .unwrap();
         assert_eq!(
             changes,
@@ -246,6 +271,95 @@ mod tests {
                 mismatch: EnvMismatch::Added { name: Str::from("CHANGED_ENV") },
                 source: EnvSource::Tracked,
             }]
+        );
+    }
+
+    /// Without `-v`, the file check stops at the first changed explicit
+    /// input; with it, every one is listed in path order.
+    #[test]
+    fn every_changed_explicit_input_is_listed_when_checking_all() {
+        let rel = |path| RelativePathBuf::new(path).unwrap();
+        let value = CacheEntryValue {
+            post_run_fingerprint: PostRunFingerprint::default(),
+            std_outputs: Arc::new([]),
+            duration: Duration::ZERO,
+            globbed_inputs: BTreeMap::from([(rel("a.txt"), 1), (rel("b.txt"), 1)]),
+            output_archive: None,
+        };
+        let current = BTreeMap::from([(rel("a.txt"), 2), (rel("c.txt"), 1)]);
+        let workspace_root = vt_path::current_dir().unwrap();
+        let validate = |file_check| {
+            value
+                .validate(
+                    &FxHashMap::default(),
+                    &current,
+                    &PathGlobSet::default(),
+                    &workspace_root,
+                    file_check,
+                )
+                .unwrap()
+        };
+        let file = |kind, path| Change::File { kind, path: rel(path) };
+
+        assert_eq!(validate(FileCheck::First), [file(InputChangeKind::ContentModified, "a.txt")]);
+        assert_eq!(
+            validate(FileCheck::All),
+            [
+                file(InputChangeKind::ContentModified, "a.txt"),
+                file(InputChangeKind::Removed, "b.txt"),
+                file(InputChangeKind::Added, "c.txt"),
+            ]
+        );
+    }
+
+    /// With `-v`, a listed folder that gains a valid entry and one whose name
+    /// isn't a valid path keeps the valid one: it's a miss, not a failed
+    /// lookup. Only Unix allows a `\` in a file name, so only Unix can test it.
+    #[cfg(unix)]
+    #[test]
+    fn folder_entry_that_cannot_be_named_keeps_the_others() {
+        use crate::session::execute::fingerprint::{DirListing, InferredInput, PathFingerprint};
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = vt_path::AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        std::fs::create_dir(workspace_root.join("dir").as_path()).unwrap();
+        std::fs::write(workspace_root.join("dir/a.txt").as_path(), "x").unwrap();
+        std::fs::write(workspace_root.join("dir/a\\b").as_path(), "x").unwrap();
+        let rel = |path| RelativePathBuf::new(path).unwrap();
+        let listing = DirListing {
+            entries: BTreeMap::new(),
+            ignored_entries: std::collections::BTreeSet::new(),
+        };
+        let value = CacheEntryValue {
+            post_run_fingerprint: PostRunFingerprint {
+                inferred_inputs: crate::collections::HashMap::from_iter([(
+                    rel("dir"),
+                    InferredInput {
+                        fingerprint: PathFingerprint::Folder(Some(listing)),
+                        may_be_missing: false,
+                    },
+                )]),
+                ..PostRunFingerprint::default()
+            },
+            std_outputs: Arc::new([]),
+            duration: Duration::ZERO,
+            globbed_inputs: BTreeMap::new(),
+            output_archive: None,
+        };
+        let validate = |file_check| {
+            value.validate(
+                &FxHashMap::default(),
+                &BTreeMap::new(),
+                &PathGlobSet::default(),
+                &workspace_root,
+                file_check,
+            )
+        };
+
+        let changes = validate(FileCheck::All).unwrap();
+        assert_eq!(
+            changes,
+            [Change::File { kind: InputChangeKind::Added, path: rel("dir/a.txt") }]
         );
     }
 }

@@ -557,7 +557,7 @@ mod tests {
 
     use super::*;
     use crate::session::{
-        cache::InputChangeKind,
+        cache::{FileCheck, InputChangeKind},
         execute::{
             fingerprint::{PostRunFingerprint, TrackedEnvQuery},
             pipe::{OutputKind, StdOutput},
@@ -656,6 +656,7 @@ mod tests {
                 &globbed_inputs,
                 &PathGlobSet::default(),
                 &workspace_root,
+                FileCheck::First,
             )
         }
     }
