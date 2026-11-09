@@ -8,7 +8,7 @@ use vt_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
     ColorSupport, ColorizeExt, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
-    LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion,
+    LeafExecutionReporter, LeafPath, PipeWriters, StdioConfig, StdioSuggestion,
     format_command_with_cache_status, format_task_label, maybe_strip_writer,
     write_leaf_trailing_output,
 };
@@ -58,6 +58,7 @@ struct GroupedGraphReporter {
 impl GraphExecutionReporter for GroupedGraphReporter {
     fn new_leaf_execution(
         &mut self,
+        _path: &LeafPath,
         display: &ExecutionItemDisplay,
         _leaf_kind: &LeafExecutionKind,
     ) -> Box<dyn LeafExecutionReporter> {
@@ -183,7 +184,8 @@ mod tests {
             ColorSupport::uniform(false),
         ));
         let mut reporter = builder.build();
-        let mut leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind(item));
+        let mut leaf =
+            reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind(item));
         let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
         assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
     }
