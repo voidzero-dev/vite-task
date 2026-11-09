@@ -291,6 +291,23 @@ steps = [
     "--github-actions",
     "vt",
     "run",
+    "emit",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "`emit` runs first, on its own, so its upload doesn't overlap `after-emit`'s fetch." },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
     "after-emit",
   ], envs = [
     [
@@ -308,6 +325,23 @@ steps = [
     "--github-actions",
     "vt",
     "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "`build` runs first, on its own, so its upload doesn't overlap `after-build`'s fetch." },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
     "after-build",
   ], envs = [
     [
@@ -318,7 +352,7 @@ steps = [
       "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
       "1",
     ],
-  ], comment = "`after-build` runs the same command as `after-emit`, so that step hits the entry the first run stored." },
+  ], comment = "`after-build` runs the same command as `after-emit`, so that step hits the entry `after-emit`'s run stored, and nothing is fetched." },
   [
     "vt",
     "cache",
