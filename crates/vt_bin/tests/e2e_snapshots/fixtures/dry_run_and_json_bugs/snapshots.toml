@@ -3,30 +3,6 @@
 # `vtt` is outside the workspace, at an absolute path, so it's redacted.
 
 [[e2e]]
-name = "dry_run_writes_the_cache_folder"
-comment = """
-Bug: a dry run should write nothing, but it creates the cache folder and its database, even when no step is cached.
-"""
-steps = [
-  { argv = [
-    "vtt",
-    "stat-file",
-    "node_modules/.vite/task-cache",
-  ], comment = "Nothing has run yet." },
-  { argv = [
-    "vt",
-    "run",
-    "--dry-run",
-    "uncached",
-  ], comment = "Caching is off for this task, so there's no cache to check." },
-  { argv = [
-    "vtt",
-    "stat-file",
-    "node_modules/.vite/task-cache",
-  ], comment = "Expected: missing. It was created by the dry run." },
-]
-
-[[e2e]]
 name = "entry_stored_earlier_in_the_run"
 comment = """
 Bug: `same-command` runs the same command, with the same inputs, as `build`, which it waits on, so they share one cache entry. On a fresh cache, a real run runs `build` and stores the entry, and `same-command` then hits it. A dry run checks both against today's cache, finds no entry for either, and predicts two misses. The JSON shows `same-command` as `noBaseline`, where it should be `unknown`, as for a step whose files an earlier step may change.
@@ -56,9 +32,9 @@ steps = [
 ]
 
 [[e2e]]
-name = "run_plan_cwd_is_not_normalized"
+name = "run_plan_paths_are_not_normalized"
 comment = """
-Bug: both tasks run in the package's folder, by a `cwd` of `src/..` or by `cd src && cd ..`. The task graph leaves out a `cwd` that is the package's folder, but the run plan prints `"cwd":"src/.."`, which isn't a normalized path, for a step that runs in the package's folder and so should have no `cwd`.
+Bug: the run plan prints a step's `cwd` and `program` as they were joined, with `..` left in, where the task graph cleans its paths. So a step that runs in its package's folder gets a `cwd`, which should be absent, and a path outside the workspace is written relative to the workspace root, where it should be absolute.
 """
 steps = [
   { argv = [
@@ -68,7 +44,7 @@ steps = [
     "vt",
     "run",
     "--json",
-  ], comment = "The task graph: `up-and-back` has no `cwd`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"' } },
+  ], comment = "The task graph: `up-and-back` has no `cwd`, and the `cwd` of `outside` is absolute.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"cwd":"(/|[A-Za-z]:|\\\\)[^"]*"' = '"cwd":"<absolute path>"' } },
   { argv = [
     "vtt",
     "pipe-stdout",
@@ -90,8 +66,152 @@ steps = [
     "cd-and-back",
   ], comment = "The same after `cd src && cd ..`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"' } },
   { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "outside",
+  ], comment = "Expected: an absolute `cwd`, as in the task graph. It's `..`, relative to the workspace root.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"' } },
+  # On Windows, `tool` resolves to `tool.cmd`.
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "tool",
+  ], comment = "Expected: `bin/tool`. It's `src/../bin/tool`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', 'tool\.cmd"' = 'tool"' } },
+  { argv = [
     "vt",
     "run",
     "up-and-back",
   ], comment = "The command runs in the package's folder." },
+]
+
+[[e2e]]
+name = "nested_hook_is_not_marked"
+comment = """
+Bug: each step of a `pre` or `post` script has a `hook`, but a `pre` script that runs a nested `vt run` doesn't, so it reads as the task's own command.
+"""
+steps = [
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "check",
+  ], comment = "Expected: the first step has `\"hook\":\"precheck\"`, like the `postcheck` step.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"' } },
+]
+
+[[e2e]]
+name = "json_write_error_is_silent"
+comment = """
+Bug: when the run plan can't be written to stdout, `vt run --dry-run --json` fails without saying why. `vt run --json` prints the error.
+"""
+steps = [
+  { argv = [
+    "vtt",
+    "closed-stdout",
+    "--",
+    "vt",
+    "run",
+    "--json",
+  ], comment = "The task graph's write error goes to stderr." },
+  { argv = [
+    "vtt",
+    "closed-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "build",
+  ], comment = "Expected: the same error. It exits 1 and prints nothing." },
+]
+
+[[e2e]]
+name = "remote_error_has_no_cause"
+comment = """
+Bug: when the remote cache can't be read, the text with `-v` says why, but the JSON's `message` never does, with `-v` or without.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "-v",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE_URL",
+      "http://127.0.0.1:0/projects/test",
+    ],
+  ], comment = "Nothing can listen on port 0. The detailed summary lists the causes." },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "-v",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE_URL",
+      "http://127.0.0.1:0/projects/test",
+    ],
+  ], comment = "Expected: the causes, as in the text. The message is only `remote cache fetch failed`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"' } },
+]
+
+[[e2e]]
+name = "missing_archive_is_a_hit"
+comment = """
+Bug: a local hit whose output archive is gone from the cache folder is a plain hit in a dry run, which exits 0, but the real run fails to restore it. With `-vv`, the hit lists no outputs, as if it restored none, where the cached run has `dist/out.txt`.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "emit",
+  ],
+  [
+    "vtt",
+    "rm",
+    "--ext",
+    ".tar.zst",
+    "node_modules/.vite/task-cache",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "-vv",
+    "emit",
+  ], comment = "Expected: the missing archive is reported. It's a hit with no `Outputs:` line." },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "-vv",
+    "emit",
+  ], comment = "The same in the JSON: no `outputs`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>' } },
+  { argv = [
+    "vt",
+    "run",
+    "emit",
+  ], comment = "The real run can't restore it." },
 ]

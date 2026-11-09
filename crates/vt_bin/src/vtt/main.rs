@@ -8,6 +8,7 @@
 
 mod barrier;
 mod check_tty;
+mod closed_stdout;
 mod cp;
 mod exit;
 mod exit_on_ctrlc;
@@ -41,7 +42,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, fs, grep-file, hold-reads, list-dir, mkdir, pipe-stdin, pipe-stdout, print, print-color, print-cwd, print-env, print-file, read-link, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, symlink, touch-file, write-file"
+            "Subcommands: barrier, check-tty, closed-stdout, cp, exit, exit-on-ctrlc, fs, grep-file, hold-reads, list-dir, mkdir, pipe-stdin, pipe-stdout, print, print-color, print-cwd, print-env, print-file, read-link, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, symlink, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -52,6 +53,7 @@ fn main() {
             check_tty::run();
             Ok(())
         }
+        "closed-stdout" => closed_stdout::run(&args[2..]),
         "cp" => cp::run(&args[2..]),
         "exit" => exit::run(&args[2..]),
         "exit-on-ctrlc" => exit_on_ctrlc::run(),

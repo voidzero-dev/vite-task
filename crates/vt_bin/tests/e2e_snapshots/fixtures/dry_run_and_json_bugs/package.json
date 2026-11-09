@@ -1,4 +1,9 @@
 {
   "name": "dry-run-and-json-bugs",
-  "private": true
+  "private": true,
+  "scripts": {
+    "precheck": "vt run build",
+    "check": "vtt print check",
+    "postcheck": "vtt print post"
+  }
 }

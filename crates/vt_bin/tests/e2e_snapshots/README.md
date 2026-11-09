@@ -42,7 +42,7 @@ Notes:
 - `vt` and `vtt` are the binaries built for the test. Other programs are looked up in `PATH`, with `packages/tools/node_modules/.bin` (when installed) ahead of the inherited entries.
 - `write-key` accepts `up`, `down`, `enter`, `escape`, `backspace`, and `ctrl-c`.
 - Snapshots include every interaction line, and each `expect-milestone` records the screen at that point.
-- Steps don't run in a shell, so pipes, `&&`, and redirections aren't available. To pipe data to a command's stdin, use `vtt pipe-stdin <data> -- <command> [args...]`. To snapshot what a command prints when its stdout is captured rather than a terminal, use `vtt pipe-stdout -- <command> [args...]`.
+- Steps don't run in a shell, so pipes, `&&`, and redirections aren't available. To pipe data to a command's stdin, use `vtt pipe-stdin <data> -- <command> [args...]`. To snapshot what a command prints when its stdout is captured rather than a terminal, use `vtt pipe-stdout -- <command> [args...]`. To make every write to a command's stdout fail, use `vtt closed-stdout -- <command> [args...]`.
 
 The test runner:
 
