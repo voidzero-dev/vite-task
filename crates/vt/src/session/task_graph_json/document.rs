@@ -4,12 +4,13 @@
 //! The doc comments here are the descriptions in `schemas/task-graph.json`, the JSON
 //! Schema that `$schema` points to, which a test generates from these types.
 
-use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
-use cow_utils::CowUtils as _;
-use serde::{Serialize, Serializer};
+use serde::Serialize;
 use vt_path::AbsolutePath;
 use vt_str::Str;
+
+use crate::session::json::Version;
 
 /// Every package and task in the workspace, and how the tasks depend on each other, as
 /// printed by `vp run --json`.
@@ -23,7 +24,7 @@ pub struct TaskGraph {
 
     /// Format version. It changes only for a breaking change: a rename, a removal, or a
     /// changed meaning. New fields and values don't change it; ignore fields you don't know.
-    pub version: Version,
+    pub version: Version<1>,
 
     /// Absolute path of the workspace root. Other paths are relative to it, with `/` on
     /// every platform.
@@ -38,31 +39,6 @@ pub struct TaskGraph {
     /// or just the task name for a task of the root package. In each part, `%` is written
     /// `%25` and `#` is written `%23`. Compare IDs; don't decode them.
     pub tasks: BTreeMap<Str, Task>,
-}
-
-/// The format version, `1`.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Version;
-
-impl Serialize for Version {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u8(1)
-    }
-}
-
-#[cfg(test)]
-impl schemars::JsonSchema for Version {
-    fn inline_schema() -> bool {
-        true
-    }
-
-    fn schema_name() -> Cow<'static, str> {
-        Cow::Borrowed("Version")
-    }
-
-    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({ "type": "integer", "const": 1 })
-    }
 }
 
 /// A package in the workspace.
@@ -140,39 +116,9 @@ impl Command {
     }
 }
 
-/// The ID of the task named `name` in the package at `package` (`"."` for the root).
-#[must_use]
-pub fn task_id(package: &str, name: &str) -> Str {
-    let name = encode_id_part(name);
-    if package == "." {
-        Str::from(name.as_ref())
-    } else {
-        vt_str::format!("{}#{name}", encode_id_part(package))
-    }
-}
-
-fn encode_id_part(part: &str) -> Cow<'_, str> {
-    match part.cow_replace('%', "%25") {
-        Cow::Borrowed(part) => part.cow_replace('#', "%23"),
-        Cow::Owned(part) => Cow::Owned(part.cow_replace('#', "%23").into_owned()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn task_ids() {
-        assert_eq!(task_id(".", "ci"), "ci");
-        assert_eq!(task_id("packages/ui", "build"), "packages/ui#build");
-        // Encoding `#` keeps task `c` in the package at `a#b` apart from task `b#c` in `a`.
-        assert_eq!(task_id("a#b", "c"), "a%23b#c");
-        assert_eq!(task_id("a", "b#c"), "a#b%23c");
-        // Encoding `%` keeps root tasks `a#b` and `a%23b` apart.
-        assert_eq!(task_id(".", "a#b"), "a%23b");
-        assert_eq!(task_id(".", "a%23b"), "a%2523b");
-    }
 
     #[test]
     fn commands() {
