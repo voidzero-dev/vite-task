@@ -8,6 +8,10 @@
     "filter-nonexistent-strict": {
       "command": "vt run --filter nonexistent --fail-if-no-match build",
       "cache": false
+    },
+    "run-unknown-package": {
+      "command": "vt run nonexistent#build",
+      "cache": false
     }
   }
 }
