@@ -38,3 +38,38 @@ steps = [
     "out/a.txt",
   ],
 ]
+
+[[e2e]]
+name = "output_changed_after_clean_and_rebuild"
+comment = """
+The task removes `out` with `out/a.txt` in it and writes `out/a.txt` again, then a later step changes `out/a.txt`. Removing the file doesn't read it, so the change doesn't make the next run miss.
+"""
+steps = [
+  { argv = [
+    "vtt",
+    "write-file",
+    "out/a.txt",
+    "stale",
+  ], comment = "an earlier build left `out/a.txt`" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "write-file",
+    "out/a.txt",
+    "stamped",
+  ], comment = "an uncached step changes the output, like a step stamping a version into it" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "print-file",
+    "out/a.txt",
+  ],
+]

@@ -160,16 +160,14 @@ async fn symlink_destination() -> anyhow::Result<()> {
         }
     })
     .await?;
-    for link in ["file_link", "folder_link"] {
-        let link = tmp_path.join(link);
-        #[cfg(unix)]
-        assert_contains(&accesses, &link, PathAccess::Write);
-        // `CreateSymbolicLinkW` creates the link with an open that lacks write
-        // access, recorded as a read, or as a mkdir for a folder link, before
-        // it sets the reparse point.
-        #[cfg(windows)]
-        test_utils::assert_includes(&accesses, &link, PathAccess::Write);
-    }
+    assert_contains(&accesses, &tmp_path.join("file_link"), PathAccess::Write);
+    let folder_link = tmp_path.join("folder_link");
+    #[cfg(unix)]
+    assert_contains(&accesses, &folder_link, PathAccess::Write);
+    // `CreateSymbolicLinkW` makes a folder link as a folder, recorded as a
+    // mkdir, before it sets the reparse point.
+    #[cfg(windows)]
+    test_utils::assert_includes(&accesses, &folder_link, PathAccess::Write);
 
     Ok(())
 }
