@@ -142,7 +142,7 @@ steps = [
     "--dry-run",
     "--json",
     "nope#build",
-  ], comment = "No package is named `nope`, so, as in a real run, the plan is empty.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"' } },
+  ], comment = "No package is named `nope`, so, as in a real run, it's an error and nothing goes to stdout." },
   { argv = [
     "vtt",
     "pipe-stdout",

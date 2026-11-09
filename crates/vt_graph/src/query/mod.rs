@@ -133,8 +133,8 @@ impl IndexedTaskGraph<'_> {
     ///
     /// # Errors
     ///
-    /// Returns [`PackageQueryResolveError::AmbiguousPackageName`] when an exact
-    /// package name (from a `pkg#task` specifier) matches multiple packages, and
+    /// Returns [`PackageQueryResolveError`] when an exact package name (from a
+    /// `pkg#task` specifier) matches no package or several, and
     /// [`TaskGraphLoadError`] when the tasks of a selected package fail to load.
     ///
     /// # Order of operations

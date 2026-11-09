@@ -33,11 +33,13 @@ error: Task "typo" not found
 
 ## `vtt pipe-stdout -- vt run --dry-run --json nope#build`
 
-No package is named `nope`, so, as in a real run, the plan is empty.
+No package is named `nope`, so, as in a real run, it's an error and nothing goes to stdout.
+
+**Exit code:** 1
 
 ```
+error: Package 'nope' not found in the workspace
 --- stdout ---
-{"$schema":"<schema>","version":1,"workspaceRoot":"<workspace>","plan":{}}
 ```
 
 ## `vtt pipe-stdout -- vt run --dry-run --json --filter nope build`
