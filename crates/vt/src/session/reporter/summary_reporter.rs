@@ -5,7 +5,7 @@
 //! reporter handles all output formatting (interleaved, labeled, grouped).
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     io::Write,
     num::NonZeroUsize,
     process::ExitStatus as StdExitStatus,
@@ -18,12 +18,12 @@ use vt_plan::{ExecutionItemDisplay, LeafExecutionKind};
 use vt_str::Str;
 
 use super::{
-    ColorSupport, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
-    LeafExecutionReporter, StdioConfig,
+    ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafExecutionReporter,
+    StdioConfig,
 };
 use crate::session::{
     cache::remote::UploadError,
-    event::{CacheStatus, CacheUpdateStatus, ExecutionError},
+    event::{CacheStatus, CacheUpdateStatus, ExecutionError, RunKind},
     reporter::summary::{
         LastRunSummary, SavedError, SpawnOutcome, TaskResult, TaskSummary, format_compact_summary,
         format_full_summary, format_uploads_pending,
@@ -41,6 +41,7 @@ pub struct SummaryReporterBuilder {
     show_details: bool,
     write_summary: Option<WriteSummaryFn>,
     program_name: Str,
+    run_kind: RunKind,
 }
 
 impl SummaryReporterBuilder {
@@ -48,6 +49,9 @@ impl SummaryReporterBuilder {
     /// owns per-stream stripping of the child-process pipe writers; the
     /// reporter's own summary text picks colour-vs-plain at format time
     /// via `ColorizeExt`, so `writer` is stored unwrapped.
+    ///
+    /// A dry run (`RunKind::Dry`) passes no `write_summary`: its summary isn't
+    /// saved, so `vp run --last-details` still shows the last real run.
     pub fn new(
         inner: Box<dyn GraphExecutionReporterBuilder>,
         workspace_path: Arc<AbsolutePath>,
@@ -55,9 +59,9 @@ impl SummaryReporterBuilder {
         show_details: bool,
         write_summary: Option<WriteSummaryFn>,
         program_name: Str,
-        _color_support: ColorSupport,
+        run_kind: RunKind,
     ) -> Self {
-        Self { inner, workspace_path, writer, show_details, write_summary, program_name }
+        Self { inner, workspace_path, writer, show_details, write_summary, program_name, run_kind }
     }
 }
 
@@ -66,11 +70,13 @@ impl GraphExecutionReporterBuilder for SummaryReporterBuilder {
         Box::new(SummaryGraphReporter {
             inner: self.inner.build(),
             tasks: Rc::new(RefCell::new(Vec::new())),
+            failed_before_start: Rc::new(Cell::new(false)),
             workspace_path: self.workspace_path,
             writer: self.writer,
             show_details: self.show_details,
             write_summary: self.write_summary,
             program_name: self.program_name,
+            run_kind: self.run_kind,
         })
     }
 }
@@ -87,11 +93,16 @@ struct RecordedTask {
 struct SummaryGraphReporter {
     inner: Box<dyn GraphExecutionReporter>,
     tasks: Rc<RefCell<Vec<RecordedTask>>>,
+    /// Whether a task failed before it started, such as when its cache
+    /// couldn't be checked. It isn't in `tasks`, which records only tasks that
+    /// started, but it fails the run.
+    failed_before_start: Rc<Cell<bool>>,
     workspace_path: Arc<AbsolutePath>,
     writer: Box<dyn Write>,
     show_details: bool,
     write_summary: Option<WriteSummaryFn>,
     program_name: Str,
+    run_kind: RunKind,
 }
 
 impl GraphExecutionReporter for SummaryGraphReporter {
@@ -104,6 +115,7 @@ impl GraphExecutionReporter for SummaryGraphReporter {
         Box::new(SummaryLeafReporter {
             inner,
             tasks: Rc::clone(&self.tasks),
+            failed_before_start: Rc::clone(&self.failed_before_start),
             display: display.clone(),
             workspace_path: Arc::clone(&self.workspace_path),
             cache_status: None,
@@ -133,7 +145,8 @@ impl GraphExecutionReporter for SummaryGraphReporter {
             })
             .collect();
 
-        let has_infra_errors = tasks.iter().any(|t| t.result.error().is_some());
+        let has_infra_errors =
+            tasks.iter().any(|t| t.result.error().is_some()) || self.failed_before_start.get();
 
         let failed_exit_codes: Vec<i32> = tasks
             .iter()
@@ -166,9 +179,9 @@ impl GraphExecutionReporter for SummaryGraphReporter {
         let summary = LastRunSummary { tasks, exit_code };
 
         let summary_buf = if self.show_details {
-            format_full_summary(&summary)
+            format_full_summary(&summary, self.run_kind)
         } else {
-            format_compact_summary(&summary, &self.program_name)
+            format_compact_summary(&summary, &self.program_name, self.run_kind)
         };
 
         if let Some(write_summary) = self.write_summary {
@@ -194,6 +207,7 @@ impl GraphExecutionReporter for SummaryGraphReporter {
 struct SummaryLeafReporter {
     inner: Box<dyn LeafExecutionReporter>,
     tasks: Rc<RefCell<Vec<RecordedTask>>>,
+    failed_before_start: Rc<Cell<bool>>,
     display: ExecutionItemDisplay,
     workspace_path: Arc<AbsolutePath>,
     cache_status: Option<CacheStatus>,
@@ -240,6 +254,8 @@ impl LeafExecutionReporter for SummaryLeafReporter {
             };
 
             self.tasks.borrow_mut().push(RecordedTask { summary, upload_error });
+        } else if error.is_some() {
+            self.failed_before_start.set(true);
         }
 
         self.inner.finish(status, cache_update_status, error);
@@ -253,34 +269,12 @@ mod tests {
     use super::*;
     use crate::session::{
         cache::CacheMiss,
+        event::{CacheErrorKind, CacheNotUpdatedReason},
         reporter::{
-            InterleavedReporterBuilder,
-            test_fixtures::{spawn_task, test_path},
+            ColorSupport, InterleavedReporterBuilder,
+            test_fixtures::{SharedBuffer, spawn_task, test_path},
         },
     };
-
-    /// A writer whose output stays readable after it's moved into a reporter.
-    #[derive(Clone, Default)]
-    struct SharedBuffer(Rc<RefCell<Vec<u8>>>);
-
-    impl Write for SharedBuffer {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.borrow_mut().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl SharedBuffer {
-        fn text(&self) -> Str {
-            let bytes = self.0.borrow();
-            let text = std::str::from_utf8(&bytes).unwrap();
-            vt_str::format!("{}", anstream::adapter::strip_str(text))
-        }
-    }
 
     #[test]
     fn upload_error_set_after_the_task_finishes_is_in_the_summary() {
@@ -293,20 +287,23 @@ mod tests {
         let saved = SharedBuffer::default();
         let write_summary: WriteSummaryFn = Box::new({
             let mut saved = saved.clone();
-            move |summary| saved.write_all(&format_compact_summary(summary, "vp")).unwrap()
+            move |summary| {
+                saved.write_all(&format_compact_summary(summary, "vp", RunKind::Real)).unwrap();
+            }
         });
         let mut reporter = Box::new(SummaryReporterBuilder::new(
             Box::new(InterleavedReporterBuilder::new(
                 test_path(),
                 Box::new(std::io::sink()),
                 ColorSupport::uniform(false),
+                RunKind::Real,
             )),
             test_path(),
             Box::new(output.clone()),
             false,
             Some(write_summary),
             Str::from("vp"),
-            ColorSupport::uniform(false),
+            RunKind::Real,
         ))
         .build();
 
@@ -329,5 +326,43 @@ mod tests {
             output.text().as_str(),
             vt_str::format!("Waiting for 1 remote cache upload to finish...\n{summary}").as_str()
         );
+    }
+
+    /// A task whose cache can't be checked fails before it starts, so it isn't
+    /// in the summary, but the run still fails, dry or real.
+    #[test]
+    fn task_that_fails_before_it_starts_fails_the_run() {
+        let task = spawn_task("build");
+        let item = &task.items[0];
+        let ExecutionItemKind::Leaf(leaf_kind) = &item.kind else {
+            panic!("test fixture item must be a Leaf");
+        };
+        for run_kind in [RunKind::Real, RunKind::Dry] {
+            let mut reporter = Box::new(SummaryReporterBuilder::new(
+                Box::new(InterleavedReporterBuilder::new(
+                    test_path(),
+                    Box::new(std::io::sink()),
+                    ColorSupport::uniform(false),
+                    run_kind,
+                )),
+                test_path(),
+                Box::new(std::io::sink()),
+                false,
+                None,
+                Str::from("vp"),
+                run_kind,
+            ))
+            .build();
+            let leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind);
+            leaf.finish(
+                None,
+                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+                Some(ExecutionError::Cache {
+                    kind: CacheErrorKind::Lookup,
+                    source: anyhow::anyhow!("the cache database can't be read"),
+                }),
+            );
+            assert_eq!(reporter.finish(), Err(ExitStatus::FAILURE), "{run_kind:?}");
+        }
     }
 }

@@ -67,7 +67,6 @@ vp run: 0/2 cache hit (0%), 2/2 successful. (Run `vp run --last-details` for ful
 - Nothing runs and nothing is written: no process, no cache entry, no change to `vp run --last-details`.
 - Everything else is a real run's: the plan, the cache check, every run flag and the args after the task name. The remote cache is read exactly when a real run would read it. Outputs are never downloaded or restored, since that would write files.
 - Each step is checked against the files as they are now. In the JSON, a step that waits on one that would write files first, by running or by restoring outputs on a hit, is `unknown`: its files may change before it starts. The text shows today's check for it, and the real run below shows what can change.
-- The first changed file is the first in path order, `cache.input` files before the files the task read.
 
 ### `-v`
 
@@ -513,7 +512,9 @@ type RunPlan = {
 
 - **Placement.** Like every vp flag, `--dry-run` goes before the task name. `vp run deploy --dry-run` passes `--dry-run` to `deploy` and runs it.
 - **Nested dry runs.** A task whose command runs `vp run --dry-run …` isn't inlined like other nested `vp run` commands: that command is started as a process, and it prints its own dry run.
-- **Exit codes.** A dry run exits 0 when planning succeeds, whatever it predicts. When planning fails, the error goes to stderr and the exit code is non-zero.
+- **Exit codes.** A dry run exits 0 when planning succeeds, whatever it predicts, unless a step's cache can't be checked. When planning fails, the error goes to stderr and the exit code is non-zero.
+- **Summary.** A dry run's summary follows a real run's rules, with "nothing was run" in place of the successful count and the time saved. A single task gets a summary line only when it would hit: `vp run: cache hit, nothing was run.` There is no `--last-details` hint, since that shows the last real run. The detailed summary has no ✓ or exit codes, and a hit's line is just `→ Cache hit`.
+- **Cache errors.** When a step's cache can't be checked, for example because the cache database can't be read, the error is printed under that step's command, and the dry run stops and fails as a real run does. A cache folder that can't be opened, for example because it's read-only, fails the dry run as it fails a real run.
 - **`--last-details`.** After a run with `-v`, it shows every change.
 
 ## Changes to existing behaviour

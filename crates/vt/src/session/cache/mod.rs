@@ -44,9 +44,12 @@ use wincode::{
 };
 
 use self::remote::{ReadError, RemoteClients, RemoteUploads, Restore, UploadError};
-use super::execute::{
-    fingerprint::{PostRunFingerprint, TrackedEnvQuery},
-    pipe::StdOutput,
+use super::{
+    event::RunKind,
+    execute::{
+        fingerprint::{PostRunFingerprint, TrackedEnvQuery},
+        pipe::StdOutput,
+    },
 };
 
 const TASK_CACHE_PREALLOCATION_SIZE_LIMIT: usize = 256 * 1024 * 1024;
@@ -437,6 +440,9 @@ impl ExecutionCache {
     /// remote request or check is a [`ReadError::Cancelled`] miss, and a
     /// cancelled check of the local entry returns `Ok(None)`. Either way the
     /// task doesn't start, so nothing is reported.
+    ///
+    /// A dry run (`RunKind::Dry`) writes nothing: a local hit isn't recorded,
+    /// and a remote hit's archive isn't downloaded.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn try_hit(
         &self,
@@ -444,6 +450,7 @@ impl ExecutionCache {
         globbed_inputs: &Arc<BTreeMap<RelativePathBuf, u64>>,
         workspace_root: &Arc<AbsolutePath>,
         cache_dir: &AbsolutePath,
+        run_kind: RunKind,
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Option<Result<CacheHit, CacheMiss>>> {
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
@@ -458,8 +465,9 @@ impl ExecutionCache {
         };
 
         let start = Instant::now();
-        let Some(local_lookup) =
-            self.try_hit_local(cache_metadata, &cache_key, &validation, cancel_token).await?
+        let Some(local_lookup) = self
+            .try_hit_local(cache_metadata, &cache_key, &validation, run_kind, cancel_token)
+            .await?
         else {
             return Ok(None);
         };
@@ -497,6 +505,7 @@ impl ExecutionCache {
                 &cache_key,
                 &validation,
                 cache_dir,
+                run_kind,
                 cancel_token,
             )
             .await?;
@@ -528,6 +537,7 @@ impl ExecutionCache {
         cache_metadata: &CacheMetadata,
         cache_key: &CacheEntryKey,
         validation: &Validation,
+        run_kind: RunKind,
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Option<Result<CacheEntryValue, CacheMiss>>> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
@@ -550,7 +560,9 @@ impl ExecutionCache {
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed
-            self.upsert_task_fingerprint(execution_cache_key, cache_key).await?;
+            if run_kind == RunKind::Real {
+                self.upsert_task_fingerprint(execution_cache_key, cache_key).await?;
+            }
             return Ok(Some(Ok(cache_value)));
         }
 
@@ -570,11 +582,12 @@ impl ExecutionCache {
 
     /// Fetch the entry from the remote cache that `remote_config` configures.
     /// An exact entry that passes validation is a hit once its output archive
-    /// is downloaded.
+    /// is downloaded, or right away in a dry run.
     /// A fallback entry, a failed validation, or a failed read is a miss. An
     /// error while validating counts as a failed read, so the remote entry
     /// never fails the task. The fetched entries are checked off the
     /// scheduler's thread.
+    #[expect(clippy::too_many_arguments, reason = "forwarded from `try_hit`")]
     async fn try_hit_remote(
         &self,
         remote_config: &ResolvedRemoteCacheConfig,
@@ -582,6 +595,7 @@ impl ExecutionCache {
         cache_key: &CacheEntryKey,
         validation: &Validation,
         cache_dir: &AbsolutePath,
+        run_kind: RunKind,
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
         let start = Instant::now();
@@ -616,6 +630,12 @@ impl ExecutionCache {
             Some(Err(miss)) => return Ok(Err(miss)),
             None => return Ok(Err(ReadError::Cancelled.into_miss())),
         };
+        // `resolve` checks that the entry has an archive exactly when it has a
+        // blob to download, so the hit a dry run shows says whether it restores
+        // outputs.
+        if run_kind == RunKind::Dry {
+            return Ok(Ok(cache_value));
+        }
 
         let output_archive = match blob_id {
             Some(blob_id) => {

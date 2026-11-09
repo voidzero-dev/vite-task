@@ -1,0 +1,37 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt print-file src/a.txt",
+      "cache": {
+        "input": ["src/**"]
+      }
+    },
+    "test": {
+      "command": "vtt print tested",
+      "dependsOn": ["build"],
+      "cache": {
+        "input": ["src/**"]
+      }
+    },
+    "steps": {
+      "command": "vtt print one && echo hello && vtt print two",
+      "cache": {
+        "input": ["src/**"]
+      }
+    },
+    "uncached": {
+      "command": "vtt print uncached",
+      "cache": false
+    },
+    "nested": {
+      "command": "vt run build"
+    },
+    "nested-dry-run": {
+      "command": "vt run --dry-run build"
+    },
+    "args": {
+      "command": "vtt print",
+      "cache": false
+    }
+  }
+}

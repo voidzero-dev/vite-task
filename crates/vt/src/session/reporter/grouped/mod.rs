@@ -12,7 +12,7 @@ use super::{
     format_command_with_cache_status, format_task_label, maybe_strip_writer,
     write_leaf_trailing_output,
 };
-use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
+use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError, RunKind};
 
 mod writer;
 
@@ -92,8 +92,12 @@ struct GroupedLeafReporter {
 
 impl LeafExecutionReporter for GroupedLeafReporter {
     fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
-        let line =
-            format_command_with_cache_status(&self.display, &self.workspace_path, &cache_status);
+        let line = format_command_with_cache_status(
+            &self.display,
+            &self.workspace_path,
+            &cache_status,
+            RunKind::Real,
+        );
 
         self.started = true;
 
