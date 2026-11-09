@@ -968,3 +968,103 @@ steps = [
     ],
   ], comment = "Nothing can listen on port 0. The failed fetch is a miss, as in a real run." },
 ]
+
+[[e2e]]
+name = "very_verbose_remote_hit"
+cfg = 'not(target_env = "musl")'
+ignore = true
+comment = """
+With `-vv`, a remote hit's outputs are listed once its archive is downloaded. A dry run doesn't download it, so it says they aren't, and a real run lists them. A remote hit without outputs has none to list either way.
+"""
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "check",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "--dry-run",
+    "-vv",
+    "build",
+  ], comment = "A dry run doesn't download the archive, so the outputs aren't listed." },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "-vv",
+    "build",
+  ], comment = "In the JSON, they're `notDownloaded`. Hashes depend on file contents, so they're redacted.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>', '"hash":"[0-9a-f]{16}"' = '"hash":"<hash>"' } },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "-vv",
+    "check",
+  ], comment = "`check` has no outputs, which the entry says without its archive, so there's no `outputs`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>', '"hash":"[0-9a-f]{16}"' = '"hash":"<hash>"' } },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "-vv",
+    "build",
+  ], comment = "A real run downloads the archive, so it lists the outputs it restores." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]

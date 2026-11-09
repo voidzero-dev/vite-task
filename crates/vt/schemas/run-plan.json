@@ -224,10 +224,142 @@
           "type": "integer",
           "format": "uint64",
           "minimum": 0
+        },
+        "fingerprint": {
+          "description": "With `-vv`: everything the cached run depends on, changed or not: the env names and inputs the cache records for this step. Absent when it depends on none.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Fingerprint"
+            }
+          ]
+        },
+        "outputs": {
+          "description": "With `-vv`: the files a hit restores, by path. Directories don't get entries of their own. Absent when there are none. `\"notDownloaded\"` for a cached run from the remote cache that has outputs: a dry run doesn't download its archive, so its files aren't known.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Outputs"
+            }
+          ]
         }
       },
       "required": [
         "durationMs"
+      ]
+    },
+    "Fingerprint": {
+      "description": "Everything a cached run depends on.",
+      "type": "object",
+      "properties": {
+        "env": {
+          "description": "Env names, sorted. Absent when there are none.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "inputs": {
+          "description": "The cached run's inputs, by path, with what is checked: the files it matched or read, the directories it opened, and the paths it found missing. Absent when there are none.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/PathFingerprint"
+          }
+        }
+      }
+    },
+    "PathFingerprint": {
+      "description": "What a cached run recorded of a path it depends on.",
+      "oneOf": [
+        {
+          "description": "A file, matched by `cache.input` or read by the task. Its content is checked.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "file"
+            },
+            "hash": {
+              "description": "A hash of the content the cached run recorded. Compare it only with hashes from the same version of `vp run`: the algorithm can change.",
+              "type": "string"
+            },
+            "mayBeMissing": {
+              "description": "The task rewrites this file, so it may be missing, as on a fresh checkout. When it is there, its content is still checked.",
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "type",
+            "hash"
+          ]
+        },
+        {
+          "description": "A directory the task opened.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "dir"
+            },
+            "entries": {
+              "description": "The names of the directory's entries, when the task listed it. Adding or removing an entry is a change. An empty array means the directory was empty. Absent when the task opened the directory without listing it: then only that it exists is checked.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "mayBeMissing": {
+              "description": "The task creates this directory, as a folder or a link, so it may be missing, as on a fresh checkout. When it is there, it is still checked.",
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "A path the task looked for and didn't find. Creating it is a change.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "missing"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "Outputs": {
+      "description": "The files a hit restores, or why they aren't listed.",
+      "anyOf": [
+        {
+          "description": "The files, by path.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Why the files aren't listed.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Unlisted"
+            }
+          ]
+        }
+      ]
+    },
+    "Unlisted": {
+      "description": "Why a hit's output files aren't listed.",
+      "oneOf": [
+        {
+          "description": "The cached run is in the remote cache, and a dry run doesn't download its archive.",
+          "type": "string",
+          "const": "notDownloaded"
+        }
       ]
     },
     "Hit": {

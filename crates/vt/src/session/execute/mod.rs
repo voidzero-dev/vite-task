@@ -455,6 +455,7 @@ async fn run(
                 replayed_duration: hit.value.duration,
                 source: hit.source,
                 restores_outputs: hit.value.output_archive.is_some(),
+                baseline: hit.baseline.clone(),
             });
             if run_kind == RunKind::Dry {
                 return Ok(Report::CacheHit);

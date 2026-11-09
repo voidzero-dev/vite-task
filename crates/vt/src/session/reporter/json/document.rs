@@ -197,6 +197,95 @@ pub struct Changed {
 pub struct Baseline {
     /// How long the cached run took, in milliseconds. On a hit, the time a replay saves.
     pub duration_ms: u64,
+
+    /// With `-vv`: everything the cached run depends on, changed or not: the env names and
+    /// inputs the cache records for this step. Absent when it depends on none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, schemars(with = "Fingerprint"))]
+    pub fingerprint: Option<Fingerprint>,
+
+    /// With `-vv`: the files a hit restores, by path. Directories don't get entries of their
+    /// own. Absent when there are none. `"notDownloaded"` for a cached run from the remote
+    /// cache that has outputs: a dry run doesn't download its archive, so its files aren't
+    /// known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, schemars(with = "Outputs"))]
+    pub outputs: Option<Outputs>,
+}
+
+/// The files a hit restores, or why they aren't listed.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(untagged)]
+pub enum Outputs {
+    /// The files, by path.
+    Files(Vec<Str>),
+    /// Why the files aren't listed.
+    Unlisted(Unlisted),
+}
+
+/// Why a hit's output files aren't listed.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub enum Unlisted {
+    /// The cached run is in the remote cache, and a dry run doesn't download its archive.
+    NotDownloaded,
+}
+
+/// Everything a cached run depends on.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct Fingerprint {
+    /// Env names, sorted. Absent when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<Str>,
+
+    /// The cached run's inputs, by path, with what is checked: the files it matched or read,
+    /// the directories it opened, and the paths it found missing. Absent when there are none.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub inputs: BTreeMap<Str, PathFingerprint>,
+}
+
+/// What a cached run recorded of a path it depends on.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum PathFingerprint {
+    /// A file, matched by `cache.input` or read by the task. Its content is checked.
+    #[serde(rename_all = "camelCase")]
+    File {
+        /// A hash of the content the cached run recorded. Compare it only with hashes from the
+        /// same version of `vp run`: the algorithm can change.
+        hash: Str,
+
+        /// The task rewrites this file, so it may be missing, as on a fresh checkout. When it
+        /// is there, its content is still checked.
+        #[serde(skip_serializing_if = "is_false")]
+        #[cfg_attr(test, schemars(with = "AlwaysTrue"))]
+        may_be_missing: bool,
+    },
+
+    /// A directory the task opened.
+    #[serde(rename_all = "camelCase")]
+    Dir {
+        /// The names of the directory's entries, when the task listed it. Adding or removing
+        /// an entry is a change. An empty array means the directory was empty. Absent when the
+        /// task opened the directory without listing it: then only that it exists is checked.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, schemars(with = "Vec<Str>"))]
+        entries: Option<Vec<Str>>,
+
+        /// The task creates this directory, as a folder or a link, so it may be missing, as on a
+        /// fresh checkout. When it is there, it is still checked.
+        #[serde(skip_serializing_if = "is_false")]
+        #[cfg_attr(test, schemars(with = "AlwaysTrue"))]
+        may_be_missing: bool,
+    },
+
+    /// A path the task looked for and didn't find. Creating it is a change.
+    Missing,
 }
 
 /// One difference between a step and its cached run.
