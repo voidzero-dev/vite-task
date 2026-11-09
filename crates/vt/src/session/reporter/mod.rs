@@ -20,6 +20,9 @@
 //! - [`labeled::LabeledReporterBuilder`] — prefixes each output line with `[pkg#task]`.
 //! - [`grouped::GroupedReporterBuilder`] — buffers output per task and prints as a block.
 //!
+//! With `--json`, a dry run uses [`json::JsonReporterBuilder`] instead, which prints the run
+//! plan as one JSON document.
+//!
 //! [`summary_reporter::SummaryReporterBuilder`] wraps any mode reporter to add summary
 //! tracking (task results, exit codes, cache stats) and renders the summary at the end.
 //!
@@ -28,6 +31,7 @@
 
 mod grouped;
 mod interleaved;
+mod json;
 mod labeled;
 mod plain;
 mod retrying_writer;
@@ -38,6 +42,7 @@ use std::{io::Write, num::NonZeroUsize, process::ExitStatus as StdExitStatus};
 
 pub use grouped::GroupedReporterBuilder;
 pub use interleaved::InterleavedReporterBuilder;
+pub use json::{JsonReporterBuilder, RUN_PLAN_SCHEMA};
 pub use labeled::LabeledReporterBuilder;
 use owo_colors::Style;
 pub use plain::PlainReporter;

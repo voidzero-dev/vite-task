@@ -1,0 +1,183 @@
+[[e2e]]
+name = "cache_statuses"
+comment = """
+Each step's `cache` shows what a dry run found. Durations vary, and `vtt` is outside the workspace, at an absolute path, so both are redacted.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "build",
+  ], comment = "Nothing cached yet. In a terminal, the document is indented.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"', '"program": "[^"]*"' = '"program": "<vtt>"' } },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "build",
+  ], comment = "A hit. Captured, the document is on one line.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>' } },
+  [
+    "vtt",
+    "write-file",
+    "a.txt",
+    "changed",
+  ],
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "build",
+  ], comment = "One file changed. Without `-v`, the file check stops there, so the list may be partial.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>' } },
+  [
+    "vtt",
+    "write-file",
+    "b.txt",
+    "changed",
+  ],
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "-v",
+    "build",
+  ], comment = "With `-v`, every changed file is listed, by path, and the list is complete.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>' } },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "uncached",
+  ], comment = "Caching is off for this task.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"' } },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "other",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE_URL",
+      "http://127.0.0.1:0/projects/test",
+    ],
+  ], comment = "Nothing is cached locally, and the remote cache can't be read: nothing can listen on port 0.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"' } },
+]
+
+[[e2e]]
+name = "flags"
+comment = """
+Run flags that combine with `--dry-run --json`. Like them, they go before the task name.
+"""
+steps = [
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "--cache",
+    "uncached",
+  ], comment = "`--cache` leaves a task with `cache: false` uncached.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"' } },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "--concurrency-limit",
+    "1",
+    "--ignore-depends-on",
+    "other",
+  ], comment = "Flags that only change scheduling or `dependsOn` are accepted too.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"' } },
+  { argv = [
+    "vt",
+    "run",
+    "other",
+    "--dry-run",
+    "--json",
+  ], comment = "After the task name, `--dry-run` and `--json` are passed to the task, which runs." },
+]
+
+[[e2e]]
+name = "errors"
+comment = """
+Errors go to stderr, and nothing is printed to stdout.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--json",
+    "build",
+  ], comment = "With a task, `--json` requires `--dry-run`." },
+  # clap names the binary in its usage line by the path it was run from,
+  # which is `vt.exe` on Windows.
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "--log",
+    "labeled",
+    "build",
+  ], comment = "`--json` conflicts with `--log`.", redact = { 'Usage: vt\.exe ' = 'Usage: vt ' } },
+  { argv = [
+    "vt",
+    "run",
+    "--json",
+    "--last-details",
+  ], comment = "`--last-details` takes no other argument.", redact = { 'Usage: vt\.exe ' = 'Usage: vt ' } },
+  { argv = [
+    "vt",
+    "run",
+    "--json",
+    "-r",
+  ], comment = "Without a task, `--json` prints every package and task, and takes no other argument." },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+  ], comment = "Without a task, there is nothing to plan, as for `--dry-run`." },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "typo",
+  ], comment = "A task that isn't found is an error, not a task list." },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "nested",
+  ], comment = "Nested runs aren't in the run plan yet." },
+]

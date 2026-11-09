@@ -161,28 +161,65 @@ pub struct Comparison {
     /// file check stops at the first changed file it finds, so at most one
     /// file is listed.
     pub changes: Vec<Change>,
+    /// How long the cached run took. `None` when the command, config or env
+    /// changed: then only the key of the task's previous cached run is
+    /// compared, not the run itself.
+    pub baseline_duration: Option<Duration>,
+    /// Other files may have changed too: the file check stopped at the first
+    /// changed file or couldn't check some of them, or, after a command,
+    /// config or env change, didn't run.
+    pub changes_partial: bool,
 }
 
 impl Comparison {
     /// Sort `changes` and drop duplicates, such as an env var that two
     /// tracked queries match. Of two duplicates, the one found first is kept.
-    fn new(mut changes: Vec<Change>) -> Self {
+    fn new(
+        mut changes: Vec<Change>,
+        baseline_duration: Option<Duration>,
+        changes_partial: bool,
+    ) -> Self {
         changes.sort_by(|a, b| a.order_key().cmp(&b.order_key()));
         changes.dedup_by(|a, b| a.order_key() == b.order_key());
-        Self { changes }
+        Self { changes, baseline_duration, changes_partial }
     }
+
+    /// The miss for a cached run, `value`, that differs from the execution
+    /// as `checked` found.
+    fn of_value(value: &CacheEntryValue, checked: Checked) -> Self {
+        Self::new(checked.changes, Some(value.duration), checked.partial)
+    }
+
+    /// The miss for a task whose previous cached run is stored under
+    /// `old_key`: only the keys are compared, so the files and tracked envs
+    /// aren't checked.
+    fn of_key(old_key: &CacheEntryKey, current_key: &CacheEntryKey) -> Self {
+        Self::new(old_key.changes_to(current_key), None, true)
+    }
+}
+
+/// What comparing a cached run with the execution found.
+#[derive(Debug)]
+pub struct Checked {
+    /// Every difference found. Empty when the cached run matches.
+    pub changes: Vec<Change>,
+    /// Some files weren't checked, as in [`Comparison::changes_partial`].
+    pub partial: bool,
 }
 
 /// One difference between the current execution and the cached run it's
 /// compared with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Change {
-    /// The program the command runs changed.
-    Program,
+    /// The program the command runs changed. Each is the program as the
+    /// cache records it: its path inside the workspace, or just its name
+    /// outside it.
+    Program { from: Str, to: Str },
     /// The command's arguments changed.
-    Args,
-    /// The directory the command runs in changed.
-    Cwd,
+    Args { from: Arc<[Str]>, to: Arc<[Str]> },
+    /// The directory the command runs in changed. Each is relative to the
+    /// workspace root.
+    Cwd { from: RelativePathBuf, to: RelativePathBuf },
     /// The task's `input` setting changed.
     InputConfig,
     /// The task's `output` setting changed.
@@ -205,9 +242,9 @@ impl Change {
     fn order_key(&self) -> (u8, OrderName<'_>, u8) {
         let exact = OrderName::Exact;
         match self {
-            Self::Program => (0, exact(""), 0),
-            Self::Args => (1, exact(""), 0),
-            Self::Cwd => (2, exact(""), 0),
+            Self::Program { .. } => (0, exact(""), 0),
+            Self::Args { .. } => (1, exact(""), 0),
+            Self::Cwd { .. } => (2, exact(""), 0),
             Self::InputConfig => (3, exact(""), 0),
             Self::OutputConfig => (4, exact(""), 0),
             Self::UntrackedEnvAdded { name } => (5, exact(name), 0),
@@ -443,7 +480,7 @@ struct Validation {
 
 impl Validation {
     /// Validate `cache_value` as [`CacheEntryValue::validate`] does.
-    fn validate(&self, cache_value: &CacheEntryValue) -> anyhow::Result<Vec<Change>> {
+    fn validate(&self, cache_value: &CacheEntryValue) -> anyhow::Result<Checked> {
         cache_value.validate(
             &self.unfiltered_envs,
             &self.globbed_inputs,
@@ -620,16 +657,19 @@ impl ExecutionCache {
             let validation = validation.clone();
             let Some(checked) = run_off_thread(cancel_token, move || {
                 let cache_value: CacheEntryValue = deserialize_cache(&value_blob)?;
-                let changes = validation.validate(&cache_value)?;
-                anyhow::Ok((cache_value, changes))
+                let checked = validation.validate(&cache_value)?;
+                anyhow::Ok((cache_value, checked))
             })
             .await
             else {
                 return Ok(None);
             };
-            let (cache_value, changes) = checked?;
-            if !changes.is_empty() {
-                return Ok(Some(Err(CacheMiss::Changed(Comparison::new(changes)))));
+            let (cache_value, checked) = checked?;
+            if !checked.changes.is_empty() {
+                return Ok(Some(Err(CacheMiss::Changed(Comparison::of_value(
+                    &cache_value,
+                    checked,
+                )))));
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed
@@ -646,8 +686,10 @@ impl ExecutionCache {
         {
             // `get_cache_entry_blob` above returned None for the *current*
             // cache key, so the associated key must differ.
-            let changes = old_cache_key.changes_to(cache_key);
-            return Ok(Some(Err(CacheMiss::Changed(Comparison::new(changes)))));
+            return Ok(Some(Err(CacheMiss::Changed(Comparison::of_key(
+                &old_cache_key,
+                cache_key,
+            )))));
         }
 
         Ok(Some(Err(CacheMiss::NotFound)))
@@ -1086,11 +1128,15 @@ mod tests {
     /// same env, so its change is listed once.
     #[test]
     fn env_changes_dedupe_by_platform_rules() {
-        let comparison = Comparison::new(vec![
-            tracked_env_changed("probe_env"),
-            tracked_env_changed("PROBE_ENV"),
-            tracked_env_changed("probe_env"),
-        ]);
+        let comparison = Comparison::new(
+            vec![
+                tracked_env_changed("probe_env"),
+                tracked_env_changed("PROBE_ENV"),
+                tracked_env_changed("probe_env"),
+            ],
+            None,
+            false,
+        );
         assert_eq!(comparison.changes.len(), if cfg!(windows) { 1 } else { 2 });
     }
 

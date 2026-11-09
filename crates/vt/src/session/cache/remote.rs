@@ -41,7 +41,7 @@ use wincode::{
 };
 
 use super::{
-    CACHE_SCHEMA_VERSION, CacheEntryKey, CacheEntryValue, CacheMiss, Change, Comparison,
+    CACHE_SCHEMA_VERSION, CacheEntryKey, CacheEntryValue, CacheMiss, Checked, Comparison,
     TaskCacheConfig, archive, deserialize_cache, serialize_cache,
 };
 
@@ -129,13 +129,13 @@ pub(super) struct Restore {
 pub(super) fn resolve(
     fetched: Result<Option<Fetched>, ReadError>,
     cache_key: &CacheEntryKey,
-    mut validate: impl FnMut(&CacheEntryValue) -> anyhow::Result<Vec<Change>>,
+    mut validate: impl FnMut(&CacheEntryValue) -> anyhow::Result<Checked>,
 ) -> Result<Restore, CacheMiss> {
     let entries = match fetched.map_err(ReadError::into_miss)? {
         Some(Fetched::Exact { entries }) => entries,
         Some(Fetched::Fallback { key }) => {
             let key = decode_key(&key).map_err(ReadError::into_miss)?;
-            return Err(CacheMiss::Changed(Comparison::new(key.changes_to(cache_key))));
+            return Err(CacheMiss::Changed(Comparison::of_key(&key, cache_key)));
         }
         None => return Err(CacheMiss::NotFound),
     };
@@ -165,15 +165,15 @@ pub(super) fn resolve(
 /// Check one entry of an exact match, as [`resolve`] describes.
 fn check_entry(
     Entry { value, blob_id }: Entry,
-    validate: &mut impl FnMut(&CacheEntryValue) -> anyhow::Result<Vec<Change>>,
+    validate: &mut impl FnMut(&CacheEntryValue) -> anyhow::Result<Checked>,
 ) -> Result<Restore, CacheMiss> {
     let value = decode_value(&value).map_err(|err| ReadError::CorruptValue(err).into_miss())?;
     if value.output_archive.is_some() != blob_id.is_some() {
         return Err(ReadError::MismatchedBlob.into_miss());
     }
     match validate(&value) {
-        Ok(changes) if changes.is_empty() => Ok(Restore { value, blob_id }),
-        Ok(changes) => Err(CacheMiss::Changed(Comparison::new(changes))),
+        Ok(checked) if checked.changes.is_empty() => Ok(Restore { value, blob_id }),
+        Ok(checked) => Err(CacheMiss::Changed(Comparison::of_value(&value, checked))),
         Err(err) => Err(ReadError::Validate(err).into_miss()),
     }
 }
@@ -557,7 +557,7 @@ mod tests {
 
     use super::*;
     use crate::session::{
-        cache::{FileCheck, InputChangeKind},
+        cache::{Change, FileCheck, InputChangeKind},
         execute::{
             fingerprint::{PostRunFingerprint, TrackedEnvQuery},
             pipe::{OutputKind, StdOutput},
@@ -648,7 +648,7 @@ mod tests {
     /// the current inputs.
     fn validate_against(
         globbed_inputs: BTreeMap<RelativePathBuf, u64>,
-    ) -> impl FnMut(&CacheEntryValue) -> anyhow::Result<Vec<Change>> {
+    ) -> impl FnMut(&CacheEntryValue) -> anyhow::Result<Checked> {
         move |value| {
             let workspace_root = vt_path::current_dir().unwrap();
             value.validate(
@@ -661,7 +661,7 @@ mod tests {
         }
     }
 
-    fn not_validated(_: &CacheEntryValue) -> anyhow::Result<Vec<Change>> {
+    fn not_validated(_: &CacheEntryValue) -> anyhow::Result<Checked> {
         panic!("only exact entries that decode and match their blob are validated")
     }
 
@@ -801,8 +801,15 @@ mod tests {
             not_validated,
         )
         .unwrap_err();
+        // Only the keys are compared, so the files may have changed too, and
+        // there's no run to take a duration from.
         assert!(
-            matches!(&miss, CacheMiss::Changed(comparison) if comparison.changes == [Change::InputConfig]),
+            matches!(
+                &miss,
+                CacheMiss::Changed(comparison) if comparison.changes == [Change::InputConfig]
+                    && comparison.changes_partial
+                    && comparison.baseline_duration.is_none()
+            ),
             "{miss:?}"
         );
     }
