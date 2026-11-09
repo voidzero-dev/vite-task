@@ -153,7 +153,12 @@ pub enum RunKind {
 pub enum CacheStatus {
     Disabled(CacheDisabledReason),
     Miss(CacheMiss),
-    Hit { replayed_duration: Duration, source: CacheHitSource },
+    Hit {
+        replayed_duration: Duration,
+        source: CacheHitSource,
+        /// The hit has output files, which a real run restores.
+        restores_outputs: bool,
+    },
 }
 
 /// Convert `ExitStatus` to an i32 exit code.

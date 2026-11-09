@@ -334,7 +334,7 @@ type RunPlan = {
                    *   it starts, by running or by being a hit that restores outputs. A step waits on the
                    *   earlier steps of its task, on the tasks in its `dependsOn`, and, in a nested plan, on
                    *   the steps before the enclosing step. Only a step that would otherwise be `hit` or
-                   *   `changed` can be `unknown`, and `changes` and `changesPartial` still show today's check.
+                   *   `changed` can be `unknown`, and `changes` still shows today's check.
                    */
                   status: 'hit' | 'changed' | 'unknown';
 

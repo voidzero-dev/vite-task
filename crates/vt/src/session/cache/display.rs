@@ -193,8 +193,11 @@ mod tests {
 
     #[test]
     fn inline_cache_hit_names_remote_source() {
-        let hit =
-            |source| CacheStatus::Hit { replayed_duration: std::time::Duration::ZERO, source };
+        let hit = |source| CacheStatus::Hit {
+            replayed_duration: std::time::Duration::ZERO,
+            source,
+            restores_outputs: false,
+        };
 
         assert_eq!(
             format_cache_status_inline(&hit(CacheHitSource::Local), RunKind::Real).as_deref(),

@@ -100,7 +100,7 @@
           "type": "string"
         },
         "cache": {
-          "description": "Whether the cache would be used. Absent for a built-in such as `echo`.\n\nThe check looks at the files as they are now.",
+          "description": "Whether the cache would be used. Absent for a built-in such as `echo`.\n\nThe check looks at the files as they are now. `unknown` marks a step whose files an earlier step may change before it starts.",
           "allOf": [
             {
               "$ref": "#/definitions/Cache"
@@ -140,6 +140,24 @@
             "status": {
               "type": "string",
               "const": "changed"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "allOf": [
+            {
+              "$ref": "#/definitions/Changed"
+            }
+          ]
+        },
+        {
+          "description": "Can't be predicted yet: a step that runs before it would write files first, by running or by restoring a hit's outputs. `changes` shows the check of the files as they are now.",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "unknown"
             }
           },
           "required": [
@@ -393,7 +411,7 @@
           ]
         },
         "changes": {
-          "description": "What differs from the cached run, sorted by kind in the order listed here, then by name or path. Undoing all of them would make the step a hit, unless `changesPartial` is set.",
+          "description": "What differs from the cached run, sorted by kind in the order listed here, then by name or path. Undoing all of them would make the step a hit, unless `changesPartial` is set. Present for `changed`, and for `unknown` when today's check found differences.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/Change"
@@ -404,10 +422,7 @@
           "type": "boolean",
           "const": true
         }
-      },
-      "required": [
-        "changes"
-      ]
+      }
     },
     "NestedStep": {
       "description": "A nested `vp run`, which runs a plan of its own.",
