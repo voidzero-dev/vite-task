@@ -1,0 +1,30 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt print-file src/a.txt",
+      "cache": {
+        "input": ["src/**"]
+      }
+    },
+    "same-command": {
+      "command": "vtt print-file src/a.txt",
+      "dependsOn": ["build"],
+      "cache": {
+        "input": ["src/**"]
+      }
+    },
+    "uncached": {
+      "command": "vtt print uncached",
+      "cache": false
+    },
+    "up-and-back": {
+      "command": "vtt print-cwd",
+      "cwd": "src/..",
+      "cache": false
+    },
+    "cd-and-back": {
+      "command": "cd src && cd .. && vtt print-cwd",
+      "cache": false
+    }
+  }
+}

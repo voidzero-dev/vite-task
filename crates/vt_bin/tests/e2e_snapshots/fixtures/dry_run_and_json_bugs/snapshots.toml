@@ -1,0 +1,97 @@
+# Each case shows what `vt run --dry-run` or `--json` does today where it
+# disagrees with what they promise. The comments say what's expected.
+# `vtt` is outside the workspace, at an absolute path, so it's redacted.
+
+[[e2e]]
+name = "dry_run_writes_the_cache_folder"
+comment = """
+Bug: a dry run should write nothing, but it creates the cache folder and its database, even when no step is cached.
+"""
+steps = [
+  { argv = [
+    "vtt",
+    "stat-file",
+    "node_modules/.vite/task-cache",
+  ], comment = "Nothing has run yet." },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "uncached",
+  ], comment = "Caching is off for this task, so there's no cache to check." },
+  { argv = [
+    "vtt",
+    "stat-file",
+    "node_modules/.vite/task-cache",
+  ], comment = "Expected: missing. It was created by the dry run." },
+]
+
+[[e2e]]
+name = "entry_stored_earlier_in_the_run"
+comment = """
+Bug: `same-command` runs the same command, with the same inputs, as `build`, which it waits on, so they share one cache entry. On a fresh cache, a real run runs `build` and stores the entry, and `same-command` then hits it. A dry run checks both against today's cache, finds no entry for either, and predicts two misses. The JSON shows `same-command` as `noBaseline`, where it should be `unknown`, as for a step whose files an earlier step may change.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "same-command",
+  ], comment = "Predicts 0/2 cache hits." },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "same-command",
+  ], comment = "Expected: `same-command` is `unknown`. It's `noBaseline`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"' } },
+  { argv = [
+    "vt",
+    "run",
+    "same-command",
+  ], comment = "The real run hits 1/2." },
+]
+
+[[e2e]]
+name = "run_plan_cwd_is_not_normalized"
+comment = """
+Bug: both tasks run in the package's folder, by a `cwd` of `src/..` or by `cd src && cd ..`. The task graph leaves out a `cwd` that is the package's folder, but the run plan prints `"cwd":"src/.."`, which isn't a normalized path, for a step that runs in the package's folder and so should have no `cwd`.
+"""
+steps = [
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--json",
+  ], comment = "The task graph: `up-and-back` has no `cwd`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"' } },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "up-and-back",
+  ], comment = "Expected: no `cwd`. It's `src/..`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"' } },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "cd-and-back",
+  ], comment = "The same after `cd src && cd ..`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"' } },
+  { argv = [
+    "vt",
+    "run",
+    "up-and-back",
+  ], comment = "The command runs in the package's folder." },
+]
