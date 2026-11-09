@@ -529,6 +529,12 @@ fn run_case(
             // by vt100's `Screen::contents()` when the snapshot is rendered,
             // so this does not introduce colour-noise into existing snapshots.
             cmd.env("TERM", "xterm-256color");
+            // `vp run` checks cache entries on rayon's pool, and a task starts
+            // once its check finishes. With one thread, the checks finish in
+            // the order they're submitted, so tasks that become ready
+            // together start, and print their commands, in the same order
+            // every run.
+            cmd.env("RAYON_NUM_THREADS", "1");
             // The macOS x64 CI shard needs Playwright to select an x64 browser
             // while running under Rosetta on Apple Silicon.
             if let Some(value) = env::var_os("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE") {

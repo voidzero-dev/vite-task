@@ -38,7 +38,10 @@ const HIDE_PENDING_UPLOADS_ENV: &str = "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS";
 /// The `reporter` field is wrapped in `RefCell` because concurrent futures
 /// (via `FuturesUnordered`) need shared access to create leaf reporters.
 /// Since all futures run on a single thread (no `tokio::spawn`), `RefCell`
-/// is sufficient for interior mutability.
+/// is sufficient for interior mutability. That thread also runs any blocking
+/// work done inside them, so a cache lookup hashes inputs and checks entries
+/// on rayon's pool instead (see
+/// [`run_off_thread`](crate::session::cache::run_off_thread)).
 ///
 /// Cache fields are passed through to [`execute_spawn`] for cache-aware execution.
 struct ExecutionContext<'a> {

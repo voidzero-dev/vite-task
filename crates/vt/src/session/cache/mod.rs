@@ -7,9 +7,11 @@ mod validation;
 
 use std::{
     collections::BTreeMap,
+    ffi::OsStr,
     fmt::Display,
     fs::File,
     io::Write,
+    panic::{self, AssertUnwindSafe},
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
@@ -21,9 +23,11 @@ pub use display::{
     format_spawn_change,
 };
 use rusqlite::{Connection, OptionalExtension as _};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 use tokio_util::sync::CancellationToken;
+use vt_casefold::EnvName;
 use vt_glob::path::PathGlobSet;
 use vt_graph::config::ResolvedGlobConfig;
 use vt_path::{AbsolutePath, RelativePathBuf};
@@ -307,6 +311,77 @@ fn enable_wal(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Run `work` on rayon's global thread pool, in the current span, and wait for
+/// it until `cancel_token` is cancelled.
+///
+/// The scheduler polls every task's future on one thread, so file and CPU work
+/// done there, such as hashing a task's inputs or checking a cache entry,
+/// holds up every other task until it's done. Run there, the cache lookups of
+/// tasks that become ready together would run one after another.
+///
+/// The pool is rayon's rather than tokio's blocking threads because checking
+/// an entry already hashes its inferred inputs in parallel on it, and a pool
+/// thread takes part in that work instead of waiting for it. With one thread
+/// (`RAYON_NUM_THREADS=1`, as in the e2e tests), work also finishes in the
+/// order it's submitted, so tasks that become ready together start in the
+/// same order every run.
+///
+/// Returns `None` if `cancel_token` is cancelled first. Work that hasn't
+/// started then doesn't run, and work that's already running finishes in the
+/// background with its result dropped, so it must have no effects that
+/// outlive it. If `work` panics, the panic is resumed here.
+pub async fn run_off_thread<T: Send + 'static>(
+    cancel_token: &CancellationToken,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    if cancel_token.is_cancelled() {
+        return None;
+    }
+    let span = tracing::Span::current();
+    let (sender, receiver) = oneshot::channel();
+    rayon::spawn_fifo(move || {
+        if sender.is_closed() {
+            return;
+        }
+        // A panic in a job would abort the process, so it's sent to the
+        // waiting task instead.
+        let _ = sender.send(panic::catch_unwind(AssertUnwindSafe(|| span.in_scope(work))));
+    });
+    match cancel_token.run_until_cancelled(receiver).await? {
+        Ok(Ok(output)) => Some(output),
+        Ok(Err(panic)) => panic::resume_unwind(panic),
+        // The job sends a result unless the receiver is dropped first.
+        Err(oneshot::error::RecvError { .. }) => None,
+    }
+}
+
+/// What a lookup validates entries against: the execution's current envs and
+/// explicit inputs, and the files under the workspace root. It owns all of
+/// them, so that entries can be checked off the scheduler's thread.
+#[derive(Clone)]
+struct Validation {
+    /// The execution's `CacheMetadata::unfiltered_envs`.
+    unfiltered_envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
+    globbed_inputs: Arc<BTreeMap<RelativePathBuf, u64>>,
+    input_negative_globs: Arc<PathGlobSet<'static>>,
+    workspace_root: Arc<AbsolutePath>,
+}
+
+impl Validation {
+    /// Validate `cache_value` as [`CacheEntryValue::validate`] does.
+    fn validate(
+        &self,
+        cache_value: &CacheEntryValue,
+    ) -> anyhow::Result<Option<FingerprintMismatch>> {
+        cache_value.validate(
+            &self.unfiltered_envs,
+            &self.globbed_inputs,
+            &self.input_negative_globs,
+            &self.workspace_root,
+        )
+    }
+}
+
 impl ExecutionCache {
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
@@ -347,37 +422,47 @@ impl ExecutionCache {
     }
 
     /// Try to hit cache by looking up the cache entry key and validating inputs.
-    /// Returns `Ok(Ok(cache_hit))` on cache hit, `Ok(Err(cache_miss))` on miss.
+    /// Returns `Ok(Some(Ok(cache_hit)))` on cache hit, `Ok(Some(Err(cache_miss)))`
+    /// on miss.
     ///
     /// After a local miss, the remote cache is queried if the task has one. A
     /// remote hit has its output archive downloaded into `cache_dir`, is
     /// recorded locally by [`Self::restore`], and is never uploaded. If the
     /// local cache has an entry for the task, its miss reason is kept.
-    /// Otherwise the reason comes from the remote cache. Remote requests stop
-    /// when `cancel_token` is cancelled.
+    /// Otherwise the reason comes from the remote cache.
+    ///
+    /// Entries are decoded and validated on rayon's pool, as
+    /// [`run_off_thread`] describes, so other tasks' lookups don't wait for
+    /// them. The lookup stops when `cancel_token` is cancelled. A cancelled
+    /// remote request or check is a [`ReadError::Cancelled`] miss, and a
+    /// cancelled check of the local entry returns `Ok(None)`. Either way the
+    /// task doesn't start, so nothing is reported.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn try_hit(
         &self,
         cache_metadata: &CacheMetadata,
-        globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
-        workspace_root: &AbsolutePath,
+        globbed_inputs: &Arc<BTreeMap<RelativePathBuf, u64>>,
+        workspace_root: &Arc<AbsolutePath>,
         cache_dir: &AbsolutePath,
         cancel_token: &CancellationToken,
-    ) -> anyhow::Result<Result<CacheHit, CacheMiss>> {
+    ) -> anyhow::Result<Option<Result<CacheHit, CacheMiss>>> {
         let cache_key = CacheEntryKey::from_metadata(cache_metadata);
-        // Part of the key, so the same as when the entry was created.
-        let input_negative_globs = PathGlobSet::new(&cache_metadata.input_config.negative_globs)?;
+        let validation = Validation {
+            unfiltered_envs: Arc::clone(&cache_metadata.unfiltered_envs),
+            globbed_inputs: Arc::clone(globbed_inputs),
+            // Part of the key, so the same as when the entry was created.
+            input_negative_globs: Arc::new(
+                PathGlobSet::new(&cache_metadata.input_config.negative_globs)?.into_owned(),
+            ),
+            workspace_root: Arc::clone(workspace_root),
+        };
 
         let start = Instant::now();
-        let local_lookup = self
-            .try_hit_local(
-                cache_metadata,
-                &cache_key,
-                globbed_inputs,
-                &input_negative_globs,
-                workspace_root,
-            )
-            .await?;
+        let Some(local_lookup) =
+            self.try_hit_local(cache_metadata, &cache_key, &validation, cancel_token).await?
+        else {
+            return Ok(None);
+        };
         tracing::debug!(
             outcome = match &local_lookup {
                 Ok(_) => "hit",
@@ -388,7 +473,7 @@ impl ExecutionCache {
             "looked up the local cache"
         );
         let local_miss = match local_lookup {
-            Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Local })),
+            Ok(value) => return Ok(Some(Ok(CacheHit { value, source: CacheHitSource::Local }))),
             Err(miss) => miss,
         };
         #[expect(
@@ -402,7 +487,7 @@ impl ExecutionCache {
                     ..
                 },
             ) => remote_config,
-            None => return Ok(Err(local_miss)),
+            None => return Ok(Some(Err(local_miss))),
         };
         let start = Instant::now();
         let remote_lookup = self
@@ -410,9 +495,7 @@ impl ExecutionCache {
                 remote_config,
                 cache_metadata,
                 &cache_key,
-                globbed_inputs,
-                &input_negative_globs,
-                workspace_root,
+                &validation,
                 cache_dir,
                 cancel_token,
             )
@@ -428,39 +511,47 @@ impl ExecutionCache {
             "looked up the remote cache"
         );
         let remote_miss = match remote_lookup {
-            Ok(value) => return Ok(Ok(CacheHit { value, source: CacheHitSource::Remote })),
+            Ok(value) => return Ok(Some(Ok(CacheHit { value, source: CacheHitSource::Remote }))),
             Err(miss) => miss,
         };
-        Ok(Err(match local_miss {
+        Ok(Some(Err(match local_miss {
             CacheMiss::NotFound => remote_miss,
             local_miss => local_miss,
-        }))
+        })))
     }
 
+    /// Look up the local entry under `cache_key` and validate it with
+    /// `validation`. Returns `None` if `cancel_token` is cancelled while the
+    /// entry is checked.
     async fn try_hit_local(
         &self,
         cache_metadata: &CacheMetadata,
         cache_key: &CacheEntryKey,
-        globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
-        input_negative_globs: &PathGlobSet<'_>,
-        workspace_root: &AbsolutePath,
-    ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
+        validation: &Validation,
+        cancel_token: &CancellationToken,
+    ) -> anyhow::Result<Option<Result<CacheEntryValue, CacheMiss>>> {
         let execution_cache_key = &cache_metadata.execution_cache_key;
 
         // Try to find the cache entry by key (spawn fingerprint + input config)
-        if let Some(cache_value) = self.get_by_cache_key(cache_key).await? {
-            if let Some(mismatch) = cache_value.validate(
-                &cache_metadata.unfiltered_envs,
-                globbed_inputs,
-                input_negative_globs,
-                workspace_root,
-            )? {
-                return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
+        if let Some(value_blob) = self.get_cache_entry_blob(cache_key).await? {
+            let validation = validation.clone();
+            let Some(checked) = run_off_thread(cancel_token, move || {
+                let cache_value: CacheEntryValue = deserialize_cache(&value_blob)?;
+                let mismatch = validation.validate(&cache_value)?;
+                anyhow::Ok((cache_value, mismatch))
+            })
+            .await
+            else {
+                return Ok(None);
+            };
+            let (cache_value, mismatch) = checked?;
+            if let Some(mismatch) = mismatch {
+                return Ok(Some(Err(CacheMiss::FingerprintMismatch(mismatch))));
             }
             // Associate the execution key to the cache entry key if not already,
             // so that next time we can find it and report what changed
             self.upsert_task_fingerprint(execution_cache_key, cache_key).await?;
-            return Ok(Ok(cache_value));
+            return Ok(Some(Ok(cache_value)));
         }
 
         // No cache found with the current cache entry key,
@@ -468,13 +559,13 @@ impl ExecutionCache {
         if let Some(old_cache_key) =
             self.get_cache_key_by_execution_key(execution_cache_key).await?
         {
-            // `get_by_cache_key` above returned None for the *current* cache key,
-            // so the associated key must differ.
+            // `get_cache_entry_blob` above returned None for the *current*
+            // cache key, so the associated key must differ.
             let mismatch = old_cache_key.into_mismatch(cache_key);
-            return Ok(Err(CacheMiss::FingerprintMismatch(mismatch)));
+            return Ok(Some(Err(CacheMiss::FingerprintMismatch(mismatch))));
         }
 
-        Ok(Err(CacheMiss::NotFound))
+        Ok(Some(Err(CacheMiss::NotFound)))
     }
 
     /// Fetch the entry from the remote cache that `remote_config` configures.
@@ -482,16 +573,14 @@ impl ExecutionCache {
     /// is downloaded.
     /// A fallback entry, a failed validation, or a failed read is a miss. An
     /// error while validating counts as a failed read, so the remote entry
-    /// never fails the task.
-    #[expect(clippy::too_many_arguments, reason = "forwarded from `try_hit`")]
+    /// never fails the task. The fetched entries are checked off the
+    /// scheduler's thread.
     async fn try_hit_remote(
         &self,
         remote_config: &ResolvedRemoteCacheConfig,
         cache_metadata: &CacheMetadata,
         cache_key: &CacheEntryKey,
-        globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
-        input_negative_globs: &PathGlobSet<'_>,
-        workspace_root: &AbsolutePath,
+        validation: &Validation,
         cache_dir: &AbsolutePath,
         cancel_token: &CancellationToken,
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
@@ -513,19 +602,20 @@ impl ExecutionCache {
             elapsed = ?start.elapsed(),
             "fetched from the remote cache"
         );
-        let validate = |cache_value: &CacheEntryValue| {
-            cache_value.validate(
-                &cache_metadata.unfiltered_envs,
-                globbed_inputs,
-                input_negative_globs,
-                workspace_root,
-            )
+        let (cache_key, validation) = (cache_key.clone(), validation.clone());
+        #[expect(
+            clippy::result_large_err,
+            reason = "`CacheMiss` is intentionally large, and a lookup returns it once"
+        )]
+        let check = move || {
+            remote::resolve(fetched, &cache_key, |cache_value| validation.validate(cache_value))
         };
-        let Restore { value: cache_value, blob_id } =
-            match remote::resolve(fetched, cache_key, validate) {
-                Ok(restore) => restore,
-                Err(miss) => return Ok(Err(miss)),
-            };
+        let resolved = run_off_thread(cancel_token, check).await;
+        let Restore { value: cache_value, blob_id } = match resolved {
+            Some(Ok(restore)) => restore,
+            Some(Err(miss)) => return Ok(Err(miss)),
+            None => return Ok(Err(ReadError::Cancelled.into_miss())),
+        };
 
         let output_archive = match blob_id {
             Some(blob_id) => {
@@ -684,10 +774,6 @@ impl ExecutionCache {
 
 // Basic database operations
 impl ExecutionCache {
-    #[expect(
-        clippy::significant_drop_tightening,
-        reason = "lock guard cannot be dropped earlier because prepared statement borrows connection"
-    )]
     async fn get_key_by_value<
         K: SchemaWrite<TaskCacheConfig, Src = K>,
         V: SchemaReadOwned<TaskCacheConfig, Dst = V>,
@@ -696,24 +782,32 @@ impl ExecutionCache {
         table: &str,
         key: &K,
     ) -> anyhow::Result<Option<V>> {
-        let key_blob = serialize_cache(key)?;
-        let value_blob = {
-            let conn = self.conn.lock().await;
-            #[expect(
-                clippy::disallowed_macros,
-                reason = "SQL query string for rusqlite requires String"
-            )]
-            let mut select_stmt =
-                conn.prepare_cached(&format!("SELECT value FROM {table} WHERE key=?"))?;
-            let value_blob: Option<Vec<u8>> =
-                select_stmt.query_row::<Vec<u8>, _, _>([key_blob], |row| row.get(0)).optional()?;
-            value_blob
-        };
-        let Some(value_blob) = value_blob else {
+        let Some(value_blob) = self.get_value_blob(table, key).await? else {
             return Ok(None);
         };
         let value: V = deserialize_cache(&value_blob)?;
         Ok(Some(value))
+    }
+
+    /// The encoded value stored under `key` in `table`.
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "lock guard cannot be dropped earlier because prepared statement borrows connection"
+    )]
+    async fn get_value_blob<K: SchemaWrite<TaskCacheConfig, Src = K>>(
+        &self,
+        table: &str,
+        key: &K,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        let key_blob = serialize_cache(key)?;
+        let conn = self.conn.lock().await;
+        #[expect(
+            clippy::disallowed_macros,
+            reason = "SQL query string for rusqlite requires String"
+        )]
+        let mut select_stmt =
+            conn.prepare_cached(&format!("SELECT value FROM {table} WHERE key=?"))?;
+        Ok(select_stmt.query_row::<Vec<u8>, _, _>([key_blob], |row| row.get(0)).optional()?)
     }
 
     async fn get_by_cache_key(
@@ -721,6 +815,15 @@ impl ExecutionCache {
         cache_key: &CacheEntryKey,
     ) -> anyhow::Result<Option<CacheEntryValue>> {
         self.get_key_by_value("cache_entries", cache_key).await
+    }
+
+    /// The entry under `cache_key`, still encoded, so that it can be decoded
+    /// off the scheduler's thread.
+    async fn get_cache_entry_blob(
+        &self,
+        cache_key: &CacheEntryKey,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        self.get_value_blob("cache_entries", cache_key).await
     }
 
     async fn get_cache_key_by_execution_key(

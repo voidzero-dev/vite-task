@@ -50,6 +50,19 @@ impl<'a> PathGlobSet<'a> {
         Ok(Self { patterns, has_negated })
     }
 
+    /// The same set with its patterns copied, so it borrows nothing.
+    #[must_use]
+    pub fn into_owned(self) -> PathGlobSet<'static> {
+        let Self { patterns, has_negated } = self;
+        PathGlobSet {
+            patterns: patterns
+                .into_iter()
+                .map(|(glob, match_or_not)| (glob.into_owned(), match_or_not))
+                .collect(),
+            has_negated,
+        }
+    }
+
     /// Whether the set has no patterns, so it matches nothing.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
