@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "lint": {
+      "command": "echo 'Linting app'",
+      "dependsOn": ["typecheck"]
+    }
+  }
+}

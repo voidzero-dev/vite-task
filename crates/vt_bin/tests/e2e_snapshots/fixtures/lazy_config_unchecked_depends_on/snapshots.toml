@@ -1,0 +1,33 @@
+[[e2e]]
+name = "loaded_config_depends_on_unchecked"
+comment = """
+Bug: `@test/app#lint` depends on `typecheck`, which `@test/app` doesn't define, and the root's `release` depends on `@test/nope#publish`, though no package is named `@test/nope`. Neither check needs another package's config. `vt run build` in `packages/app` loads both configs, since the root's always loads, but checks a `dependsOn` only when its task runs, so it succeeds without reporting either. `vt run`, which lists every task, doesn't report them either, while `vt run --json`, which loads the same configs, does.
+"""
+cwd = "packages/app"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "bug: loads the root's and @test/app's configs, but reports neither `dependsOn` error" },
+  { argv = [
+    "vtt",
+    "pipe-stdin",
+    "--",
+    "vt",
+    "run",
+  ], comment = "bug: lists every task, including both with a broken `dependsOn`, without an error" },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--json",
+  ], comment = "loads the same configs and reports the error" },
+  { argv = [
+    "vt",
+    "run",
+    "lint",
+  ], comment = "the error shows up only when the task runs" },
+]

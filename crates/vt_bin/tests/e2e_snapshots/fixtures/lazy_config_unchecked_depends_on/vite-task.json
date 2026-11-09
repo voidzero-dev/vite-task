@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "release": {
+      "command": "echo 'Releasing'",
+      "dependsOn": ["@test/nope#publish"]
+    }
+  }
+}

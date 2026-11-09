@@ -1,0 +1,13 @@
+{
+  "tasks": {
+    "deploy": {
+      "command": "echo 'Deploying app'",
+      "dependsOn": ["@test/broken#build"]
+    },
+    "publish": {
+      "command": "echo 'Publishing app'",
+      "dependsOn": ["@test/lib#missing"]
+    },
+    "release": "vt run --filter @test/broken build"
+  }
+}

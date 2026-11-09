@@ -1,0 +1,23 @@
+[[e2e]]
+name = "depends_on_load_error_has_no_context"
+comment = """
+Bug: `packages/broken/vite-task.json` sets `cache`, which only the workspace root config may set. Most runs never read it, so when one fails with its error, the error has to say what reached `@test/broken`. A nested `vt run` says so, and so does a `dependsOn` entry naming a missing task, but a `dependsOn` entry that loads `@test/broken` doesn't: `vt run deploy` fails with `@test/broken`'s error alone, without naming `@test/app#deploy` or its `@test/broken#build` entry.
+"""
+cwd = "packages/app"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "deploy",
+  ], comment = "bug: doesn't say that the `dependsOn` of @test/app#deploy loaded @test/broken" },
+  { argv = [
+    "vt",
+    "run",
+    "release",
+  ], comment = "a nested `vt run` names the task and the command" },
+  { argv = [
+    "vt",
+    "run",
+    "publish",
+  ], comment = "a `dependsOn` entry naming a missing task names the task and the entry" },
+]
