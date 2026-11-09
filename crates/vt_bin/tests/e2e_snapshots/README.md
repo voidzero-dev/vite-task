@@ -47,7 +47,7 @@ Notes:
 The test runner:
 
 1. Copies the fixture to a temp directory
-2. Starts each step's `argv` directly, without a shell, in an environment holding only `PATH`, `TERM`, and the step's `envs` (plus `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE` when set, and a few system variables on Windows)
+2. Starts each step's `argv` directly, without a shell, in an environment holding only `PATH`, `TERM`, `RAYON_NUM_THREADS=1` (so that tasks that become ready together start in the same order every run), and the step's `envs` (plus `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE` when set, and a few system variables on Windows)
 3. Runs each step in PTY mode (`TestTerminal`), with a timeout of 20 seconds (60 seconds on Windows and x86_64 macOS)
 4. Applies configured interactions in order for PTY steps
 5. Captures output and exit codes

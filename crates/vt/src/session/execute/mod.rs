@@ -33,7 +33,7 @@ use self::{
     spawn::{ChildHandle, ChildOutcome, SpawnStdio, spawn},
 };
 use super::{
-    cache::{CacheHit, CacheHitSource, CacheMiss, ExecutionCache},
+    cache::{CacheHit, CacheHitSource, CacheMiss, ExecutionCache, run_off_thread},
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
         ExecutionError,
@@ -547,8 +547,10 @@ enum CacheLookup<'a> {
 }
 
 /// Phase 1: compute the globbed inputs and try to hit the cache. A remote hit
-/// downloads its output archive into `cache_dir`. Remote requests stop when
-/// `cancel_token` is cancelled.
+/// downloads its output archive into `cache_dir`. The inputs are hashed, and
+/// entries checked, off the scheduler's thread (see [`run_off_thread`]). The
+/// lookup stops when `cancel_token` is cancelled, and is then
+/// [`Report::Cancelled`] or a miss that isn't reported.
 async fn lookup_cache<'a>(
     cache_metadata: Option<&'a CacheMetadata>,
     cache: &ExecutionCache,
@@ -562,27 +564,38 @@ async fn lookup_cache<'a>(
 
     // Compute globbed inputs from positive globs at execution time.
     // Globs are already workspace-root-relative (resolved at task graph stage).
-    let start = Instant::now();
-    let globbed_inputs = compute_globbed_inputs(
-        workspace_root,
-        &cache_metadata.input_config.positive_globs,
-        &cache_metadata.input_config.negative_globs,
-    )
-    .map_err(|err| {
+    let (root, input_config) = (Arc::clone(workspace_root), cache_metadata.input_config.clone());
+    let hashed = run_off_thread(cancel_token, move || {
+        let start = Instant::now();
+        let globbed_inputs = compute_globbed_inputs(
+            &root,
+            &input_config.positive_globs,
+            &input_config.negative_globs,
+        )?;
+        tracing::debug!(
+            files = globbed_inputs.len(),
+            elapsed = ?start.elapsed(),
+            "hashed the globbed inputs"
+        );
+        anyhow::Ok(globbed_inputs)
+    })
+    .await
+    .ok_or(Report::Cancelled)?;
+    let globbed_inputs = Arc::new(hashed.map_err(|err| {
         Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err })
-    })?;
-    tracing::debug!(
-        files = globbed_inputs.len(),
-        elapsed = ?start.elapsed(),
-        "hashed the globbed inputs"
-    );
+    })?);
 
     match cache
         .try_hit(cache_metadata, &globbed_inputs, workspace_root, cache_dir, cancel_token)
         .await
     {
-        Ok(Ok(hit)) => Ok(CacheLookup::Hit { hit, metadata: cache_metadata }),
-        Ok(Err(miss)) => Ok(CacheLookup::Miss { miss, globbed_inputs }),
+        Ok(Some(Ok(hit))) => Ok(CacheLookup::Hit { hit, metadata: cache_metadata }),
+        // Unless the lookup was cancelled, its checks have finished and
+        // dropped their references, so the inputs aren't copied.
+        Ok(Some(Err(miss))) => {
+            Ok(CacheLookup::Miss { miss, globbed_inputs: Arc::unwrap_or_clone(globbed_inputs) })
+        }
+        Ok(None) => Err(Report::Cancelled),
         Err(err) => {
             Err(Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }))
         }

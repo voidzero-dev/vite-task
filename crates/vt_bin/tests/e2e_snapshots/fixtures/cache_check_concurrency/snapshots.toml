@@ -1,0 +1,75 @@
+# Each case holds the reads of input.txt while read's cache entry is checked.
+# read depends on reads-held, which finishes once hold-reads holds them, so
+# the check opens input.txt and waits. hold-reads releases them only after
+# release-reads starts, which depends on other, and the scheduler can only
+# start release-reads once it sees other finish. If the check ran on the
+# scheduler's thread, it would wait there for release-reads forever, and the
+# step would time out. Once the reads are released, read hits while
+# hold-reads and release-reads finish, in any order. Each task that finishes
+# ends its output with a blank line, so those steps leave blank lines out.
+
+[[e2e]]
+name = "checking_local_entry_doesnt_block_other_tasks"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--ignore-depends-on",
+    "read",
+  ], comment = "read reads input.txt, and its entry is recorded locally." },
+  { argv = [
+    "vt",
+    "run",
+    "test",
+  ], comment = "Other tasks run while read's local entry is checked, and then it hits.", redact = { '\n\n+' = "\n" } },
+]
+
+[[e2e]]
+name = "checking_remote_cache_entry_doesnt_block_other_tasks"
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "--ignore-depends-on",
+    "read",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "read reads input.txt, and its entry is uploaded." },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "test",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read",
+    ],
+  ], comment = "Other tasks run while read's remote entry is checked, and then it hits.", redact = { '\n\n+' = "\n" } },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
