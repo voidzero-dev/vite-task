@@ -248,13 +248,19 @@ See [inputs.md](../../../docs/inputs.md) for full details.
 
 ### 8. Fingerprint Validation
 
-When a cache entry exists, the fingerprint is validated to detect changes:
+When a cache entry exists, the fingerprint is validated to detect changes. A miss lists every change it found, sorted by kind and then by name or path. The file check stops at the first changed file:
 
 ```rust
-pub enum FingerprintMismatch {
-    SpawnFingerprint { old: SpawnFingerprint, new: SpawnFingerprint },
+pub enum Change {
+    Program,
+    Args,
+    Cwd,
     InputConfig,
-    InputChanged { kind: InputChangeKind, path: RelativePathBuf },
+    OutputConfig,
+    UntrackedEnvAdded { name: Str },
+    UntrackedEnvRemoved { name: Str },
+    Env { mismatch: EnvMismatch, source: EnvSource },
+    File { kind: InputChangeKind, path: RelativePathBuf },
 }
 
 pub enum InputChangeKind {
@@ -587,7 +593,7 @@ Each `&&` separated command is cached independently. If only terser config chang
 ```
 crates/vt/src/session/
 ├── cache/
-│   ├── mod.rs            # ExecutionCache, CacheEntryKey/Value, FingerprintMismatch
+│   ├── mod.rs            # ExecutionCache, CacheEntryKey/Value, Change
 │   └── display.rs        # Cache status display formatting
 ├── execute/
 │   ├── mod.rs            # execute_spawn, SpawnOutcome

@@ -670,3 +670,51 @@ steps = [
     ],
   ], comment = "cache hit: changed match set was requested with tracked: false" },
 ]
+
+[[e2e]]
+name = "every_tracked_env_change_is_listed"
+comment = """
+A miss lists every tracked env and query match that changed, not just the first, along with the first changed file. The inline reason names the env changes together.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-and-envs",
+  ], envs = [
+    [
+      "TRACKED_ENV",
+      "first",
+    ],
+    [
+      "PROBE_A",
+      "a",
+    ],
+  ] },
+  [
+    "vtt",
+    "write-file",
+    "envs_input.txt",
+    "second",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "-v",
+    "fetch-env-and-envs",
+  ], envs = [
+    [
+      "TRACKED_ENV",
+      "second",
+    ],
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+  ], comment = "TRACKED_ENV changed, PROBE_B was added, and the input file was modified." },
+]

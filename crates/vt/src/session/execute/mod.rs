@@ -569,7 +569,8 @@ enum CacheLookup<'a> {
     /// Cache hit — the cached entry to replay, where it came from, and the
     /// metadata that looked it up.
     Hit { hit: CacheHit, metadata: &'a CacheMetadata },
-    /// Cache miss — the detailed reason (`NotFound` or `FingerprintMismatch`).
+    /// Cache miss — the detailed reason (`NotFound`, `Changed`, or a failed
+    /// remote read).
     Miss { miss: CacheMiss, globbed_inputs: BTreeMap<RelativePathBuf, u64> },
     /// Caching is disabled for this task (no cache metadata).
     Disabled,
