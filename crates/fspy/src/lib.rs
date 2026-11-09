@@ -57,8 +57,5 @@ pub struct TrackedChild {
     pub process_handle: std::os::windows::io::OwnedHandle,
 }
 
-pub(crate) static SPY_IMPL: LazyLock<SpyImpl> = LazyLock::new(|| {
-    vt_materialized_artifact::user_temp_dir("fspy")
-        .and_then(|dir| SpyImpl::init_in(&dir))
-        .expect("Failed to initialize global spy")
-});
+pub(crate) static SPY_IMPL: LazyLock<SpyImpl> =
+    LazyLock::new(|| SpyImpl::init().expect("Failed to initialize global spy"));

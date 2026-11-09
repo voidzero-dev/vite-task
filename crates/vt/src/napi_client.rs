@@ -3,7 +3,7 @@
 
 use std::sync::LazyLock;
 
-use vt_materialized_artifact::{artifact, user_temp_dir};
+use vt_materialized_artifact::artifact;
 use vt_path::{AbsolutePath, AbsolutePathBuf};
 
 /// Path to the materialized `vt_client_napi` `.node` addon.
@@ -20,13 +20,10 @@ use vt_path::{AbsolutePath, AbsolutePathBuf};
 #[must_use]
 pub fn napi_client_path() -> &'static AbsolutePath {
     static PATH: LazyLock<AbsolutePathBuf> = LazyLock::new(|| {
-        let path = user_temp_dir("vt_client_napi")
-            .and_then(|dir| {
-                artifact!("vt_client_napi", "CARGO_CDYLIB_FILE_VT_CLIENT_NAPI")
-                    .materialize()
-                    .suffix(".node")
-                    .at(&dir)
-            })
+        let path = artifact!("vt_client_napi", "CARGO_CDYLIB_FILE_VT_CLIENT_NAPI")
+            .materialize()
+            .suffix(".node")
+            .at_user_temp_dir("vp_run")
             .expect("materialize vt_client_napi");
         AbsolutePathBuf::new(path).expect("system temp dir yields an absolute path")
     });
