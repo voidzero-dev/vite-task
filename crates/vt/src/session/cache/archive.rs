@@ -73,6 +73,12 @@ pub fn create_output_archive(
     Ok(())
 }
 
+/// The size of the file at `path`, such as an archive, or `None` if it can't
+/// be read. Only for logging.
+pub fn file_size(path: &AbsolutePath) -> Option<u64> {
+    std::fs::metadata(path.as_path()).ok().map(|metadata| metadata.len())
+}
+
 /// Extract a tar.zst archive, restoring files, folders and symbolic links
 /// relative to workspace root.
 ///

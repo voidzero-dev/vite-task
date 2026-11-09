@@ -1,7 +1,11 @@
 //! Post-run cache update: decide whether a finished spawn may be cached and,
 //! if so, store its fingerprint, captured output, and output archive.
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use rustc_hash::FxHashSet;
 use tokio_util::sync::CancellationToken;
@@ -460,7 +464,15 @@ fn collect_and_archive_outputs(
     let archive_name: Str = vt_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
     let archive_path = cache_dir.join(archive_name.as_str());
 
+    let start = Instant::now();
     archive::create_output_archive(workspace_root, &sorted_files, &output_folders, &archive_path)?;
+    tracing::debug!(
+        files = sorted_files.len(),
+        folders = output_folders.len(),
+        bytes = archive::file_size(&archive_path),
+        elapsed = ?start.elapsed(),
+        "archived the outputs"
+    );
 
     Ok(Some(archive_name))
 }

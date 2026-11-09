@@ -24,6 +24,7 @@ serde_bytes = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "sync"] }
+tracing = { workspace = true }
 url = { workspace = true }
 vt_path = { workspace = true }
 vt_str = { workspace = true }

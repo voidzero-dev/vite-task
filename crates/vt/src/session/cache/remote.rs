@@ -17,12 +17,14 @@ use std::{
     fs::File,
     io::{self, Read as _, Write as _},
     sync::{Arc, Mutex, OnceLock, PoisonError},
+    time::Instant,
 };
 
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use tokio::sync::mpsc;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use tracing::Instrument as _;
 use vt_path::AbsolutePath;
 use vt_plan::{
     cache_metadata::ExecutionCacheKey,
@@ -142,8 +144,18 @@ pub(super) fn resolve(
         None => return Err(CacheMiss::NotFound),
     };
     let mut newest_miss = None;
-    for entry in entries {
-        match check_entry(entry, &mut validate) {
+    for (index, entry) in entries.into_iter().enumerate() {
+        let start = Instant::now();
+        let value_bytes = entry.value.len();
+        let checked = check_entry(entry, &mut validate);
+        tracing::debug!(
+            index,
+            value_bytes,
+            valid = checked.is_ok(),
+            elapsed = ?start.elapsed(),
+            "checked a remote cache entry"
+        );
+        match checked {
             Ok(restore) => return Ok(restore),
             Err(miss) => {
                 newest_miss.get_or_insert(miss);
@@ -238,6 +250,7 @@ impl RemoteClients {
         cache_dir: &AbsolutePath,
         cancel_token: &CancellationToken,
     ) -> Result<Str, ReadError> {
+        let start = Instant::now();
         let client = self.client(remote_config).map_err(ReadError::Download)?;
         let archive_name = vt_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
         let archive_path = cache_dir.join(archive_name.as_str());
@@ -251,6 +264,12 @@ impl RemoteClients {
             // Best-effort cleanup: the file may not have been created.
             let _ = std::fs::remove_file(temp_path.as_path());
         }
+        tracing::debug!(
+            ok = result.is_ok(),
+            bytes = result.as_ref().ok().and_then(|&()| archive::file_size(&archive_path)),
+            elapsed = ?start.elapsed(),
+            "downloaded an output archive"
+        );
         result.map(|()| archive_name)
     }
 
@@ -268,11 +287,18 @@ impl RemoteClients {
         cache_value: &CacheEntryValue,
         cache_dir: &AbsolutePath,
     ) -> Result<impl Future<Output = Result<(), UploadError>> + Send + use<>, UploadError> {
+        let start = Instant::now();
         let client = self.client(remote_config)?;
         let key = encode_key(cache_key)?;
         let secondary_key = encode_key(execution_cache_key)?;
         let value = encode_value(cache_value)?;
         let archive = cache_value.output_archive.as_ref().map(|name| cache_dir.join(name.as_str()));
+        tracing::debug!(
+            value_bytes = value.len(),
+            archive = archive.is_some(),
+            elapsed = ?start.elapsed(),
+            "prepared a remote cache upload"
+        );
         Ok(async move {
             client.store(&key, &secondary_key, &value, archive.as_deref()).await?;
             Ok(())
@@ -311,16 +337,28 @@ impl RemoteUploads {
         error: Arc<OnceLock<UploadError>>,
     ) {
         let cancel = self.cancel.clone();
-        self.tracker.spawn(async move {
-            // A cancelled upload sets its error itself, instead of being
-            // aborted, so every cancelled upload has one.
-            let result =
-                cancel.run_until_cancelled(upload).await.unwrap_or(Err(UploadError::Interrupted));
-            if let Err(err) = result {
-                tracing::debug!(?err, "remote cache upload failed");
-                let _ = error.set(err);
+        // The upload outlives its task, so it carries the task's span.
+        self.tracker.spawn(
+            async move {
+                let start = Instant::now();
+                // A cancelled upload sets its error itself, instead of being
+                // aborted, so every cancelled upload has one.
+                let result = cancel
+                    .run_until_cancelled(upload)
+                    .await
+                    .unwrap_or(Err(UploadError::Interrupted));
+                match result {
+                    Ok(()) => {
+                        tracing::debug!(elapsed = ?start.elapsed(), "remote cache upload finished");
+                    }
+                    Err(err) => {
+                        tracing::debug!(?err, elapsed = ?start.elapsed(), "remote cache upload failed");
+                        let _ = error.set(err);
+                    }
+                }
             }
-        });
+            .in_current_span(),
+        );
     }
 
     /// The number of uploads still running.
@@ -331,6 +369,8 @@ impl RemoteUploads {
     /// Wait for all uploads to finish. If `interrupt_token` is cancelled
     /// first, or already was, cancel them and wait for them to stop.
     pub(super) async fn wait(&self, interrupt_token: &CancellationToken) {
+        let start = Instant::now();
+        let pending = self.tracker.len();
         self.tracker.close();
         tokio::select! {
             biased;
@@ -339,6 +379,14 @@ impl RemoteUploads {
                 self.cancel.cancel();
                 self.tracker.wait().await;
             }
+        }
+        if pending > 0 {
+            tracing::debug!(
+                pending,
+                interrupted = interrupt_token.is_cancelled(),
+                elapsed = ?start.elapsed(),
+                "waited for remote cache uploads"
+            );
         }
         self.tracker.reopen();
     }

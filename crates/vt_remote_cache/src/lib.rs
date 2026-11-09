@@ -5,7 +5,10 @@ pub mod auth;
 #[cfg(test)]
 mod test_server;
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use bytes::Bytes;
 use reqwest::{
@@ -192,7 +195,9 @@ impl Client {
     /// Returns an error if the credentials can't be obtained, the request
     /// fails, the server responds with a status other than 200 or 404, or the
     /// body of a 200 response isn't an exact or fallback match.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub async fn fetch(&self, key: &[u8], secondary_key: &[u8]) -> Result<Option<Fetched>, Error> {
+        let start = Instant::now();
         let headers = self.auth_headers(Operation::Fetch).await?;
         let body = encode_cbor(&FetchRequest { key, secondary_key });
         let response = self
@@ -204,6 +209,7 @@ impl Client {
             .send()
             .await
             .map_err(network_error)?;
+        log_response(&response, start);
         if response.status() == StatusCode::NOT_FOUND {
             // Read the body so the connection can be reused. It doesn't matter
             // if that fails, because the status alone is the answer.
@@ -211,6 +217,7 @@ impl Client {
             return Ok(None);
         }
         let body = check_status(response).await?.bytes().await.map_err(network_error)?;
+        tracing::debug!(bytes = body.len(), elapsed = ?start.elapsed(), "remote cache fetch received");
         decode_fetched(&body).map(Some)
     }
 
@@ -222,11 +229,14 @@ impl Client {
     ///
     /// Returns an error if the credentials can't be obtained, the request
     /// fails, or the server responds with a status other than 200.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub async fn download(&self, blob_id: &str) -> Result<Download, Error> {
+        let start = Instant::now();
         let mut url = self.blob_url.clone();
         url.path_segments_mut().map_err(|()| Error::InvalidEndpoint(None))?.push(blob_id);
         let headers = self.auth_headers(Operation::Download).await?;
         let response = self.http.get(url).headers(headers).send().await.map_err(network_error)?;
+        log_response(&response, start);
         Ok(Download { response: check_status(response).await? })
     }
 
@@ -239,6 +249,7 @@ impl Client {
     /// Returns an error if the credentials can't be obtained, the blob file
     /// can't be opened, the request fails, or the server responds with a
     /// status other than 200.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub async fn store(
         &self,
         key: &[u8],
@@ -246,12 +257,24 @@ impl Client {
         value: &[u8],
         blob: Option<&AbsolutePath>,
     ) -> Result<(), Error> {
+        let start = Instant::now();
         let headers = self.auth_headers(Operation::Store).await?;
+        let auth = start.elapsed();
         let metadata = StoreMetadata { key, secondary_key, value };
         let mut form = Form::new().part("metadata", metadata_part(&metadata));
-        if let Some(blob) = blob {
-            form = form.part("blob", blob_part(blob).await?);
-        }
+        let blob_bytes = if let Some(blob) = blob {
+            let (part, length) = blob_part(blob).await?;
+            form = form.part("blob", part);
+            Some(length)
+        } else {
+            None
+        };
+        tracing::debug!(
+            value_bytes = value.len(),
+            blob_bytes,
+            ?auth,
+            "sending a remote cache store"
+        );
         let response = self
             .http
             .post(self.store_url.clone())
@@ -260,11 +283,24 @@ impl Client {
             .send()
             .await
             .map_err(network_error)?;
+        log_response(&response, start);
         // The response's blob ID isn't needed. Read the body anyway, so the
         // connection can be reused.
         check_status(response).await?.bytes().await.map_err(network_error)?;
         Ok(())
     }
+}
+
+/// Log the status and length of `response`, and the time since `start`, when
+/// the operation started. The request URL is left out, since the endpoint may
+/// contain credentials.
+fn log_response(response: &Response, start: Instant) {
+    tracing::debug!(
+        status = response.status().as_u16(),
+        content_length = response.content_length(),
+        elapsed = ?start.elapsed(),
+        "remote cache responded"
+    );
 }
 
 /// Only HTTP 200 counts as success. For other statuses, the error includes the
@@ -322,12 +358,14 @@ fn metadata_part(metadata: &StoreMetadata<'_>) -> Part {
     Part::bytes(encode_cbor(metadata)).mime_str("application/cbor").expect("valid MIME type")
 }
 
-async fn blob_part(path: &AbsolutePath) -> Result<Part, Error> {
+/// The blob part streamed from the file at `path`, and its length.
+async fn blob_part(path: &AbsolutePath) -> Result<(Part, u64), Error> {
     let file = tokio::fs::File::open(path).await.map_err(Error::ReadBlob)?;
     let length = file.metadata().await.map_err(Error::ReadBlob)?.len();
-    Ok(Part::stream_with_length(file, length)
+    let part = Part::stream_with_length(file, length)
         .mime_str("application/octet-stream")
-        .expect("valid MIME type"))
+        .expect("valid MIME type");
+    Ok((part, length))
 }
 
 #[cfg(test)]
