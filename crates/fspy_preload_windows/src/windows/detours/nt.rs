@@ -370,11 +370,11 @@ unsafe fn handle_destination(
 
 // A reparse point set on a file or folder, which makes it a link, is recorded
 // as a write before the call, so a failed call is recorded too, as `symlink`
-// is on Unix. `CreateSymbolicLinkW` creates the link with an open that lacks
-// write access, recorded as a read (or as a mkdir for a folder link), and
-// sets its reparse point here. A junction, as libuv makes for Node's
-// `fs.symlink` with `'junction'`, is a folder, recorded as a mkdir, with a
-// mount point set here.
+// is on Unix. `CreateSymbolicLinkW` creates the link with an open that asks
+// for `DELETE` and no data access, which isn't recorded (or as a mkdir for a
+// folder link), and sets its reparse point here. A junction, as libuv makes
+// for Node's `fs.symlink` with `'junction'`, is a folder, recorded as a mkdir,
+// with a mount point set here.
 static DETOUR_NT_FS_CONTROL_FILE: Detour<
     unsafe extern "system" fn(
         file_handle: HANDLE,
@@ -495,6 +495,10 @@ static DETOUR_NT_QUERY_ATTRIBUTES_FILE: Detour<
     };
 
 unsafe fn handle_open(access_mode: impl ToAccessMode, path: impl ToAbsolutePath) {
+    // SAFETY: converting access mask to AccessMode via FFI-aware trait
+    let Some(access_mode) = (unsafe { access_mode.to_access_mode() }) else {
+        return;
+    };
     // SAFETY: accessing the global client which was initialized during DLL_PROCESS_ATTACH
     let client = unsafe { global_client() };
     // SAFETY: resolving path from Windows object attributes or handle for access tracking
@@ -505,10 +509,7 @@ unsafe fn handle_open(access_mode: impl ToAccessMode, path: impl ToAbsolutePath)
             };
             let path = path.as_slice();
             let path_access = path.iter().rposition(|c| *c == u16::from(b'*')).map_or_else(
-                || {
-                    // SAFETY: converting access mask to AccessMode via FFI-aware trait
-                    access_mode.to_access_mode().with_path(IpcPath::from_wide(path))
-                },
+                || access_mode.with_path(IpcPath::from_wide(path)),
                 |wildcard_pos| {
                     let path_before_wildcard = &path[..wildcard_pos];
                     let slash_pos = path_before_wildcard

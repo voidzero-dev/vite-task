@@ -13,8 +13,8 @@ use winapi::{
     um::{
         fileapi::GetFinalPathNameByHandleW,
         winnt::{
-            ACCESS_MASK, FILE_APPEND_DATA, FILE_READ_DATA, FILE_WRITE_DATA, GENERIC_READ,
-            GENERIC_WRITE,
+            ACCESS_MASK, DELETE, FILE_APPEND_DATA, FILE_EXECUTE, FILE_READ_DATA, FILE_WRITE_DATA,
+            GENERIC_ALL, GENERIC_EXECUTE, GENERIC_READ, GENERIC_WRITE, MAXIMUM_ALLOWED,
         },
     },
 };
@@ -93,14 +93,34 @@ pub unsafe fn get_path_name(handle: HANDLE) -> winsafe::SysResult<SmallVec<u16, 
     Ok(path)
 }
 
-pub const fn access_mask_to_mode(desired_access: ACCESS_MASK) -> AccessMode {
+/// The access an open asking for `desired_access` is recorded as, or `None`
+/// if it isn't recorded. An open asking for `DELETE` and no data access, as
+/// deleting a file or folder or renaming it does, doesn't read the path, like
+/// `unlink`, `rmdir` and a rename's source, which aren't recorded on Unix.
+/// The attribute access such opens add doesn't make them reads, and
+/// `FILE_DELETE_ON_CLOSE` requires `DELETE`, so it needs no check of its own.
+/// Any other open is a write if it asks to write the data, and a read
+/// otherwise, attribute-only opens such as a stat included.
+pub const fn access_mask_to_mode(desired_access: ACCESS_MASK) -> Option<AccessMode> {
+    const DATA_ACCESS: ACCESS_MASK = FILE_READ_DATA
+        | FILE_WRITE_DATA
+        | FILE_APPEND_DATA
+        | FILE_EXECUTE
+        | GENERIC_READ
+        | GENERIC_WRITE
+        | GENERIC_EXECUTE
+        | GENERIC_ALL
+        | MAXIMUM_ALLOWED;
+    if desired_access & DELETE != 0 && desired_access & DATA_ACCESS == 0 {
+        return None;
+    }
     let has_write = (desired_access & (FILE_WRITE_DATA | FILE_APPEND_DATA | GENERIC_WRITE)) != 0;
     let has_read = (desired_access & (FILE_READ_DATA | GENERIC_READ)) != 0;
-    if has_write {
+    Some(if has_write {
         if has_read { AccessMode::ReadWrite } else { AccessMode::Write }
     } else {
         AccessMode::Read
-    }
+    })
 }
 
 pub struct HeapPath(PWSTR);
@@ -164,6 +184,32 @@ mod tests {
     #[test]
     fn test_get_path_name_long() {
         test_get_path_name(str::repeat("a", 255).as_str());
+    }
+
+    #[test]
+    fn delete_only_opens_are_not_recorded() {
+        use fspy_shared::ipc::AccessMode;
+        use winapi::um::winnt::{
+            DELETE, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_WRITE_ATTRIBUTES, GENERIC_READ,
+            GENERIC_WRITE, SYNCHRONIZE,
+        };
+
+        use super::access_mask_to_mode;
+
+        // std's `remove_dir_all`, `DeleteFileW`, and libuv's unlink.
+        for access in [
+            DELETE,
+            DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            DELETE | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE,
+        ] {
+            assert_eq!(access_mask_to_mode(access), None);
+        }
+        assert_eq!(access_mask_to_mode(DELETE | FILE_READ_DATA), Some(AccessMode::Read));
+        assert_eq!(
+            access_mask_to_mode(DELETE | GENERIC_READ | GENERIC_WRITE),
+            Some(AccessMode::ReadWrite)
+        );
+        assert_eq!(access_mask_to_mode(FILE_READ_ATTRIBUTES | SYNCHRONIZE), Some(AccessMode::Read));
     }
 
     #[test]

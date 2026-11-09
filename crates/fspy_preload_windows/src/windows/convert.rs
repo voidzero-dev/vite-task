@@ -11,18 +11,19 @@ use crate::windows::winapi_utils::{
     access_mask_to_mode, combine_paths, get_path_name, get_u16_str,
 };
 
+/// The access to record, or `None` for one that isn't recorded.
 pub trait ToAccessMode: Debug {
-    unsafe fn to_access_mode(self) -> AccessMode;
+    unsafe fn to_access_mode(self) -> Option<AccessMode>;
 }
 
 impl ToAccessMode for AccessMode {
-    unsafe fn to_access_mode(self) -> AccessMode {
-        self
+    unsafe fn to_access_mode(self) -> Option<AccessMode> {
+        Some(self)
     }
 }
 
 impl ToAccessMode for ACCESS_MASK {
-    unsafe fn to_access_mode(self) -> AccessMode {
+    unsafe fn to_access_mode(self) -> Option<AccessMode> {
         access_mask_to_mode(self)
     }
 }
