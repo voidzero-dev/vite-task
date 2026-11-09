@@ -169,6 +169,9 @@ impl PostRunFingerprint {
         tracked_env_queries: BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>,
     ) -> anyhow::Result<Self> {
         let start = Instant::now();
+        // Rayon's threads don't run in this thread's span, so the per-input
+        // events name it as their parent, which keeps them under the task.
+        let span = tracing::Span::current();
         let inferred_inputs = inferred_path_reads
             .par_iter()
             .filter(|(path, _)| {
@@ -177,7 +180,11 @@ impl PostRunFingerprint {
             .map(|(relative_path, path_read)| {
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
                 let mut fingerprint = fingerprint_path(&full_path, *path_read)?;
-                tracing::trace!(path = relative_path.as_str(), "fingerprinted an inferred input");
+                tracing::trace!(
+                    parent: &span,
+                    path = relative_path.as_str(),
+                    "fingerprinted an inferred input"
+                );
                 if let PathFingerprint::Folder(Some(listing)) = &mut fingerprint {
                     if !rebuildable.is_empty() {
                         let DirListing { entries, ignored_entries } = listing;
@@ -230,6 +237,8 @@ impl PostRunFingerprint {
         unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     ) -> anyhow::Result<Option<PostRunMismatch>> {
         let start = Instant::now();
+        // As in `create`, the per-input events name this span as their parent.
+        let span = tracing::Span::current();
         let input_mismatch =
             self.inferred_inputs.par_iter().find_map_any(|(input_relative_path, input)| {
                 let InferredInput { fingerprint: path_fingerprint, may_be_missing } = input;
@@ -256,6 +265,7 @@ impl PostRunFingerprint {
                 let unchanged = path_fingerprint == &current_path_fingerprint
                     || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound);
                 tracing::trace!(
+                    parent: &span,
                     path = input_relative_path.as_str(),
                     unchanged,
                     "validated an inferred input"
