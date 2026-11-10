@@ -1,0 +1,32 @@
+[[e2e]]
+name = "missing_task_with_unreached_broken_config"
+comment = """
+`packages/broken/vite-task.json` sets `cache`, which only the workspace root config may set. `vt run build` in `packages/app` never reads `@test/broken`'s config. `vt run ship`, a task `@test/app` doesn't define, falls back to listing every task, which loads `@test/broken`'s config. When that fails, it reports `Task "ship" not found`, as `--parallel`, which skips the fallback, does, instead of `@test/broken`'s error.
+"""
+cwd = "packages/app"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "never reads @test/broken's config" },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "ship",
+  ], comment = "not found, without @test/broken's error" },
+  { argv = [
+    "vt",
+    "run",
+    "ship",
+  ], comment = "in a terminal, also not found, without the task selector" },
+  { argv = [
+    "vt",
+    "run",
+    "--parallel",
+    "ship",
+  ], comment = "without the fallback, also not found" },
+]

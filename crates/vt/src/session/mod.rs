@@ -491,7 +491,19 @@ impl<'a> Session<'a> {
         let cwd = Arc::clone(&self.cwd);
         let task_graph = self.task_graph().await?;
         let current_package_path = task_graph.get_package_path_from_cwd(&cwd).cloned();
-        let mut entries = task_graph.list_tasks().await?;
+        // Listing loads every package's config, including ones the run never
+        // reached. When one fails to load, a run that named a task reports the
+        // task as not found, as it would without the fallback, instead of an
+        // unrelated package's error.
+        let mut entries = match task_graph.list_tasks().await {
+            Ok(entries) => entries,
+            Err(error) => {
+                return Err(run_command.task_specifier.as_ref().map_or_else(
+                    || error.into(),
+                    |task_specifier| vt_plan::Error::NoTasksMatched(task_specifier.clone()).into(),
+                ));
+            }
+        };
         entries.sort_unstable_by(|a, b| {
             a.task_display
                 .package_name
