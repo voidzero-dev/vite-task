@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RFC: token-efficient TUI for vp run</title>
+    <meta
+      name="description"
+      content="A terminal UI for vp run that saves AI agents tokens and makes runs easier for people to read, with an interactive prototype."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <div class="page">
+      <nav class="rail" aria-label="Contents">
+        <p class="rail-title">Contents</p>
+        <ol>
+          <li><a href="#summary">Summary</a></li>
+          <li><a href="#try-verify">Try it: lint, build and test</a></li>
+          <li><a href="#try-dev">Try it: dev servers</a></li>
+          <li><a href="#agents">AI agents</a></li>
+          <li><a href="#how">How it works</a></li>
+          <li><a href="#after">After the run</a></li>
+          <li><a href="#when">When the UI is used</a></li>
+          <li><a href="#details">Details</a></li>
+        </ol>
+      </nav>
+
+      <main>
+        <header class="masthead" id="summary">
+          <h1>Token-efficient TUI for <code>vp&nbsp;run</code></h1>
+          <section class="tldr" aria-labelledby="tldr-title">
+            <h2 id="tldr-title">TL;DR</h2>
+            <ul>
+              <li>
+                While tasks run, <code>vp run</code> shows them as a live tree and hides what they
+                print. At the end it prints the output of tasks that failed or warned.
+              </li>
+              <li>
+                In the first demo below, Codex read <strong>76% fewer tokens</strong> than it did
+                with plain output.
+              </li>
+            </ul>
+          </section>
+        </header>
+
+        <section id="states" aria-labelledby="states-title">
+          <h2 id="states-title" class="visually-hidden">How a run looks</h2>
+          <ol class="states">
+            <li>
+              <div class="state-text">
+                <h3>The task tree</h3>
+                <p>Each task is a row showing its state, and its status if the tool reports one.</p>
+                <p>The tree doesn't clear the terminal, and it doesn't show what tasks print.</p>
+              </div>
+              <pre
+                class="preview"
+                aria-label="Terminal: the task tree, below earlier output"
+              ><span style="color:#5cc8d6;">~/acme</span> <span style="color:#b58cff;">❯</span> git pull
+Already up to date.
+<span style="color:#5cc8d6;">~/acme</span> <span style="color:#b58cff;">❯</span> vp run verify
+  <span style="color:#5cc8d6;">⡿</span> acme#verify                    <span style="opacity:.55;">2/6</span>
+    <span style="color:#5cc8d6;">⡿</span> vp run -r build              <span style="opacity:.55;">2/4</span>
+      <span style="color:#58c17a;">✓</span> @acme/utils#build<span style="opacity:.55;">: </span>tsdown  <span style="opacity:.55;">cache hit · 2 files · 6.1 kB</span>
+      <span style="color:#5cc8d6;">⡿</span> @acme/ui#build             <span style="opacity:.55;">1/2</span>
+        <span style="color:#58c17a;">✓</span> tsc -b                   <span style="opacity:.55;">1.7s</span>
+        <span style="color:#5cc8d6;">⡿</span> tsdown                   <span style="opacity:.55;">bundling</span>
+<span style="color:#5cc8d6;font-weight:700;">›</span>     <span style="color:#5cc8d6;">⡿</span><span style="font-weight:700;"> @acme/web#build</span><span style="font-weight:700;opacity:.55;">: </span><span style="font-weight:700;">vp build</span>  <span style="opacity:.55;">rendering chunks</span>
+    <span style="opacity:.55;">○</span> vp run -r test
+      <span style="opacity:.55;">○</span> @acme/utils#test<span style="opacity:.55;">: </span>vitest run
+      <span style="opacity:.55;">○</span> @acme/web#test<span style="opacity:.55;">: </span>vitest run
+  ↑↓<span style="opacity:.55;"> move   </span>←→<span style="opacity:.55;"> fold   </span>enter<span style="opacity:.55;"> output   </span>ctrl-c<span style="opacity:.55;"> stop</span>                     <span style="opacity:.55;">brave-otter</span></pre>
+            </li>
+            <li>
+              <div class="state-text">
+                <h3>A task's output</h3>
+                <p>Press <kbd>Enter</kbd> on a task to see its output.</p>
+                <p>Agents don't press keys, so they never see this.</p>
+              </div>
+              <pre
+                class="preview"
+                aria-label="Terminal: the output of @acme/web#build"
+              ><span style="color:#5cc8d6;">vite v8.3.2 </span><span style="color:#58c17a;">building client environment for production...</span>
+transforming...
+<span style="color:#58c17a;">✓</span> 812 modules transformed.
+rendering chunks...
+
+<span style="color:#c9ccda;background:#303030;"> </span><span style="color:#5cc8d6;background:#303030;">⡿</span><span style="color:#c9ccda;background:#303030;"> </span><span style="color:#f4f5fb;background:#303030;font-weight:700;">@acme/web#build: vp build</span><span style="color:#c9ccda;background:#303030;">  </span><span style="color:#8a8a8a;background:#303030;">rendering chunks</span><span style="color:#c9ccda;background:#303030;">         </span><span style="color:#f4f5fb;background:#303030;font-weight:700;">esc</span><span style="color:#c9ccda;background:#303030;"> </span><span style="color:#8a8a8a;background:#303030;">tree</span><span style="color:#c9ccda;background:#303030;">  </span><span style="color:#f4f5fb;background:#303030;font-weight:700;">ctrl-f</span><span style="color:#c9ccda;background:#303030;"> </span><span style="color:#8a8a8a;background:#303030;">search</span><span style="color:#c9ccda;background:#303030;">  </span></pre>
+            </li>
+            <li>
+              <div class="state-text">
+                <h3>When it's done</h3>
+                <p>The tree stays on screen, and the output of failed tasks prints below it.</p>
+                <p>
+                  Agents can read logs of successful tasks with
+                  <code>vp run --last-details</code> if they want.
+                </p>
+              </div>
+              <pre
+                class="preview"
+                aria-label="Terminal: the final tree and the failing test's output"
+              ><span style="color:#5cc8d6;">~/acme</span> <span style="color:#b58cff;">❯</span> git pull
+Already up to date.
+<span style="color:#5cc8d6;">~/acme</span> <span style="color:#b58cff;">❯</span> vp run verify
+<span style="color:#ee6a6a;font-weight:700;">✗</span> acme#verify                       <span style="opacity:.55;">5.4s</span>
+  <span style="color:#58c17a;">✓</span> vp run -r build                 <span style="opacity:.55;">2.9s</span>
+    <span style="color:#58c17a;">✓</span> @acme/utils#build<span style="opacity:.55;">: </span>tsdown     <span style="opacity:.55;">cache hit · 2 files · 6.1 kB</span>
+    <span style="color:#58c17a;">✓</span> @acme/ui#build<span style="opacity:.55;"> ▸</span>              <span style="opacity:.55;">2.9s</span>
+    <span style="color:#58c17a;">✓</span> @acme/web#build<span style="opacity:.55;">: </span>vp build     <span style="opacity:.55;">812 modules · 209 kB · 2.9s</span>
+  <span style="color:#ee6a6a;font-weight:700;">✗</span> vp run -r test                  <span style="opacity:.55;">2.5s</span>
+    <span style="color:#58c17a;">✓</span> @acme/utils#test<span style="opacity:.55;">: </span>vitest run  <span style="opacity:.55;">cache hit · 36 passed</span>
+    <span style="color:#ee6a6a;font-weight:700;">✗</span> @acme/web#test<span style="opacity:.55;">: </span>vitest run    <span style="color:#ee6a6a;">1 failed · 41 passed</span><span style="opacity:.55;"> · 2.5s</span>
+
+<span style="color:#ee6a6a;font-weight:700;">✗</span><span style="font-weight:700;"> @acme/web#test: vitest run </span><span style="opacity:.55;">───────────────────────────────────────────────────</span>
+
+ <span style="color:#171a2c;background:#5cc8d6;"> RUN </span> <span style="color:#5cc8d6;">v5.0.3 </span><span style="opacity:.55;">/acme/apps/web</span>
+
+ <span style="color:#ee6a6a;">❯</span> src/pages/profile.test.tsx <span style="opacity:.55;">(6 tests | </span><span style="color:#ee6a6a;">1 failed</span><span style="opacity:.55;">)</span>
+   <span style="color:#ee6a6a;">×</span> shows the user's name
+
+<span style="background:#ee6a6a;font-weight:700;"> FAIL </span> src/pages/profile.test.tsx<span style="opacity:.55;"> &gt; </span>shows the user's name
+<span style="color:#ee6a6a;font-weight:700;">AssertionError</span><span style="color:#ee6a6a;">: expected 'Loading…' to be 'Ada Lovelace'</span>
+<span style="color:#5cc8d6;"> </span><span style="color:#5cc8d6;opacity:.55;">❯</span><span style="color:#5cc8d6;"> src/pages/profile.test.tsx:</span><span style="color:#5cc8d6;opacity:.55;">28:41</span>
+
+<span style="opacity:.55;">      Tests </span> <span style="color:#ee6a6a;font-weight:700;">1 failed</span><span style="opacity:.55;"> | </span><span style="color:#58c17a;font-weight:700;">41 passed</span><span style="color:#6b7090;"> (42)</span>
+
+<span style="opacity:.55;">---</span>
+vp run: 2/7 cache hit (28%), <span style="color:#ee6a6a;">1 failed</span>, 1.4s saved. <span style="opacity:.55;">(Run `vp run --last-details b</span>
+<span style="opacity:.55;">rave-otter` for full details)</span></pre>
+            </li>
+          </ol>
+        </section>
+
+        <section
+          class="demo"
+          id="try-verify"
+          data-scenario="verify"
+          aria-labelledby="try-verify-title"
+        >
+          <div class="demo-head">
+            <h2 id="try-verify-title">Try it: lint, build and test</h2>
+            <p>
+              This demo runs <code>vp run verify</code>. The root <code>verify</code> task is
+              <code>vp lint &amp;&amp; vp run -r build &amp;&amp; vp run -r test</code>. The linter
+              warns, two tasks are cache hits, one test fails, and the builds and tests that pass
+              print long logs. The run starts when you scroll to it.
+            </p>
+          </div>
+          <div class="demo-body">
+            <div class="terminal-frame">
+              <div
+                class="terminal"
+                role="application"
+                aria-label="Terminal running vp run verify"
+              ></div>
+            </div>
+            <aside class="try" aria-label="Things to try">
+              <h3>Things to try</h3>
+              <ul>
+                <li>
+                  Press <kbd>↓</kbd> to select a row, <kbd>←</kbd> <kbd>→</kbd> to fold,
+                  <kbd>Enter</kbd> to open a task's output.
+                </li>
+                <li>
+                  In the output, press <kbd>Ctrl</kbd> <kbd>F</kbd> and type <code>error</code>,
+                  then <kbd>↑</kbd> for older matches.
+                </li>
+                <li>Drag across the output to select text. It's copied when you let go.</li>
+                <li>
+                  When the run is over, type <code>vp run --last-details</code> and the run's name.
+                </li>
+              </ul>
+              <div class="controls">
+                <label
+                  ><input type="checkbox" name="fail" checked /> Make
+                  <code>@acme/web#test</code> fail</label
+                >
+                <label><input type="checkbox" name="agent" /> Agent mode</label>
+                <p class="bytes">Written to the terminal: <output>0 bytes</output></p>
+                <div class="buttons">
+                  <button type="button" class="pause" aria-pressed="false">Pause the run</button>
+                  <button type="button" class="restart">Run again</button>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="demo" id="try-dev" data-scenario="dev" aria-labelledby="try-dev-title">
+          <div class="demo-head">
+            <h2 id="try-dev-title">Try it: dev servers</h2>
+            <p>
+              <code>vp run -r dev</code> runs until you stop it. Each dev server's row shows its URL
+              once the server is up. <code>tsc --watch</code> doesn't report a status, so its row
+              only says it's running.
+            </p>
+          </div>
+          <div class="demo-body">
+            <div class="terminal-frame">
+              <div
+                class="terminal"
+                role="application"
+                aria-label="Terminal running vp run -r dev"
+              ></div>
+            </div>
+            <aside class="try" aria-label="Things to try">
+              <h3>Things to try</h3>
+              <ul>
+                <li>
+                  Open <code>@acme/web#dev</code> and type <kbd>h</kbd> <kbd>Enter</kbd>, as you
+                  would in a terminal, to see Vite's shortcuts.
+                </li>
+                <li>
+                  Open <code>@acme/ui#dev</code> after about ten seconds. By then <code>tsc</code>
+                  has cleared the screen twice, but the earlier output is still there.
+                </li>
+                <li>
+                  Type <kbd>q</kbd> <kbd>Enter</kbd> in a dev server's output. The server exits, and
+                  its row shows that it succeeded.
+                </li>
+                <li>
+                  In the tree, press <kbd>Ctrl</kbd> <kbd>C</kbd> to stop the run. Stopped tasks
+                  print nothing.
+                </li>
+              </ul>
+              <div class="controls">
+                <label><input type="checkbox" name="agent" /> Agent mode</label>
+                <p class="bytes">Written to the terminal: <output>0 bytes</output></p>
+                <div class="buttons">
+                  <button type="button" class="pause" aria-pressed="false">Pause the run</button>
+                  <button type="button" class="restart">Run again</button>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="agents" aria-labelledby="agents-title">
+          <h2 id="agents-title">AI agents</h2>
+          <p>
+            An agent reads every byte <code>vp run</code> writes. In agent mode it leaves out colors
+            and key hints, and redraws the tree at most every two seconds.
+          </p>
+          <figure class="chart" aria-labelledby="chart-title">
+            <figcaption>
+              <span class="chart-title" id="chart-title"
+                >Tokens Codex read for <code>vp run verify</code></span
+              >
+              <span class="chart-sub"
+                >Measured with Codex 0.160.0. The tasks that pass print about 300 lines in
+                total.</span
+              >
+            </figcaption>
+            <ol class="bars">
+              <li class="bar-row" tabindex="0" style="--f: 1">
+                <span class="bar-label">Plain output</span>
+                <span class="bar-track">
+                  <span class="bar"></span>
+                  <span class="bar-value">7,599</span>
+                  <span class="tip" role="tooltip">no frames · 19,732 bytes</span>
+                </span>
+              </li>
+              <li class="bar-row bar-row--focus" tabindex="0" style="--f: 0.2432">
+                <span class="bar-label">TUI in agent mode</span>
+                <span class="bar-track">
+                  <span class="bar"></span>
+                  <span class="bar-value">1,848</span>
+                  <span class="tip" role="tooltip">6 frames · 3,908 bytes</span>
+                </span>
+              </li>
+            </ol>
+            <details class="chart-table">
+              <summary>Show the numbers</summary>
+              <table class="measure">
+                <thead>
+                  <tr>
+                    <th scope="col">What Codex ran</th>
+                    <th scope="col">Frames</th>
+                    <th scope="col">Bytes</th>
+                    <th scope="col">Tokens</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Plain output, without a terminal</td>
+                    <td>0</td>
+                    <td>19,732</td>
+                    <td>7,599</td>
+                  </tr>
+                  <tr>
+                    <td>TUI in agent mode</td>
+                    <td>6</td>
+                    <td>3,908</td>
+                    <td>1,848</td>
+                  </tr>
+                </tbody>
+              </table>
+            </details>
+          </figure>
+          <h3>What Codex sees</h3>
+          <figure
+            class="player"
+            aria-label="The frames Codex read from vp run verify in agent mode, drawn as a terminal shows them"
+          >
+            <figcaption>
+              <p>These are the six frames Codex read.</p>
+              <p>The reports at the end are shortened here.</p>
+              <p class="player-controls">
+                <button type="button" class="player-toggle" aria-pressed="false">Pause</button>
+                <span class="player-count" aria-live="off">Frame 6 of 6</span>
+              </p>
+            </figcaption>
+            <div class="player-screen">
+              <pre class="preview player-frame" aria-hidden="true">
+● acme#verify
+  ● vp lint
+  ○ vp run -r build
+    ○ @acme/utils#build: tsdown
+    ○ @acme/ui#build
+      ○ tsc -b
+      ○ tsdown
+    ○ @acme/api#build: tsdown
+    ○ @acme/web#build: vp build
+    ○ @acme/docs#build: vp build
+  ○ vp run -r test
+    ○ @acme/utils#test: vitest run
+    ○ @acme/ui#test: vitest run
+    ○ @acme/api#test: vitest run
+    ○ @acme/web#test: vitest run</pre>
+              <pre class="preview player-frame" aria-hidden="true">
+● acme#verify
+  ! vp lint  412 files · 2 warnings · 1.2s
+  ● vp run -r build
+    ✓ @acme/utils#build: tsdown  cache hit · 20 files
+    ● @acme/ui#build
+      ● tsc -b
+      ○ tsdown
+    ✓ @acme/api#build: tsdown  6 files · 804ms
+    ○ @acme/web#build: vp build  waiting for @acme/ui#build
+    ○ @acme/docs#build: vp build  waiting for @acme/ui#build
+  ○ vp run -r test
+    ○ @acme/utils#test: vitest run
+    ○ @acme/ui#test: vitest run
+    ○ @acme/api#test: vitest run
+    ○ @acme/web#test: vitest run</pre>
+              <pre class="preview player-frame" aria-hidden="true">
+● acme#verify
+  ! vp lint  412 files · 2 warnings · 1.2s
+  ● vp run -r build
+    ✓ @acme/utils#build: tsdown  cache hit · 20 files
+    ✓ @acme/ui#build ▸  2.7s
+    ✓ @acme/api#build: tsdown  6 files · 804ms
+    ● @acme/web#build: vp build
+    ● @acme/docs#build: vp build
+  ○ vp run -r test
+    ○ @acme/utils#test: vitest run
+    ○ @acme/ui#test: vitest run
+    ○ @acme/api#test: vitest run
+    ○ @acme/web#test: vitest run</pre>
+              <pre class="preview player-frame" aria-hidden="true">
+● acme#verify
+  ! vp lint  412 files · 2 warnings · 1.2s
+  ● vp run -r build
+    ✓ @acme/utils#build: tsdown  cache hit · 20 files
+    ✓ @acme/ui#build ▸  2.7s
+    ✓ @acme/api#build: tsdown  6 files · 804ms
+    ● @acme/web#build: vp build
+    ✓ @acme/docs#build: vp build  38 pages · 44 files · 2.4s
+  ○ vp run -r test
+    ○ @acme/utils#test: vitest run
+    ○ @acme/ui#test: vitest run
+    ○ @acme/api#test: vitest run
+    ○ @acme/web#test: vitest run</pre>
+              <pre class="preview player-frame" aria-hidden="true">
+● acme#verify
+  ! vp lint  412 files · 2 warnings · 1.2s
+  ✓ vp run -r build ▸  5.7s
+  ● vp run -r test
+    ✓ @acme/utils#test: vitest run  cache hit · 143 passed
+    ● @acme/ui#test: vitest run
+    ● @acme/api#test: vitest run
+    ● @acme/web#test: vitest run</pre>
+              <pre class="preview player-frame is-current">✗ acme#verify  9.5s
+  ! vp lint  412 files · 2 warnings · 1.2s
+  ✓ vp run -r build ▸  5.7s
+  ✗ vp run -r test  2.6s
+    ✓ @acme/utils#test: vitest run  cache hit · 143 passed
+    ✓ @acme/ui#test: vitest run  342 passed · 2.0s
+    ✓ @acme/api#test: vitest run  117 passed · 1.8s
+    ✗ @acme/web#test: vitest run  1 failed · 41 passed · 2.6s
+
+! acme#verify › vp lint
+<span style="opacity:.55;">…</span>
+
+✗ @acme/web#test: vitest run
+<span style="opacity:.55;">…</span>
+AssertionError: expected 'Loading…' to be 'Ada Lovelace' // Object.is equality
+<span style="opacity:.55;">…</span>
+
+---
+vp run: 2/11 cache hit (18%), 1 failed, 2.3s saved. (Run `vp run --last-details
+witty-otter` for full details)</pre>
+            </div>
+          </figure>
+          <h3>Why not print only the final state?</h3>
+          <p>That would cut this run to about 1,100 tokens.</p>
+          <p>
+            But an agent checking on a run that takes a while would see nothing until it ended, and
+            a run of dev servers doesn't end.
+          </p>
+        </section>
+
+        <section id="how" aria-labelledby="how-title">
+          <h2 id="how-title">How it works</h2>
+
+          <h3 id="config">Task config becomes the tree</h3>
+          <div class="pair">
+            <pre class="code"><code><span class="c-c">// vite.config.ts</span>
+tasks: {
+  verify: <span class="c-s">'vp lint &amp;&amp; vp run -r build'</span>,
+}
+
+<span class="c-c">// packages/ui/vite.config.ts</span>
+tasks: {
+  build: [<span class="c-s">'tsc -b'</span>, <span class="c-s">'tsdown'</span>],
+}
+
+<span class="c-c">// apps/web/vite.config.ts</span>
+tasks: {
+  codegen: <span class="c-s">'graphql-codegen'</span>,
+  build: {
+    command: <span class="c-s">'vp build'</span>,
+    dependsOn: [<span class="c-s">'codegen'</span>],
+  },
+}</code></pre>
+            <pre
+              class="preview"
+              aria-label="Terminal: the tree for vp run verify"
+            ><span style="color:#5cc8d6;">~/acme</span> <span style="color:#b58cff;">❯</span> vp run verify
+  <span style="color:#5cc8d6;">⣾</span> acme#verify                       <span style="opacity:.55;">2/5</span>
+    <span style="color:#58c17a;">✓</span> vp lint                         <span style="opacity:.55;">412 files · 1.2s</span>
+    <span style="color:#5cc8d6;">⣾</span> vp run -r build                 <span style="opacity:.55;">1/4</span>
+      <span style="color:#5cc8d6;">⣾</span> @acme/ui#build                <span style="opacity:.55;">0/2</span>
+        <span style="color:#5cc8d6;">⣾</span> tsc -b
+        <span style="opacity:.55;">○</span> tsdown
+      <span style="color:#58c17a;">✓</span> @acme/web#codegen<span style="opacity:.55;">: </span>graphql-codegen  <span style="opacity:.55;">700ms</span>
+      <span style="opacity:.55;">○</span> @acme/web#build<span style="opacity:.55;">: </span>vp build     <span style="opacity:.55;">waiting for @acme/ui#build</span></pre>
+          </div>
+          <dl class="maps">
+            <div>
+              <dt><code>&amp;&amp;</code>, arrays</dt>
+              <dd>Each step is a row one level under its task</dd>
+            </div>
+            <div>
+              <dt><code>vp run -r</code></dt>
+              <dd>The tasks it runs get a level of their own</dd>
+            </div>
+            <div>
+              <dt><code>dependsOn</code>, package deps</dt>
+              <dd>Rows on the same level; a waiting task names the one it waits for</dd>
+            </div>
+          </dl>
+
+          <h3 id="status">Tools report a status</h3>
+          <div class="pair">
+            <pre
+              class="code"
+            ><code><span class="c-k">import</span> { setStatus, setReady } <span class="c-k">from</span>
+  <span class="c-s">'@voidzero-dev/vite-task-client'</span>;
+
+<span class="c-c">// vp build</span>
+setStatus(<span class="c-s">'transforming · 590 modules'</span>);
+
+<span class="c-c">// vp lint</span>
+setStatus(<span class="c-s">'412 files · 2 warnings'</span>, {
+  tone: <span class="c-s">'warning'</span>,
+});
+
+<span class="c-c">// vp dev</span>
+setReady(<span class="c-s">'http://localhost:5174'</span>);</code></pre>
+            <pre
+              class="preview"
+              aria-label="Terminal: statuses at the end of each row"
+            >  <span style="color:#5cc8d6;">⣾</span> @acme/web#build<span style="opacity:.55;">: </span>vp build     <span style="opacity:.55;">transforming · 590 modules</span>
+  <span style="color:#e0b44c;font-weight:700;">!</span> @acme/web#lint<span style="opacity:.55;">: </span>vp lint       <span style="color:#e0b44c;">412 files · 2 warnings</span><span style="opacity:.55;"> · 1.2s</span>
+  <span style="color:#58c17a;">◉</span> @acme/docs#dev<span style="opacity:.55;">: </span>vp dev        <span style="opacity:.55;">http://localhost:5174</span>
+  <span style="color:#58c17a;">✓</span> @acme/utils#test<span style="opacity:.55;">: </span>vitest run  <span style="opacity:.55;">cache hit · 36 passed</span></pre>
+          </div>
+          <dl class="maps">
+            <div>
+              <dt>Cache hit</dt>
+              <dd>The row shows the status saved with the cache entry</dd>
+            </div>
+            <div>
+              <dt><code>tone: 'warning'</code></dt>
+              <dd>
+                The row gets the <span class="chip-inline s-warn">!</span> icon, and the task's
+                output prints after the run
+              </dd>
+            </div>
+            <div>
+              <dt>Outside <code>vp run</code></dt>
+              <dd>The calls do nothing, and plain output doesn't show statuses</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section id="after" aria-labelledby="after-title">
+          <h2 id="after-title">After the run</h2>
+          <p>
+            The tree's last frame stays, followed by the output of tasks that failed or warned and a
+            one-line summary.
+          </p>
+          <div class="examples">
+            <figure>
+              <figcaption>
+                After Ctrl-C, the rows show what was cancelled, and nothing else prints.
+              </figcaption>
+              <pre
+                class="preview"
+                aria-label="Terminal: dev servers stopped with Ctrl-C"
+              ><span style="color:#5cc8d6;">~/acme</span> <span style="color:#b58cff;">❯</span> vp run -r dev
+<span style="opacity:.55;">⊘</span> @acme/web#dev<span style="opacity:.55;">: </span>vp dev        <span style="opacity:.55;">cancelled</span>
+<span style="opacity:.55;">⊘</span> @acme/docs#dev<span style="opacity:.55;">: </span>vp dev       <span style="opacity:.55;">cancelled</span>
+<span style="opacity:.55;">⊘</span> @acme/api#dev<span style="opacity:.55;">: </span>wrangler dev  <span style="opacity:.55;">cancelled</span>
+
+<span style="opacity:.55;">---</span>
+vp run: stopped by Ctrl-C. <span style="opacity:.55;">(Run `vp run --last-details calm-river` for full deta</span>
+<span style="opacity:.55;">ils)</span></pre>
+            </figure>
+            <figure>
+              <figcaption>
+                Each run gets a name, and <code>--last-details</code> with that name prints every
+                task's output.
+              </figcaption>
+              <pre
+                class="preview"
+                aria-label="Terminal: vp run --last-details brave-otter"
+              ><span style="color:#5cc8d6;">~/acme</span> <span style="color:#b58cff;">❯</span> vp run --last-details brave-otter
+
+<span style="color:#58c17a;">✓</span><span style="font-weight:700;"> @acme/utils#build: tsdown </span><span style="opacity:.55;">────────────────────────────────────────────────────</span>
+<span style="color:#58c17a;">✔</span> Build complete in <span style="color:#58c17a;">182ms</span>
+
+<span style="color:#58c17a;">✓</span><span style="font-weight:700;"> @acme/ui#build › tsc -b </span><span style="opacity:.55;">──────────────────────────────────────────────────────</span>
+
+<span style="color:#58c17a;">✓</span><span style="font-weight:700;"> @acme/ui#build › tsdown </span><span style="opacity:.55;">──────────────────────────────────────────────────────</span>
+<span style="color:#6c8cff;">ℹ</span> tsdown <span style="opacity:.55;">v0.23.3</span>
+<span style="color:#6c8cff;">ℹ</span> <span style="opacity:.55;">dist/</span><span style="font-weight:700;">index.mjs</span>  <span style="opacity:.55;">31.40 kB │ gzip: 8.95 kB</span>
+<span style="color:#58c17a;">✔</span> Build complete in <span style="color:#58c17a;">874ms</span>
+
+<span style="opacity:.55;">…</span></pre>
+            </figure>
+            <figure>
+              <figcaption>An unknown name lists the recent runs.</figcaption>
+              <pre
+                class="preview"
+                aria-label="Terminal: an unknown run name"
+              ><span style="color:#5cc8d6;">~/acme</span> <span style="color:#b58cff;">❯</span> vp run --last-details brave-otr
+<span style="color:#ee6a6a;">error</span>: no saved run is named `brave-otr`. Recent runs:
+  calm-river   <span style="opacity:.55;">vp run -r dev</span>
+  brave-otter  <span style="opacity:.55;">vp run verify</span></pre>
+            </figure>
+          </div>
+        </section>
+
+        <section id="when" aria-labelledby="when-title">
+          <h2 id="when-title">When the UI is used</h2>
+          <p>
+            The UI hides the output of successful tasks, which is fine only when you can open it. So
+            <code>vp run</code> uses the UI only in a terminal, and only when a run has more than
+            one task.
+          </p>
+          <div class="examples">
+            <figure>
+              <figcaption>In a terminal with two or more tasks, you get the UI.</figcaption>
+              <pre
+                class="preview"
+                aria-label="Terminal: vp run -r build shows the tree"
+              ><span style="color:#5cc8d6;">~/acme</span> <span style="color:#b58cff;">❯</span> vp run -r build
+  <span style="color:#58c17a;">✓</span> @acme/utils#build<span style="opacity:.55;">: </span>tsdown  <span style="opacity:.55;">cache hit · 20 files</span>
+  <span style="color:#5cc8d6;">⡿</span> @acme/ui#build<span style="opacity:.55;">: </span>tsdown     <span style="opacity:.55;">bundling</span>
+  <span style="opacity:.55;">○</span> @acme/web#build<span style="opacity:.55;">: </span>vp build  <span style="opacity:.55;">waiting for @acme/ui#build</span>
+  ↑↓<span style="opacity:.55;"> select a task   </span>ctrl-c<span style="opacity:.55;"> stop</span>                                     <span style="opacity:.55;">brave-otter</span></pre>
+            </figure>
+            <figure>
+              <figcaption>With one task, the output is plain, as it is today.</figcaption>
+              <pre
+                class="preview"
+                aria-label="Terminal: vp run build prints plain output"
+              ><span style="color:#5cc8d6;">~/acme/packages/ui</span> <span style="color:#b58cff;">❯</span> vp run build
+$ tsdown <span style="color:#e0b44c;">○ cache miss: 'src/button.tsx' modified, executing</span>
+<span style="color:#6c8cff;">ℹ</span> tsdown <span style="opacity:.55;">v0.23.3</span>
+<span style="color:#58c17a;">✔</span> Build complete in <span style="color:#58c17a;">874ms</span></pre>
+            </figure>
+            <figure>
+              <figcaption>
+                When output is piped, or <code>CI</code> or <code>TERM=dumb</code> is set, the
+                output is plain too.
+              </figcaption>
+              <pre
+                class="preview"
+                aria-label="Terminal: piped output is plain"
+              ><span style="color:#5cc8d6;">~/acme</span> <span style="color:#b58cff;">❯</span> vp run -r build | tee build.log
+~/packages/utils$ tsdown <span style="color:#58c17a;">◉ cache hit, replaying</span>
+<span style="color:#58c17a;">✔</span> Build complete in <span style="color:#58c17a;">182ms</span>
+~/packages/ui$ tsdown <span style="color:#e0b44c;">○ cache miss: 'src/button.tsx' modified, executing</span>
+<span style="color:#6c8cff;">ℹ</span> tsdown <span style="opacity:.55;">v0.23.3</span>
+<span style="color:#58c17a;">✔</span> Build complete in <span style="color:#58c17a;">874ms</span>
+~/apps/web$ vp build <span style="color:#e0b44c;">○ cache miss: 'src/App.tsx' modified, executing</span>
+<span style="opacity:.55;">…</span></pre>
+            </figure>
+            <figure>
+              <figcaption>
+                <code>--log=labeled</code>, <code>grouped</code> or <code>interleaved</code> picks
+                that mode instead. Set <code>VP_LOG=interleaved</code> to never get the UI.
+              </figcaption>
+              <pre
+                class="preview"
+                aria-label="Terminal: --log=labeled prefixes each line"
+              ><span style="color:#5cc8d6;">~/acme</span> <span style="color:#b58cff;">❯</span> vp run --log=labeled -r build
+<span style="opacity:.55;">[@acme/utils#build]</span> ~/packages/utils$ tsdown <span style="color:#58c17a;">◉ cache hit, replaying</span>
+<span style="opacity:.55;">[@acme/ui#build]</span> ~/packages/ui$ tsdown <span style="color:#e0b44c;">○ cache miss: 'src/button.tsx' modified, executing</span>
+<span style="opacity:.55;">[@acme/utils#build]</span> <span style="color:#58c17a;">✔</span> Build complete in <span style="color:#58c17a;">182ms</span>
+<span style="opacity:.55;">[@acme/ui#build]</span> <span style="color:#6c8cff;">ℹ</span> tsdown <span style="opacity:.55;">v0.23.3</span>
+<span style="opacity:.55;">[@acme/ui#build]</span> <span style="color:#58c17a;">✔</span> Build complete in <span style="color:#58c17a;">874ms</span>
+<span style="opacity:.55;">…</span></pre>
+            </figure>
+          </div>
+        </section>
+
+        <section id="details" aria-labelledby="details-title">
+          <h2 id="details-title">Details</h2>
+          <details class="detail" id="tree">
+            <summary><h3>The task tree</h3></summary>
+
+            <p>
+              Like a progress bar, the tree is drawn below the cursor. It doesn't clear what's
+              already in your terminal, and it doesn't show task output. When the run ends, its last
+              frame stays in your scrollback.
+            </p>
+            <h4>Icons</h4>
+            <table class="icons">
+              <tbody>
+                <tr>
+                  <td><span class="chip s-dim">○</span></td>
+                  <td>
+                    Waiting for a dependency or a free concurrency slot. The status says which.
+                  </td>
+                </tr>
+                <tr>
+                  <td><span class="chip s-run">⣾</span></td>
+                  <td>
+                    Running. In agent mode the icon is
+                    <span class="chip-inline s-run">●</span> and doesn't spin.
+                  </td>
+                </tr>
+                <tr>
+                  <td><span class="chip s-ok">◉</span></td>
+                  <td>
+                    Ready: a long-running task, such as a dev server, reported that it's up. The
+                    icon turns red or yellow if its status is an error or a warning.
+                  </td>
+                </tr>
+                <tr>
+                  <td><span class="chip s-ok">✓</span></td>
+                  <td>
+                    Succeeded. A cache hit has the same icon; its status starts with
+                    <q>cache hit</q>.
+                  </td>
+                </tr>
+                <tr>
+                  <td><span class="chip s-warn">!</span></td>
+                  <td>Succeeded with a warning. Its output prints after the run.</td>
+                </tr>
+                <tr>
+                  <td><span class="chip s-fail">✗</span></td>
+                  <td>Failed.</td>
+                </tr>
+                <tr>
+                  <td><span class="chip s-dim">⊘</span></td>
+                  <td>Cancelled, by Ctrl-C or because another task failed.</td>
+                </tr>
+                <tr>
+                  <td><span class="chip s-dim">–</span></td>
+                  <td>Never started, because the run stopped first.</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              A group shows its most urgent child: failed first, then running, then waiting, then
+              done.
+            </p>
+            <h4>How the tree fits on screen</h4>
+            <ul>
+              <li>
+                Rows never move when their state changes, so the selection doesn't jump around.
+              </li>
+              <li>
+                The tree is never taller than the terminal. Groups that finished cleanly fold
+                automatically.
+              </li>
+              <li>
+                If it still doesn't fit, siblings that finished cleanly fold into one
+                <q>N more done</q> row, and the rest scrolls, with <q>↑ N more</q> and
+                <q>↓ N more</q> rows at the edges.
+              </li>
+              <li>
+                Nothing is drawn in the first 150 ms, so a run that's over by then, such as one with
+                only cache hits, prints just its summary.
+              </li>
+              <li>
+                No row is highlighted until you press an arrow key, so a run you only watch has no
+                selection.
+              </li>
+            </ul>
+          </details>
+          <details class="detail" id="task-view">
+            <summary><h3>The task view</h3></summary>
+
+            <p>
+              <kbd>Enter</kbd> on a task opens its output full-screen, like a tmux pane. Colors,
+              wrapped lines and lines that redraw themselves look the way they would in a terminal.
+              A bar at the bottom shows the task, its status and the keys you can press.
+            </p>
+            <table class="keys">
+              <tbody>
+                <tr>
+                  <td><kbd>Esc</kbd></td>
+                  <td>Back to the tree</td>
+                </tr>
+                <tr>
+                  <td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>PgUp</kbd> <kbd>PgDn</kbd> <kbd>Home</kbd></td>
+                  <td>Scroll. The bar shows how far back you are.</td>
+                </tr>
+                <tr>
+                  <td><kbd>End</kbd></td>
+                  <td>Jump to the newest output and keep following it</td>
+                </tr>
+                <tr>
+                  <td>Typing, <kbd>Enter</kbd></td>
+                  <td>Send a line to the task, as in a terminal</td>
+                </tr>
+                <tr>
+                  <td><kbd>Ctrl</kbd> <kbd>F</kbd></td>
+                  <td>
+                    Search the output as you type, and use <kbd>↑</kbd> <kbd>↓</kbd> to move between
+                    matches. A lowercase query matches any case.
+                  </td>
+                </tr>
+                <tr>
+                  <td><kbd>Ctrl</kbd> <kbd>C</kbd></td>
+                  <td>Interrupt the task, or stop the run if the task has ended</td>
+                </tr>
+                <tr>
+                  <td><kbd>Ctrl</kbd> <kbd>D</kbd></td>
+                  <td>Close the task's input</td>
+                </tr>
+                <tr>
+                  <td>Mouse wheel</td>
+                  <td>Scroll</td>
+                </tr>
+                <tr>
+                  <td>Drag</td>
+                  <td>
+                    Select text. Dragging past the top or bottom scrolls, and letting go copies the
+                    text to the clipboard.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              When a tool clears the screen, as <code>tsc --watch</code> does, the view keeps the
+              earlier output and adds a <q>screen cleared</q> divider after it.
+            </p>
+          </details>
+          <details class="detail" id="input">
+            <summary><h3>Typing to a task</h3></summary>
+
+            <p>
+              Tasks write to a pipe, so tools don't draw spinners or progress bars. The status shows
+              their progress instead.
+            </p>
+            <ul>
+              <li>
+                Type in a task's output and press <kbd>Enter</kbd> to send the line. Your typing
+                shows at the end of the output, as a terminal would echo it.
+              </li>
+              <li>
+                <kbd>Ctrl</kbd> <kbd>D</kbd> closes the task's input, and <kbd>Ctrl</kbd>
+                <kbd>C</kbd> interrupts only that task.
+              </li>
+              <li>
+                Tasks that aren't cached can read what you type. Cached tasks get no input, as
+                today.
+              </li>
+              <li>
+                Prompts that read a line work, and so do Vite's shortcuts (<q>h + enter</q>), which
+                <code>vp dev</code> turns on under the UI.
+              </li>
+              <li>
+                Prompts you answer with arrow keys don't work. Run those tasks on their own, or pass
+                <code>--log=interleaved</code>.
+              </li>
+            </ul>
+          </details>
+        </section>
+
+        <footer class="facts-footer">
+          <dl class="facts">
+            <div>
+              <dt>Status</dt>
+              <dd>Draft, for discussion</dd>
+            </div>
+            <div>
+              <dt>Prototype</dt>
+              <dd><code>crates/vt_tui</code></dd>
+            </div>
+            <div>
+              <dt>Demos</dt>
+              <dd>
+                <code>crates/vt_tui_demo</code> runs on this page as WebAssembly in ghostty-web. In
+                a terminal, run <code>cargo run -p vt_tui_demo -- verify</code>.
+              </dd>
+            </div>
+          </dl>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

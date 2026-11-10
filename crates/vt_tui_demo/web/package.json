@@ -1,0 +1,16 @@
+{
+  "name": "vt-tui-rfc",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "wasm": "node build-wasm.mjs",
+    "dev": "node build-wasm.mjs && vp dev",
+    "build": "node build-wasm.mjs && vp build"
+  },
+  "dependencies": {
+    "ghostty-web": "0.4.0"
+  },
+  "devDependencies": {
+    "vite-plus": "catalog:"
+  }
+}

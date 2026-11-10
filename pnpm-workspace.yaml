@@ -2,6 +2,7 @@ packages:
   - .
   - packages/tools
   - packages/vite-task-client
+  - crates/vt_tui_demo/web
 
 allowBuilds:
   '@playwright/browser-chromium': true
