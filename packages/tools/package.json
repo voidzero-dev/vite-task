@@ -2,27 +2,29 @@
   "name": "vite-task-tools",
   "private": true,
   "bin": {
-    "cbor-http": "./src/cbor-http.ts",
     "remote-cache-server": "./src/remote-cache/cli.ts"
   },
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test src/*.test.ts"
+    "check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "catalog:",
-    "@fastify/busboy": "catalog:",
+    "@cloudflare/workers-types": "5.20260911.1",
     "@openai/codex": "catalog:",
     "@playwright/browser-chromium": "catalog:",
     "@vitest/browser-playwright": "catalog:",
+    "@voidzero-dev/vite-plus-remote-cache-cloudflare": "github:voidzero-dev/vite-plus-remote-cache-cloudflare#2f0c821158e674d5660bc10f6b16c0ef101273a5",
     "@voidzero-dev/vite-task-client": "workspace:*",
+    "astro": "catalog:",
     "bun": "catalog:",
-    "cbor-edn": "catalog:",
     "cbor2": "catalog:",
     "cross-env": "catalog:",
     "cross-spawn": "catalog:",
     "deno": "catalog:",
+    "esbuild": "0.28.1",
+    "miniflare": "5.20260911.0-alpha",
+    "next": "catalog:",
     "nitro": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
@@ -30,9 +32,13 @@
     "playwright": "catalog:",
     "pnpm": "catalog:",
     "postject": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tsdown": "catalog:",
     "typescript": "7.1.0-dev.20261001.1",
     "vite": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "wrangler": "4.131.1"
   },
   "devDependencies": {
     "@types/cross-spawn": "catalog:",

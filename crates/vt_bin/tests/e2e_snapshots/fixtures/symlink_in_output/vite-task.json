@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt symlink target.txt out/link",
+      "cache": true
+    }
+  }
+}

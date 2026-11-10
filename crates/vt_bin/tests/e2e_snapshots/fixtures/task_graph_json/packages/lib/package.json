@@ -1,0 +1,6 @@
+{
+  "name": "lib",
+  "scripts": {
+    "build": "vtt print built lib"
+  }
+}

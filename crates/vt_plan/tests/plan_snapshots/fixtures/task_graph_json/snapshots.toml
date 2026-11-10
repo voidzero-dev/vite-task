@@ -1,0 +1,20 @@
+# `vp run --json` prints every package and task in the workspace.
+
+[[plan]]
+name = "task_graph"
+args = ["run", "--json"]
+
+# The document doesn't depend on the directory it's printed from.
+[[plan]]
+name = "task_graph_from_package"
+args = ["run", "--json"]
+cwd = "packages/web"
+
+# `--json` can't be combined with any other `run` argument.
+[[plan]]
+name = "json_with_recursive_errors"
+args = ["run", "--json", "-r"]
+
+[[plan]]
+name = "json_with_task_errors"
+args = ["run", "--json", "build"]

@@ -7,11 +7,11 @@ use vt_plan::{ExecutionItemDisplay, LeafExecutionKind};
 
 use super::{
     ColorSupport, ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder,
-    LeafExecutionReporter, PipeWriters, RetryingWriter, StdioConfig, StdioSuggestion,
+    LeafExecutionReporter, LeafPath, PipeWriters, RetryingWriter, StdioConfig, StdioSuggestion,
     format_command_with_cache_status, format_task_label, maybe_strip_writer,
     write_leaf_trailing_output,
 };
-use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError};
+use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError, RunKind};
 
 mod writer;
 
@@ -55,6 +55,7 @@ struct LabeledGraphReporter {
 impl GraphExecutionReporter for LabeledGraphReporter {
     fn new_leaf_execution(
         &mut self,
+        _path: &LeafPath,
         display: &ExecutionItemDisplay,
         _leaf_kind: &LeafExecutionKind,
     ) -> Box<dyn LeafExecutionReporter> {
@@ -85,8 +86,12 @@ struct LabeledLeafReporter {
 impl LeafExecutionReporter for LabeledLeafReporter {
     fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
         let label = format_task_label(&self.display);
-        let line =
-            format_command_with_cache_status(&self.display, &self.workspace_path, &cache_status);
+        let line = format_command_with_cache_status(
+            &self.display,
+            &self.workspace_path,
+            &cache_status,
+            RunKind::Real,
+        );
 
         self.started = true;
 
@@ -159,7 +164,8 @@ mod tests {
             ColorSupport::uniform(false),
         ));
         let mut reporter = builder.build();
-        let mut leaf = reporter.new_leaf_execution(&item.execution_item_display, leaf_kind(item));
+        let mut leaf =
+            reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind(item));
         let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
         assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
     }

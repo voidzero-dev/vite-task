@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "deploy": {
+      "command": "vtt fs mkdir ../site write ../site/index.html hi",
+      "cache": true
+    }
+  }
+}

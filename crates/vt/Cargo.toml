@@ -16,6 +16,7 @@ anstream = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
+cow-utils = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
 clap = { workspace = true, features = ["derive"] }
 ctrlc = { workspace = true }
@@ -67,7 +68,11 @@ wax = { workspace = true }
 zstd = { workspace = true }
 
 [dev-dependencies]
+# `preserve_order` keeps the schema's properties in declaration order, as the document prints them.
+schemars = { workspace = true, features = ["preserve_order"] }
 tempfile = { workspace = true }
+vt_snapshot_test = { workspace = true }
+vt_str = { workspace = true, features = ["schemars"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 fspy = { workspace = true }

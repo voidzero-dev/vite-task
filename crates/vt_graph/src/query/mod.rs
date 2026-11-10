@@ -6,7 +6,7 @@
 //! and produces a `DiGraphMap<PackageNodeIndex, ()>` (the *package subgraph*).
 //!
 //! Stage 2 — task mapping — is handled by `map_subgraph_to_tasks`:
-//! - Packages that **have** the requested task are mapped to their `TaskNodeIndex`.
+//! - Packages that **have** the requested task are mapped to that task.
 //! - Packages that **lack** the task are *reconnected*: each predecessor is wired
 //!   directly to each successor, then the task-lacking node is removed. This preserves
 //!   transitive ordering even when intermediate packages miss the task.
@@ -16,35 +16,48 @@
 //!
 //! Explicit `dependsOn` dependencies are then added on top by `add_dependencies`.
 
-use petgraph::{Direction, prelude::DiGraphMap, visit::EdgeRef};
-use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::{BTreeMap, BTreeSet};
+
+use petgraph::{Direction, prelude::DiGraphMap};
+use rustc_hash::FxHashMap;
 use vt_str::Str;
 use vt_workspace::PackageNodeIndex;
 pub use vt_workspace::package_graph::{PackageQuery, PackageQueryResolveError};
 
-use crate::{IndexedTaskGraph, TaskDependencyType, TaskId, TaskNodeIndex};
+use crate::{IndexedTaskGraph, TaskGraphLoadError, TaskId, TaskNode};
 
 /// A task execution graph queried from a `TaskQuery`.
 ///
-/// Nodes in `graph` are `TaskNodeIndex` values into the full `TaskGraph`.
-/// Edges represent the final dependency relationships between tasks (no weights).
+/// `tasks` maps each selected task's ID to the task and the IDs of the tasks
+/// it runs after.
 ///
-/// `requested` is the subset of nodes the user typed on the CLI — i.e. the
-/// nodes added by `map_subgraph_to_tasks` (stage 2), not the ones reached
-/// only via `dependsOn` expansion in `IndexedTaskGraph::add_dependencies` (stage 3).
+/// A task is `requested` when the user typed it on the CLI — i.e. it was
+/// added by `map_subgraph_to_tasks` (stage 2), not reached only via
+/// `dependsOn` expansion in `IndexedTaskGraph::add_dependencies` (stage 3).
 ///
 /// For example, given `test` with `dependsOn: ["build"]` and the command
 /// `vp run test some-filter`:
 ///
-/// - `graph` contains both `test` and `build` with an edge between them.
-/// - `requested` contains only `test`.
+/// - `tasks` contains both `test` and `build`, and `test` depends on `build`.
+/// - Only `test` is `requested`.
 ///
 /// The planner uses this distinction to forward `some-filter` to `test`
 /// while running `build` with no extra args.
 #[derive(Debug, Default, Clone)]
-pub struct TaskExecutionGraph {
-    pub graph: DiGraphMap<TaskNodeIndex, ()>,
-    pub requested: FxHashSet<TaskNodeIndex>,
+pub struct TaskExecutionGraph<'g> {
+    pub tasks: BTreeMap<TaskId, QueriedTask<'g>>,
+}
+
+/// A task selected by a [`TaskQuery`].
+#[derive(Debug, Clone)]
+pub struct QueriedTask<'g> {
+    pub node: &'g TaskNode,
+
+    /// The tasks this one runs after, all of which are in the same [`TaskExecutionGraph`].
+    pub dependencies: BTreeSet<TaskId>,
+
+    /// Whether the query selected this task itself, rather than through `dependsOn`.
+    pub requested: bool,
 }
 
 /// A query for which tasks to run.
@@ -75,13 +88,13 @@ pub struct TaskQuery {
 
 /// The result of [`IndexedTaskGraph::query_tasks`].
 #[derive(Debug)]
-pub struct TaskQueryResult {
+pub struct TaskQueryResult<'g> {
     /// The final execution graph for the selected tasks.
     ///
     /// May be empty if no selected packages have the requested task, or if no
     /// packages matched the filters. The caller distinguishes the two cases
     /// with [`Self::selected_package_count`].
-    pub execution_graph: TaskExecutionGraph,
+    pub execution_graph: TaskExecutionGraph<'g>,
 
     /// Original `--filter` strings for inclusion filters that contributed no
     /// packages to the final selected set — either the core selector matched
@@ -101,7 +114,17 @@ pub struct TaskQueryResult {
     pub selected_package_count: usize,
 }
 
-impl IndexedTaskGraph {
+/// Errors that can occur when querying the task graph.
+#[derive(Debug, thiserror::Error)]
+pub enum TaskQueryError {
+    #[error(transparent)]
+    PackageQueryResolve(#[from] PackageQueryResolveError),
+
+    #[error(transparent)]
+    TaskGraphLoad(#[from] TaskGraphLoadError),
+}
+
+impl IndexedTaskGraph<'_> {
     /// Query the task graph based on the given [`TaskQuery`].
     ///
     /// Returns a [`TaskQueryResult`] containing the execution graph and any
@@ -110,8 +133,9 @@ impl IndexedTaskGraph {
     ///
     /// # Errors
     ///
-    /// Returns [`PackageQueryResolveError::AmbiguousPackageName`] when an exact
-    /// package name (from a `pkg#task` specifier) matches multiple packages.
+    /// Returns [`PackageQueryResolveError`] when an exact package name (from a
+    /// `pkg#task` specifier) matches no package or several, and
+    /// [`TaskGraphLoadError`] when the tasks of a selected package fail to load.
     ///
     /// # Order of operations
     ///
@@ -119,14 +143,14 @@ impl IndexedTaskGraph {
     /// 2. Map package subgraph → task execution graph, reconnecting task-lacking
     ///    packages (Stage 2).
     /// 3. Expand explicit `dependsOn` edges (if `include_explicit_deps`).
-    pub fn query_tasks(
+    pub async fn query_tasks(
         &self,
         query: &TaskQuery,
-    ) -> Result<TaskQueryResult, PackageQueryResolveError> {
+    ) -> Result<TaskQueryResult<'_>, TaskQueryError> {
         let mut execution_graph = TaskExecutionGraph::default();
 
         // Stage 1: resolve package selection.
-        let resolution = self.indexed_package_graph.resolve_query(&query.package_query)?;
+        let resolution = self.package_graph().resolve_query(&query.package_query)?;
         let selected_package_count = resolution.package_subgraph.node_count();
 
         // Stage 2: map each selected package to its task node (with reconnection).
@@ -134,11 +158,12 @@ impl IndexedTaskGraph {
             &resolution.package_subgraph,
             &query.task_name,
             &mut execution_graph,
-        );
+        )
+        .await?;
 
         // Expand explicit dependsOn edges (may add new task nodes from outside the subgraph).
         if query.include_explicit_deps {
-            self.add_dependencies(&mut execution_graph, |_| TaskDependencyType::is_explicit());
+            self.add_dependencies(&mut execution_graph).await?;
         }
 
         Ok(TaskQueryResult {
@@ -150,7 +175,7 @@ impl IndexedTaskGraph {
 
     /// Map a package subgraph to a task execution graph.
     ///
-    /// For packages **with** the task: add the corresponding `TaskNodeIndex`.
+    /// For packages **with** the task: add the task.
     ///
     /// For packages **without** the task: wire each predecessor directly to each
     /// successor (skip-intermediate reconnection), then remove the node. Working on
@@ -161,21 +186,20 @@ impl IndexedTaskGraph {
     /// After all task-lacking nodes are removed, every remaining node in `subgraph`
     /// is guaranteed to be in `pkg_to_task`. The index operator panics on a missing
     /// key — a panic here indicates a bug in the reconnection loop above.
-    fn map_subgraph_to_tasks(
-        &self,
+    async fn map_subgraph_to_tasks<'g>(
+        &'g self,
         package_subgraph: &DiGraphMap<PackageNodeIndex, ()>,
         task_name: &Str,
-        execution_graph: &mut TaskExecutionGraph,
-    ) {
+        execution_graph: &mut TaskExecutionGraph<'g>,
+    ) -> Result<(), TaskGraphLoadError> {
         // Build the task-lookup map for all packages that have the requested task.
-        let pkg_to_task: FxHashMap<PackageNodeIndex, TaskNodeIndex> = package_subgraph
-            .nodes()
-            .filter_map(|pkg| {
-                self.node_indices_by_task_id
-                    .get(&TaskId { package_index: pkg, task_name: task_name.clone() })
-                    .map(|&task_idx| (pkg, task_idx))
-            })
-            .collect();
+        let mut pkg_to_task = FxHashMap::<PackageNodeIndex, &'g TaskNode>::default();
+        for package_index in package_subgraph.nodes() {
+            let id = TaskId { package_index, task_name: task_name.clone() };
+            if let Some(task) = self.task(&id).await? {
+                pkg_to_task.insert(package_index, task);
+            }
+        }
 
         // Clone the subgraph so that reconnection edits are visible in subsequent iterations.
         let mut subgraph = package_subgraph.clone();
@@ -197,58 +221,71 @@ impl IndexedTaskGraph {
             subgraph.remove_node(pkg);
         }
 
-        // Map remaining nodes and their edges to task nodes.
+        // Map remaining nodes and their edges to tasks.
         // Every node still in `subgraph` is in `pkg_to_task`; the index operator
         // panics on a missing key — that would be a bug in the loop above.
         //
-        // All nodes added here are explicitly-requested tasks, so they are
-        // inserted into both the inner graph and the `requested` set.
-        for &task_idx in pkg_to_task.values() {
-            execution_graph.graph.add_node(task_idx);
-            execution_graph.requested.insert(task_idx);
+        // All tasks added here are explicitly requested.
+        for &task in pkg_to_task.values() {
+            execution_graph.tasks.insert(
+                task.id.clone(),
+                QueriedTask { node: task, dependencies: BTreeSet::new(), requested: true },
+            );
         }
         for (src, dst, ()) in subgraph.all_edges() {
-            let st = pkg_to_task[&src];
-            let dt = pkg_to_task[&dst];
-            execution_graph.graph.add_edge(st, dt, ());
+            let dependency = pkg_to_task[&dst].id.clone();
+            execution_graph
+                .tasks
+                .get_mut(&pkg_to_task[&src].id)
+                .expect("every task in pkg_to_task was added above")
+                .dependencies
+                .insert(dependency);
         }
+        Ok(())
     }
 
-    /// Recursively add dependencies to the execution graph based on filtered edges.
+    /// Recursively add `dependsOn` dependencies to the execution graph.
     ///
-    /// Starts from the current nodes in `execution_graph` and follows outgoing edges
-    /// that match `filter_edge`, adding new nodes to the frontier until no new nodes
-    /// are discovered.
-    fn add_dependencies(
-        &self,
-        execution_graph: &mut TaskExecutionGraph,
-        mut filter_edge: impl FnMut(TaskDependencyType) -> bool,
-    ) {
-        let mut frontier: FxHashSet<TaskNodeIndex> = execution_graph.graph.nodes().collect();
+    /// Starts from the tasks in `execution_graph` and follows their `dependsOn`,
+    /// adding new tasks to the frontier until no new tasks are discovered.
+    async fn add_dependencies<'g>(
+        &'g self,
+        execution_graph: &mut TaskExecutionGraph<'g>,
+    ) -> Result<(), TaskGraphLoadError> {
+        let mut frontier: Vec<TaskId> = execution_graph.tasks.keys().cloned().collect();
 
-        // Continue until no new nodes are added to the frontier.
+        // Continue until no new tasks are added to the frontier.
         //
-        // Nodes added here are dependency-only tasks and must NOT be marked as
+        // Tasks added here are dependency-only tasks and must NOT be marked as
         // `requested` — the planner uses that distinction to decide whether to
         // forward CLI extra args to a task.
         while !frontier.is_empty() {
-            let mut next_frontier = FxHashSet::<TaskNodeIndex>::default();
+            let mut next_frontier = Vec::new();
 
-            for from_node in frontier {
-                for edge_ref in self.task_graph.edges(from_node) {
-                    let to_node = edge_ref.target();
-                    let dep_type = *edge_ref.weight();
-                    if filter_edge(dep_type) {
-                        let is_new = !execution_graph.graph.contains_node(to_node);
-                        execution_graph.graph.add_edge(from_node, to_node, ());
-                        if is_new {
-                            next_frontier.insert(to_node);
-                        }
+            for from in frontier {
+                for dependency in self.depends_on(&from).await? {
+                    if !execution_graph.tasks.contains_key(&dependency.id) {
+                        execution_graph.tasks.insert(
+                            dependency.id.clone(),
+                            QueriedTask {
+                                node: dependency,
+                                dependencies: BTreeSet::new(),
+                                requested: false,
+                            },
+                        );
+                        next_frontier.push(dependency.id.clone());
                     }
+                    execution_graph
+                        .tasks
+                        .get_mut(&from)
+                        .expect("frontier tasks are in the execution graph")
+                        .dependencies
+                        .insert(dependency.id.clone());
                 }
             }
 
             frontier = next_frontier;
         }
+        Ok(())
     }
 }

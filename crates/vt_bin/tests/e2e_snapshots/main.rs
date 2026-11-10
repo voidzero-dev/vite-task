@@ -529,6 +529,12 @@ fn run_case(
             // by vt100's `Screen::contents()` when the snapshot is rendered,
             // so this does not introduce colour-noise into existing snapshots.
             cmd.env("TERM", "xterm-256color");
+            // `vp run` checks cache entries on rayon's pool, and a task starts
+            // once its check finishes. With one thread, the checks finish in
+            // the order they're submitted, so tasks that become ready
+            // together start, and print their commands, in the same order
+            // every run.
+            cmd.env("RAYON_NUM_THREADS", "1");
             // The macOS x64 CI shard needs Playwright to select an x64 browser
             // while running under Rosetta on Apple Silicon.
             if let Some(value) = env::var_os("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE") {
@@ -694,7 +700,14 @@ fn run_case(
 
 #[expect(clippy::disallowed_types, reason = "Path required for CARGO_MANIFEST_DIR path traversal")]
 fn main() {
-    let tmp_dir = tempfile::tempdir().unwrap();
+    // On Windows CI, stage the fixtures in `RUNNER_TEMP`, on the checkout's
+    // drive: the staged workspaces resolve `node_modules` into the checkout,
+    // and Next.js builds its client entry from a path relative to the project,
+    // which can't cross drives.
+    let tmp_dir = match std::env::var_os("RUNNER_TEMP") {
+        Some(runner_temp) if cfg!(windows) => tempfile::tempdir_in(runner_temp).unwrap(),
+        _ => tempfile::tempdir().unwrap(),
+    };
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 
     let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());

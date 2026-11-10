@@ -7,7 +7,7 @@ use std::{
 use vt_server::Error as IpcServerError;
 use vt_str::Str;
 
-use super::cache::{CacheHitSource, CacheMiss, remote::UploadError};
+use super::cache::{BaselineDetails, CacheHitSource, CacheMiss, remote::UploadError};
 
 /// The cache operation that failed.
 #[derive(Debug)]
@@ -88,6 +88,9 @@ pub enum CacheDisabledReason {
 pub enum CacheNotUpdatedReason {
     /// Cache was hit - task was replayed from cache, no update needed
     CacheHit,
+    /// A dry run (`vp run --dry-run`) checked the cache without running the
+    /// command.
+    DryRun,
     /// Caching was disabled for this task
     CacheDisabled,
     /// Execution exited with non-zero status
@@ -139,15 +142,26 @@ pub enum CacheUpdateStatus {
     NotUpdated(CacheNotUpdatedReason),
 }
 
+/// Whether a run runs its commands, or is a dry run (`vp run --dry-run`),
+/// which plans them and checks the cache without running anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunKind {
+    Real,
+    Dry,
+}
+
 #[derive(Debug, Clone)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "CacheMiss variant is intentionally large and infrequently cloned"
-)]
 pub enum CacheStatus {
     Disabled(CacheDisabledReason),
     Miss(CacheMiss),
-    Hit { replayed_duration: Duration, source: CacheHitSource },
+    Hit {
+        replayed_duration: Duration,
+        source: CacheHitSource,
+        /// The hit has output files, which a real run restores.
+        restores_outputs: bool,
+        /// With `vp run -vv`, what the cached run depends on and its outputs.
+        baseline: Option<Arc<BaselineDetails>>,
+    },
 }
 
 /// Convert `ExitStatus` to an i32 exit code.

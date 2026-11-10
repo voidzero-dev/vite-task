@@ -1,14 +1,27 @@
 # Cases that use the remote cache backend are ignored because it runs on
-# Node.js. Whether an upload to the backend is still running when the tasks
-# finish depends on timing, so steps that upload hide the message about
-# pending uploads. The cases that test it stall the uploads instead, with
-# stalled-remote-cache in front of the backend.
+# Node.js, and skipped on musl because the backend runs Vite+'s Cloudflare
+# remote cache in workerd, whose prebuilt binaries require glibc. Each of these
+# cases starts its own backend first, runs commands against it with
+# `remote-cache-server run`, and stops it last. The backend only accepts
+# uploads with a GitHub Actions token, so steps that upload run with
+# `--github-actions`, as a job of a push to the main branch. Whether an upload
+# to the backend is still running when the tasks finish depends on timing, so
+# steps that upload hide the message about pending uploads. The cases that
+# test it stall the uploads instead, with stalled-remote-cache in front of the
+# backend.
 [[e2e]]
 name = "read_write"
+cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -24,6 +37,8 @@ steps = [
   ], comment = "The fetch finds no entry. The new execution is uploaded with one store request, and vt run waits for it after the task finishes." },
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -33,14 +48,25 @@ steps = [
       "read-write",
     ],
   ], comment = "A local hit makes no requests." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
 name = "read"
+cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -62,18 +88,30 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
   ], comment = "An endpoint without a mode selects read. The task reruns without uploading." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
 name = "restore"
+cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -100,6 +138,8 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -116,6 +156,7 @@ steps = [
   ], comment = "The outputs are restored." },
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -133,18 +174,30 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
   ], comment = "The exact entry fails validation, so the archive isn't downloaded." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
 name = "local_and_remote_hits"
+cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -170,6 +223,7 @@ steps = [
   ], comment = "Without an endpoint, check is cached only locally." },
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "all",
@@ -179,14 +233,25 @@ steps = [
     "run",
     "--last-details",
   ], comment = "The details show which hit came from the remote cache." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
 name = "fallback"
+cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -214,18 +279,30 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
   ], comment = "The entry stored for this task has a different key. The miss reason compares it with the current key." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
 name = "corrupt_archive"
+cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -240,10 +317,9 @@ steps = [
     ],
   ] },
   { argv = [
-    "vtt",
-    "write-file",
-    "remote-cache/blobs/1",
-    "corrupt",
+    "remote-cache-server",
+    "corrupt-blob",
+    "1",
   ], comment = "Overwrite the stored archive." },
   [
     "vt",
@@ -252,6 +328,7 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -269,14 +346,80 @@ steps = [
     ".tmp",
     "--recursive",
   ], comment = "The corrupt download was removed." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "expired_after_fetch"
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "expire-entry",
+    "--before-download",
+    "1",
+  ], comment = "The entry expires after the next fetch returns it, before its archive is downloaded." },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The fetch finds the entry, but its archive is gone, so the task reruns." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details include the underlying error." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
 name = "restore_failure"
+cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vt",
     "run",
     "build",
@@ -309,6 +452,7 @@ steps = [
   ], comment = "A file where the output directory goes makes restoring fail." },
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
@@ -333,18 +477,30 @@ steps = [
   ],
   { argv = [
     "remote-cache-server",
+    "run",
     "vt",
     "run",
     "build",
   ], comment = "Nothing was cached locally, so the remote entry is fetched and restored again." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
 name = "pending_uploads"
+cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vtt",
     "stalled-remote-cache",
     "--stall",
@@ -366,6 +522,10 @@ steps = [
     "run",
     "--last-details",
   ], comment = "Both uploads were cancelled." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
@@ -471,6 +631,83 @@ steps = [
 ]
 
 [[e2e]]
+name = "pull_request_upload"
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+      "pull-request",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "The job runs for a pull request, so its token doesn't satisfy the write policy and the backend rejects the upload. The task succeeds." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details include the backend's message." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "upload_without_token"
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "Outside GitHub Actions, the upload has no token, so the backend rejects it. The task succeeds." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The details include the backend's message." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
 name = "read_invalid_endpoint"
 steps = [
   { argv = [
@@ -554,10 +791,17 @@ steps = [
 
 [[e2e]]
 name = "ctrl_c_during_upload"
+cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vtt",
     "stalled-remote-cache",
     "--stall",
@@ -584,14 +828,25 @@ steps = [
     "run",
     "build",
   ], comment = "The entry is still in the local cache." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
 name = "fast_fail_during_upload"
+cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vtt",
     "stalled-remote-cache",
     "--stall",
@@ -608,14 +863,25 @@ steps = [
     { "expect-milestone" = "uploads-pending" },
     { "write-key" = "ctrl-c" },
   ], comment = "The proxy never forwards the upload. fail-after-build exits after build finishes, which doesn't cancel build's upload, so vt run waits for it until Ctrl-C." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]
 
 [[e2e]]
 name = "hide_pending_uploads"
+cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
   { argv = [
     "remote-cache-server",
+    "run",
+    "--github-actions",
     "vtt",
     "stalled-remote-cache",
     "--stall",
@@ -636,4 +902,169 @@ steps = [
     { "expect-milestone" = "uploads-pending" },
     { "write-key" = "ctrl-c" },
   ], comment = "The proxy never forwards the upload. vt run waits for it until Ctrl-C, without the message about pending uploads." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "dry_run_remote_hit"
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "--dry-run",
+    "build",
+  ], comment = "A dry run reads the remote cache, as a real run does, but doesn't download the hit's archive: there's no `GET /blob` request." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "dry_run_read_failure"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE_URL",
+      "http://127.0.0.1:0/projects/test",
+    ],
+  ], comment = "Nothing can listen on port 0. The failed fetch is a miss, as in a real run." },
+]
+
+[[e2e]]
+name = "very_verbose_remote_hit"
+cfg = 'not(target_env = "musl")'
+ignore = true
+comment = """
+With `-vv`, a remote hit's outputs are listed once its archive is downloaded. A dry run doesn't download it, so it says they aren't, and a real run lists them. A remote hit without outputs has none to list either way.
+"""
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "check",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "--dry-run",
+    "-vv",
+    "build",
+  ], comment = "A dry run doesn't download the archive, so the outputs aren't listed." },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "-vv",
+    "build",
+  ], comment = "In the JSON, they're `notDownloaded`. Hashes depend on file contents, so they're redacted.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>', '"hash":"[0-9a-f]{16}"' = '"hash":"<hash>"' } },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "-vv",
+    "check",
+  ], comment = "`check` has no outputs, which the entry says without its archive, so there's no `outputs`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>', '"hash":"[0-9a-f]{16}"' = '"hash":"<hash>"' } },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "-vv",
+    "build",
+  ], comment = "A real run downloads the archive, so it lists the outputs it restores." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
 ]

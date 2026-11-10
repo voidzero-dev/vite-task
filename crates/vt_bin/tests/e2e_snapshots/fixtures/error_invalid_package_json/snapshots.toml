@@ -16,3 +16,25 @@ steps = [
     "build",
   ],
 ]
+
+[[e2e]]
+name = "invalid_package_json_task_graph_json_error"
+comment = """
+With `--json`, a load error goes to stderr and nothing goes to stdout
+"""
+steps = [
+  [
+    "vtt",
+    "cp",
+    "packages/broken/package.invalid",
+    "packages/broken/package.json",
+  ],
+  [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--json",
+  ],
+]

@@ -9,7 +9,6 @@
 /// - `--hang`: Keep process alive after the barrier (for kill tests).
 /// - `--daemonize`: Close stdout/stderr but keep process alive (for daemon kill tests).
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    use notify::Watcher as _;
     let mut positional: Vec<&str> = Vec::new();
     let mut exit_code: i32 = 0;
     let mut hang = false;
@@ -34,9 +33,40 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    let dir = std::path::Path::new(positional[0]);
-    let prefix = positional[1];
     let count: usize = positional[2].parse()?;
+    wait(std::path::Path::new(positional[0]), positional[1], count)?;
+
+    if daemonize {
+        // Close stdout/stderr but keep the process alive. Simulates a daemon that
+        // detaches from stdio — tests that the runner can still kill such processes.
+        // Closing the fds gives the parent's pipe an EOF.
+        // SAFETY: fds 1 and 2 are always valid (stdout/stderr).
+        unsafe {
+            libc::close(1);
+            libc::close(2);
+        }
+        loop {
+            std::thread::park();
+        }
+    }
+
+    if hang {
+        loop {
+            std::thread::park();
+        }
+    }
+
+    std::process::exit(exit_code);
+}
+
+/// Join the barrier `<prefix>` in `dir`: create `dir/<prefix>_<pid>`, then
+/// wait until `count` files matching `<prefix>_*` exist in `dir`.
+pub fn wait(
+    dir: &std::path::Path,
+    prefix: &str,
+    count: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use notify::Watcher as _;
 
     std::fs::create_dir_all(dir)?;
 
@@ -64,26 +94,5 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-
-    if daemonize {
-        // Close stdout/stderr but keep the process alive. Simulates a daemon that
-        // detaches from stdio — tests that the runner can still kill such processes.
-        // Closing the fds gives the parent's pipe an EOF.
-        // SAFETY: fds 1 and 2 are always valid (stdout/stderr).
-        unsafe {
-            libc::close(1);
-            libc::close(2);
-        }
-        loop {
-            std::thread::park();
-        }
-    }
-
-    if hang {
-        loop {
-            std::thread::park();
-        }
-    }
-
-    std::process::exit(exit_code);
+    Ok(())
 }

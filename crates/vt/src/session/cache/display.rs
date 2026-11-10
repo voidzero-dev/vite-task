@@ -3,126 +3,52 @@
 //! This module provides plain text formatting for cache status.
 //! Coloring is handled by the reporter to respect `NO_COLOR` environment variable.
 
-use rustc_hash::FxHashSet;
-use serde::{Deserialize, Serialize};
-use vt_plan::cache_metadata::SpawnFingerprint;
 use vt_str::Str;
 
-use super::{
-    CacheHitSource, CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind, split_path,
-};
-use crate::session::event::CacheStatus;
+use super::{CacheHitSource, CacheMiss, Change, EnvSource, InputChangeKind, split_path};
+use crate::session::event::{CacheStatus, RunKind};
 
-/// Describes a single atomic change between two spawn fingerprints.
-///
-/// Used both for live cache status display and for persisted summary data.
-#[derive(Serialize, Deserialize)]
-pub enum SpawnFingerprintChange {
-    /// A fingerprinted env var was added, removed, or changed value.
-    Env(EnvMismatch),
-
-    // Untracked env config changes
-    /// Untracked env pattern added
-    UntrackedEnvAdded { name: Str },
-    /// Untracked env pattern removed
-    UntrackedEnvRemoved { name: Str },
-
-    // Command changes
-    /// Program changed
-    ProgramChanged,
-    /// Args changed
-    ArgsChanged,
-
-    // Working directory change
-    /// Working directory changed
-    CwdChanged,
-}
-
-/// Format a single spawn fingerprint change as human-readable text.
-///
-/// Used by both the live cache status display and the persisted summary rendering.
-pub fn format_spawn_change(change: &SpawnFingerprintChange) -> Str {
+/// Format one change as the detailed summary lists it, e.g.
+/// `env 'NODE_ENV' added` or `'src/a.ts' modified`.
+pub fn format_change(change: &Change) -> Str {
     match change {
-        SpawnFingerprintChange::Env(mismatch) => vt_str::format!("{mismatch}"),
-        SpawnFingerprintChange::UntrackedEnvAdded { name } => {
-            vt_str::format!("untracked env '{name}' added")
-        }
-        SpawnFingerprintChange::UntrackedEnvRemoved { name } => {
-            vt_str::format!("untracked env '{name}' removed")
-        }
-        SpawnFingerprintChange::ProgramChanged => Str::from("program changed"),
-        SpawnFingerprintChange::ArgsChanged => Str::from("args changed"),
-        SpawnFingerprintChange::CwdChanged => Str::from("working directory changed"),
+        Change::Program { .. } => Str::from("program changed"),
+        Change::Args { .. } => Str::from("args changed"),
+        Change::Cwd { .. } => Str::from("working directory changed"),
+        Change::InputConfig => Str::from("input configuration changed"),
+        Change::OutputConfig => Str::from("output configuration changed"),
+        Change::UntrackedEnvAdded { name } => vt_str::format!("untracked env '{name}' added"),
+        Change::UntrackedEnvRemoved { name } => vt_str::format!("untracked env '{name}' removed"),
+        Change::Env { mismatch, .. } => vt_str::format!("{mismatch}"),
+        Change::File { kind, path } => format_input_change_str(*kind, path.as_str()),
     }
 }
 
-/// Compare two spawn fingerprints and return all changes.
-pub fn detect_spawn_fingerprint_changes(
-    old: &SpawnFingerprint,
-    new: &SpawnFingerprint,
-) -> Vec<SpawnFingerprintChange> {
-    let mut changes = Vec::new();
-    let old_env = old.env_fingerprints();
-    let new_env = new.env_fingerprints();
-
-    // Check for removed or changed envs
-    for (key, old_value) in &old_env.fingerprinted_envs {
-        if let Some(new_value) = new_env.fingerprinted_envs.get(key) {
-            if old_value != new_value {
-                changes
-                    .push(SpawnFingerprintChange::Env(EnvMismatch::Changed { name: key.clone() }));
+/// The inline reason for a miss: its first change. When the first change is
+/// an env, every env change is named, as in `envs 'A', 'B' changed`, and a
+/// single env from `cache.env` reads `env 'NODE_ENV' changed` however it
+/// changed. Untracked env changes read `untracked env config changed`.
+fn format_changes_inline(changes: &[Change]) -> Str {
+    match changes.first() {
+        None => Str::from("configuration changed"),
+        Some(Change::UntrackedEnvAdded { .. } | Change::UntrackedEnvRemoved { .. }) => {
+            Str::from("untracked env config changed")
+        }
+        Some(Change::Env { mismatch, source }) => {
+            let names: Vec<&Str> = changes
+                .iter()
+                .filter_map(|change| match change {
+                    Change::Env { mismatch, .. } => Some(mismatch.name()),
+                    _ => None,
+                })
+                .collect();
+            match (names.as_slice(), source) {
+                ([_], EnvSource::Tracked) => vt_str::format!("{mismatch}"),
+                _ => format_env_changed_inline(&names),
             }
-        } else {
-            changes.push(SpawnFingerprintChange::Env(EnvMismatch::Removed { name: key.clone() }));
         }
+        Some(change) => format_change(change),
     }
-
-    // Check for added envs
-    for key in new_env.fingerprinted_envs.keys() {
-        if !old_env.fingerprinted_envs.contains_key(key) {
-            changes.push(SpawnFingerprintChange::Env(EnvMismatch::Added { name: key.clone() }));
-        }
-    }
-
-    // Check untracked env config changes
-    let old_untracked: FxHashSet<_> = old_env.untracked_env_config.iter().collect();
-    let new_untracked: FxHashSet<_> = new_env.untracked_env_config.iter().collect();
-    for name in old_untracked.difference(&new_untracked) {
-        changes.push(SpawnFingerprintChange::UntrackedEnvRemoved { name: (*name).clone() });
-    }
-    for name in new_untracked.difference(&old_untracked) {
-        changes.push(SpawnFingerprintChange::UntrackedEnvAdded { name: (*name).clone() });
-    }
-
-    // Check program changes
-    if old.program_fingerprint_debug() != new.program_fingerprint_debug() {
-        changes.push(SpawnFingerprintChange::ProgramChanged);
-    }
-
-    // Check args changes
-    if old.args() != new.args() {
-        changes.push(SpawnFingerprintChange::ArgsChanged);
-    }
-
-    // Check cwd changes
-    if old.cwd() != new.cwd() {
-        changes.push(SpawnFingerprintChange::CwdChanged);
-    }
-
-    changes
-}
-
-/// Names of the env vars involved in a set of spawn-fingerprint changes, in the
-/// order detected. Only env changes are collected; untracked-env and non-env
-/// changes are skipped.
-fn env_change_names(changes: &[SpawnFingerprintChange]) -> Vec<&Str> {
-    changes
-        .iter()
-        .filter_map(|change| match change {
-            SpawnFingerprintChange::Env(mismatch) => Some(mismatch.name()),
-            _ => None,
-        })
-        .collect()
 }
 
 /// Inline cache-miss reason naming the env var(s) that changed, e.g.
@@ -148,58 +74,36 @@ fn format_env_changed_inline(names: &[&Str]) -> Str {
 /// - Cache Miss (with mismatch): Shows "cache miss" with brief reason
 /// - Cache Disabled: Shows "cache disabled" with reason
 ///
+/// In a real run, a hit ends in ", replaying" and a miss in ", executing". A
+/// dry run does neither, so its status has no such suffix.
+///
 /// Note: Returns plain text without styling. The reporter applies colors.
-pub fn format_cache_status_inline(cache_status: &CacheStatus) -> Option<Str> {
+pub fn format_cache_status_inline(cache_status: &CacheStatus, run_kind: RunKind) -> Option<Str> {
+    let suffix = |next_step: &str| match run_kind {
+        RunKind::Real => vt_str::format!(", {next_step}"),
+        RunKind::Dry => Str::default(),
+    };
     match cache_status {
         CacheStatus::Hit { source, .. } => {
             // Show "cache hit" indicator when replaying from cache
-            Some(match source {
-                CacheHitSource::Local => Str::from("◉ cache hit, replaying"),
-                CacheHitSource::Remote => Str::from("◉ remote cache hit, replaying"),
-            })
+            let hit = match source {
+                CacheHitSource::Local => "cache hit",
+                CacheHitSource::Remote => "remote cache hit",
+            };
+            Some(vt_str::format!("◉ {hit}{}", suffix("replaying")))
         }
         CacheStatus::Miss(CacheMiss::NotFound) => {
             // No inline message for "not found" case - just show command
             // This keeps the output clean for first-time executions
             None
         }
-        CacheStatus::Miss(CacheMiss::FingerprintMismatch(mismatch)) => {
+        CacheStatus::Miss(CacheMiss::Changed(comparison)) => {
             // Show "cache miss" with reason why cache couldn't be used
-            let reason = match mismatch {
-                FingerprintMismatch::SpawnFingerprint { old, new } => {
-                    let changes = detect_spawn_fingerprint_changes(old, new);
-                    match changes.first() {
-                        Some(SpawnFingerprintChange::Env(_)) => {
-                            format_env_changed_inline(&env_change_names(&changes))
-                        }
-                        Some(
-                            SpawnFingerprintChange::UntrackedEnvAdded { .. }
-                            | SpawnFingerprintChange::UntrackedEnvRemoved { .. },
-                        ) => Str::from("untracked env config changed"),
-                        Some(SpawnFingerprintChange::ProgramChanged) => {
-                            Str::from("program changed")
-                        }
-                        Some(SpawnFingerprintChange::ArgsChanged) => Str::from("args changed"),
-                        Some(SpawnFingerprintChange::CwdChanged) => {
-                            Str::from("working directory changed")
-                        }
-                        None => Str::from("configuration changed"),
-                    }
-                }
-                FingerprintMismatch::InputConfig => Str::from("input configuration changed"),
-                FingerprintMismatch::OutputConfig => Str::from("output configuration changed"),
-                FingerprintMismatch::InputChanged { kind, path } => {
-                    format_input_change_str(*kind, path.as_str())
-                }
-                FingerprintMismatch::TrackedEnvChanged(mismatch)
-                | FingerprintMismatch::TrackedEnvQueryChanged { mismatch, .. } => {
-                    vt_str::format!("{mismatch}")
-                }
-            };
-            Some(vt_str::format!("○ cache miss: {reason}, executing"))
+            let reason = format_changes_inline(&comparison.changes);
+            Some(vt_str::format!("○ cache miss: {reason}{}", suffix("executing")))
         }
         CacheStatus::Miss(CacheMiss::RemoteReadFailed(error)) => {
-            Some(vt_str::format!("○ cache miss: {error}, executing"))
+            Some(vt_str::format!("○ cache miss: {error}{}", suffix("executing")))
         }
         CacheStatus::Disabled(_) => Some(Str::from("⊘ cache disabled")),
     }
@@ -228,19 +132,52 @@ pub fn format_input_change_str(kind: InputChangeKind, path: &str) -> Str {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use crate::session::cache::{Comparison, EnvMismatch};
+
+    fn env(mismatch: EnvMismatch, source: EnvSource) -> Change {
+        Change::Env { mismatch, source }
+    }
+
+    fn miss(changes: Vec<Change>) -> CacheStatus {
+        CacheStatus::Miss(CacheMiss::Changed(Comparison::new(changes, None, false)))
+    }
 
     #[test]
-    fn env_spawn_changes_report_names_only() {
-        let added = SpawnFingerprintChange::Env(EnvMismatch::Added { name: Str::from("MY_ENV") });
-        let removed =
-            SpawnFingerprintChange::Env(EnvMismatch::Removed { name: Str::from("MY_ENV") });
-        let changed =
-            SpawnFingerprintChange::Env(EnvMismatch::Changed { name: Str::from("MY_ENV") });
+    fn env_changes_report_names_only() {
+        let name = || Str::from("MY_ENV");
+        let source = EnvSource::Fingerprinted;
+        let added = env(EnvMismatch::Added { name: name() }, source);
+        let removed = env(EnvMismatch::Removed { name: name() }, source);
+        let changed = env(EnvMismatch::Changed { name: name() }, source);
 
-        assert_eq!(format_spawn_change(&added).as_str(), "env 'MY_ENV' added");
-        assert_eq!(format_spawn_change(&removed).as_str(), "env 'MY_ENV' removed");
-        assert_eq!(format_spawn_change(&changed).as_str(), "env 'MY_ENV' changed");
+        assert_eq!(format_change(&added).as_str(), "env 'MY_ENV' added");
+        assert_eq!(format_change(&removed).as_str(), "env 'MY_ENV' removed");
+        assert_eq!(format_change(&changed).as_str(), "env 'MY_ENV' changed");
+    }
+
+    #[test]
+    fn inline_reason_is_the_first_change_in_kind_order() {
+        let fingerprinted =
+            |name| env(EnvMismatch::Added { name: Str::from(name) }, EnvSource::Fingerprinted);
+        let args = Change::Args { from: Arc::from([]), to: Arc::from([Str::from("--watch")]) };
+        let status = miss(vec![fingerprinted("B"), args, fingerprinted("A")]);
+        assert_eq!(
+            format_cache_status_inline(&status, RunKind::Dry).as_deref(),
+            Some("○ cache miss: args changed")
+        );
+        let status = miss(vec![fingerprinted("B"), fingerprinted("A")]);
+        assert_eq!(
+            format_cache_status_inline(&status, RunKind::Dry).as_deref(),
+            Some("○ cache miss: envs 'A', 'B' changed")
+        );
+        let status = miss(vec![fingerprinted("A")]);
+        assert_eq!(
+            format_cache_status_inline(&status, RunKind::Dry).as_deref(),
+            Some("○ cache miss: env 'A' changed")
+        );
     }
 
     #[test]
@@ -256,42 +193,43 @@ mod tests {
 
     #[test]
     fn inline_cache_hit_names_remote_source() {
-        let hit =
-            |source| CacheStatus::Hit { replayed_duration: std::time::Duration::ZERO, source };
+        let hit = |source| CacheStatus::Hit {
+            replayed_duration: std::time::Duration::ZERO,
+            source,
+            restores_outputs: false,
+            baseline: None,
+        };
 
         assert_eq!(
-            format_cache_status_inline(&hit(CacheHitSource::Local)).as_deref(),
+            format_cache_status_inline(&hit(CacheHitSource::Local), RunKind::Real).as_deref(),
             Some("◉ cache hit, replaying")
         );
         assert_eq!(
-            format_cache_status_inline(&hit(CacheHitSource::Remote)).as_deref(),
+            format_cache_status_inline(&hit(CacheHitSource::Remote), RunKind::Real).as_deref(),
             Some("◉ remote cache hit, replaying")
+        );
+        assert_eq!(
+            format_cache_status_inline(&hit(CacheHitSource::Remote), RunKind::Dry).as_deref(),
+            Some("◉ remote cache hit")
         );
     }
 
     #[test]
     fn inline_tracked_env_mismatch_preserves_kind() {
-        let added = CacheStatus::Miss(CacheMiss::FingerprintMismatch(
-            FingerprintMismatch::TrackedEnvQueryChanged {
-                query: crate::session::execute::fingerprint::TrackedEnvQuery::Glob(Str::from(
-                    "PROBE_*",
-                )),
-                mismatch: EnvMismatch::Added { name: Str::from("PROBE_C") },
-            },
-        ));
-        let removed = CacheStatus::Miss(CacheMiss::FingerprintMismatch(
-            FingerprintMismatch::TrackedEnvChanged(EnvMismatch::Removed {
-                name: Str::from("PROBE_A"),
-            }),
-        ));
+        let added =
+            miss(vec![env(EnvMismatch::Added { name: Str::from("PROBE_C") }, EnvSource::Tracked)]);
+        let removed = miss(vec![env(
+            EnvMismatch::Removed { name: Str::from("PROBE_A") },
+            EnvSource::Tracked,
+        )]);
 
         assert_eq!(
-            format_cache_status_inline(&added).as_deref(),
+            format_cache_status_inline(&added, RunKind::Real).as_deref(),
             Some("○ cache miss: env 'PROBE_C' added, executing")
         );
         assert_eq!(
-            format_cache_status_inline(&removed).as_deref(),
-            Some("○ cache miss: env 'PROBE_A' removed, executing")
+            format_cache_status_inline(&removed, RunKind::Dry).as_deref(),
+            Some("○ cache miss: env 'PROBE_A' removed")
         );
     }
 }

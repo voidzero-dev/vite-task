@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt cp src/a.txt output.txt",
+      "cache": {
+        "env": ["MODE"],
+        "input": ["src/**"],
+        "output": ["output.txt"]
+      }
+    }
+  }
+}

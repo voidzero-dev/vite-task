@@ -2,7 +2,7 @@
 //! (dependency order, concurrency limits, fast-fail), and hands each leaf to
 //! [`execute_spawn`] which owns *how* a single spawn runs.
 
-use std::{cell::RefCell, ffi::OsStr, io::Write as _, num::NonZeroUsize, sync::Arc};
+use std::{cell::RefCell, ffi::OsStr, io::Write as _, num::NonZeroUsize, sync::Arc, time::Instant};
 
 use futures_util::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
 use petgraph::Direction;
@@ -20,9 +20,11 @@ use super::{SpawnOutcome, execute_spawn};
 use crate::{
     Session,
     session::{
-        cache::ExecutionCache,
-        event::{CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus},
-        reporter::{ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder},
+        cache::{ExecutionCache, FileCheck},
+        event::{
+            CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, RunKind,
+        },
+        reporter::{ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafPath},
     },
 };
 
@@ -38,7 +40,10 @@ const HIDE_PENDING_UPLOADS_ENV: &str = "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS";
 /// The `reporter` field is wrapped in `RefCell` because concurrent futures
 /// (via `FuturesUnordered`) need shared access to create leaf reporters.
 /// Since all futures run on a single thread (no `tokio::spawn`), `RefCell`
-/// is sufficient for interior mutability.
+/// is sufficient for interior mutability. That thread also runs any blocking
+/// work done inside them, so a cache lookup hashes inputs and checks entries
+/// on rayon's pool instead (see
+/// [`run_off_thread`](crate::session::cache::run_off_thread)).
 ///
 /// Cache fields are passed through to [`execute_spawn`] for cache-aware execution.
 struct ExecutionContext<'a> {
@@ -55,6 +60,11 @@ struct ExecutionContext<'a> {
     /// Public-facing program name (e.g. `vp`), used in user-facing error
     /// messages that suggest a CLI command (e.g. `cache clean`).
     program_name: &'a str,
+    /// In a dry run, each leaf is looked up and reported as in a real run, but
+    /// nothing runs: see [`execute_spawn`].
+    run_kind: RunKind,
+    /// How many changed files a cache miss lists.
+    file_check: FileCheck,
     /// Token cancelled when a task fails. Kills in-flight child processes
     /// (via `start_kill` in spawn.rs).
     fast_fail_token: CancellationToken,
@@ -83,8 +93,15 @@ impl ExecutionContext<'_> {
     /// (killing in-flight child processes). Ctrl-C cancels the `cancel_token`.
     /// Either cancellation causes this method to close the semaphore, drain
     /// remaining futures, and return.
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute_expanded_graph(&self, graph: &ExecutionGraph) {
+    ///
+    /// `path` is where `graph` is: empty for the root graph, and the path of
+    /// the item it expands for a nested one.
+    #[tracing::instrument(
+        level = "debug",
+        skip_all,
+        fields(tasks = graph.graph.node_count(), concurrency_limit = graph.concurrency_limit)
+    )]
+    async fn execute_expanded_graph(&self, graph: &ExecutionGraph, path: &LeafPath) {
         if graph.graph.node_count() == 0 {
             return;
         }
@@ -104,7 +121,7 @@ impl ExecutionContext<'_> {
         // Schedule initially ready nodes (no dependencies).
         for (&node_ix, &count) in &dep_count {
             if count == 0 {
-                futures.push(self.spawn_node(graph, node_ix, &semaphore));
+                futures.push(self.spawn_node(graph, path, node_ix, &semaphore));
             }
         }
 
@@ -125,7 +142,7 @@ impl ExecutionContext<'_> {
                 let count = dep_count.get_mut(&dependent).expect("all nodes are in dep_count");
                 *count -= 1;
                 if *count == 0 {
-                    futures.push(self.spawn_node(graph, dependent, &semaphore));
+                    futures.push(self.spawn_node(graph, path, dependent, &semaphore));
                 }
             }
         }
@@ -139,15 +156,22 @@ impl ExecutionContext<'_> {
     fn spawn_node<'a>(
         &'a self,
         graph: &'a ExecutionGraph,
+        path: &'a LeafPath,
         node_ix: ExecutionNodeIndex,
         semaphore: &Arc<Semaphore>,
     ) -> LocalBoxFuture<'a, ExecutionNodeIndex> {
         let sem = semaphore.clone();
         async move {
+            let start = Instant::now();
             if let Ok(_permit) = sem.acquire_owned().await
                 && !self.cancelled()
             {
-                self.execute_node(graph, node_ix).await;
+                tracing::debug!(
+                    task = %graph.graph[node_ix].task_display,
+                    waited = ?start.elapsed(),
+                    "acquired a concurrency permit"
+                );
+                self.execute_node(graph, path, node_ix).await;
             }
             node_ix
         }
@@ -159,19 +183,27 @@ impl ExecutionContext<'_> {
     /// A node may have multiple items (from `&&`-split commands). Items are executed
     /// in order; if any item fails, `execute_leaf` cancels the `fast_fail_token`
     /// and remaining items are skipped (preserving `&&` semantics).
-    async fn execute_node(&self, graph: &ExecutionGraph, node_ix: ExecutionNodeIndex) {
+    async fn execute_node(
+        &self,
+        graph: &ExecutionGraph,
+        path: &LeafPath,
+        node_ix: ExecutionNodeIndex,
+    ) {
         let task_execution = &graph.graph[node_ix];
 
-        for item in &task_execution.items {
+        for (item_index, item) in task_execution.items.iter().enumerate() {
             if self.cancelled() {
                 return;
             }
+            let item_path: Vec<_> = path.iter().copied().chain([(node_ix, item_index)]).collect();
             match &item.kind {
                 ExecutionItemKind::Leaf(leaf_kind) => {
-                    self.execute_leaf(&item.execution_item_display, leaf_kind).boxed_local().await;
+                    self.execute_leaf(&item_path, &item.execution_item_display, leaf_kind)
+                        .boxed_local()
+                        .await;
                 }
                 ExecutionItemKind::Expanded(nested_graph) => {
-                    self.execute_expanded_graph(nested_graph).boxed_local().await;
+                    self.execute_expanded_graph(nested_graph, &item_path).boxed_local().await;
                 }
             }
         }
@@ -183,11 +215,22 @@ impl ExecutionContext<'_> {
     /// from the graph reporter and delegates to the appropriate execution
     /// method. On failure (non-zero exit or infrastructure error), cancels the
     /// `fast_fail_token`.
-    #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute_leaf(&self, display: &ExecutionItemDisplay, leaf_kind: &LeafExecutionKind) {
+    #[tracing::instrument(
+        level = "debug",
+        skip_all,
+        fields(task = %item_display.task_display, command = %item_display.command)
+    )]
+    async fn execute_leaf(
+        &self,
+        path: &LeafPath,
+        item_display: &ExecutionItemDisplay,
+        leaf_kind: &LeafExecutionKind,
+    ) {
+        let start = Instant::now();
         // Borrow the reporter briefly to create the leaf reporter, then drop
         // the RefCell guard before any `.await` point.
-        let mut leaf_reporter = self.reporter.borrow_mut().new_leaf_execution(display, leaf_kind);
+        let mut leaf_reporter =
+            self.reporter.borrow_mut().new_leaf_execution(path, item_display, leaf_kind);
 
         let failed = match leaf_kind {
             LeafExecutionKind::InProcess(in_process_execution) => {
@@ -195,10 +238,13 @@ impl ExecutionContext<'_> {
                 let mut stdio_config = leaf_reporter
                     .start(CacheStatus::Disabled(CacheDisabledReason::InProcessExecution));
 
-                let execution_output = in_process_execution.execute();
-                // Write output to the stdout writer from StdioConfig
-                let _ = stdio_config.writers.stdout_writer.write_all(&execution_output.stdout);
-                let _ = stdio_config.writers.stdout_writer.flush();
+                // A dry run doesn't run it.
+                if self.run_kind == RunKind::Real {
+                    let execution_output = in_process_execution.execute();
+                    // Write output to the stdout writer from StdioConfig
+                    let _ = stdio_config.writers.stdout_writer.write_all(&execution_output.stdout);
+                    let _ = stdio_config.writers.stdout_writer.flush();
+                }
 
                 leaf_reporter.finish(
                     None,
@@ -215,17 +261,22 @@ impl ExecutionContext<'_> {
                     self.workspace_root,
                     self.cache_dir,
                     self.program_name,
+                    self.run_kind,
+                    self.file_check,
                     self.fast_fail_token.clone(),
                     self.cancel_token.clone(),
                 )
                 .await;
                 match outcome {
-                    SpawnOutcome::CacheHit | SpawnOutcome::Cancelled => false,
+                    SpawnOutcome::CacheHit | SpawnOutcome::WouldSpawn | SpawnOutcome::Cancelled => {
+                        false
+                    }
                     SpawnOutcome::Spawned(status) => !status.success(),
                     SpawnOutcome::Failed => true,
                 }
             }
         };
+        tracing::debug!(failed, elapsed = ?start.elapsed(), "finished the task item");
         if failed {
             self.fast_fail_token.cancel();
         }
@@ -239,6 +290,10 @@ impl Session<'_> {
     /// after cache initialization, so cache errors are reported directly to stderr
     /// without involving the reporter at all.
     ///
+    /// In a dry run (`RunKind::Dry`), each leaf only reports what a real run
+    /// would do: nothing runs, and no cache entry is written.
+    /// `file_check` says how many changed files a cache miss lists.
+    ///
     /// `fast_fail_token` and `cancel_token` are described on [`ExecutionContext`].
     ///
     /// Uploads to the remote cache run in the background and can outlive
@@ -250,10 +305,13 @@ impl Session<'_> {
     /// Returns `Err(ExitStatus)` to indicate the caller should exit with the given status code.
     /// Returns `Ok(())` when all tasks succeeded.
     #[tracing::instrument(level = "debug", skip_all)]
+    #[expect(clippy::too_many_arguments, reason = "each argument sets how the graph is executed")]
     pub(crate) async fn execute_graph(
         &self,
         execution_graph: ExecutionGraph,
         builder: Box<dyn GraphExecutionReporterBuilder>,
+        run_kind: RunKind,
+        file_check: FileCheck,
         fast_fail_token: CancellationToken,
         cancel_token: CancellationToken,
         interrupt_token: CancellationToken,
@@ -278,13 +336,15 @@ impl Session<'_> {
             workspace_root: &self.workspace_path,
             cache_dir: &self.cache_path,
             program_name: self.program_name.as_str(),
+            run_kind,
+            file_check,
             fast_fail_token,
             cancel_token,
         };
 
         // Execute the graph with fast-fail: if any task fails, remaining tasks
         // are skipped. Leaf-level errors are reported through the reporter.
-        execution_context.execute_expanded_graph(&execution_graph).await;
+        execution_context.execute_expanded_graph(&execution_graph, &[]).await;
 
         // Nested graphs share the cache, so this waits for their uploads too.
         // After Ctrl-C, the uploads are cancelled without a message.

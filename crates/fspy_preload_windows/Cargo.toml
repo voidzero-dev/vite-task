@@ -26,7 +26,11 @@ winapi = { workspace = true, features = [
   "memoryapi",
   "std",
 ] }
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_UI_Shell"] }
+windows-sys = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_System_Ioctl",
+  "Win32_UI_Shell",
+] }
 winsafe = { workspace = true, features = ["kernel"] }
 
 [target.'cfg(target_os = "windows")'.dev-dependencies]

@@ -1,0 +1,41 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt print-file a.txt b.txt",
+      "cache": true
+    },
+    "other": {
+      "command": "vtt print other",
+      "cache": true
+    },
+    "uncached": {
+      "command": "vtt print uncached",
+      "cache": false
+    },
+    "nested": {
+      "command": "vt run build"
+    },
+    "emit": {
+      "command": "vtt write-file dist/out.txt built",
+      "cache": true
+    },
+    "after-emit": {
+      "command": "vtt print checked",
+      "dependsOn": ["emit"],
+      "cache": true
+    },
+    "after-build": {
+      "command": "vtt print checked",
+      "dependsOn": ["build"],
+      "cache": true
+    },
+    "emit-then-print": {
+      "command": "vtt write-file dist/steps.txt built && vtt print after",
+      "cache": true
+    },
+    "nested-then-print": {
+      "command": "vt run emit && vtt print after",
+      "cache": true
+    }
+  }
+}

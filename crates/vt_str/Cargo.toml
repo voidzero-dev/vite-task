@@ -11,10 +11,12 @@ rust-version.workspace = true
 wincode = { workspace = true }
 compact_str = { workspace = true, features = ["serde"] }
 diff-struct = { workspace = true }
+schemars = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 ts-rs = { workspace = true, optional = true, features = ["no-serde-warnings"] }
 
 [features]
+schemars = ["dep:schemars"]
 ts-rs = ["dep:ts-rs"]
 
 [lints]

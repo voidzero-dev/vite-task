@@ -15,19 +15,19 @@ use std::{
 };
 
 use owo_colors::Style;
+use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
-use vt_path::AbsolutePath;
+use vt_casefold::EnvName;
+use vt_path::{AbsolutePath, RelativePath};
 use vt_str::Str;
 
 use super::{CACHE_MISS_STYLE, COMMAND_STYLE, ColorizeExt};
 use crate::session::{
     cache::{
-        CacheHitSource, CacheMiss, EnvMismatch, FingerprintMismatch, InputChangeKind,
-        SpawnFingerprintChange, detect_spawn_fingerprint_changes, format_input_change_str,
-        format_spawn_change,
+        BaselineDetails, BaselineOutputs, BaselinePath, CacheHitSource, CacheMiss, Change,
+        InputChangeKind, format_change,
     },
-    event::{CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus},
-    execute::fingerprint::TrackedEnvQuery,
+    event::{CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, RunKind},
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -72,6 +72,9 @@ pub enum TaskResult {
         /// Summaries saved before the source was recorded read as local hits.
         #[serde(default)]
         source: CacheHitSource,
+        /// With `vp run -vv`, what the cached run depends on and its outputs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        baseline: Option<BaselineDetails>,
     },
 
     /// Cache hit whose output files couldn't be restored. Always a failure.
@@ -146,17 +149,17 @@ pub enum SpawnOutcome {
 pub enum SavedCacheMissReason {
     /// No previous cache entry for this task.
     NotFound,
-    /// Spawn fingerprint changed (command, envs, cwd, etc.).
-    SpawnFingerprintChanged(Vec<SpawnFingerprintChange>),
-    /// Task configuration changed (`input_config` or `glob_base`).
-    ConfigChanged,
-    /// An input file or folder changed.
-    InputChanged { kind: InputChangeKind, path: Str },
-    /// A runner-aware tool reported a tracked env var that changed between runs.
-    TrackedEnvChanged(EnvMismatch),
-    /// A runner-aware tool reported a tracked bulk env query whose match-set changed
-    /// between runs. Carries the first differing entry.
-    TrackedEnvQueryChanged { query: TrackedEnvQuery, mismatch: EnvMismatch },
+    /// The task's cached run differs.
+    Changed {
+        /// Each change, in the order they're listed.
+        changes: Vec<Change>,
+        /// Some files or envs couldn't be checked, so `changes` may miss some.
+        #[serde(default, skip_serializing_if = "is_false")]
+        changes_partial: bool,
+        /// With `vp run -vv`, what the cached run depends on and its outputs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        baseline: Option<BaselineDetails>,
+    },
     /// Reading the remote cache failed, and the local cache had no entry.
     RemoteReadFailed(SavedError),
 }
@@ -208,7 +211,7 @@ impl SummaryStats {
 
         for task in tasks {
             match &task.result {
-                TaskResult::CacheHit { saved_duration_ms, source } => {
+                TaskResult::CacheHit { saved_duration_ms, source, .. } => {
                     stats.cache_hits += 1;
                     if *source == CacheHitSource::Remote {
                         stats.remote_cache_hits += 1;
@@ -269,25 +272,10 @@ impl SavedCacheMissReason {
     fn from_cache_miss(cache_miss: &CacheMiss) -> Self {
         match cache_miss {
             CacheMiss::NotFound => Self::NotFound,
-            CacheMiss::FingerprintMismatch(mismatch) => match mismatch {
-                FingerprintMismatch::SpawnFingerprint { old, new } => {
-                    Self::SpawnFingerprintChanged(detect_spawn_fingerprint_changes(old, new))
-                }
-                FingerprintMismatch::InputConfig | FingerprintMismatch::OutputConfig => {
-                    Self::ConfigChanged
-                }
-                FingerprintMismatch::InputChanged { kind, path } => {
-                    Self::InputChanged { kind: *kind, path: Str::from(path.as_str()) }
-                }
-                FingerprintMismatch::TrackedEnvChanged(mismatch) => {
-                    Self::TrackedEnvChanged(mismatch.clone())
-                }
-                FingerprintMismatch::TrackedEnvQueryChanged { query, mismatch } => {
-                    Self::TrackedEnvQueryChanged {
-                        query: query.clone(),
-                        mismatch: mismatch.clone(),
-                    }
-                }
+            CacheMiss::Changed(comparison) => Self::Changed {
+                changes: comparison.changes.clone(),
+                changes_partial: comparison.changes_partial,
+                baseline: comparison.baseline.as_deref().cloned(),
             },
             CacheMiss::RemoteReadFailed(error) => {
                 Self::RemoteReadFailed(SavedError::new(error.as_ref()))
@@ -330,13 +318,15 @@ impl TaskResult {
 
         match cache_status {
             // The only error a cache hit can have is a failed restore.
-            CacheStatus::Hit { replayed_duration, source } => saved_error.map_or_else(
-                || Self::CacheHit {
-                    saved_duration_ms: duration_to_ms(*replayed_duration),
-                    source: *source,
-                },
-                |error| Self::RestoreFailed { source: *source, error: error.clone() },
-            ),
+            CacheStatus::Hit { replayed_duration, source, baseline, .. } => saved_error
+                .map_or_else(
+                    || Self::CacheHit {
+                        saved_duration_ms: duration_to_ms(*replayed_duration),
+                        source: *source,
+                        baseline: baseline.as_deref().cloned(),
+                    },
+                    |error| Self::RestoreFailed { source: *source, error: error.clone() },
+                ),
             CacheStatus::Disabled(CacheDisabledReason::InProcessExecution) => Self::InProcess,
             CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Disabled,
@@ -524,23 +514,25 @@ impl TaskResult {
     }
 
     /// Format the cache status detail line for the full summary, with the
-    /// causes to show below it. Only a remote read failure has causes. The
+    /// lines below it: the other changes of a miss, each aligned under the
+    /// first, and the causes. Only a remote read failure has causes. The
     /// caller shows [`Self::ipc_server_error`] instead, if there is one.
     ///
     /// Examples:
     /// - "→ Cache hit - output replayed - 102.96ms saved"
     /// - "→ Remote cache hit - output replayed - 102.96ms saved"
+    /// - "→ Cache hit" (in a dry run, which replays nothing)
     /// - "→ Cache hit, but the outputs couldn't be restored"
     /// - "→ Cache miss: no previous cache entry found"
     /// - "→ Cache disabled in task configuration"
-    fn format_cache_detail(&self) -> (Str, &[Str]) {
+    fn format_cache_detail(&self, run_kind: RunKind) -> (Str, Vec<Str>, &[Str]) {
         // Tool-reported cache disable — the tool said it shouldn't be cached.
         if let Self::Spawned {
             outcome: SpawnOutcome::Success { tool_disabled_cache: true, .. },
             ..
         } = self
         {
-            return (Str::from("→ Not cached: the task opted out of caching"), &[]);
+            return (Str::from("→ Not cached: the task opted out of caching"), Vec::new(), &[]);
         }
 
         // Tracking came up short, so the inferred inputs and outputs would
@@ -554,6 +546,7 @@ impl TaskResult {
                 Str::from(
                     "→ Not cached: automatic file tracking couldn't record everything this task did. Configure `input` and `output` manually to enable caching.",
                 ),
+                Vec::new(),
                 &[],
             );
         }
@@ -566,16 +559,22 @@ impl TaskResult {
                 Str::from(
                     "→ Not cached: `input` auto-inference isn't supported on this OS. Configure `input` manually to enable caching.",
                 ),
+                Vec::new(),
                 &[],
             );
         }
 
         let detail = match self {
-            Self::CacheHit { saved_duration_ms, source } => {
-                let d = Duration::from_millis(*saved_duration_ms);
-                let formatted_duration = format_summary_duration(d);
+            Self::CacheHit { saved_duration_ms, source, .. } => {
                 let hit = format_hit(*source);
-                vt_str::format!("→ {hit} - output replayed - {formatted_duration} saved")
+                match run_kind {
+                    RunKind::Real => {
+                        let d = Duration::from_millis(*saved_duration_ms);
+                        let formatted_duration = format_summary_duration(d);
+                        vt_str::format!("→ {hit} - output replayed - {formatted_duration} saved")
+                    }
+                    RunKind::Dry => vt_str::format!("→ {hit}"),
+                }
             }
             Self::RestoreFailed { source, .. } => {
                 vt_str::format!("→ {}, but the outputs couldn't be restored", format_hit(*source))
@@ -587,34 +586,42 @@ impl TaskResult {
                     SavedCacheMissReason::NotFound => {
                         Str::from("→ Cache miss: no previous cache entry found")
                     }
-                    SavedCacheMissReason::SpawnFingerprintChanged(changes) => {
-                        let formatted: Vec<Str> = changes.iter().map(format_spawn_change).collect();
-                        if formatted.is_empty() {
-                            Str::from("→ Cache miss: configuration changed")
-                        } else {
-                            let joined =
-                                formatted.iter().map(Str::as_str).collect::<Vec<_>>().join("; ");
-                            vt_str::format!("→ Cache miss: {joined}")
-                        }
-                    }
-                    SavedCacheMissReason::ConfigChanged => {
-                        Str::from("→ Cache miss: input configuration changed")
-                    }
-                    SavedCacheMissReason::InputChanged { kind, path } => {
-                        let desc = format_input_change_str(*kind, path.as_str());
-                        vt_str::format!("→ Cache miss: {desc}")
-                    }
-                    SavedCacheMissReason::TrackedEnvChanged(mismatch)
-                    | SavedCacheMissReason::TrackedEnvQueryChanged { mismatch, .. } => {
-                        vt_str::format!("→ Cache miss: {mismatch}")
+                    SavedCacheMissReason::Changed { changes, .. } => {
+                        let mut lines = changes.iter().map(format_change);
+                        let first =
+                            lines.next().unwrap_or_else(|| Str::from("configuration changed"));
+                        return (vt_str::format!("→ Cache miss: {first}"), lines.collect(), &[]);
                     }
                     SavedCacheMissReason::RemoteReadFailed(error) => {
-                        return (vt_str::format!("→ Cache miss: {}", error.message), &error.causes);
+                        return (
+                            vt_str::format!("→ Cache miss: {}", error.message),
+                            Vec::new(),
+                            &error.causes,
+                        );
                     }
                 },
             },
         };
-        (detail, &[])
+        (detail, Vec::new(), &[])
+    }
+
+    /// With `vp run -vv`, the cached run the task was compared with, and the
+    /// changes found, or `None` for them when some files or envs couldn't be
+    /// checked, so what's unchanged isn't known.
+    fn baseline(&self) -> Option<(&BaselineDetails, Option<&[Change]>)> {
+        match self {
+            Self::CacheHit { baseline: Some(baseline), .. } => Some((baseline, Some(&[]))),
+            Self::Spawned {
+                cache_status:
+                    SpawnedCacheStatus::Miss(SavedCacheMissReason::Changed {
+                        changes,
+                        changes_partial,
+                        baseline: Some(baseline),
+                    }),
+                ..
+            } => Some((baseline, (!changes_partial).then_some(changes.as_slice()))),
+            _ => None,
+        }
     }
 
     /// The [`Style`] for the cache detail line.
@@ -678,12 +685,13 @@ const fn format_hit(source: CacheHitSource) -> &'static str {
 
 /// Render the full detailed execution summary.
 ///
-/// Used by both `--verbose` (live) and `--last-details` (from file).
+/// Used by both `--verbose` (live) and `--last-details` (from file). A dry
+/// run's summary has no exit icons and no saved time, since nothing ran.
 #[expect(
     clippy::too_many_lines,
     reason = "summary formatting is inherently verbose with many write calls"
 )]
-pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
+pub fn format_full_summary(summary: &LastRunSummary, run_kind: RunKind) -> Vec<u8> {
     let mut buf = Vec::new();
 
     let stats = SummaryStats::compute(&summary.tasks);
@@ -779,7 +787,7 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
         );
     }
 
-    if stats.total_saved > Duration::ZERO {
+    if run_kind == RunKind::Real && stats.total_saved > Duration::ZERO {
         let formatted_total_saved = format_summary_duration(stats.total_saved);
         let _ = write!(
             buf,
@@ -811,7 +819,9 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
         let _ = write!(buf, ": {}", task.format_command_display().style(COMMAND_STYLE));
 
         // Exit icon
-        if task.result.is_success() {
+        if run_kind == RunKind::Dry {
+            // Nothing ran, so there is no exit status.
+        } else if task.result.is_success() {
             let _ = write!(buf, " {}", "✓".style(Style::new().green().bold()));
         } else if let TaskResult::Spawned { outcome: SpawnOutcome::Failed { exit_code }, .. } =
             &task.result
@@ -837,9 +847,16 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
                 detail_style,
             );
         } else {
-            let (cache_detail, causes) = task.result.format_cache_detail();
+            let (cache_detail, more_changes, causes) = task.result.format_cache_detail(run_kind);
             let _ = writeln!(buf, "      {}", cache_detail.style(detail_style));
+            for change in more_changes {
+                // Aligned under the first change, after "→ Cache miss: ".
+                let _ = writeln!(buf, "                    {}", change.style(detail_style));
+            }
             write_causes(&mut buf, causes, detail_style);
+            if let Some((baseline, changes)) = task.result.baseline() {
+                write_baseline(&mut buf, baseline, changes);
+            }
         }
 
         if let Some(error) = task.result.upload_error() {
@@ -881,6 +898,102 @@ pub fn format_full_summary(summary: &LastRunSummary) -> Vec<u8> {
     buf
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's `skip_serializing_if` passes a reference"
+)]
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Write what `vp run -vv` shows of a cached run: what it depends on that
+/// didn't change, under `Unchanged:`, and its output files, under `Outputs:`,
+/// each by path, aligned under the first, or `(not downloaded)` for a remote
+/// run's archive that a dry run doesn't download. Without the complete
+/// `changes`, what's unchanged isn't known, and only the outputs are written.
+fn write_baseline(buf: &mut Vec<u8>, baseline: &BaselineDetails, changes: Option<&[Change]>) {
+    let style = Style::new().bright_black();
+    let unchanged = changes.map_or_else(Vec::new, |changes| unchanged_lines(baseline, changes));
+    let outputs: Vec<Str> = match &baseline.outputs {
+        Some(BaselineOutputs::Listed(files)) => {
+            files.iter().map(|path| vt_str::format!("'{path}'")).collect()
+        }
+        Some(BaselineOutputs::NotDownloaded) => vec![Str::from("(not downloaded)")],
+        None => Vec::new(),
+    };
+    for (label, lines) in [("Unchanged:", unchanged), ("Outputs:", outputs)] {
+        for (index, line) in lines.iter().enumerate() {
+            let label = if index == 0 { label } else { "" };
+            let _ = writeln!(buf, "        {}", vt_str::format!("{label:<11}{line}").style(style));
+        }
+    }
+}
+
+/// The lines of what a cached run depends on that none of `changes` changed:
+/// its inputs, then its env names.
+fn unchanged_lines(baseline: &BaselineDetails, changes: &[Change]) -> Vec<Str> {
+    let mut changed_paths: FxHashSet<&RelativePath> = FxHashSet::default();
+    // The folders whose listing changed: an entry was added or removed, not
+    // just changed.
+    let mut changed_listings: FxHashSet<&RelativePath> = FxHashSet::default();
+    // Env names compare by the platform's rules, as the changes do.
+    let mut changed_envs: FxHashSet<EnvName<&str>> = FxHashSet::default();
+    for change in changes {
+        match change {
+            Change::File { path, kind } => {
+                changed_paths.insert(path.as_relative_path());
+                if matches!(kind, InputChangeKind::Added | InputChangeKind::Removed)
+                    && let Some(parent) = path.as_relative_path().parent()
+                {
+                    changed_listings.insert(parent);
+                }
+            }
+            Change::Env { mismatch, .. } => {
+                changed_envs.insert(EnvName::new(mismatch.name().as_str()));
+            }
+            _ => {}
+        }
+    }
+    let mut unchanged: Vec<Str> = baseline
+        .inputs
+        .iter()
+        .filter(|(path, recorded)| {
+            let path = path.as_relative_path();
+            let listed = matches!(recorded, BaselinePath::Dir { entries: Some(_), .. });
+            let differs =
+                changed_paths.contains(path) || (listed && changed_listings.contains(path));
+            !differs
+        })
+        .map(|(path, recorded)| {
+            let path = quoted_path(path);
+            match recorded {
+                BaselinePath::File { .. } => path,
+                BaselinePath::Dir { entries: Some(_), .. } => vt_str::format!("{path} (listing)"),
+                BaselinePath::Dir { entries: None, .. } => vt_str::format!("{path} (folder)"),
+                BaselinePath::Missing => vt_str::format!("{path} (missing)"),
+            }
+        })
+        .collect();
+    unchanged.extend(
+        baseline
+            .envs
+            .iter()
+            .filter(|name| !changed_envs.contains(&EnvName::new(name.as_str())))
+            .map(|name| vt_str::format!("env '{name}'")),
+    );
+    unchanged
+}
+
+/// `path` in quotes, or `workspace root` for the root itself, as the miss
+/// reasons name it.
+fn quoted_path(path: &RelativePath) -> Str {
+    if path.as_str().is_empty() {
+        Str::from("workspace root")
+    } else {
+        vt_str::format!("'{}'", path.as_str())
+    }
+}
+
 /// Write a task detail line with `label` and `error`'s message, then each of
 /// its causes on its own line below.
 fn write_error_lines(buf: &mut Vec<u8>, label: impl Display, error: &SavedError, style: Style) {
@@ -916,7 +1029,15 @@ fn write_causes(buf: &mut Vec<u8>, causes: &[Str], style: Style) {
 ///   with caching disabled, and `successful` includes cache hits. The hit count is left out
 ///   when `cacheable` is 0, and has an optional remote hit count ("({rate}%, {remote} remote)").
 ///   Followed by the `--last-details` hint.
-pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> Vec<u8> {
+///
+/// A dry run's summary follows the same rules, with "nothing was run" in place of the
+/// successful count and saved time. Its tasks print no output, so a blank line comes before the
+/// thin line, and there is no `--last-details` hint: that shows the last real run.
+pub fn format_compact_summary(
+    summary: &LastRunSummary,
+    program_name: &str,
+    run_kind: RunKind,
+) -> Vec<u8> {
     if summary.tasks.is_empty() {
         return Vec::new();
     }
@@ -932,21 +1053,32 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
 
     let mut buf = Vec::new();
 
+    if run_kind == RunKind::Dry {
+        let _ = writeln!(buf);
+    }
+
     // Thin line separator
     let _ = writeln!(buf, "{}", "---".style(Style::new().bright_black()));
 
     let run_label = vt_str::format!("{program_name} run:");
-    let mut show_last_details_hint = true;
+    let mut show_last_details_hint = run_kind == RunKind::Real;
     if is_single_task && stats.cache_hits > 0 {
         // Single task cache hit — no need for --last-details hint
-        let formatted_total_saved = format_summary_duration(stats.total_saved);
         let hit = if stats.remote_cache_hits > 0 { "remote cache hit" } else { "cache hit" };
-        let _ = write!(
-            buf,
-            "{} {hit}, {} saved.",
-            run_label.as_str().style(Style::new().blue().bold()),
-            formatted_total_saved.style(Style::new().green().bold()),
-        );
+        let _ = write!(buf, "{} {hit}, ", run_label.as_str().style(Style::new().blue().bold()));
+        match run_kind {
+            RunKind::Real => {
+                let formatted_total_saved = format_summary_duration(stats.total_saved);
+                let _ = write!(
+                    buf,
+                    "{} saved.",
+                    formatted_total_saved.style(Style::new().green().bold())
+                );
+            }
+            RunKind::Dry => {
+                let _ = write!(buf, "nothing was run.");
+            }
+        }
         show_last_details_hint = false;
     } else if !is_single_task {
         // Multi-task
@@ -975,19 +1107,30 @@ pub fn format_compact_summary(summary: &LastRunSummary, program_name: &str) -> V
             let _ = write!(buf, "),");
         }
 
-        let total = stats.total;
-        let successful = total - stats.failed;
-        let successful_style = if successful < total { Style::new().red() } else { Style::new() };
-        let _ = write!(
-            buf,
-            " {} successful",
-            vt_str::format!("{successful}/{total}").style(successful_style)
-        );
+        match run_kind {
+            RunKind::Real => {
+                let total = stats.total;
+                let successful = total - stats.failed;
+                let successful_style =
+                    if successful < total { Style::new().red() } else { Style::new() };
+                let _ = write!(
+                    buf,
+                    " {} successful",
+                    vt_str::format!("{successful}/{total}").style(successful_style)
+                );
 
-        if stats.total_saved > Duration::ZERO {
-            let formatted_total_saved = format_summary_duration(stats.total_saved);
-            let _ =
-                write!(buf, ", {} saved", formatted_total_saved.style(Style::new().green().bold()));
+                if stats.total_saved > Duration::ZERO {
+                    let formatted_total_saved = format_summary_duration(stats.total_saved);
+                    let _ = write!(
+                        buf,
+                        ", {} saved",
+                        formatted_total_saved.style(Style::new().green().bold())
+                    );
+                }
+            }
+            RunKind::Dry => {
+                let _ = write!(buf, " nothing was run");
+            }
         }
 
         let _ = write!(buf, ".");
@@ -1047,6 +1190,10 @@ pub fn format_uploads_pending(count: NonZeroUsize) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use vt_path::RelativePathBuf;
+
     use super::*;
     use crate::session::event::ExecutionError;
 
@@ -1087,7 +1234,7 @@ mod tests {
             task_name: Str::from(task_name),
             command: Str::from("build"),
             cwd: Str::default(),
-            result: TaskResult::CacheHit { saved_duration_ms: 1000, source },
+            result: TaskResult::CacheHit { saved_duration_ms: 1000, source, baseline: None },
         }
     }
 
@@ -1120,11 +1267,135 @@ mod tests {
     }
 
     fn compact_summary(tasks: Vec<TaskSummary>) -> Str {
-        strip(&format_compact_summary(&LastRunSummary { tasks, exit_code: 0 }, "vp"))
+        strip(&format_compact_summary(&LastRunSummary { tasks, exit_code: 0 }, "vp", RunKind::Real))
     }
 
     fn full_summary(tasks: Vec<TaskSummary>) -> Str {
-        strip(&format_full_summary(&LastRunSummary { tasks, exit_code: 0 }))
+        strip(&format_full_summary(&LastRunSummary { tasks, exit_code: 0 }, RunKind::Real))
+    }
+
+    #[test]
+    fn full_summary_lists_each_change_on_its_own_line() {
+        let mut task = cache_miss_task("a");
+        if let TaskResult::Spawned { cache_status, .. } = &mut task.result {
+            *cache_status = SpawnedCacheStatus::Miss(SavedCacheMissReason::Changed {
+                changes: vec![Change::InputConfig, Change::OutputConfig],
+                changes_partial: false,
+                baseline: None,
+            });
+        }
+        let summary = full_summary(vec![task]);
+        let lines: Vec<&str> = summary.as_str().lines().collect();
+        assert!(
+            lines.windows(2).any(|pair| pair
+                == [
+                    "      → Cache miss: input configuration changed",
+                    "                    output configuration changed",
+                ]),
+            "{summary}"
+        );
+    }
+
+    fn baseline_details() -> BaselineDetails {
+        let rel = |path| RelativePathBuf::new(path).unwrap();
+        BaselineDetails {
+            envs: vec![Str::from("NODE_ENV")],
+            inputs: BTreeMap::from([
+                (
+                    rel("src"),
+                    BaselinePath::Dir {
+                        entries: Some(vec![Str::from("a.txt")]),
+                        may_be_missing: false,
+                    },
+                ),
+                (rel("src/a.txt"), BaselinePath::File { hash: 1, may_be_missing: false }),
+            ]),
+            outputs: Some(BaselineOutputs::Listed(vec![Str::from("dist/out.txt")])),
+        }
+    }
+
+    fn baseline_text(changes: Option<&[Change]>) -> Str {
+        let mut buf = Vec::new();
+        write_baseline(&mut buf, &baseline_details(), changes);
+        strip(&buf)
+    }
+
+    /// A changed file's content leaves the folder listing it unchanged, and
+    /// an added entry changes it.
+    #[test]
+    fn unchanged_leaves_out_only_what_changed() {
+        let file = |kind, path| Change::File { kind, path: RelativePathBuf::new(path).unwrap() };
+        assert_eq!(
+            baseline_text(Some(&[file(InputChangeKind::ContentModified, "src/a.txt")])).as_str(),
+            "        Unchanged: 'src' (listing)\n                   env 'NODE_ENV'\n        \
+             Outputs:   'dist/out.txt'\n"
+        );
+        assert_eq!(
+            baseline_text(Some(&[file(InputChangeKind::Added, "src/b.txt")])).as_str(),
+            "        Unchanged: 'src/a.txt'\n                   env 'NODE_ENV'\n        \
+             Outputs:   'dist/out.txt'\n"
+        );
+    }
+
+    /// The workspace root reads as in the miss reasons, not as `''`.
+    #[test]
+    fn workspace_root_is_named() {
+        let root = RelativePathBuf::new("").unwrap();
+        let baseline = BaselineDetails {
+            envs: Vec::new(),
+            inputs: BTreeMap::from([(
+                root,
+                BaselinePath::Dir {
+                    entries: Some(vec![Str::from("a.txt")]),
+                    may_be_missing: false,
+                },
+            )]),
+            outputs: Some(BaselineOutputs::Listed(Vec::new())),
+        };
+        let mut buf = Vec::new();
+        write_baseline(&mut buf, &baseline, Some(&[]));
+        assert_eq!(strip(&buf).as_str(), "        Unchanged: workspace root (listing)\n");
+    }
+
+    /// A changed env isn't unchanged under another spelling that the
+    /// platform treats as the same name: on Windows, `node_env` is `NODE_ENV`.
+    #[test]
+    fn changed_envs_compare_by_platform_rules() {
+        let change = Change::Env {
+            mismatch: crate::session::cache::EnvMismatch::Changed { name: Str::from("node_env") },
+            source: crate::session::cache::EnvSource::Tracked,
+        };
+        let text = baseline_text(Some(&[change]));
+        assert_eq!(text.as_str().contains("env 'NODE_ENV'"), !cfg!(windows), "{text}");
+    }
+
+    /// When some files or envs couldn't be checked, what's unchanged isn't
+    /// known, so only the outputs are listed.
+    #[test]
+    fn partial_changes_list_only_the_outputs() {
+        assert_eq!(baseline_text(None).as_str(), "        Outputs:   'dist/out.txt'\n");
+    }
+
+    /// A remote run's outputs that a dry run doesn't download say so,
+    /// instead of reading as none.
+    #[test]
+    fn outputs_not_downloaded_say_so() {
+        let baseline =
+            BaselineDetails { outputs: Some(BaselineOutputs::NotDownloaded), ..baseline_details() };
+        let mut buf = Vec::new();
+        write_baseline(&mut buf, &baseline, None);
+        assert_eq!(strip(&buf).as_str(), "        Outputs:   (not downloaded)\n");
+    }
+
+    /// A dry run whose tasks all have caching disabled still gets its
+    /// summary line. The other dry-run summaries are in the `dry_run` e2e
+    /// snapshots.
+    #[test]
+    fn dry_run_without_caching_says_nothing_was_run() {
+        let tasks = vec![cache_disabled_task("a"), cache_disabled_task("b")];
+        let summary =
+            format_compact_summary(&LastRunSummary { tasks, exit_code: 0 }, "vp", RunKind::Dry);
+        assert_eq!(strip(&summary).as_str(), "\n---\nvp run: nothing was run.\n");
     }
 
     #[test]
@@ -1217,7 +1488,20 @@ mod tests {
         .unwrap();
         assert!(matches!(
             summary.tasks[0].result,
-            TaskResult::CacheHit { saved_duration_ms: 5, source: CacheHitSource::Local }
+            TaskResult::CacheHit { saved_duration_ms: 5, source: CacheHitSource::Local, .. }
+        ));
+    }
+
+    /// A miss saved before `-vv` existed, without `changes_partial` or
+    /// `baseline`, still reads.
+    #[test]
+    fn saved_miss_without_baseline_reads() {
+        let reason: SavedCacheMissReason =
+            serde_json::from_str(r#"{"Changed":{"changes":["InputConfig"]}}"#).unwrap();
+        assert!(matches!(
+            reason,
+            SavedCacheMissReason::Changed { ref changes, changes_partial: false, baseline: None }
+                if changes.as_slice() == [Change::InputConfig]
         ));
     }
 
@@ -1257,8 +1541,10 @@ mod tests {
             "a",
             saved_error("network error", &["error sending request", "connection refused"]),
         );
-        let summary =
-            strip(&format_full_summary(&LastRunSummary { tasks: vec![task], exit_code: 0 }));
+        let summary = strip(&format_full_summary(
+            &LastRunSummary { tasks: vec![task], exit_code: 0 },
+            RunKind::Real,
+        ));
         assert!(
             summary.as_str().contains(
                 "\n      ⚠ Not uploaded to the remote cache: network error\n        \

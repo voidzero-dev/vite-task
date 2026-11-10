@@ -33,10 +33,10 @@ use self::{
     spawn::{ChildHandle, ChildOutcome, SpawnStdio, spawn},
 };
 use super::{
-    cache::{CacheHit, CacheHitSource, CacheMiss, ExecutionCache},
+    cache::{CacheHit, CacheHitSource, CacheMiss, ExecutionCache, FileCheck, run_off_thread},
     event::{
         CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
-        ExecutionError,
+        ExecutionError, RunKind,
     },
     reporter::{LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion},
 };
@@ -47,8 +47,12 @@ use super::{
 /// already reported through `LeafExecutionReporter::finish()` before this
 /// value is returned — the caller does not need to handle error display.
 pub enum SpawnOutcome {
-    /// Cache hit — no process was spawned. Cached outputs were replayed.
+    /// Cache hit — no process was spawned. Cached outputs were replayed, except
+    /// in a dry run.
     CacheHit,
+    /// In a dry run, the cache missed or is disabled, so a real run would
+    /// spawn the process. Nothing was spawned.
+    WouldSpawn,
     /// Process was spawned and exited with this status.
     Spawned(std::process::ExitStatus),
     /// An infrastructure error prevented the process from running
@@ -271,8 +275,11 @@ enum Report {
     /// An infrastructure error prevented the process from running (or from
     /// being observed to completion).
     Failed { cache_update: CacheUpdateStatus, error: ExecutionError },
-    /// Cache hit: captured outputs were replayed, no process ran.
+    /// Cache hit: no process ran. Captured outputs were replayed, except in a
+    /// dry run.
     CacheHit,
+    /// In a dry run, a miss or a task without caching: nothing ran.
+    WouldSpawn,
     /// The process ran to completion; its exit status is reported regardless
     /// of how the cache update went.
     Spawned {
@@ -309,6 +316,14 @@ impl Report {
                 );
                 SpawnOutcome::CacheHit
             }
+            Self::WouldSpawn => {
+                reporter.finish(
+                    None,
+                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::DryRun),
+                    None,
+                );
+                SpawnOutcome::WouldSpawn
+            }
             Self::Spawned { exit_status, cache_update, error } => {
                 reporter.finish(Some(exit_status), cache_update, error);
                 SpawnOutcome::Spawned(exit_status)
@@ -340,6 +355,11 @@ impl Report {
 ///    via [`run_child`], then decide the cache update
 ///    ([`cache_update::update_cache`])
 ///
+/// A dry run (`RunKind::Dry`) only looks: the lookup in step 1 writes
+/// nothing, and steps 3 and 4 are skipped.
+///
+/// `file_check` says how many changed files a cache miss lists.
+///
 /// Cancelling `fast_fail_token` kills the process. `cancel_token` must be a
 /// child of `fast_fail_token` that Ctrl-C also cancels: cancelling it stops
 /// remote cache lookups and prevents caching. A cached run's upload to the
@@ -361,6 +381,8 @@ pub async fn execute_spawn(
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     program_name: &str,
+    run_kind: RunKind,
+    file_check: FileCheck,
     fast_fail_token: CancellationToken,
     cancel_token: CancellationToken,
 ) -> SpawnOutcome {
@@ -371,6 +393,8 @@ pub async fn execute_spawn(
         workspace_root,
         cache_dir,
         program_name,
+        run_kind,
+        file_check,
         fast_fail_token,
         cancel_token,
     );
@@ -388,6 +412,7 @@ pub async fn execute_spawn(
 /// unwraps both into the same single `finish()`, so the distinction is pure
 /// control flow and a value on either side is equally valid.
 #[expect(clippy::too_many_arguments, reason = "forwarded verbatim from `execute_spawn`")]
+#[expect(clippy::too_many_lines, reason = "the phases of one spawn, in order")]
 async fn run(
     reporter: &mut dyn LeafExecutionReporter,
     spawn_execution: &SpawnExecution,
@@ -395,6 +420,8 @@ async fn run(
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     program_name: &str,
+    run_kind: RunKind,
+    file_check: FileCheck,
     fast_fail_token: CancellationToken,
     cancel_token: CancellationToken,
 ) -> Result<Report, Report> {
@@ -405,8 +432,16 @@ async fn run(
     //    error, `start()` is never called — there is no valid status to show.
     //    A lookup can take a while, especially a remote one. If the run was
     //    cancelled meanwhile, neither start the process nor restore outputs.
-    let lookup =
-        lookup_cache(cache_metadata, cache, workspace_root, cache_dir, &cancel_token).await?;
+    let lookup = lookup_cache(
+        cache_metadata,
+        cache,
+        workspace_root,
+        cache_dir,
+        run_kind,
+        file_check,
+        &cancel_token,
+    )
+    .await?;
     if cancel_token.is_cancelled() {
         return Err(Report::Cancelled);
     }
@@ -419,7 +454,12 @@ async fn run(
             let mut stdio_config = reporter.start(CacheStatus::Hit {
                 replayed_duration: hit.value.duration,
                 source: hit.source,
+                restores_outputs: hit.value.output_archive.is_some(),
+                baseline: hit.baseline.clone(),
             });
+            if run_kind == RunKind::Dry {
+                return Ok(Report::CacheHit);
+            }
             return Ok(replay_cache_hit(
                 &mut stdio_config,
                 &hit,
@@ -439,6 +479,9 @@ async fn run(
             BTreeMap::new(),
         ),
     };
+    if run_kind == RunKind::Dry {
+        return Ok(Report::WouldSpawn);
+    }
 
     // 4. Fold the cache/fspy/stdio decisions into the typed mode.
     let mut mode = ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs)
@@ -459,6 +502,7 @@ async fn run(
     )
     .await
     .map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
+    tracing::debug!(fspy = fspy_enabled, elapsed = ?start.elapsed(), "spawned the task process");
 
     // 6. Drain the pipes and wait for exit, concurrently with the IPC driver.
     //    The driver must be polled during pipe drain — otherwise a tool doing
@@ -539,20 +583,25 @@ enum CacheLookup<'a> {
     /// Cache hit — the cached entry to replay, where it came from, and the
     /// metadata that looked it up.
     Hit { hit: CacheHit, metadata: &'a CacheMetadata },
-    /// Cache miss — the detailed reason (`NotFound` or `FingerprintMismatch`).
+    /// Cache miss — the detailed reason (`NotFound`, `Changed`, or a failed
+    /// remote read).
     Miss { miss: CacheMiss, globbed_inputs: BTreeMap<RelativePathBuf, u64> },
     /// Caching is disabled for this task (no cache metadata).
     Disabled,
 }
 
 /// Phase 1: compute the globbed inputs and try to hit the cache. A remote hit
-/// downloads its output archive into `cache_dir`. Remote requests stop when
-/// `cancel_token` is cancelled.
+/// downloads its output archive into `cache_dir`, except in a dry run. The
+/// inputs are hashed, and entries checked, off the scheduler's thread (see
+/// [`run_off_thread`]). The lookup stops when `cancel_token` is cancelled, and
+/// is then [`Report::Cancelled`] or a miss that isn't reported.
 async fn lookup_cache<'a>(
     cache_metadata: Option<&'a CacheMetadata>,
     cache: &ExecutionCache,
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
+    run_kind: RunKind,
+    file_check: FileCheck,
     cancel_token: &CancellationToken,
 ) -> Result<CacheLookup<'a>, Report> {
     let Some(cache_metadata) = cache_metadata else {
@@ -561,21 +610,46 @@ async fn lookup_cache<'a>(
 
     // Compute globbed inputs from positive globs at execution time.
     // Globs are already workspace-root-relative (resolved at task graph stage).
-    let globbed_inputs = compute_globbed_inputs(
-        workspace_root,
-        &cache_metadata.input_config.positive_globs,
-        &cache_metadata.input_config.negative_globs,
-    )
-    .map_err(|err| {
+    let (root, input_config) = (Arc::clone(workspace_root), cache_metadata.input_config.clone());
+    let hashed = run_off_thread(cancel_token, move || {
+        let start = Instant::now();
+        let globbed_inputs = compute_globbed_inputs(
+            &root,
+            &input_config.positive_globs,
+            &input_config.negative_globs,
+        )?;
+        tracing::debug!(
+            files = globbed_inputs.len(),
+            elapsed = ?start.elapsed(),
+            "hashed the globbed inputs"
+        );
+        anyhow::Ok(globbed_inputs)
+    })
+    .await
+    .ok_or(Report::Cancelled)?;
+    let globbed_inputs = Arc::new(hashed.map_err(|err| {
         Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err })
-    })?;
+    })?);
 
     match cache
-        .try_hit(cache_metadata, &globbed_inputs, workspace_root, cache_dir, cancel_token)
+        .try_hit(
+            cache_metadata,
+            &globbed_inputs,
+            workspace_root,
+            cache_dir,
+            run_kind,
+            file_check,
+            cancel_token,
+        )
         .await
     {
-        Ok(Ok(hit)) => Ok(CacheLookup::Hit { hit, metadata: cache_metadata }),
-        Ok(Err(miss)) => Ok(CacheLookup::Miss { miss, globbed_inputs }),
+        Ok(Some(Ok(hit))) => Ok(CacheLookup::Hit { hit, metadata: cache_metadata }),
+        // Unless the lookup was cancelled, its checks have finished and
+        // dropped their references, so the inputs aren't copied.
+        Ok(Some(Err(miss))) => {
+            Ok(CacheLookup::Miss { miss, globbed_inputs: Arc::unwrap_or_clone(globbed_inputs) })
+        }
+        Ok(None) => Err(Report::Cancelled),
         Err(err) => {
             Err(Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }))
         }
@@ -634,6 +708,7 @@ async fn run_child(
     stop_accepting: Option<&StopAccepting>,
     fast_fail_token: CancellationToken,
 ) -> Result<ChildOutcome, ExecutionError> {
+    let start = Instant::now();
     let pipe_result: Result<(), ExecutionError> = if let Some(sinks) = sinks {
         let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
         let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
@@ -662,6 +737,14 @@ async fn run_child(
 
     if let Some(stop_accepting) = stop_accepting {
         stop_accepting.signal();
+    }
+    if let Ok(outcome) = &wait_result {
+        tracing::debug!(
+            success = outcome.exit_status.success(),
+            exit_code = outcome.exit_status.code(),
+            elapsed = ?start.elapsed(),
+            "the task process exited"
+        );
     }
     wait_result
 }

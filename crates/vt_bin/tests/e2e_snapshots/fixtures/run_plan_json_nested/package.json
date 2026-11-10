@@ -1,0 +1,10 @@
+{
+  "name": "nested",
+  "private": true,
+  "scripts": {
+    "build": "vt run --filter a build",
+    "ci": "vt run -r build && vt run lint",
+    "lint": "vtt print lint",
+    "preview": "vt run --dry-run lint"
+  }
+}

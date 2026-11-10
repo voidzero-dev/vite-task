@@ -1,0 +1,5 @@
+error: with a task, '--json' is only supported with '--dry-run' for now
+
+Usage: vt run [OPTIONS] [TASK_SPECIFIER] [ADDITIONAL_ARGS]...
+
+For more information, try '--help'.

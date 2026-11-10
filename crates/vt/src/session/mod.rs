@@ -1,32 +1,35 @@
 mod cache;
 mod event;
 mod execute;
+mod json;
 pub(crate) mod reporter;
+mod task_graph_json;
 
 // Re-export types that are part of the public API
 use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, rc::Rc, sync::Arc};
 
-use cache::ExecutionCache;
-pub use cache::{CacheMiss, FingerprintMismatch};
-use clap::Parser as _;
+use anyhow::Context as _;
+pub use cache::{CacheMiss, Change, Comparison};
+use cache::{ExecutionCache, FileCheck};
+use event::RunKind;
 use once_cell::sync::OnceCell;
 pub use reporter::ExitStatus;
 use reporter::{
-    ColorSupport, GroupedReporterBuilder, InterleavedReporterBuilder, LabeledReporterBuilder,
-    SummaryReporterBuilder,
+    ColorSupport, GroupedReporterBuilder, InterleavedReporterBuilder, JsonReporterBuilder,
+    LabeledReporterBuilder, RUN_PLAN_SCHEMA, SummaryReporterBuilder,
     summary::{LastRunSummary, ReadSummaryError, format_full_summary},
 };
 use rustc_hash::FxHashMap;
 use vt_casefold::EnvName;
 use vt_graph::{
-    IndexedTaskGraph, TaskGraph, TaskGraphLoadError,
+    IndexedTaskGraph, TaskGraphLoadError,
     config::{GlobResolver, user::UserCacheConfig},
     loader::UserConfigLoader,
     query::TaskQuery,
 };
 use vt_path::{AbsolutePath, AbsolutePathBuf};
 use vt_plan::{
-    ExecutionGraph, TaskGraphLoader,
+    ExecutionGraph,
     plan_request::{
         PlanOptions, PlanRequest, QueryPlanRequest, ScriptCommand, SyntheticPlanRequest,
     },
@@ -36,7 +39,22 @@ use vt_select::SelectItem;
 use vt_str::Str;
 use vt_workspace::{WorkspaceRoot, find_workspace_root, package_graph::PackageQuery};
 
-use crate::cli::{CacheSubcommand, Command, ResolvedCommand, ResolvedRunCommand, RunCommand};
+use crate::cli::{
+    CacheSubcommand, Command, ResolvedCommand, ResolvedRunCommand, RunCommand, RunMode,
+};
+
+/// Why [`Session::plan_from_cli_run`] couldn't plan a command.
+#[derive(Debug, thiserror::Error)]
+pub enum PlanFromCliError {
+    /// The arguments can't be combined, reported as `vp run` reports it.
+    #[error(transparent)]
+    Cli(#[from] clap::Error),
+    /// The command doesn't run tasks, such as `--last-details`.
+    #[error("not a command that runs tasks")]
+    NotARun,
+    #[error(transparent)]
+    Plan(#[from] vt_plan::Error),
+}
 
 /// Error type for [`Session::main`].
 ///
@@ -57,32 +75,29 @@ where
     }
 }
 
+/// Builds the task graph the first time it's needed.
+///
+/// Building it reads every `package.json` and the root `vite.config.*`, which
+/// commands such as `vp cache clean` don't need.
 #[derive(Debug)]
-enum LazyTaskGraph<'a> {
-    Uninitialized {
-        workspace_root: WorkspaceRoot,
-        config_loader: &'a dyn UserConfigLoader,
-        glob_resolver: Rc<GlobResolver>,
-    },
-    Initialized(IndexedTaskGraph),
+struct TaskGraphCell<'a> {
+    workspace_root: WorkspaceRoot,
+    config_loader: &'a dyn UserConfigLoader,
+    glob_resolver: Rc<GlobResolver>,
+    graph: tokio::sync::OnceCell<IndexedTaskGraph<'a>>,
 }
 
-#[async_trait::async_trait(?Send)]
-impl TaskGraphLoader for LazyTaskGraph<'_> {
-    async fn load_task_graph(&mut self) -> Result<&vt_graph::IndexedTaskGraph, TaskGraphLoadError> {
-        let _span = tracing::debug_span!("load_task_graph").entered();
-        Ok(match self {
-            Self::Uninitialized { workspace_root, config_loader, glob_resolver } => {
-                let graph =
-                    IndexedTaskGraph::load(workspace_root, *config_loader, glob_resolver).await?;
-                *self = Self::Initialized(graph);
-                match self {
-                    Self::Initialized(graph) => &*graph,
-                    Self::Uninitialized { .. } => unreachable!(),
-                }
-            }
-            Self::Initialized(graph) => &*graph,
-        })
+impl<'a> TaskGraphCell<'a> {
+    async fn get(&self) -> Result<&IndexedTaskGraph<'a>, TaskGraphLoadError> {
+        self.graph
+            .get_or_try_init(|| {
+                IndexedTaskGraph::load(
+                    &self.workspace_root,
+                    self.config_loader,
+                    Rc::clone(&self.glob_resolver),
+                )
+            })
+            .await
     }
 }
 
@@ -131,26 +146,37 @@ impl vt_plan::PlanRequestParser for PlanRequestParser<'_> {
     ) -> anyhow::Result<Option<PlanRequest>> {
         match self.command_handler.handle_command(command).await? {
             HandledCommand::Synthesized(synthetic) => Ok(Some(PlanRequest::Synthetic(synthetic))),
-            HandledCommand::ViteTaskCommand(cli_command) => match cli_command.into_resolved() {
-                ResolvedCommand::Cache { .. } | ResolvedCommand::RunLastDetails => {
-                    Ok(Some(PlanRequest::Synthetic(
+            HandledCommand::ViteTaskCommand(cli_command) => {
+                match cli_command.into_resolved(&command.program)? {
+                    ResolvedCommand::Cache { .. }
+                    | ResolvedCommand::RunLastDetails
+                    | ResolvedCommand::TaskGraphJson => Ok(Some(PlanRequest::Synthetic(
                         command.to_synthetic_plan_request(UserCacheConfig::disabled()),
-                    )))
-                }
-                ResolvedCommand::Run(run_command) => {
-                    match run_command.into_query_plan_request(&command.cwd) {
-                        Ok((query_plan_request, _)) => {
-                            Ok(Some(PlanRequest::Query(query_plan_request)))
+                    ))),
+                    // A nested dry run isn't inlined. It runs as a process, which
+                    // prints its own dry run, so an enclosing dry run doesn't run it.
+                    ResolvedCommand::Run(run_command)
+                        if matches!(run_command.mode, RunMode::Dry | RunMode::DryJson) =>
+                    {
+                        Ok(Some(PlanRequest::Synthetic(
+                            command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                        )))
+                    }
+                    ResolvedCommand::Run(run_command) => {
+                        match run_command.into_query_plan_request(&command.cwd) {
+                            Ok((query_plan_request, _)) => {
+                                Ok(Some(PlanRequest::Query(query_plan_request)))
+                            }
+                            Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
+                                Ok(Some(PlanRequest::Synthetic(
+                                    command.to_synthetic_plan_request(UserCacheConfig::disabled()),
+                                )))
+                            }
+                            Err(err) => Err(err.into()),
                         }
-                        Err(crate::cli::CLITaskQueryError::MissingTaskSpecifier) => {
-                            Ok(Some(PlanRequest::Synthetic(
-                                command.to_synthetic_plan_request(UserCacheConfig::disabled()),
-                            )))
-                        }
-                        Err(err) => Err(err.into()),
                     }
                 }
-            },
+            }
             HandledCommand::Verbatim => Ok(None),
         }
     }
@@ -163,7 +189,7 @@ pub struct Session<'a> {
     workspace_path: Arc<AbsolutePath>,
     /// A session doesn't necessarily load the task graph immediately.
     /// The task graph is loaded on-demand and cached for future use.
-    lazy_task_graph: LazyTaskGraph<'a>,
+    task_graph: TaskGraphCell<'a>,
 
     /// Shared by task graph loading and every plan, so each cache glob pattern is parsed once.
     glob_resolver: Rc<GlobResolver>,
@@ -217,16 +243,14 @@ impl<'a> Session<'a> {
         Self::init_with(envs, vt_path::current_dir()?.into(), config)
     }
 
-    /// Ensures the task graph is loaded, loading it if necessary.
+    /// The workspace's task graph, loaded on first access.
     ///
     /// # Errors
     ///
     /// Returns an error if the task graph cannot be loaded from the workspace configuration.
     #[tracing::instrument(level = "debug", skip_all)]
-    pub async fn ensure_task_graph_loaded(
-        &mut self,
-    ) -> Result<&IndexedTaskGraph, TaskGraphLoadError> {
-        self.lazy_task_graph.load_task_graph().await
+    pub async fn task_graph(&self) -> Result<&IndexedTaskGraph<'a>, TaskGraphLoadError> {
+        self.task_graph.get().await
     }
 
     /// Initialize a session with custom cwd, environment variables. Useful for testing.
@@ -255,10 +279,11 @@ impl<'a> Session<'a> {
         // Cache is lazily initialized on first access to avoid SQLite race conditions
         Ok(Self {
             workspace_path: Arc::clone(&workspace_root.path),
-            lazy_task_graph: LazyTaskGraph::Uninitialized {
+            task_graph: TaskGraphCell {
                 workspace_root,
                 config_loader: config.user_config_loader,
                 glob_resolver: Rc::clone(&glob_resolver),
+                graph: tokio::sync::OnceCell::new(),
             },
             glob_resolver,
             envs: Arc::new(envs),
@@ -293,106 +318,41 @@ impl<'a> Session<'a> {
     ///
     /// Panics if parsing a hardcoded bare `RunCommand` fails (should never happen).
     async fn main_inner(&mut self, command: Command) -> Result<(), SessionError> {
-        match command.into_resolved() {
+        let command = match command.into_resolved(&self.program_name) {
+            Ok(command) => command,
+            Err(err) => {
+                // Printed as clap prints the errors it finds while parsing.
+                let _ = err.print();
+                return Err(SessionError::EarlyExit(ExitStatus(
+                    u8::try_from(err.exit_code()).unwrap_or(2),
+                )));
+            }
+        };
+        match command {
             ResolvedCommand::Cache { ref subcmd } => self.handle_cache_command(subcmd),
             ResolvedCommand::RunLastDetails => self.show_last_run_details(),
+            ResolvedCommand::TaskGraphJson => self.print_task_graph_json().await,
             ResolvedCommand::Run(run_command) => {
-                let is_interactive =
-                    std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+                let Some(graph) = self.plan_run(&run_command).await? else {
+                    return Ok(());
+                };
 
-                let graph = if let Some(ref task_specifier) = run_command.task_specifier {
-                    // Task specifier provided — plan it.
-                    let cwd = Arc::clone(&self.cwd);
-                    let (plan_result, is_cwd_only) =
-                        self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?;
-
-                    if plan_result.graph.graph.node_count() == 0 {
-                        // Three empty-graph outcomes, in order of precedence:
-                        //   1. `--filter` selected zero packages — the planner has
-                        //      already warned per filter; exit 0 silently. This is the
-                        //      pnpm-compatible default; `--fail-if-no-match` opts in
-                        //      to strict behaviour and is raised inside the planner.
-                        //   2. Bare `vp run` (cwd-only, no execution flags) — fall
-                        //      through to the interactive task selector.
-                        //   3. Otherwise (e.g. typoed task, `-r` with no matching
-                        //      package) — surface NoTasksMatched.
-                        if plan_result.no_packages_matched {
-                            return Ok(());
-                        }
-                        let has_execution_flags = run_command.flags.concurrency_limit.is_some()
-                            || run_command.flags.parallel;
-                        if is_cwd_only && !has_execution_flags {
-                            let qpr = self.handle_no_task(is_interactive, &run_command).await?;
-                            self.plan_from_query(qpr).await?
-                        } else {
-                            return Err(
-                                vt_plan::Error::NoTasksMatched(task_specifier.clone()).into()
-                            );
-                        }
-                    } else {
-                        plan_result.graph
+                let run_kind = match run_command.mode {
+                    RunMode::Real { .. } => RunKind::Real,
+                    RunMode::Dry | RunMode::DryJson => RunKind::Dry,
+                };
+                let builder = match run_command.mode {
+                    RunMode::Real { log } => self.text_reporter(&run_command, log, run_kind),
+                    // A dry run's lines are the interleaved reporter's.
+                    RunMode::Dry => {
+                        self.text_reporter(&run_command, crate::cli::LogMode::Interleaved, run_kind)
                     }
-                } else {
-                    // No task specifier (e.g. `vp run` or `vp run --verbose`).
-                    // Only bare `vp run` enters the selector; with extra flags, error.
-                    let bare = RunCommand::try_parse_from::<_, &str>([])
-                        .expect("parsing hardcoded bare command should never fail")
-                        .into_resolved();
-
-                    // Normalize the run_command for comparison by ignoring cache flags, which don't affect task selection.
-                    let mut normalized_run_command = run_command.clone();
-                    normalized_run_command.flags.cache = false;
-
-                    if normalized_run_command != bare {
-                        return Err(vt_plan::Error::MissingTaskSpecifier.into());
+                    RunMode::DryJson => {
+                        let stdout = std::io::stdout();
+                        let pretty = stdout.is_terminal();
+                        self.run_plan_reporter(&graph, Box::new(stdout), pretty)?
                     }
-                    let qpr = self.handle_no_task(is_interactive, &run_command).await?;
-                    self.plan_from_query(qpr).await?
                 };
-
-                let workspace_path = self.workspace_path();
-                let writer: Box<dyn std::io::Write> = Box::new(std::io::stdout());
-
-                // Detect color support once at the point where reporters are
-                // constructed. The reporters and their pipe writers then strip
-                // ANSI escapes from cached/replayed output if the terminal
-                // can't render them. Detect per-stream so a redirected stdout
-                // doesn't trigger stripping of an interactive stderr.
-                let color_support = ColorSupport {
-                    stdout: stdout_supports_color(),
-                    stderr: stderr_supports_color(),
-                };
-
-                let inner: Box<dyn reporter::GraphExecutionReporterBuilder> = match run_command
-                    .flags
-                    .log
-                {
-                    crate::cli::LogMode::Interleaved => Box::new(InterleavedReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                    )),
-                    crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                    )),
-                    crate::cli::LogMode::Grouped => Box::new(GroupedReporterBuilder::new(
-                        Arc::clone(&workspace_path),
-                        writer,
-                        color_support,
-                    )),
-                };
-
-                let builder = Box::new(SummaryReporterBuilder::new(
-                    inner,
-                    workspace_path,
-                    Box::new(std::io::stdout()),
-                    run_command.flags.verbose,
-                    Some(self.make_summary_writer()),
-                    self.program_name.clone(),
-                    color_support,
-                ));
                 // Don't let SIGINT/CTRL_C kill the runner. Child tasks receive
                 // the signal directly from the terminal driver and handle it
                 // themselves. Cancelling the cancel token prevents scheduling
@@ -428,9 +388,19 @@ impl<'a> Session<'a> {
                     it.cancel();
                 })?;
 
-                self.execute_graph(graph, builder, fast_fail_token, cancel_token, interrupt_token)
-                    .await
-                    .map_err(SessionError::EarlyExit)
+                // `-v` lists every change, so the file check checks every file.
+                let file_check = FileCheck::from_verbosity(run_command.flags.verbose);
+                self.execute_graph(
+                    graph,
+                    builder,
+                    run_kind,
+                    file_check,
+                    fast_fail_token,
+                    cancel_token,
+                    interrupt_token,
+                )
+                .await
+                .map_err(SessionError::EarlyExit)
             }
         }
     }
@@ -448,6 +418,58 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// The graph that `run_command` runs, or `None` when `--filter` selects no
+    /// package, which the planner has already warned about. A run plan
+    /// (`--json`) of no tasks is still a document, so it gets the empty graph.
+    async fn plan_run(
+        &mut self,
+        run_command: &ResolvedRunCommand,
+    ) -> Result<Option<ExecutionGraph>, SessionError> {
+        let is_interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+
+        let Some(task_specifier) = &run_command.task_specifier else {
+            // No task specifier (e.g. `vp run` or `vp run --verbose`).
+            // Only bare `vp run` enters the selector; with extra flags, error.
+            let bare = ResolvedRunCommand::bare();
+
+            // Normalize the run_command for comparison by ignoring cache flags, which don't affect task selection.
+            let mut normalized_run_command = run_command.clone();
+            normalized_run_command.flags.cache = false;
+
+            if normalized_run_command != bare {
+                return Err(vt_plan::Error::MissingTaskSpecifier.into());
+            }
+            let qpr = self.handle_no_task(is_interactive, run_command).await?;
+            return Ok(Some(self.plan_from_query(qpr).await?));
+        };
+
+        let cwd = Arc::clone(&self.cwd);
+        let (plan_result, is_cwd_only) =
+            self.plan_from_cli_run_resolved(cwd, run_command.clone()).await?;
+        if plan_result.graph.graph.node_count() > 0 {
+            return Ok(Some(plan_result.graph));
+        }
+        // Three empty-graph outcomes, in order of precedence:
+        //   1. `--filter` selected zero packages — the planner has
+        //      already warned per filter; exit 0 silently. This is the
+        //      pnpm-compatible default; `--fail-if-no-match` opts in
+        //      to strict behaviour and is raised inside the planner.
+        //   2. Bare `vp run` (cwd-only, no execution flags) — fall
+        //      through to the interactive task selector.
+        //   3. Otherwise (e.g. typoed task, `-r` with no matching
+        //      package) — surface NoTasksMatched.
+        let has_execution_flags =
+            run_command.flags.concurrency_limit.is_some() || run_command.flags.parallel;
+        if plan_result.no_packages_matched {
+            Ok((run_command.mode == RunMode::DryJson).then_some(plan_result.graph))
+        } else if is_cwd_only && !has_execution_flags && run_command.mode != RunMode::DryJson {
+            let qpr = self.handle_no_task(is_interactive, run_command).await?;
+            Ok(Some(self.plan_from_query(qpr).await?))
+        } else {
+            Err(vt_plan::Error::NoTasksMatched(task_specifier.clone()).into())
+        }
+    }
+
     /// Show the task selector or list, and return a plan request for the selected task.
     ///
     /// In interactive mode, shows a fuzzy-searchable selection list. On selection,
@@ -461,15 +483,27 @@ impl<'a> Session<'a> {
         reason = "builds interactive/non-interactive select items and handles selection"
     )]
     async fn handle_no_task(
-        &mut self,
+        &self,
         is_interactive: bool,
         run_command: &ResolvedRunCommand,
     ) -> Result<QueryPlanRequest, SessionError> {
         let not_found_name = run_command.task_specifier.as_deref();
         let cwd = Arc::clone(&self.cwd);
-        let task_graph = self.ensure_task_graph_loaded().await?;
+        let task_graph = self.task_graph().await?;
         let current_package_path = task_graph.get_package_path_from_cwd(&cwd).cloned();
-        let mut entries = task_graph.list_tasks();
+        // Listing loads every package's config, including ones the run never
+        // reached. When one fails to load, a run that named a task reports the
+        // task as not found, as it would without the fallback, instead of an
+        // unrelated package's error.
+        let mut entries = match task_graph.list_tasks().await {
+            Ok(entries) => entries,
+            Err(error) => {
+                return Err(run_command.task_specifier.as_ref().map_or_else(
+                    || error.into(),
+                    |task_specifier| vt_plan::Error::NoTasksMatched(task_specifier.clone()).into(),
+                ));
+            }
+        };
         entries.sort_unstable_by(|a, b| {
             a.task_display
                 .package_name
@@ -659,7 +693,7 @@ impl<'a> Session<'a> {
                 // styled span via `ColorizeExt` (which consults
                 // `supports-color`), so the buffer already matches the
                 // terminal's capability and we write it to stdout directly.
-                let buf = format_full_summary(&summary);
+                let buf = format_full_summary(&summary, RunKind::Real);
                 {
                     use std::io::Write;
                     let mut stdout = std::io::stdout().lock();
@@ -680,13 +714,6 @@ impl<'a> Session<'a> {
                 Err(SessionError::EarlyExit(ExitStatus::FAILURE))
             }
             Err(ReadSummaryError::Io(err)) => Err(err.into()),
-        }
-    }
-
-    pub const fn task_graph(&self) -> Option<&TaskGraph> {
-        match &self.lazy_task_graph {
-            LazyTaskGraph::Initialized(graph) => Some(graph.task_graph()),
-            LazyTaskGraph::Uninitialized { .. } => None,
         }
     }
 
@@ -750,6 +777,8 @@ impl<'a> Session<'a> {
             &self.workspace_path,
             &self.cache_path,
             self.program_name.as_str(),
+            RunKind::Real,
+            FileCheck::First,
             fast_fail_token,
             cancel_token,
         )
@@ -758,8 +787,11 @@ impl<'a> Session<'a> {
         // summary, so it isn't told about the upload or its result.
         cache.wait_for_uploads(&tokio_util::sync::CancellationToken::new()).await;
         match outcome {
-            // Cache hit — no process was spawned, success
-            execute::SpawnOutcome::CacheHit => Ok(ExitStatus::SUCCESS),
+            // Cache hit — no process was spawned, success. This is a real run,
+            // so nothing is `WouldSpawn`.
+            execute::SpawnOutcome::CacheHit | execute::SpawnOutcome::WouldSpawn => {
+                Ok(ExitStatus::SUCCESS)
+            }
             // Process ran successfully
             execute::SpawnOutcome::Spawned(status) if status.success() => Ok(ExitStatus::SUCCESS),
             // Process ran but exited with non-zero status
@@ -779,19 +811,116 @@ impl<'a> Session<'a> {
         }
     }
 
+    /// The document `vp run --json` prints: every package and task in the workspace.
+    ///
+    /// Like listing the tasks, this loads every package's config. It also copies the JSON
+    /// Schema that the document's `$schema` points to into the system temp dir.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a package's config can't be loaded, a `dependsOn` entry names
+    /// a task that doesn't exist, or the schema can't be written.
+    pub async fn task_graph_json(&self) -> anyhow::Result<task_graph_json::TaskGraph> {
+        let task_graph = self.task_graph().await?;
+        let schema = task_graph_json::schema_url()
+            .context("Failed to write the JSON Schema that `$schema` points to")?;
+        Ok(task_graph_json::build(task_graph, &self.workspace_path, schema).await?)
+    }
+
+    /// Prints the task graph as JSON: indented in a terminal, on one line otherwise.
+    async fn print_task_graph_json(&self) -> Result<(), SessionError> {
+        let document = self.task_graph_json().await?;
+        let mut stdout = std::io::stdout().lock();
+        let pretty = stdout.is_terminal();
+        json::write_document(&mut stdout, &document, pretty)?;
+        Ok(())
+    }
+
+    /// The reporters of a run that prints text: the lines of the `log` reporter,
+    /// as a real or dry run (`run_kind`) prints them, and the summary.
+    fn text_reporter(
+        &self,
+        run_command: &ResolvedRunCommand,
+        log: crate::cli::LogMode,
+        run_kind: RunKind,
+    ) -> Box<dyn reporter::GraphExecutionReporterBuilder> {
+        let workspace_path = self.workspace_path();
+        let writer: Box<dyn std::io::Write> = Box::new(std::io::stdout());
+
+        // Detect color support once at the point where reporters are
+        // constructed. The reporters and their pipe writers then strip
+        // ANSI escapes from cached/replayed output if the terminal
+        // can't render them. Detect per-stream so a redirected stdout
+        // doesn't trigger stripping of an interactive stderr.
+        let color_support =
+            ColorSupport { stdout: stdout_supports_color(), stderr: stderr_supports_color() };
+
+        let inner: Box<dyn reporter::GraphExecutionReporterBuilder> = match log {
+            crate::cli::LogMode::Interleaved => Box::new(InterleavedReporterBuilder::new(
+                Arc::clone(&workspace_path),
+                writer,
+                color_support,
+                run_kind,
+            )),
+            crate::cli::LogMode::Labeled => Box::new(LabeledReporterBuilder::new(
+                Arc::clone(&workspace_path),
+                writer,
+                color_support,
+            )),
+            crate::cli::LogMode::Grouped => Box::new(GroupedReporterBuilder::new(
+                Arc::clone(&workspace_path),
+                writer,
+                color_support,
+            )),
+        };
+
+        Box::new(SummaryReporterBuilder::new(
+            inner,
+            workspace_path,
+            Box::new(std::io::stdout()),
+            run_command.flags.verbose > 0,
+            (run_kind == RunKind::Real).then(|| self.make_summary_writer()),
+            self.program_name.clone(),
+            run_kind,
+        ))
+    }
+
+    /// The reporter that writes the run plan of `graph`, for
+    /// `vp run --dry-run --json`, to `writer`: indented when `pretty` is set,
+    /// on one line otherwise. It also copies the JSON Schema that the
+    /// document's `$schema` points to into the system temp dir.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the schema can't be written.
+    fn run_plan_reporter(
+        &self,
+        graph: &ExecutionGraph,
+        writer: Box<dyn std::io::Write>,
+        pretty: bool,
+    ) -> anyhow::Result<Box<dyn reporter::GraphExecutionReporterBuilder>> {
+        let schema = json::schema_url(RUN_PLAN_SCHEMA)
+            .context("Failed to write the JSON Schema that `$schema` points to")?;
+        Ok(Box::new(JsonReporterBuilder::new(graph, &self.workspace_path, writer, pretty, schema)))
+    }
+
     /// Plans execution from a CLI run command.
     ///
     /// # Errors
     ///
-    /// Returns an error if the plan request cannot be parsed or if planning fails.
+    /// Returns the clap error of an invalid combination of arguments, as `vp run` prints it,
+    /// or an error if the command doesn't run tasks, the plan request cannot be parsed or
+    /// planning fails.
     #[tracing::instrument(level = "debug", skip_all)]
     pub async fn plan_from_cli_run(
         &mut self,
         cwd: Arc<AbsolutePath>,
         command: RunCommand,
-    ) -> Result<ExecutionGraph, vt_plan::Error> {
-        let (plan_result, _) =
-            self.plan_from_cli_run_resolved(cwd, command.into_resolved()).await?;
+    ) -> Result<ExecutionGraph, PlanFromCliError> {
+        let ResolvedCommand::Run(command) = command.resolve(&self.program_name)? else {
+            return Err(PlanFromCliError::NotARun);
+        };
+        let (plan_result, _) = self.plan_from_cli_run_resolved(cwd, command).await?;
         Ok(plan_result.graph)
     }
 
@@ -816,13 +945,14 @@ impl<'a> Session<'a> {
                 });
             }
         };
+        let task_graph = self.task_graph.get().await?;
         let plan_result = vt_plan::plan_query(
             query_plan_request,
             &self.workspace_path,
             &cwd,
             &self.envs,
             &mut self.plan_request_parser,
-            &mut self.lazy_task_graph,
+            task_graph,
             &self.glob_resolver,
         )
         .await?;
@@ -838,13 +968,14 @@ impl<'a> Session<'a> {
         request: QueryPlanRequest,
     ) -> Result<ExecutionGraph, vt_plan::Error> {
         let cwd = Arc::clone(&self.cwd);
+        let task_graph = self.task_graph.get().await?;
         let plan_result = vt_plan::plan_query(
             request,
             &self.workspace_path,
             &cwd,
             &self.envs,
             &mut self.plan_request_parser,
-            &mut self.lazy_task_graph,
+            task_graph,
             &self.glob_resolver,
         )
         .await?;

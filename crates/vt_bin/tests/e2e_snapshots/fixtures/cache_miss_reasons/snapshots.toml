@@ -329,3 +329,29 @@ steps = [
     "glob-test",
   ], comment = "cache miss: input removed" },
 ]
+
+[[e2e]]
+name = "input_and_output_config_changed"
+comment = """
+When a task's `input` and `output` settings change together, the miss lists both.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "test",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    "\"env\": [\"MY_ENV\"]",
+    "\"env\": [\"MY_ENV\"], \"input\": [\"test.txt\"], \"output\": []",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "-v",
+    "test",
+  ], comment = "The inline reason is the first change. The summary lists both." },
+]
