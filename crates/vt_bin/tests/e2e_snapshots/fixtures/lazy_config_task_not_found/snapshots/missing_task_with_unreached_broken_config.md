@@ -1,6 +1,6 @@
 # missing_task_with_unreached_broken_config
 
-`packages/broken/vite-task.json` sets `cache`, which only the workspace root config may set. `vt run build` in `packages/app` never reads `@test/broken`'s config. Neither should `vt run ship`, a task `@test/app` doesn't define, but it falls back to listing every task, so it fails with `@test/broken`'s error instead of saying `Task "ship" not found`. With `--parallel`, which skips that fallback, the same command gets the not-found error.
+`packages/broken/vite-task.json` sets `cache`, which only the workspace root config may set. `vt run build` in `packages/app` never reads `@test/broken`'s config. `vt run ship`, a task `@test/app` doesn't define, falls back to listing every task, which loads `@test/broken`'s config. When that fails, it reports `Task "ship" not found`, as `--parallel`, which skips the fallback, does, instead of `@test/broken`'s error.
 
 ## `vt run build`
 
@@ -13,28 +13,28 @@ Building app
 
 ## `vtt pipe-stdout -- vt run ship`
 
-fails with @test/broken's error instead of `Task "ship" not found.`
+not found, without @test/broken's error
 
 **Exit code:** 1
 
 ```
-error: `cache` can only be set in the workspace root config, but found in <workspace>/packages/broken
+error: Task "ship" not found
 --- stdout ---
 ```
 
 ## `vt run ship`
 
-in a terminal, fails with the same error
+in a terminal, also not found, without the task selector
 
 **Exit code:** 1
 
 ```
-error: `cache` can only be set in the workspace root config, but found in <workspace>/packages/broken
+error: Task "ship" not found
 ```
 
 ## `vt run --parallel ship`
 
-without the fallback, the same command is reported as not found
+without the fallback, also not found
 
 **Exit code:** 1
 
