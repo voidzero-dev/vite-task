@@ -35,9 +35,10 @@ unsafe impl<M: Sync> Sync for ShmWriter<M> {}
 /// Why a frame could not be claimed.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClaimError {
-    /// The CLOSED gate is set, by a seal or by an earlier failed claim.
-    /// Dropping the record is right either way: the receiver had stopped
-    /// collecting, or that same bit already fails its seal.
+    /// The CLOSED gate is set, by a seal, by an earlier failed claim, or by
+    /// [`ShmWriter::report_loss`]. Dropping the record is right in every
+    /// case: the receiver had stopped collecting, or that same bit already
+    /// fails its seal.
     #[error("the channel has been closed")]
     Closed,
     /// No room left, or a frame longer than the `u32::MAX` a descriptor
@@ -69,7 +70,8 @@ impl<M: AsRawSlice> ShmWriter<M> {
         Some(Self { mapped, _mem: mem })
     }
 
-    /// Whether the CLOSED gate is set, by a seal or by a failed claim.
+    /// Whether the CLOSED gate is set, by a seal, by a failed claim, or by
+    /// [`ShmWriter::report_loss`].
     pub fn is_closed(&self) -> bool {
         self.mapped.claims().load(Ordering::Relaxed) & CLOSED != 0
     }

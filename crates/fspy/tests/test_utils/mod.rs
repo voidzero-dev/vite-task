@@ -155,3 +155,46 @@ pub async fn spawn_command(cmd: vt_subprocess_test::Command) -> anyhow::Result<P
     assert!(termination.status.success());
     Ok(termination.path_accesses.expect("the test region holds every record"))
 }
+
+/// Writes the static test binary to a file named after the current test
+/// binary, so test binaries running at once don't rewrite a file another one
+/// is executing, and returns its path.
+///
+/// # Panics
+///
+/// Panics if the test binary is not statically linked or cannot be written.
+#[cfg(all(target_os = "linux", not(target_env = "musl")))]
+#[expect(
+    clippy::allow_attributes,
+    reason = "allow attribute required for conditionally-used helper"
+)]
+#[allow(dead_code, reason = "not all test files use this helper")]
+pub fn test_bin_path() -> &'static Path {
+    use std::{
+        fs::{self, Permissions},
+        os::unix::fs::PermissionsExt as _,
+        path::PathBuf,
+        sync::LazyLock,
+    };
+
+    use fspy_shared_unix::is_dynamically_linked_to_libc;
+
+    const TEST_BIN_CONTENT: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_FSPY_TEST_BIN"));
+
+    static TEST_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
+        assert_eq!(
+            is_dynamically_linked_to_libc(TEST_BIN_CONTENT),
+            Ok(false),
+            "Test binary is not a static executable"
+        );
+
+        let test_bin_path = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+            .join(concat!("fspy-test-bin-", env!("CARGO_CRATE_NAME")));
+        fs::write(&test_bin_path, TEST_BIN_CONTENT).expect("failed to write test binary");
+        fs::set_permissions(&test_bin_path, Permissions::from_mode(0o755))
+            .expect("failed to set permissions on test binary");
+
+        test_bin_path
+    });
+    TEST_BIN_PATH.as_path()
+}
