@@ -114,11 +114,12 @@ pub enum CacheNotUpdatedReason {
     /// A runner-aware tool explicitly requested that this run not be cached
     /// (e.g. vite dev-server, a watch task).
     ToolRequested,
-    /// A tracked process could not record a file access it went on to
-    /// perform: the channel it reports them through had no room left, or
-    /// none for a record that long. The accesses that did arrive are a
-    /// subset of what the task touched, so caching from them would bake in
-    /// inputs and outputs that are not all of them.
+    /// A tracked process could not record everything it did. For example,
+    /// the channel it reports file accesses through had no room left, or
+    /// the seccomp filter could not be installed and an exec continued
+    /// untracked. The accesses that did arrive are a subset of what the
+    /// task touched, so caching from them would bake in inputs and outputs
+    /// that are not all of them.
     #[cfg_attr(not(fspy), expect(dead_code, reason = "only fspy tracking can be incomplete"))]
     TrackingIncomplete,
 }

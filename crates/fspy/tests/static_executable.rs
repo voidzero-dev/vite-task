@@ -3,41 +3,14 @@
 //! the CI builds with `-crt-static` the binary becomes dynamically linked,
 //! defeating the purpose of these tests.
 #![cfg(all(target_os = "linux", not(target_env = "musl")))]
-use std::{
-    fs::{self, Permissions},
-    os::unix::fs::PermissionsExt as _,
-    path::{Path, PathBuf},
-    sync::LazyLock,
-};
+use std::path::Path;
 
 use fspy::PathAccessIterable;
-use fspy_shared_unix::is_dynamically_linked_to_libc;
 use test_log::test;
 
-use crate::test_utils::assert_contains;
+use crate::test_utils::{assert_contains, test_bin_path};
 
 mod test_utils;
-
-const TEST_BIN_CONTENT: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_FSPY_TEST_BIN"));
-
-fn test_bin_path() -> &'static Path {
-    static TEST_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
-        assert_eq!(
-            is_dynamically_linked_to_libc(TEST_BIN_CONTENT),
-            Ok(false),
-            "Test binary is not a static executable"
-        );
-
-        let tmp_dir = env!("CARGO_TARGET_TMPDIR");
-        let test_bin_path = PathBuf::from(tmp_dir).join("fspy-test-bin");
-        fs::write(&test_bin_path, TEST_BIN_CONTENT).expect("failed to write test binary");
-        fs::set_permissions(&test_bin_path, Permissions::from_mode(0o755))
-            .expect("failed to set permissions on test binary");
-
-        test_bin_path
-    });
-    TEST_BIN_PATH.as_path()
-}
 
 async fn track_test_bin(args: &[&str], cwd: Option<&str>) -> PathAccessIterable {
     let mut cmd = fspy::Command::new(test_bin_path());

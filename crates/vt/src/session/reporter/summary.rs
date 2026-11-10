@@ -121,8 +121,8 @@ pub enum SpawnOutcome {
         fspy_unsupported: bool,
         /// The IPC server error that caused the cache to be skipped, if any.
         ipc_server_error: Option<SavedError>,
-        /// `true` when the task made more file accesses than tracking had
-        /// room for, so the inferred inputs and outputs were a subset of
+        /// `true` when automatic file tracking could not record everything
+        /// the task did, so the inferred inputs and outputs were a subset of
         /// what it touched. Task ran successfully but cache was not
         /// updated.
         #[serde(default)]
@@ -544,7 +544,7 @@ impl TaskResult {
         {
             return (
                 Str::from(
-                    "→ Not cached: this task used more files than automatic tracking can record. Configure `input` and `output` manually to enable caching.",
+                    "→ Not cached: automatic file tracking couldn't record everything this task did. Configure `input` and `output` manually to enable caching.",
                 ),
                 Vec::new(),
                 &[],
