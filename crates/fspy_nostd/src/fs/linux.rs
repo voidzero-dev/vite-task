@@ -13,6 +13,9 @@ pub(super) const O_CREAT: u32 = linux_raw_sys::general::O_CREAT;
 pub(super) const O_EXCL: u32 = linux_raw_sys::general::O_EXCL;
 pub(super) const O_CLOEXEC: u32 = linux_raw_sys::general::O_CLOEXEC;
 pub(super) const AT_REMOVEDIR: u32 = linux_raw_sys::general::AT_REMOVEDIR;
+pub(super) const AT_SYMLINK_NOFOLLOW: u32 = linux_raw_sys::general::AT_SYMLINK_NOFOLLOW;
+pub(super) const S_IFMT: u32 = linux_raw_sys::general::S_IFMT;
+pub(super) const S_IFDIR: u32 = linux_raw_sys::general::S_IFDIR;
 pub(super) type ModeBits = u32;
 pub(super) const S_IRUSR: ModeBits = linux_raw_sys::general::S_IRUSR;
 pub(super) const S_IWUSR: ModeBits = linux_raw_sys::general::S_IWUSR;
@@ -69,7 +72,34 @@ pub(super) fn fstat(fd: BorrowedFd<'_>) -> Result<Stat> {
         .map_err(Error::from)?;
     // SAFETY: a successful `fstat` initialized the complete structure.
     let raw = unsafe { raw.assume_init() };
-    Ok(Stat { st_size: raw.st_size })
+    Ok(Stat { st_size: raw.st_size, st_mode: raw.st_mode })
+}
+
+#[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
+pub(super) fn fstatat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, flags: AtFlags) -> Result<Stat> {
+    // x86_64 names the syscall `newfstatat`.
+    #[cfg(target_arch = "x86_64")]
+    const FSTATAT: syscalls::Sysno = syscalls::Sysno::newfstatat;
+    #[cfg(not(target_arch = "x86_64"))]
+    const FSTATAT: syscalls::Sysno = syscalls::Sysno::fstatat;
+
+    let mut raw = core::mem::MaybeUninit::<linux_raw_sys::general::stat>::zeroed();
+    // SAFETY: `dirfd` remains borrowed, `path` is NUL-terminated, and `raw`
+    // points to writable storage for the kernel's architecture-specific
+    // `stat` structure.
+    unsafe {
+        syscalls::syscall!(
+            FSTATAT,
+            dirfd.as_raw_fd(),
+            path.as_ptr(),
+            raw.as_mut_ptr(),
+            flags.bits()
+        )
+    }
+    .map_err(Error::from)?;
+    // SAFETY: a successful `fstatat` initialized the complete structure.
+    let raw = unsafe { raw.assume_init() };
+    Ok(Stat { st_size: raw.st_size, st_mode: raw.st_mode })
 }
 
 pub(super) fn ftruncate(fd: BorrowedFd<'_>, len: u64) -> Result<()> {

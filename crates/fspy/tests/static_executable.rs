@@ -8,7 +8,7 @@ use std::path::Path;
 use fspy::PathAccessIterable;
 use test_log::test;
 
-use crate::test_utils::{assert_contains, test_bin_path};
+use crate::test_utils::{assert_contains, assert_not_contains, test_bin_path};
 
 mod test_utils;
 
@@ -42,6 +42,17 @@ async fn open_write() {
 async fn open_readwrite() {
     let accesses = track_test_bin(&["open_readwrite", "/hello"], None).await;
     assert_contains(&accesses, Path::new("/hello"), fspy::PathAccess::ReadWrite);
+}
+
+#[test(tokio::test)]
+async fn open_folder_only() {
+    // The open of a file fails without reading it, so it isn't recorded.
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let accesses = track_test_bin(&["open_folder_only", file.path().to_str().unwrap()], None).await;
+    assert_not_contains(&accesses, file.path());
+
+    let accesses = track_test_bin(&["open_folder_only", "/hello"], None).await;
+    assert_contains(&accesses, Path::new("/hello"), fspy::PathAccess::Read);
 }
 
 #[test(tokio::test)]

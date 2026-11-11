@@ -29,6 +29,10 @@ fn main() {
         "open_readwrite" => {
             let _ = File::options().read(true).write(true).open(path);
         }
+        "open_folder_only" => {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            let _ = File::options().read(true).custom_flags(nix::libc::O_DIRECTORY).open(path);
+        }
         "openat2_read" => {
             let _ = openat2(AT_FDCWD, path, OpenHow::new().flags(OFlag::O_RDONLY));
         }

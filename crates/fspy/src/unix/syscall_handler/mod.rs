@@ -7,7 +7,7 @@ mod stat;
 use std::{
     borrow::Cow,
     ffi::{OsStr, c_int},
-    io,
+    fs, io,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -18,6 +18,7 @@ use fspy_seccomp_unotify::{
     supervisor::handler::arg::{CStrPtr, Caller, Fd},
 };
 use fspy_shared::ipc::{AccessMode, PathAccess, channel::Sender};
+use fspy_shared_unix::open_flags::fails_without_reading;
 
 const PATH_MAX: usize = libc::PATH_MAX as usize;
 
@@ -48,7 +49,18 @@ impl SyscallHandler {
             libc::O_WRONLY => AccessMode::Write,
             _ => AccessMode::Read,
         };
-        self.handle_path(caller, dir_fd, path_ptr, mode)
+        let Some(path) = read_path(&mut self.path_read_buf, caller, dir_fd, path_ptr)? else {
+            return Ok(());
+        };
+        let skipped = fails_without_reading(flags, |follow_symlinks| {
+            let metadata =
+                if follow_symlinks { fs::metadata(&path) } else { fs::symlink_metadata(&path) };
+            metadata.ok().map(|metadata| metadata.is_dir())
+        });
+        if !skipped {
+            self.ipc_sender.send(&mode.with_path(path.as_os_str().into()));
+        }
+        Ok(())
     }
 
     fn handle_path(
@@ -58,19 +70,9 @@ impl SyscallHandler {
         path_ptr: CStrPtr,
         mode: AccessMode,
     ) -> io::Result<()> {
-        let Some(path_len) = path_ptr.read(caller, &mut self.path_read_buf)? else {
-            // Ignore paths that are too long to fit in PATH_MAX
-            return Ok(());
-        };
-        let mut path = Cow::Borrowed(Path::new(OsStr::from_bytes(&self.path_read_buf[..path_len])));
-        if !path.is_absolute() {
-            let mut resolved_path = PathBuf::from(dir_fd.get_path(caller)?);
-            if !nix::NixPath::is_empty(path.as_ref()) {
-                resolved_path.push(&path);
-            }
-            path = Cow::Owned(resolved_path);
+        if let Some(path) = read_path(&mut self.path_read_buf, caller, dir_fd, path_ptr)? {
+            self.ipc_sender.send(&mode.with_path(path.as_os_str().into()));
         }
-        self.ipc_sender.send(&mode.with_path(path.as_os_str().into()));
         Ok(())
     }
 
@@ -83,6 +85,29 @@ impl SyscallHandler {
         self.ipc_sender.send(&PathAccess::ReadDir(OsStr::from_bytes(path.as_bytes()).into()));
         Ok(())
     }
+}
+
+/// Reads the path at `path_ptr` in the caller into `buf` and resolves it
+/// against `dir_fd`, or returns `None` for a path too long to fit in
+/// `PATH_MAX`, which isn't recorded.
+fn read_path<'buf>(
+    buf: &'buf mut [u8; PATH_MAX],
+    caller: Caller,
+    dir_fd: Fd,
+    path_ptr: CStrPtr,
+) -> io::Result<Option<Cow<'buf, Path>>> {
+    let Some(path_len) = path_ptr.read(caller, buf)? else {
+        return Ok(None);
+    };
+    let path = Path::new(OsStr::from_bytes(&buf[..path_len]));
+    if path.is_absolute() {
+        return Ok(Some(Cow::Borrowed(path)));
+    }
+    let mut resolved_path = PathBuf::from(dir_fd.get_path(caller)?);
+    if !nix::NixPath::is_empty(path) {
+        resolved_path.push(path);
+    }
+    Ok(Some(Cow::Owned(resolved_path)))
 }
 
 impl_handler!(

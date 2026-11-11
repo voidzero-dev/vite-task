@@ -35,6 +35,40 @@ async fn open_write() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// An `O_DIRECTORY` open of a file fails without reading it, as does one of a
+/// symlink with `O_NOFOLLOW`, so neither is recorded. libc++'s
+/// `std::filesystem::remove_all` opens every path it removes that way. An
+/// open of a folder, or of a path that isn't there, is still recorded.
+#[cfg(unix)]
+#[test(tokio::test)]
+async fn open_folder_only() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let tmp_path = tmp_dir.path().canonicalize()?;
+    File::create(tmp_path.join("file"))?;
+    fs::create_dir(tmp_path.join("folder"))?;
+    std::os::unix::fs::symlink("folder", tmp_path.join("link"))?;
+    let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
+    let accesses = track_fn!(tmp_path_str, |tmp_path_str: String| {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let tmp_path = std::path::Path::new(&tmp_path_str);
+        for (name, flags) in
+            [("file", 0), ("link", libc::O_NOFOLLOW), ("folder", 0), ("missing", 0)]
+        {
+            let _ = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_DIRECTORY | flags)
+                .open(tmp_path.join(name));
+        }
+    })
+    .await?;
+    test_utils::assert_not_contains(&accesses, &tmp_path.join("file"));
+    test_utils::assert_not_contains(&accesses, &tmp_path.join("link"));
+    assert_contains(&accesses, &tmp_path.join("folder"), PathAccess::Read);
+    assert_contains(&accesses, &tmp_path.join("missing"), PathAccess::Read);
+
+    Ok(())
+}
+
 #[test(tokio::test)]
 async fn rename_destination() -> anyhow::Result<()> {
     let tmp_dir = tempfile::tempdir()?;
