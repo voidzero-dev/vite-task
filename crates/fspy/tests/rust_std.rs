@@ -35,36 +35,31 @@ async fn open_write() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// An `O_DIRECTORY` open of a file fails without reading it, as does one of a
-/// symlink with `O_NOFOLLOW`, so neither is recorded. libc++'s
-/// `std::filesystem::remove_all` opens every path it removes that way. An
-/// open of a folder, or of a path that isn't there, is still recorded.
+/// An `O_DIRECTORY` open reads nothing, so it isn't recorded, whether it
+/// fails on a file, as when libc++'s `std::filesystem::remove_all` opens each
+/// path it removes, or opens a folder. Reading the folder's entries is
+/// recorded on its own (see `readdir`).
 #[cfg(unix)]
 #[test(tokio::test)]
-async fn open_folder_only() -> anyhow::Result<()> {
+async fn open_directory() -> anyhow::Result<()> {
     let tmp_dir = tempfile::tempdir()?;
     let tmp_path = tmp_dir.path().canonicalize()?;
     File::create(tmp_path.join("file"))?;
     fs::create_dir(tmp_path.join("folder"))?;
-    std::os::unix::fs::symlink("folder", tmp_path.join("link"))?;
     let tmp_path_str = tmp_path.to_str().unwrap().to_owned();
     let accesses = track_fn!(tmp_path_str, |tmp_path_str: String| {
         use std::os::unix::fs::OpenOptionsExt as _;
         let tmp_path = std::path::Path::new(&tmp_path_str);
-        for (name, flags) in
-            [("file", 0), ("link", libc::O_NOFOLLOW), ("folder", 0), ("missing", 0)]
-        {
+        for name in ["file", "folder"] {
             let _ = OpenOptions::new()
                 .read(true)
-                .custom_flags(libc::O_DIRECTORY | flags)
+                .custom_flags(libc::O_DIRECTORY)
                 .open(tmp_path.join(name));
         }
     })
     .await?;
     test_utils::assert_not_contains(&accesses, &tmp_path.join("file"));
-    test_utils::assert_not_contains(&accesses, &tmp_path.join("link"));
-    assert_contains(&accesses, &tmp_path.join("folder"), PathAccess::Read);
-    assert_contains(&accesses, &tmp_path.join("missing"), PathAccess::Read);
+    test_utils::assert_not_contains(&accesses, &tmp_path.join("folder"));
 
     Ok(())
 }
@@ -283,9 +278,9 @@ async fn readdir() -> anyhow::Result<()> {
     //   and if that fails, not read dir call (NtQueryDirectoryFile/NtQueryDirectoryFileEx) is made.
     // - macOS/Linux:
     //   - opendir results in a read_dir access. This call is directly made without trying to open the directory as a fd first.
-    //   - open + fopendir results in READ access, because open would fail with ENOENT, and fopendir is not called.
+    //   - open + fdopendir results in no access, because the `O_DIRECTORY` open isn't recorded, and it fails with ENOENT, so fdopendir is not called.
     //
-    // This difference is acceptable because both will result in a "not found" fingerprint in vite-task.
+    // READ and read_dir both result in a "not found" fingerprint in vite-task.
     // To keep the test consistent across platforms, we create the directory first.
     std::fs::create_dir(tmpdir.path().join("hello_dir"))?;
 

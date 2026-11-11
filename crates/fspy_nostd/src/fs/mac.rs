@@ -14,9 +14,6 @@ pub(super) const O_CREAT: u32 = libc::O_CREAT.cast_unsigned();
 pub(super) const O_EXCL: u32 = libc::O_EXCL.cast_unsigned();
 pub(super) const O_CLOEXEC: u32 = libc::O_CLOEXEC.cast_unsigned();
 pub(super) const AT_REMOVEDIR: u32 = libc::AT_REMOVEDIR.cast_unsigned();
-pub(super) const AT_SYMLINK_NOFOLLOW: u32 = libc::AT_SYMLINK_NOFOLLOW.cast_unsigned();
-pub(super) const S_IFMT: u32 = libc::S_IFMT as u32;
-pub(super) const S_IFDIR: u32 = libc::S_IFDIR as u32;
 pub(super) type ModeBits = libc::mode_t;
 pub(super) const S_IRUSR: ModeBits = libc::S_IRUSR;
 pub(super) const S_IWUSR: ModeBits = libc::S_IWUSR;
@@ -64,28 +61,7 @@ pub(super) fn fstat(fd: BorrowedFd<'_>) -> Result<Stat> {
     }
     // SAFETY: a successful `fstat` initialized the complete structure.
     let raw = unsafe { raw.assume_init() };
-    Ok(Stat { st_size: raw.st_size, st_mode: u32::from(raw.st_mode) })
-}
-
-#[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
-pub(super) fn fstatat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, flags: AtFlags) -> Result<Stat> {
-    let mut raw = core::mem::MaybeUninit::<libc::stat>::zeroed();
-    // SAFETY: `dirfd` remains borrowed, `path` is NUL-terminated, and `raw`
-    // is writable for the call.
-    if unsafe {
-        libc::fstatat(
-            dirfd.as_raw_fd(),
-            path.as_ptr().cast(),
-            raw.as_mut_ptr(),
-            flags.bits().cast_signed(),
-        )
-    } == -1
-    {
-        return Err(Error::last_os_error());
-    }
-    // SAFETY: a successful `fstatat` initialized the complete structure.
-    let raw = unsafe { raw.assume_init() };
-    Ok(Stat { st_size: raw.st_size, st_mode: u32::from(raw.st_mode) })
+    Ok(Stat { st_size: raw.st_size })
 }
 
 pub(super) fn ftruncate(fd: BorrowedFd<'_>, len: u64) -> Result<()> {

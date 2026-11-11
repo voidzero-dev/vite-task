@@ -45,14 +45,11 @@ async fn open_readwrite() {
 }
 
 #[test(tokio::test)]
-async fn open_folder_only() {
-    // The open of a file fails without reading it, so it isn't recorded.
+async fn open_directory() {
+    // The open fails on a file without reading it.
     let file = tempfile::NamedTempFile::new().unwrap();
-    let accesses = track_test_bin(&["open_folder_only", file.path().to_str().unwrap()], None).await;
+    let accesses = track_test_bin(&["open_directory", file.path().to_str().unwrap()], None).await;
     assert_not_contains(&accesses, file.path());
-
-    let accesses = track_test_bin(&["open_folder_only", "/hello"], None).await;
-    assert_contains(&accesses, Path::new("/hello"), fspy::PathAccess::Read);
 }
 
 #[test(tokio::test)]

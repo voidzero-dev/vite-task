@@ -44,24 +44,13 @@ bitflags! {
     pub struct AtFlags: u32 {
         /// Remove a directory rather than a non-directory entry.
         const REMOVEDIR = imp::AT_REMOVEDIR;
-        /// Report on a symlink itself rather than on what it points to.
-        const SYMLINK_NOFOLLOW = imp::AT_SYMLINK_NOFOLLOW;
     }
 }
 
-/// File metadata.
+/// Metadata used by fspy's shared-memory backing files.
 #[derive(Clone, Copy, Debug)]
 pub struct Stat {
     pub st_size: i64,
-    pub st_mode: u32,
-}
-
-impl Stat {
-    /// Whether the file is a directory.
-    #[must_use]
-    pub const fn is_dir(&self) -> bool {
-        self.st_mode & imp::S_IFMT == imp::S_IFDIR
-    }
 }
 
 /// The platform's maximum pathname size, including the terminating NUL.
@@ -97,15 +86,6 @@ pub fn unlinkat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, flags: AtFlags) -> 
 /// Returns the error reported by `fstat`.
 pub fn fstat(fd: BorrowedFd<'_>) -> Result<Stat> {
     imp::fstat(fd)
-}
-
-/// Returns metadata for `path` relative to `dirfd`.
-///
-/// # Errors
-///
-/// Returns the error reported by `fstatat`.
-pub fn fstatat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, flags: AtFlags) -> Result<Stat> {
-    imp::fstatat(dirfd, path, flags)
 }
 
 /// Sets the length of an open file.

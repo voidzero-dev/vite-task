@@ -4,6 +4,7 @@ use allocator_api2::{alloc::Allocator, vec::Vec};
 use bstr::ByteSlice;
 use fspy_nostd::{BorrowedFd, CWD};
 use fspy_shared::ipc::AccessMode;
+use fspy_shared_unix::open_flags::open_access_mode;
 use libc::{c_char, c_int};
 
 #[cfg(target_os = "linux")]
@@ -196,44 +197,41 @@ impl ToAbsolutePath for fspy_nostd::CStr<'_, fspy_nostd::Thin> {
 }
 
 pub trait ToAccessMode {
-    /// Converts the intercepted operation's mode into an access mode.
+    /// Converts the intercepted operation's mode into the access to record,
+    /// or `None` for one that isn't recorded.
     ///
     /// # Safety
     ///
     /// Implementations backed by raw process pointers require those pointers
     /// to remain valid for the conversion.
-    unsafe fn to_access_mode(self) -> AccessMode;
+    unsafe fn to_access_mode(self) -> Option<AccessMode>;
 }
 
 impl ToAccessMode for AccessMode {
-    unsafe fn to_access_mode(self) -> AccessMode {
-        self
+    unsafe fn to_access_mode(self) -> Option<AccessMode> {
+        Some(self)
     }
 }
 
 pub struct OpenFlags(pub c_int);
 impl ToAccessMode for OpenFlags {
-    unsafe fn to_access_mode(self) -> AccessMode {
-        match self.0 & libc::O_ACCMODE {
-            libc::O_RDWR => AccessMode::ReadWrite,
-            libc::O_WRONLY => AccessMode::Write,
-            _ => AccessMode::Read,
-        }
+    unsafe fn to_access_mode(self) -> Option<AccessMode> {
+        open_access_mode(self.0)
     }
 }
 
 pub struct ModeStr(pub *const c_char);
 impl ToAccessMode for ModeStr {
-    unsafe fn to_access_mode(self) -> AccessMode {
+    unsafe fn to_access_mode(self) -> Option<AccessMode> {
         // SAFETY: self.0 is a non-null pointer to a valid null-terminated C
         // string, as guaranteed by the libc calling convention.
         let mode_str = unsafe { CStr::from_ptr(self.0) }.to_bytes().as_bstr();
         let has_read = mode_str.contains(&b'r');
         let has_write = mode_str.contains(&b'w') || mode_str.contains(&b'a');
-        match (has_read, has_write) {
+        Some(match (has_read, has_write) {
             (false, true) => AccessMode::Write,
             (true, true) => AccessMode::ReadWrite,
             _ => AccessMode::Read,
-        }
+        })
     }
 }
