@@ -1,6 +1,6 @@
 # Changelog
 
-- **Fixed** Uncached tasks preserve terminal colors with `vp run --log labeled` and `--log grouped`, including Vitest coverage tables. Explicit color controls and redirected stdout remain respected ([#???](https://github.com/voidzero-dev/vite-task/pull/???)).
+- **Fixed** Uncached tasks executed directly now preserve colors with `vp run --log labeled` and `--log grouped`, including Vitest coverage tables ([#997](https://github.com/voidzero-dev/vite-task/pull/997)).
 
 - **Fixed** On Windows, tasks with automatic file-access tracking can now run Git Bash's `sh` and other MSYS2 or Cygwin programs, which aborted with `fatal error - MapViewOfFileEx 'shared.5'(…) Win32 error 487` ([#830](https://github.com/voidzero-dev/vite-task/issues/830), [#952](https://github.com/voidzero-dev/vite-task/pull/952)).
 - **Fixed** On Linux, cached tasks no longer fail to spawn child processes in restricted sandboxes, for example rootless bubblewrap that denies the `seccomp` syscall. When the `seccomp` filter for file-access tracking cannot be installed, the process runs untracked instead and the run is reported as not cached. The not-cached message now reads "automatic file tracking couldn't record everything this task did", which fits both this case and a full tracking channel ([#700](https://github.com/voidzero-dev/vite-task/issues/700), [#701](https://github.com/voidzero-dev/vite-task/pull/701)).

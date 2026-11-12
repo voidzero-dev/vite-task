@@ -221,13 +221,12 @@ impl<'a> ExecutionMode<'a> {
                 envs
             }
             Self::Uncached { pipe_writers: Some(_) }
-                if super::stdout_supports_color()
+                if !command.shell_fallback
+                    && super::stdout_supports_color()
                     && !["FORCE_COLOR", "NO_COLOR", "NODE_DISABLE_COLORS"].iter().any(|name| {
                         command.spawn_envs.contains_key(EnvName::from_ref(OsStr::new(name)))
                     }) =>
             {
-                // Piping hides the terminal from color detection in child tools.
-                // This is display policy, so keep it out of the cached plan.
                 vec![(OsStr::new("FORCE_COLOR"), OsStr::new("1"))]
             }
             Self::Uncached { .. } => Vec::new(),
