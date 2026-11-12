@@ -1,4 +1,4 @@
-# uncached_redirected_stdout
+# uncached_stdio_color_detection
 
 ## `vtt pipe-stdout -- vt run --log labeled uncached-force`
 
@@ -8,11 +8,9 @@
 [color-env-handling#uncached-force] (undefined)
 ```
 
-## `vtt pipe-stdout -- vt run --log grouped uncached-force`
+## `vt run --log interleaved uncached-force`
 
 ```
---- stdout ---
-[color-env-handling#uncached-force] $ vtt print-env FORCE_COLOR ⊘ cache disabled
-── [color-env-handling#uncached-force] ──
+$ vtt print-env FORCE_COLOR ⊘ cache disabled
 (undefined)
 ```
