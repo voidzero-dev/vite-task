@@ -256,10 +256,13 @@ pub struct EnabledCacheConfig {
     pub remote: Option<bool>,
 }
 
-/// Options for user-defined tasks in `vite.config.*`, excluding the command.
+/// Options for user-defined tasks and `package.json` scripts in `vite.config.*`, excluding the
+/// command.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
 #[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "TaskOptions"))]
+// `deny_unknown_fields` applies to `scripts` entries. Flattened into a task, this struct only
+// receives its own fields, so `UserTaskConfig` is the one that rejects unknown fields there.
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct UserTaskOptions {
     /// The working directory for the task, relative to the package root (not workspace root).
