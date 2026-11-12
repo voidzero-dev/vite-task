@@ -247,14 +247,25 @@ impl ShmHandle {
         // fixed address. The injected DLL maps it before msys-2.0.dll starts,
         // and a 4 GiB view placed by the system lands on Cygwin's shared
         // regions, so `sh.exe` dies with Win32 error 487 (vite-task#830).
-        let view = match fspy_nostd::mm::map_view_of_file_above(
-            mapping.as_handle(),
-            len,
-            ABOVE_CYGWIN_FIXED_LAYOUT,
-        ) {
-            Some(Ok(view)) => view,
-            // No `MapViewOfFile3`, or no room up there: let the system choose.
-            None | Some(Err(_)) => fspy_nostd::mm::map_view_of_file(
+        let above_cygwin = fspy_nostd::mm::get_map_view_of_file3().and_then(|map_view_of_file3| {
+            map_view_of_file3
+                .call(
+                    mapping.as_handle(),
+                    PageProtection::ReadWrite,
+                    0,
+                    len,
+                    Some(ABOVE_CYGWIN_FIXED_LAYOUT),
+                )
+                .ok()
+        });
+        let view = match above_cygwin {
+            Some(view) => view,
+            // Before Windows 10 1803 there is no `MapViewOfFile3`. A failure
+            // above Cygwin's layout, such as a 64-bit process linked without
+            // `/LARGEADDRESSAWARE`, rarely leaves room lower down either, but
+            // letting the system choose costs nothing and keeps the old
+            // behavior.
+            None => fspy_nostd::mm::map_view_of_file(
                 mapping.as_handle(),
                 MappingAccess::READ | MappingAccess::WRITE,
                 0,

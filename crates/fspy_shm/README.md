@@ -40,6 +40,8 @@ The crate is `no_std`: paths arrive as platform C strings and errors are raw OS 
 
 `remove` unlinks the path on Unix. On Windows it relies on [POSIX delete semantics](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-_file_disposition_information_ex), which requires NTFS on Windows 10 1607 or newer: the name goes away at once, while existing handles keep working and [mapped views keep the data alive](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-createfilemappingw) until the last one goes away.
 
+On Windows, `map` asks `MapViewOfFile3` for an address at or above `0x7000_0000_0000`, the top of Cygwin's mmap arena. The fspy DLL maps its view before `msys-2.0.dll` starts, and a 4 GiB view placed by the system lands on the address ranges Cygwin and MSYS2 programs such as Git Bash's `sh.exe` claim at fixed addresses, which makes them abort with Win32 error 487 ([#830](https://github.com/voidzero-dev/vite-task/issues/830)). Windows releases before Windows 10 1803 have no `MapViewOfFile3`; there, or when no room is left that high, `map` lets the system choose the address.
+
 ## Options considered
 
 | Option                                    | Decision                                                                                                                                                                                        |
