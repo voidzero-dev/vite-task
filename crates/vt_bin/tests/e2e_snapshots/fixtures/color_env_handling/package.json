@@ -1,4 +1,9 @@
 {
   "name": "color-env-handling",
-  "private": true
+  "private": true,
+  "scripts": {
+    "uncached-color": "vtt print-color green coverage-row",
+    "uncached-force": "vtt print-env FORCE_COLOR",
+    "explicit-no-color": "FORCE_COLOR=0 vtt print-env FORCE_COLOR"
+  }
 }

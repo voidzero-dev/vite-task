@@ -45,3 +45,76 @@ argv = ["vt", "run", "print-colored-b"]
 envs = [["FORCE_COLOR", "1"]]
 comment = "task B — cache hit replayed; formatted snapshot proves the cached bytes were coloured, even though the cache-miss run (above) showed them as plain text"
 formatted-snapshot = true
+
+[[e2e]]
+name = "uncached_piped_colors"
+
+[[e2e.steps]]
+argv = ["vt", "run", "--log", "labeled", "uncached-color"]
+formatted-snapshot = true
+
+[[e2e.steps]]
+argv = ["vt", "run", "--log", "grouped", "uncached-color"]
+formatted-snapshot = true
+
+[[e2e]]
+name = "uncached_force_color_zero"
+
+[[e2e.steps]]
+argv = ["vt", "run", "--log", "labeled", "uncached-force"]
+envs = [["FORCE_COLOR", "0"]]
+
+[[e2e.steps]]
+argv = ["vt", "run", "--log", "grouped", "uncached-force"]
+envs = [["FORCE_COLOR", "0"]]
+
+[[e2e]]
+name = "uncached_no_color"
+
+[[e2e.steps]]
+argv = ["vt", "run", "--log", "labeled", "uncached-force"]
+envs = [["NO_COLOR", "1"]]
+
+[[e2e.steps]]
+argv = ["vt", "run", "--log", "grouped", "uncached-force"]
+envs = [["NO_COLOR", "1"]]
+
+[[e2e]]
+name = "uncached_node_disable_colors"
+
+[[e2e.steps]]
+argv = ["vt", "run", "--log", "labeled", "uncached-force"]
+envs = [["NODE_DISABLE_COLORS", "1"]]
+
+[[e2e.steps]]
+argv = ["vt", "run", "--log", "grouped", "uncached-force"]
+envs = [["NODE_DISABLE_COLORS", "1"]]
+
+[[e2e]]
+name = "uncached_explicit_task_color"
+
+[[e2e.steps]]
+argv = ["vt", "run", "--log", "labeled", "explicit-no-color"]
+
+[[e2e.steps]]
+argv = ["vt", "run", "--log", "grouped", "explicit-no-color"]
+
+[[e2e]]
+name = "uncached_redirected_stdout"
+
+[[e2e.steps]]
+argv = ["vtt", "pipe-stdout", "--", "vt", "run", "--log", "labeled", "uncached-force"]
+
+[[e2e.steps]]
+argv = ["vtt", "pipe-stdout", "--", "vt", "run", "--log", "grouped", "uncached-force"]
+
+[[e2e]]
+name = "uncached_inherited_stdio_keeps_color_detection"
+steps = [["vt", "run", "--log", "interleaved", "uncached-force"]]
+
+[[e2e]]
+name = "uncached_preserves_explicit_force_color"
+steps = [
+  { argv = ["vt", "run", "--log", "labeled", "uncached-force"], envs = [["FORCE_COLOR", "3"]] },
+  { argv = ["vt", "run", "--log", "grouped", "uncached-force"], envs = [["FORCE_COLOR", "3"]] },
+]

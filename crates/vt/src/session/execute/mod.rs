@@ -21,10 +21,11 @@ use std::{
 
 use futures_util::future::LocalBoxFuture;
 use tokio_util::sync::CancellationToken;
+use vt_casefold::EnvName;
 use vt_glob::path::PathGlobSet;
 use vt_ipc_shared::NODE_CLIENT_PATH_ENV_NAME;
 use vt_path::{AbsolutePath, RelativePathBuf};
-use vt_plan::{SpawnExecution, cache_metadata::CacheMetadata};
+use vt_plan::{SpawnCommand, SpawnExecution, cache_metadata::CacheMetadata};
 use vt_server::{Recorder, Reports, ServerHandle, StopAccepting, serve};
 
 use self::{
@@ -205,9 +206,10 @@ impl<'a> ExecutionMode<'a> {
     }
 
     /// The extra envs to inject into the child: IPC connection info + the
-    /// napi addon path runner-aware tools `require()`. Empty when execution
-    /// is uncached.
-    fn injected_envs(&self) -> Vec<(&OsStr, &OsStr)> {
+    /// napi addon path runner-aware tools `require()`. Uncached piped tasks
+    /// also preserve the parent terminal's color support unless the task
+    /// explicitly controls colors.
+    fn injected_envs(&self, command: &SpawnCommand) -> Vec<(&OsStr, &OsStr)> {
         match self {
             Self::Cached { state: CacheState { tracking: t, .. }, .. } => {
                 let mut envs: Vec<(&OsStr, &OsStr)> =
@@ -217,6 +219,16 @@ impl<'a> ExecutionMode<'a> {
                     crate::napi_client::napi_client_path().as_path().as_os_str(),
                 ));
                 envs
+            }
+            Self::Uncached { pipe_writers: Some(_) }
+                if super::stdout_supports_color()
+                    && !["FORCE_COLOR", "NO_COLOR", "NODE_DISABLE_COLORS"].iter().any(|name| {
+                        command.spawn_envs.contains_key(EnvName::from_ref(OsStr::new(name)))
+                    }) =>
+            {
+                // Piping hides the terminal from color detection in child tools.
+                // This is display policy, so keep it out of the cached plan.
+                vec![(OsStr::new("FORCE_COLOR"), OsStr::new("1"))]
             }
             Self::Uncached { .. } => Vec::new(),
         }
@@ -498,7 +510,7 @@ async fn run(
         fspy_enabled,
         spawn_stdio,
         fast_fail_token.clone(),
-        mode.injected_envs(),
+        mode.injected_envs(&spawn_execution.spawn_command),
     )
     .await
     .map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
