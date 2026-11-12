@@ -23,6 +23,12 @@ use windows_sys::Win32::{
     System::{IO::DeviceIoControl, Ioctl::FSCTL_SET_SPARSE},
 };
 
+/// The top of Cygwin's mmap arena (`MMAP_STORAGE_HIGH` in
+/// `winsup/cygwin/local_includes/memory_layout.h`). Everything Cygwin places
+/// at a fixed address, from the executable at `0x100400000` up through the
+/// arena, lies below it, and user space continues to `0x7FFF_FFFE_FFFF`.
+pub const ABOVE_CYGWIN_FIXED_LAYOUT: usize = 0x7000_0000_0000;
+
 const SHARE_ALL: FileShare = FileShare::READ.union(FileShare::WRITE).union(FileShare::DELETE);
 
 /// Opened shared memory that is not mapped yet.
@@ -237,13 +243,36 @@ impl ShmHandle {
             0,
             0,
         )?;
-        let view = fspy_nostd::mm::map_view_of_file(
-            mapping.as_handle(),
-            MappingAccess::READ | MappingAccess::WRITE,
-            0,
-            0,
-            len,
-        )?;
+        // Keep the view out of every range an MSYS2/Cygwin process maps at a
+        // fixed address. The injected DLL maps it before msys-2.0.dll starts,
+        // and a 4 GiB view placed by the system lands on Cygwin's shared
+        // regions, so `sh.exe` dies with Win32 error 487 (vite-task#830).
+        let above_cygwin = fspy_nostd::mm::get_map_view_of_file3().and_then(|map_view_of_file3| {
+            map_view_of_file3
+                .call(
+                    mapping.as_handle(),
+                    PageProtection::ReadWrite,
+                    0,
+                    len,
+                    Some(ABOVE_CYGWIN_FIXED_LAYOUT),
+                )
+                .ok()
+        });
+        let view = match above_cygwin {
+            Some(view) => view,
+            // Before Windows 10 1803 there is no `MapViewOfFile3`. A failure
+            // above Cygwin's layout, such as a 64-bit process linked without
+            // `/LARGEADDRESSAWARE`, rarely leaves room lower down either, but
+            // letting the system choose costs nothing and keeps the old
+            // behavior.
+            None => fspy_nostd::mm::map_view_of_file(
+                mapping.as_handle(),
+                MappingAccess::READ | MappingAccess::WRITE,
+                0,
+                0,
+                len,
+            )?,
+        };
         // The view remains valid after its mapping-object handle closes.
         Ok(Mapping { view, len })
     }

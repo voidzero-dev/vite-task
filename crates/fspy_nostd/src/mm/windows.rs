@@ -4,10 +4,19 @@ use core::{
 };
 
 use bitflags::bitflags;
-use windows_sys::Win32::System::Memory::{
-    CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
-    MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, PAGE_READWRITE, UnmapViewOfFile, VirtualAlloc,
-    VirtualFree,
+use windows_sys::Win32::{
+    Foundation::HANDLE,
+    System::{
+        LibraryLoader::GetProcAddress,
+        Memory::{
+            CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MEM_ADDRESS_REQUIREMENTS,
+            MEM_COMMIT, MEM_EXTENDED_PARAMETER, MEM_EXTENDED_PARAMETER_0, MEM_EXTENDED_PARAMETER_1,
+            MEM_RELEASE, MEM_RESERVE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
+            MemExtendedParameterAddressRequirements, PAGE_READWRITE, UnmapViewOfFile,
+            VIRTUAL_ALLOCATION_TYPE, VirtualAlloc, VirtualFree,
+        },
+        Threading::GetCurrentProcess,
+    },
 };
 
 use crate::{BorrowedHandle, OwnedHandle, Result, SecurityAttributes};
@@ -149,6 +158,111 @@ pub fn create_file_mapping(
     Ok(unsafe { OwnedHandle::from_raw_handle(mapping) })
 }
 
+/// The signature of `MapViewOfFile3`.
+type MapViewOfFile3Fn = unsafe extern "system" fn(
+    file_mapping: HANDLE,
+    process: HANDLE,
+    base_address: *const c_void,
+    offset: u64,
+    view_size: usize,
+    allocation_type: VIRTUAL_ALLOCATION_TYPE,
+    page_protection: u32,
+    extended_parameters: *mut MEM_EXTENDED_PARAMETER,
+    parameter_count: u32,
+) -> MEMORY_MAPPED_VIEW_ADDRESS;
+
+/// `MapViewOfFile3`, which `kernelbase.dll` exports from Windows 10 1803 on.
+///
+/// A value proves that this process has the function; only
+/// [`get_map_view_of_file3`] creates one. The value is `Copy`, so a caller
+/// that maps often can keep it instead of looking the function up again.
+#[derive(Clone, Copy)]
+pub struct MapViewOfFile3 {
+    function: MapViewOfFile3Fn,
+}
+
+/// Looks [`MapViewOfFile3`] up at run time rather than importing it, so this
+/// crate still loads on Windows releases that predate it.
+///
+/// The lookup is safe under the loader lock: `kernelbase.dll` is loaded before
+/// any other DLL's `DllMain` runs, and neither `GetModuleHandleW` nor
+/// `GetProcAddress` loads a module, since `kernelbase.dll` implements
+/// `MapViewOfFile3` rather than forwarding it.
+///
+/// Returns `None` before Windows 10 1803.
+#[must_use]
+pub fn get_map_view_of_file3() -> Option<MapViewOfFile3> {
+    let kernelbase = crate::windows::get_module_handle(crate::wide_cstr!("kernelbase.dll")).ok()?;
+    // SAFETY: `kernelbase` is a loaded module handle and the symbol name is a
+    // NUL-terminated ANSI string.
+    let symbol = unsafe { GetProcAddress(kernelbase.as_ptr(), c"MapViewOfFile3".as_ptr().cast()) }?;
+    // SAFETY: `MapViewOfFile3` has exactly the signature of `MapViewOfFile3Fn`.
+    let function = unsafe {
+        core::mem::transmute::<unsafe extern "system" fn() -> isize, MapViewOfFile3Fn>(symbol)
+    };
+    Some(MapViewOfFile3 { function })
+}
+
+impl MapViewOfFile3 {
+    /// Calls `MapViewOfFile3` to map `bytes_to_map` bytes of `mapping`,
+    /// starting at `offset`, into the current process at a system-chosen
+    /// address, no lower than `lowest_address` when one is given.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error reported by `MapViewOfFile3`, for example when no
+    /// free range of `bytes_to_map` bytes exists above `lowest_address`.
+    pub fn call(
+        self,
+        mapping: BorrowedHandle<'_>,
+        protection: PageProtection,
+        offset: u64,
+        bytes_to_map: usize,
+        lowest_address: Option<usize>,
+    ) -> Result<MappingView> {
+        let mut requirements = MEM_ADDRESS_REQUIREMENTS {
+            LowestStartingAddress: ptr::without_provenance_mut(lowest_address.unwrap_or(0)),
+            // Null means the highest address the process can use.
+            HighestEndingAddress: ptr::null_mut(),
+            // Zero means the allocation granularity.
+            Alignment: 0,
+        };
+        let mut parameter = MEM_EXTENDED_PARAMETER {
+            // The type occupies the low 8 bits.
+            Anonymous1: MEM_EXTENDED_PARAMETER_0 {
+                _bitfield: MemExtendedParameterAddressRequirements.cast_unsigned().into(),
+            },
+            Anonymous2: MEM_EXTENDED_PARAMETER_1 { Pointer: (&raw mut requirements).cast() },
+        };
+        let (parameters, parameter_count) =
+            if lowest_address.is_some() { (&raw mut parameter, 1) } else { (ptr::null_mut(), 0) };
+        // SAFETY: `self.function` is `MapViewOfFile3`. `mapping` keeps the
+        // opaque handle open for the call, and `parameters` is null or points
+        // at `parameter`, which points at `requirements`; both outlive the
+        // call. A null base address makes the system choose a free range, so
+        // the view cannot alias an existing allocation. Windows validates the
+        // handle, offset, size, protection, and address range; any mismatch is
+        // reported as a null result.
+        let view = unsafe {
+            (self.function)(
+                mapping.as_raw_handle(),
+                GetCurrentProcess(),
+                ptr::null(),
+                offset,
+                bytes_to_map,
+                0,
+                protection as u32,
+                parameters,
+                parameter_count,
+            )
+        };
+        let Some(ptr) = NonNull::new(view.Value.cast::<u8>()) else {
+            return Err(crate::Error::last_os_error());
+        };
+        Ok(MappingView { ptr })
+    }
+}
+
 /// Calls `MapViewOfFile` and returns the new owned view.
 ///
 /// # Errors
@@ -177,4 +291,47 @@ pub fn map_view_of_file(
         return Err(crate::Error::last_os_error());
     };
     Ok(MappingView { ptr })
+}
+
+#[cfg(test)]
+mod tests {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+
+    use super::*;
+
+    const SIZE: u32 = 64 * 1024;
+
+    fn pagefile_mapping() -> OwnedHandle {
+        // SAFETY: `CreateFileMappingW` defines `INVALID_HANDLE_VALUE` as a
+        // request for memory backed by the paging file.
+        let pagefile = unsafe { BorrowedHandle::borrow_raw(INVALID_HANDLE_VALUE) };
+        create_file_mapping(pagefile, None, PageProtection::ReadWrite, 0, SIZE).unwrap()
+    }
+
+    fn map_with_map_view_of_file3(lowest_address: Option<usize>) -> MappingView {
+        let mapping = pagefile_mapping();
+        let view = get_map_view_of_file3()
+            .expect("Windows 10 1803 and later export MapViewOfFile3")
+            .call(mapping.as_handle(), PageProtection::ReadWrite, 0, SIZE as usize, lowest_address)
+            .unwrap();
+        // SAFETY: the view is `SIZE` writable bytes that only this test uses.
+        unsafe {
+            view.as_ptr().add(SIZE as usize - 1).write(7);
+            assert_eq!(view.as_ptr().add(SIZE as usize - 1).read(), 7);
+        }
+        view
+    }
+
+    #[test]
+    fn map_view_of_file3_maps_at_or_above_the_lowest_address() {
+        const LOWEST_ADDRESS: usize = 0x7000_0000_0000;
+
+        let view = map_with_map_view_of_file3(Some(LOWEST_ADDRESS));
+        assert!(view.as_ptr().addr() >= LOWEST_ADDRESS, "view at {:p}", view.as_ptr());
+    }
+
+    #[test]
+    fn map_view_of_file3_maps_without_a_lowest_address() {
+        let _view = map_with_map_view_of_file3(None);
+    }
 }
