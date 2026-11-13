@@ -6,9 +6,9 @@ use hashbrown::hash_map::EntryRef;
 use rustc_hash::{FxBuildHasher, FxHashSet};
 use serde::Serialize;
 pub use user::{
-    AutoTracking, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
-    UserCacheConfig, UserDependencyType, UserDependsOnEntry, UserDependsOnFrom,
-    UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
+    AutoTracking, Command, DetailedGlobalCacheConfig, EnabledCacheConfig, GlobWithBase, InputBase,
+    ResolvedGlobalCacheConfig, UserCacheConfig, UserDependencyType, UserDependsOnEntry,
+    UserDependsOnFrom, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
     UserPackageDependency, UserRunConfig, UserTaskConfig, UserTaskDefinition,
 };
 use vt_path::AbsolutePath;
