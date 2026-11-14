@@ -54,6 +54,11 @@ pub struct SpawnCommand {
     #[serde(serialize_with = "serialize_envs")]
     pub spawn_envs: Arc<BTreeMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
 
+    /// Whether the runner delegates an unparsed task script to the system shell.
+    /// Color controls inside the script are not represented in `spawn_envs`.
+    #[serde(skip)]
+    pub shell_fallback: bool,
+
     /// Current working directory
     pub cwd: Arc<AbsolutePath>,
 }
