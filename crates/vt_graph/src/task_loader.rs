@@ -125,6 +125,10 @@ impl Loader for TaskLoader<'_> {
         key.package_index
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "sequential loading steps are clearer in one function"
+    )]
     async fn load(
         &self,
         package_index: PackageNodeIndex,
@@ -219,11 +223,16 @@ impl Loader for TaskLoader<'_> {
             tasks.push((task_node, depends_on));
         }
 
-        // For remaining package.json scripts not in the tasks map, create tasks with default config
+        // For remaining package.json scripts not in the tasks map, create tasks with their
+        // options from the scripts map, or default options
+        let mut script_options = user_config.scripts.unwrap_or_default();
         for (script_name, package_json_script) in package_json_scripts {
+            let options = script_options.remove(script_name).unwrap_or_default();
+            let depends_on = options.depends_on.clone();
             let resolved_config = ResolvedTaskConfig::resolve_package_json_script(
                 &package_dir,
                 package_json_script,
+                options,
                 &self.workspace_path,
                 &self.glob_resolver,
             )
@@ -237,7 +246,14 @@ impl Loader for TaskLoader<'_> {
                 resolved_config,
                 source: TaskSource::PackageJsonScript,
             };
-            tasks.push((task_node, None));
+            tasks.push((task_node, depends_on));
+        }
+
+        // `min` keeps the error stable when several entries have no script
+        if let Some(script_name) = script_options.into_keys().min() {
+            return Err(TaskGraphLoadError::ScriptNotFound {
+                task_display: task_display(script_name),
+            });
         }
 
         top_level_cache_fields.finish().map_err(TaskGraphLoadError::TopLevelCacheFields)?;

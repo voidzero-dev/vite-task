@@ -256,11 +256,14 @@ pub struct EnabledCacheConfig {
     pub remote: Option<bool>,
 }
 
-/// Options for user-defined tasks in `vite.config.*`, excluding the command.
+/// Options for user-defined tasks and `package.json` scripts in `vite.config.*`, excluding the
+/// command.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
-#[serde(rename_all = "camelCase")]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields, rename = "TaskOptions"))]
+// `deny_unknown_fields` applies to `scripts` entries. Flattened into a task, this struct only
+// receives its own fields, so `UserTaskConfig` is the one that rejects unknown fields there.
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct UserTaskOptions {
     /// The working directory for the task, relative to the package root (not workspace root).
     #[serde(rename = "cwd")]
@@ -378,7 +381,7 @@ pub enum UserGlobalCacheConfig {
         /// Enable caching for package.json scripts not defined in the `tasks` map.
         ///
         /// When `false`, package.json scripts will not be cached.
-        /// When `true`, package.json scripts will be cached with default settings.
+        /// When `true`, package.json scripts will be cached, using their `scripts` options if any.
         ///
         /// Default: `false`
         scripts: Option<bool>,
@@ -459,6 +462,13 @@ pub struct UserRunConfig {
 
     /// Task definitions: full task objects, command strings, or command string arrays.
     pub tasks: Option<FxHashMap<Str, UserTaskDefinition>>,
+
+    /// Options for `package.json` scripts, by script name.
+    ///
+    /// The command stays in `package.json`, and the script stays a script: the root `cache`
+    /// setting's `scripts` field decides whether it's cached, and its `preX`/`postX` hooks
+    /// still run. When a script runs as another script's hook, its `dependsOn` doesn't apply.
+    pub scripts: Option<FxHashMap<Str, UserTaskOptions>>,
 
     /// Whether to automatically run `preX`/`postX` package.json scripts as
     /// lifecycle hooks when script `X` is executed.
@@ -571,6 +581,17 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn test_script_options_reject_task_only_fields() {
+        for script_options in [json!({ "command": "echo test" }), json!({ "env": ["NODE_ENV"] })] {
+            let user_config_json = json!({ "scripts": { "build": script_options } });
+            assert!(
+                serde_json::from_value::<UserRunConfig>(user_config_json.clone()).is_err(),
+                "{user_config_json}"
+            );
+        }
+    }
 
     #[test]
     fn test_command_required() {

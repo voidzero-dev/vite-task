@@ -1,0 +1,10 @@
+{
+  "name": "@test/script-hook-depends-on",
+  "private": true,
+  "scripts": {
+    "setup": "vtt print setup",
+    "prebuild": "vtt print prebuild",
+    "build": "vtt print build",
+    "postbuild": "vtt print postbuild"
+  }
+}

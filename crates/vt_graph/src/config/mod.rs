@@ -398,9 +398,8 @@ pub enum ResolveTaskConfigError {
 }
 
 impl ResolvedTaskConfig {
-    /// Resolve from package.json script only (no config entry for this task).
+    /// Resolves from a package.json script and its options in the `scripts` map.
     ///
-    /// Always resolves with caching enabled (default settings).
     /// The global cache config is applied at plan time, not here.
     ///
     /// # Errors
@@ -409,13 +408,14 @@ impl ResolvedTaskConfig {
     pub fn resolve_package_json_script(
         package_dir: &Arc<AbsolutePath>,
         package_json_script: &str,
+        options: UserTaskOptions,
         workspace_root: &AbsolutePath,
         glob_resolver: &GlobResolver,
     ) -> Result<Self, ResolveTaskConfigError> {
         Ok(Self {
             commands: vec![package_json_script.into()].into(),
             resolved_options: ResolvedTaskOptions::resolve(
-                UserTaskOptions::default(),
+                options,
                 package_dir,
                 workspace_root,
                 glob_resolver,

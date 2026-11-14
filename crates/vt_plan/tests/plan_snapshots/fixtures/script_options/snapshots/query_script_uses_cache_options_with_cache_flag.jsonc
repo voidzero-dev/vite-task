@@ -1,0 +1,144 @@
+// run --cache build
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "build"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "vtt print prebuild",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "execution_item_display": {
+              "command": "vtt print build",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {
+                          "APP_ENV": "sha256:ab8e18ef4ebebeddc0b3152ce9c9006e14fc05242e3fc9ce32246ea6a9543074"
+                        },
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": false,
+                      "positive_globs": [
+                        "src/**"
+                      ],
+                      "negative_globs": []
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "execution_item_display": {
+              "command": "vtt print postbuild",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": [
+        [
+          "<workspace>/",
+          "lint"
+        ]
+      ]
+    },
+    {
+      "key": [
+        "<workspace>/",
+        "lint"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "vtt print lint",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "spawn_fingerprint": {
+                      "env_fingerprints": {
+                        "fingerprinted_envs": {},
+                        "untracked_env_config": [
+                          "<default untracked envs>"
+                        ]
+                      }
+                    },
+                    "input_config": {
+                      "includes_auto": true,
+                      "positive_globs": [],
+                      "negative_globs": []
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ]
+}
