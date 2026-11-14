@@ -203,7 +203,6 @@ pub struct PackageInfo {
     pub absolute_path: Arc<AbsolutePath>,
 }
 
-/// A dependency's package name, type, and the version range the workspace package must satisfy.
 type WorkspaceDependency = (Str, DependencyType, Str);
 
 #[derive(Default)]
@@ -1282,7 +1281,6 @@ mod tests {
         });
         fs::write(temp_dir_path.join("services/api/package.json"), api_pkg.to_string()).unwrap();
 
-        // npm, Yarn and Bun link a workspace package whose version satisfies the range
         fs::create_dir_all(temp_dir_path.join("services/worker")).unwrap();
         let worker_pkg = serde_json::json!({
             "name": "worker-service",
@@ -1296,7 +1294,6 @@ mod tests {
         fs::write(temp_dir_path.join("services/worker/package.json"), worker_pkg.to_string())
             .unwrap();
 
-        // and install from the registry when it doesn't
         fs::create_dir_all(temp_dir_path.join("services/legacy")).unwrap();
         let legacy_pkg = serde_json::json!({
             "name": "legacy-service",
@@ -1310,7 +1307,6 @@ mod tests {
 
         let graph = discover_package_graph(temp_dir_path).unwrap();
 
-        // root + database + codegen + api + worker + legacy
         assert_eq!(graph.node_count(), 6);
 
         let mut edges: Vec<_> = graph

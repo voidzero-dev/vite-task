@@ -63,7 +63,6 @@ impl PackageJson {
             .chain(self.peer_dependencies.iter().map(|entry| (entry, DependencyType::Peer)))
             .filter_map(move |((key, value), dep_type)| {
                 let Some(workspace_version) = value.strip_prefix("workspace:") else {
-                    // TODO: support pnpm's `linkWorkspacePackages`: https://pnpm.io/settings#linkworkspacepackages
                     return link_workspace_packages.then(|| (key.clone(), dep_type, value.clone()));
                 };
                 // TODO: support paths: https://github.com/pnpm/pnpm/pull/2972
@@ -80,9 +79,7 @@ impl PackageJson {
     }
 }
 
-/// Whether a workspace package at `version` satisfies the dependency `range`, following npm: `*` and an empty range
-/// match any version, prereleases included, and anything that isn't a semver range, like `file:` or a tag, matches
-/// none. Yarn excludes prereleases from `*`; linking them anyway only adds an ordering edge Yarn wouldn't have.
+/// `*` and an empty range match any version, prereleases included, as npm does.
 ///
 /// <https://github.com/npm/cli/blob/latest/workspaces/arborist/lib/dep-valid.js>
 pub(crate) fn version_satisfies(version: &str, range: &str) -> bool {
