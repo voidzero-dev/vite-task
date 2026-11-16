@@ -18,6 +18,7 @@ use fspy_seccomp_unotify::{
     supervisor::handler::arg::{CStrPtr, Caller, Fd},
 };
 use fspy_shared::ipc::{AccessMode, PathAccess, channel::Sender};
+use fspy_shared_unix::open_flags::open_access_mode;
 
 const PATH_MAX: usize = libc::PATH_MAX as usize;
 
@@ -43,10 +44,8 @@ impl SyscallHandler {
         path_ptr: CStrPtr,
         flags: c_int,
     ) -> io::Result<()> {
-        let mode = match flags & libc::O_ACCMODE {
-            libc::O_RDWR => AccessMode::ReadWrite,
-            libc::O_WRONLY => AccessMode::Write,
-            _ => AccessMode::Read,
+        let Some(mode) = open_access_mode(flags) else {
+            return Ok(());
         };
         self.handle_path(caller, dir_fd, path_ptr, mode)
     }

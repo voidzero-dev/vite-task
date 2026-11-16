@@ -23,7 +23,9 @@ const USAGE: &str = "Usage: vtt fs <op> <arg>... [<op> <arg>...]...";
 ///   missing folder isn't an error.
 /// - `rm <path>`: remove the file, or the folder and everything in it, like
 ///   `rm -r`. A missing path isn't an error, like a tool cleaning its output
-///   folder.
+///   folder. On Linux and macOS, it opens each path as a folder first and
+///   removes the path as a file when it isn't one, like Node's `fs.rmSync`
+///   on macOS, which uses libc++'s `std::filesystem::remove_all`.
 /// - `mkdir <dir>`: create the folder and any missing parents, like
 ///   `mkdir -p`.
 /// - `rename <from> <to>`: move the file or folder `<from>` to `<to>`, like
@@ -46,7 +48,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             ["stat", path, rest @ ..] => (allow_missing(fs::metadata(path)), rest),
             ["list", dir, rest @ ..] => (allow_missing(list(dir)), rest),
             ["walk", dir, rest @ ..] => (allow_missing(walk(Path::new(dir))), rest),
-            ["rm", path, rest @ ..] => (allow_missing(remove(path)), rest),
+            ["rm", path, rest @ ..] => (allow_missing(remove(Path::new(path))), rest),
             ["mkdir", dir, rest @ ..] => (fs::create_dir_all(dir), rest),
             ["rename", from, to, rest @ ..] => (fs::rename(from, to), rest),
             _ => return Err(format!("{USAGE}\nunexpected arguments: {}", ops.join(" ")).into()),
@@ -72,7 +74,30 @@ fn walk(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn remove(path: &str) -> io::Result<()> {
+#[cfg(unix)]
+fn remove(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+    {
+        Ok(_) => {
+            for entry in fs::read_dir(path)? {
+                remove(&entry?.path())?;
+            }
+            fs::remove_dir(path)
+        }
+        Err(err) if matches!(err.raw_os_error(), Some(libc::ENOTDIR | libc::ELOOP)) => {
+            fs::remove_file(path)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(windows)]
+fn remove(path: &Path) -> io::Result<()> {
     if fs::symlink_metadata(path)?.is_dir() {
         fs::remove_dir_all(path)
     } else {
