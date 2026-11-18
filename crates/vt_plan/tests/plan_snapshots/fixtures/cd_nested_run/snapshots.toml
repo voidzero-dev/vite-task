@@ -1,0 +1,11 @@
+# Tests that after `cd` into a nested project outside this workspace (no workspace file lists it),
+# a nested `vpr` runs as written instead of planning the enclosing package's task.
+
+[fields]
+key = true
+execution_item_display = { command = true, cwd = true }
+spawn_command = { program_path = true, args = true, cwd = true }
+
+[[plan]]
+name = "cd_into_other_project_then_vpr"
+args = ["run", "plain"]

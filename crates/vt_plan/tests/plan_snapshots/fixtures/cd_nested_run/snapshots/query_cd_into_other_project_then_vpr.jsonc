@@ -1,0 +1,34 @@
+// run plain
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "plain"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "vpr hello",
+              "cwd": "<workspace>/ui"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "spawn_command": {
+                    "program_path": "<tools>/vpr",
+                    "args": [
+                      "hello"
+                    ],
+                    "cwd": "<workspace>/ui"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
