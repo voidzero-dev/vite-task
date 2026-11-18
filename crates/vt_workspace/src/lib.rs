@@ -18,6 +18,7 @@ use wax::{
     walk::{Entry as _, FileIterator as _},
 };
 
+use crate::package::version_satisfies;
 pub use crate::{
     error::Error,
     package::{DependencyType, PackageJson},
@@ -202,9 +203,12 @@ pub struct PackageInfo {
     pub absolute_path: Arc<AbsolutePath>,
 }
 
+type WorkspaceDependency = (Str, DependencyType, Str);
+
 #[derive(Default)]
 struct PackageGraphBuilder {
-    id_and_deps_by_path: HashMap<RelativePathBuf, (PackageNodeIndex, Vec<(Str, DependencyType)>)>,
+    link_workspace_packages: bool,
+    id_and_deps_by_path: HashMap<RelativePathBuf, (PackageNodeIndex, Vec<WorkspaceDependency>)>,
     name_to_path: HashMap<Str, SmallVec1<[RelativePathBuf; 1]>>,
     graph: DiGraph<PackageInfo, DependencyType, PackageIx>,
 }
@@ -216,7 +220,9 @@ impl PackageGraphBuilder {
         absolute_path: Arc<AbsolutePath>,
         package_json: PackageJson,
     ) {
-        let deps = package_json.get_workspace_dependencies().collect::<Vec<_>>();
+        let deps = package_json
+            .get_workspace_dependencies(self.link_workspace_packages)
+            .collect::<Vec<_>>();
         let package_name = package_json.name.clone();
         let id = self.graph.add_node(PackageInfo {
             package_json,
@@ -240,7 +246,7 @@ impl PackageGraphBuilder {
 
     fn build(mut self) -> Result<DiGraph<PackageInfo, DependencyType, PackageIx>, Error> {
         for (id, deps) in self.id_and_deps_by_path.values() {
-            for (dep_name, dep_type) in deps {
+            for (dep_name, dep_type, range) in deps {
                 // Skip dependencies on nameless packages (empty string)
                 // These can't be referenced anyway
                 if dep_name.is_empty() {
@@ -260,7 +266,9 @@ impl PackageGraphBuilder {
                     }
                     // Skip self-referential edges: a package listing itself as a dependency
                     // (e.g. for testing purposes) must not create a cycle in the task graph.
-                    if *id != *dep_id {
+                    if *id != *dep_id
+                        && version_satisfies(&self.graph[*dep_id].package_json.version, range)
+                    {
                         self.graph.add_edge(*id, *dep_id, *dep_type);
                     }
                 }
@@ -321,6 +329,7 @@ pub fn load_package_graph(
             WorkspaceMemberGlobs::from_pnpm_workspace_yaml(file_with_path)?
         }
         WorkspaceFile::NpmWorkspaceJson(file_with_path) => {
+            graph_builder.link_workspace_packages = true;
             WorkspaceMemberGlobs::from_npm_workspace_json(file_with_path)?
         }
         WorkspaceFile::NonWorkspacePackage(file_with_path) => {
@@ -535,9 +544,12 @@ mod tests {
 
         // Create package A
         fs::create_dir_all(temp_dir_path.join("packages/pkg-a")).unwrap();
+        // pnpm links a workspace package for a semver range only with `linkWorkspacePackages`
         let pkg_a = serde_json::json!({
             "name": "pkg-a",
-            "dependencies": {}
+            "dependencies": {
+                "pkg-b": "*"
+            }
         });
         fs::write(temp_dir_path.join("packages/pkg-a/package.json"), pkg_a.to_string()).unwrap();
 
@@ -1249,6 +1261,14 @@ mod tests {
         });
         fs::write(temp_dir_path.join("libs/database/package.json"), db_pkg.to_string()).unwrap();
 
+        fs::create_dir_all(temp_dir_path.join("libs/codegen")).unwrap();
+        let codegen_pkg = serde_json::json!({
+            "name": "@company/codegen",
+            "version": "0.0.0-dev"
+        });
+        fs::write(temp_dir_path.join("libs/codegen/package.json"), codegen_pkg.to_string())
+            .unwrap();
+
         // Create service with various workspace protocol formats
         fs::create_dir_all(temp_dir_path.join("services/api")).unwrap();
         let api_pkg = serde_json::json!({
@@ -1261,28 +1281,53 @@ mod tests {
         });
         fs::write(temp_dir_path.join("services/api/package.json"), api_pkg.to_string()).unwrap();
 
+        fs::create_dir_all(temp_dir_path.join("services/worker")).unwrap();
+        let worker_pkg = serde_json::json!({
+            "name": "worker-service",
+            "dependencies": {
+                "@company/database": "^3.0.0"
+            },
+            "devDependencies": {
+                "@company/codegen": " * "
+            }
+        });
+        fs::write(temp_dir_path.join("services/worker/package.json"), worker_pkg.to_string())
+            .unwrap();
+
+        fs::create_dir_all(temp_dir_path.join("services/legacy")).unwrap();
+        let legacy_pkg = serde_json::json!({
+            "name": "legacy-service",
+            "dependencies": {
+                "@company/database": "^2.0.0",
+                "@company/codegen": "^0.0.0"
+            }
+        });
+        fs::write(temp_dir_path.join("services/legacy/package.json"), legacy_pkg.to_string())
+            .unwrap();
+
         let graph = discover_package_graph(temp_dir_path).unwrap();
 
-        // Verify packages
-        assert_eq!(graph.node_count(), 3); // root + database + api
+        assert_eq!(graph.node_count(), 6);
 
-        // Verify workspace dependency exists but not external dependency
-        let mut found_workspace_dep = false;
-        for edge_ref in graph.edge_references() {
-            let source = &graph[edge_ref.source()];
-            let target = &graph[edge_ref.target()];
-
-            if source.package_json.name == "api-service"
-                && target.package_json.name == "@company/database"
-            {
-                found_workspace_dep = true;
-            }
-        }
-
-        assert!(found_workspace_dep, "Should have found workspace dependency");
-
-        // External dependencies should not create edges
-        assert_eq!(graph.edge_count(), 1, "Should only have one edge for workspace dependency");
+        let mut edges: Vec<_> = graph
+            .edge_references()
+            .map(|edge_ref| {
+                (
+                    graph[edge_ref.source()].package_json.name.as_str(),
+                    graph[edge_ref.target()].package_json.name.as_str(),
+                    *edge_ref.weight(),
+                )
+            })
+            .collect();
+        edges.sort_unstable_by_key(|(source, target, _)| (*source, *target));
+        assert_eq!(
+            edges,
+            [
+                ("api-service", "@company/database", DependencyType::Normal),
+                ("worker-service", "@company/codegen", DependencyType::Dev),
+                ("worker-service", "@company/database", DependencyType::Normal),
+            ]
+        );
     }
 
     #[test]
