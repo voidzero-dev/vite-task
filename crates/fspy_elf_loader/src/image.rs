@@ -111,12 +111,27 @@ impl File {
                 // SAFETY: the file remains unchanged and mapped read-only.
                 let bytes =
                     unsafe { self.view.bytes() }.get(start..end).expect("truncated PT_INTERP");
-                let path = CStr::from_units_with_nul(bytes).expect("invalid PT_INTERP path");
+                // Linux requires only that the last byte is NUL, then treats
+                // the slice as a C string. Linkers may pad with extra NULs.
+                assert!(bytes.last() == Some(&0), "unterminated PT_INTERP");
+                let len = bytes.iter().position(|byte| *byte == 0).unwrap() + 1;
+                let path =
+                    CStr::from_units_with_nul(&bytes[..len]).expect("invalid PT_INTERP path");
                 assert!(!path.as_units().is_empty(), "empty PT_INTERP path");
                 result = Some(path);
             }
         }
         result
+    }
+
+    fn assert_disjoint_load(&self, index: usize, start: usize, end: usize) {
+        for (other_index, other) in self.segments().iter().enumerate() {
+            if other_index > index && other.p_type == abi::PT_LOAD && other.p_memsz != 0 {
+                let other_start = word(other.p_vaddr);
+                let other_end = add(other_start, word(other.p_memsz));
+                assert!(end <= other_start || other_end <= start, "overlapping ELF segments");
+            }
+        }
     }
 
     pub fn map(&self, page: usize) -> Image {
@@ -125,35 +140,40 @@ impl File {
         let mut low = usize::MAX;
         let mut high = 0;
         let mut alignment = page;
-        let mut previous_end = 0;
-        for segment in self.segments().iter() {
+        for (index, segment) in self.segments().iter().enumerate() {
             if segment.p_type == abi::PT_GNU_STACK {
                 assert!(segment.p_flags & abi::PF_X == 0, "executable stacks are unsupported");
             }
-            if segment.p_type != abi::PT_LOAD {
-                continue;
+            if segment.p_type == abi::PT_LOAD {
+                let start = word(segment.p_vaddr);
+                let end = add(start, word(segment.p_memsz));
+                let file_end = add(word(segment.p_offset), word(segment.p_filesz));
+                assert!(segment.p_filesz <= segment.p_memsz, "ELF filesz exceeds memsz");
+                assert!(file_end <= self.view.len, "truncated ELF segment");
+                // Byte ranges must not overlap. Header order need not match
+                // vaddr order; mapping below still walks headers so a later
+                // MAP_FIXED can share a page with an earlier load.
+                if segment.p_memsz != 0 {
+                    self.assert_disjoint_load(index, start, end);
+                    low = low.min(start & !sub(page, 1));
+                    high = high.max(align_up(end, page));
+                }
+                // ELF treats alignment 0 and 1 as no extra constraint. File
+                // and memory offsets must agree within a page for mmap.
+                let align = word(segment.p_align).max(1);
+                assert!(align.is_power_of_two(), "invalid segment alignment");
+                assert_eq!(
+                    start % align,
+                    word(segment.p_offset) % align,
+                    "incongruent ELF alignment"
+                );
+                assert_eq!(
+                    start % page,
+                    word(segment.p_offset) % page,
+                    "incongruent ELF page offsets"
+                );
+                alignment = alignment.max(align);
             }
-            let start = word(segment.p_vaddr);
-            let end = add(start, word(segment.p_memsz));
-            let file_end = add(word(segment.p_offset), word(segment.p_filesz));
-            assert!(segment.p_filesz <= segment.p_memsz, "ELF filesz exceeds memsz");
-            assert!(file_end <= self.view.len, "truncated ELF segment");
-            // Our MVP rejects overlapping byte ranges. Page-rounded ranges
-            // can still overlap, so mapping below must preserve header order.
-            assert!(start >= previous_end, "overlapping or unordered ELF segments");
-            previous_end = end;
-            // ELF treats alignment 0 and 1 as no extra constraint. File and
-            // memory offsets must agree within a page for file-backed mmap.
-            let align = word(segment.p_align).max(1);
-            assert!(align.is_power_of_two(), "invalid segment alignment");
-            assert_eq!(start % align, word(segment.p_offset) % align, "incongruent ELF alignment");
-            assert_eq!(start % page, word(segment.p_offset) % page, "incongruent ELF page offsets");
-            alignment = alignment.max(align);
-            if segment.p_memsz == 0 {
-                continue;
-            }
-            low = low.min(start & !sub(page, 1));
-            high = high.max(align_up(end, page));
         }
         let span = high.checked_sub(low).expect("ELF has no loadable memory");
         // Reserve the whole image, including holes, before replacing pages
@@ -228,17 +248,21 @@ impl File {
             protection |= ProtFlags::EXEC;
         }
         let fixed = MapFlags::PRIVATE | MapFlags::FIXED;
-        if segment.p_filesz != 0 {
+        // Linux elf_map skips a zero-length mapping, which happens only when
+        // filesz is 0 and vaddr is page-aligned. A zero-filesz load that
+        // starts mid-page still maps that shared page from the file so a
+        // later MAP_FIXED does not anonymous-wipe the previous load's bytes.
+        let file_len = sub(align_up(file_end, page), page_start);
+        if file_len != 0 {
             // Round both the file offset and address down by the same amount.
             // For example, an offset ending in 0x340 needs those first 0x340
             // bytes of its page mapped too. Round the end up to cover the tail.
             // PRIVATE keeps BSS writes and later relocations out of the file.
-            let len = sub(align_up(file_end, page), page_start);
             // SAFETY: caller owns the entire reservation being replaced.
             unsafe {
                 mm::mmap(
                     ptr::with_exposed_provenance_mut(page_start),
-                    len,
+                    file_len,
                     protection,
                     fixed,
                     self.fd.as_fd(),
@@ -246,18 +270,18 @@ impl File {
                 )
             }
             .expect("cannot map ELF segment");
-            if file_end < end && !file_end.is_multiple_of(page) {
+            // Zero through the page boundary, not just p_memsz: leftover file
+            // bytes after filesz==memsz, and the BSS tail of filesz<memsz,
+            // must be zero. glibc's early allocator reads spare bytes after
+            // the interpreter's _end (Linux padzero). Stopping at p_memsz
+            // crashed /bin/echo's interpreter in the ARM64 smoke test.
+            if !file_end.is_multiple_of(page) {
                 let tail_page = file_end & !sub(page, 1);
                 // Writable, non-executable pages can be zeroed directly.
                 // Otherwise temporarily make the last file page writable,
                 // without X, and restore its original protection afterwards.
                 let change_protection =
                     !protection.contains(ProtFlags::WRITE) || protection.contains(ProtFlags::EXEC);
-                // Clear through the page boundary, not just p_memsz: glibc's
-                // early allocator uses the spare bytes after the interpreter's
-                // _end and expects them to be zero (Linux padzero behavior).
-                // Stopping at p_memsz crashed /bin/echo's interpreter in the
-                // ARM64 smoke test. image/tests.rs checks the entire page tail.
                 // SAFETY: this private page was mapped above; it has no live references.
                 unsafe {
                     if change_protection {
@@ -284,12 +308,11 @@ impl File {
                 }
             }
         }
-        let anonymous_start =
-            if segment.p_filesz == 0 { page_start } else { align_up(file_end, page) };
+        let anonymous_start = align_up(file_end, page);
         let anonymous_end = align_up(end, page);
         if anonymous_start < anonymous_end {
-            // The remaining BSS has no file bytes. Anonymous pages start at
-            // zero; mapping the file past its end could instead cause SIGBUS.
+            // Remaining BSS pages have no file bytes. Anonymous pages start
+            // at zero; mapping the file past its end could instead SIGBUS.
             // SAFETY: these pages lie inside the reservation and have no live references.
             unsafe {
                 mm::mmap_anonymous(
