@@ -133,9 +133,17 @@ pub unsafe fn exec_elf<'a>(
 #[cfg(target_arch = "aarch64")]
 #[unsafe(naked)]
 unsafe extern "C" fn enter(_entry: usize, _stack: *mut usize) -> ! {
-    // X0 holds entry and X1 holds the new SP. Save entry in scratch register
-    // X16 before clearing X0; clear X30 because there is no caller to return to.
-    core::arch::naked_asm!("mov x16, x0", "mov sp, x1", "mov x0, xzr", "mov x30, xzr", "br x16");
+    // X0 holds entry and X1 holds the new SP. Linux start_thread zeros GPRs;
+    // clear the ones this stub dirties. X16 must keep the entry for BR.
+    core::arch::naked_asm!(
+        "mov x16, x0",
+        "mov sp, x1",
+        "mov x0, xzr",
+        "mov x1, xzr",
+        "mov x29, xzr",
+        "mov x30, xzr",
+        "br x16",
+    );
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -143,6 +151,13 @@ unsafe extern "C" fn enter(_entry: usize, _stack: *mut usize) -> ! {
 unsafe extern "C" fn enter(_entry: usize, _stack: *mut usize) -> ! {
     // RDI holds entry and RSI holds the new RSP. RDX is the optional
     // dynamic-linker finalizer (an exit callback); there is none yet.
-    // Clear RBP to mark the end of the frame-pointer chain.
-    core::arch::naked_asm!("mov rsp, rsi", "xor edx, edx", "xor ebp, ebp", "jmp rdi");
+    // Clear RBP to mark the end of the frame-pointer chain. RSI held SP.
+    // RDI must keep the entry for JMP.
+    core::arch::naked_asm!(
+        "mov rsp, rsi",
+        "xor esi, esi",
+        "xor edx, edx",
+        "xor ebp, ebp",
+        "jmp rdi"
+    );
 }
