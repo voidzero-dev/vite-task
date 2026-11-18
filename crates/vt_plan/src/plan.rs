@@ -388,7 +388,7 @@ async fn plan_task_as_execution_node(
                     context.resolved_global_cache(),
                 ),
             };
-            let spawn_execution = plan_spawn_execution(
+            let mut spawn_execution = plan_spawn_execution(
                 context.workspace_path(),
                 Some(ExecutionCacheKey::UserTask {
                     task_name: task_node.task_display.task_name.clone(),
@@ -408,6 +408,7 @@ async fn plan_task_as_execution_node(
                 Arc::clone(&*SHELL_PROGRAM_PATH),
                 SHELL_ARGS.iter().map(|s| Str::from(*s)).chain(std::iter::once(script)).collect(),
             )?;
+            spawn_execution.spawn_command.shell_fallback = true;
             items.push(ExecutionItem {
                 execution_item_display,
                 kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution)),
@@ -723,6 +724,7 @@ fn plan_spawn_execution(
 
     Ok(SpawnExecution {
         spawn_command: SpawnCommand {
+            shell_fallback: false,
             program_path,
             args: Arc::clone(&args),
             cwd,

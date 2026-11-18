@@ -526,6 +526,7 @@ pub mod test_fixtures {
                 kind: ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(SpawnExecution {
                     cache_metadata: None,
                     spawn_command: SpawnCommand {
+                        shell_fallback: false,
                         program_path: test_path(),
                         args: Arc::from([]),
                         spawn_envs: Arc::new(BTreeMap::new()),
