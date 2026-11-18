@@ -1,0 +1,33 @@
+# Tests options for package.json scripts in the `scripts` map.
+
+[fields]
+key = true
+neighbors = true
+execution_item_display = { command = true, cwd = true }
+cache_metadata = { spawn_fingerprint = { env_fingerprints = true }, input_config = true }
+
+# `cache.scripts` still decides caching, and hooks still run
+[[plan]]
+name = "script_uses_depends_on_and_hooks_without_cache"
+args = ["run", "build"]
+
+[[plan]]
+name = "script_uses_cache_options_with_cache_flag"
+args = ["run", "--cache", "build"]
+env = { APP_ENV = "production" }
+
+[[plan]]
+name = "script_cache_false_wins_over_cache_flag"
+args = ["run", "--cache", "deploy"]
+
+[[plan]]
+name = "ignore_depends_on_applies_to_scripts"
+args = ["run", "--ignore-depends-on", "build"]
+
+[[plan]]
+name = "hook_uses_depends_on_when_run_directly"
+args = ["run", "prebuild"]
+
+[[plan]]
+name = "script_uses_cwd"
+args = ["run", "where"]

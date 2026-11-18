@@ -1,0 +1,1 @@
+`run.scripts` configures @test/script-options-script-not-found#lint, but package.json has no such script

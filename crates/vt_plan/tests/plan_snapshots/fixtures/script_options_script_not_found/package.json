@@ -1,0 +1,6 @@
+{
+  "name": "@test/script-options-script-not-found",
+  "scripts": {
+    "build": "echo build"
+  }
+}

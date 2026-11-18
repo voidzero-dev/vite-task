@@ -1,0 +1,29 @@
+// run where
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "where"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "vtt print where",
+              "cwd": "<workspace>/src"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ]
+}

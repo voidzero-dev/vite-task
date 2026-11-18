@@ -1,0 +1,12 @@
+{
+  "name": "@test/script-options",
+  "scripts": {
+    "build": "vtt print build",
+    "prebuild": "vtt print prebuild",
+    "postbuild": "vtt print postbuild",
+    "lint": "vtt print lint",
+    "setup": "vtt print setup",
+    "deploy": "vtt print deploy",
+    "where": "vtt print where"
+  }
+}

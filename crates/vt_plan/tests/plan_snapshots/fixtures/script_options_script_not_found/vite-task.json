@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "lint": { "command": "echo lint" }
+  },
+  "scripts": {
+    "test": {},
+    "lint": {}
+  }
+}

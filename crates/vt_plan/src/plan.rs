@@ -81,6 +81,25 @@ fn effective_cache_config(
     if enabled { task_cache_config.cloned() } else { None }
 }
 
+/// Warns when `hook` has `dependsOn`. A hook runs inside the execution node of `script`, so its
+/// `dependsOn` only applies when it runs as a task of its own.
+#[expect(clippy::print_stderr, reason = "user-facing warning for config that has no effect")]
+async fn warn_if_hook_has_dependencies(
+    hook: &TaskNode,
+    script: &TaskNode,
+    context: &PlanContext<'_, '_>,
+) -> Result<(), Error> {
+    if context.parent_query().include_explicit_deps
+        && context.indexed_task_graph().depends_on(&hook.id).await?.next().is_some()
+    {
+        eprintln!(
+            "`dependsOn` of {} is ignored when it runs as a hook of {}. Add it to `{}` in `run.scripts`.",
+            hook.task_display, script.task_display, script.task_display.task_name
+        );
+    }
+    Ok(())
+}
+
 /// - `with_hooks`: whether to look up `preX`/`postX` lifecycle hooks for this task.
 ///   `false` when the task itself is being executed as a hook, so that hooks are
 ///   never expanded more than one level deep (matching npm behavior).
@@ -114,6 +133,7 @@ async fn plan_task_as_execution_node(
         None
     };
     if let Some(pre_hook) = pre_hook {
+        warn_if_hook_has_dependencies(pre_hook, task_node, &context).await?;
         let mut pre_context = context.duplicate();
         // Extra args (e.g. `vt run test --coverage`) must not be forwarded to hooks.
         pre_context.set_extra_args(Arc::new([]));
@@ -422,6 +442,7 @@ async fn plan_task_as_execution_node(
         None
     };
     if let Some(post_hook) = post_hook {
+        warn_if_hook_has_dependencies(post_hook, task_node, &context).await?;
         let mut post_context = context.duplicate();
         // Extra args must not be forwarded to hooks.
         post_context.set_extra_args(Arc::new([]));

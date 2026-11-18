@@ -1,0 +1,29 @@
+// run --cache deploy
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "deploy"
+      ],
+      "node": {
+        "items": [
+          {
+            "execution_item_display": {
+              "command": "vtt print deploy",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": null
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ]
+}

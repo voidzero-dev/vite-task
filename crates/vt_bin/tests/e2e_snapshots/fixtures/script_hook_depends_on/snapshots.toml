@@ -1,0 +1,20 @@
+[[e2e]]
+name = "hooks_warn_that_depends_on_is_ignored"
+comment = """
+`dependsOn` of a pre or post hook doesn't apply when the hook runs inside its script, so `setup` doesn't run and each hook warns.
+"""
+steps = [["vt", "run", "build"]]
+
+[[e2e]]
+name = "hook_run_directly_uses_depends_on_without_warning"
+comment = """
+A hook that runs as a task of its own uses its `dependsOn`, so there's nothing to warn about.
+"""
+steps = [["vt", "run", "prebuild"]]
+
+[[e2e]]
+name = "ignore_depends_on_does_not_warn"
+comment = """
+`--ignore-depends-on` already asks to skip dependencies, so hooks don't warn.
+"""
+steps = [["vt", "run", "--ignore-depends-on", "build"]]

@@ -91,12 +91,37 @@ output?: Array<string | GlobWithBase | AutoTracking>, };
 
 export type TaskDefinition = Task | Command;
 
+export type TaskOptions = {
+/**
+ * The working directory for the task, relative to the package root (not workspace root).
+ */
+cwd?: string,
+/**
+ * Tasks that must run before this task.
+ *
+ * - A string runs one named task, such as `"build"` in the same package or
+ *   `"package-name#build"` in another package.
+ * - An object runs a task in direct workspace dependency packages selected
+ *   from package.json fields. For example,
+ *   `{ "task": "build", "from": "dependencies" }` runs `build` in each
+ *   direct workspace dependency that defines a `build` task.
+ */
+dependsOn?: Array<DependsOnEntry>,
+/**
+ * Whether and how to cache the task.
+ *
+ * - Omitted or `true`: caching enabled with default settings (same as `{}`)
+ * - `false`: caching disabled
+ * - Object: caching enabled with the given settings
+ */
+cache?: TaskCache, };
+
 export type UserGlobalCacheConfig = boolean | {
 /**
  * Enable caching for package.json scripts not defined in the `tasks` map.
  *
  * When `false`, package.json scripts will not be cached.
- * When `true`, package.json scripts will be cached with default settings.
+ * When `true`, package.json scripts will be cached, using their `scripts` options if any.
  *
  * Default: `false`
  */
@@ -135,6 +160,14 @@ cache?: UserGlobalCacheConfig,
  * Task definitions: full task objects, command strings, or command string arrays.
  */
 tasks?: { [key in string]: TaskDefinition },
+/**
+ * Options for `package.json` scripts, by script name.
+ *
+ * The command stays in `package.json`, and the script stays a script: the root `cache`
+ * setting's `scripts` field decides whether it's cached, and its `preX`/`postX` hooks
+ * still run. When a script runs as another script's hook, its `dependsOn` doesn't apply.
+ */
+scripts?: { [key in string]: TaskOptions },
 /**
  * Whether to automatically run `preX`/`postX` package.json scripts as
  * lifecycle hooks when script `X` is executed.
