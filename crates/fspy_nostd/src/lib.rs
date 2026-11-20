@@ -13,6 +13,7 @@ mod entry;
 mod error;
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 mod fd;
+#[cfg(any(target_os = "linux", target_os = "none"))]
 #[doc(hidden)]
 pub mod no_global_alloc;
 #[cfg(any(target_os = "linux", target_os = "none"))]

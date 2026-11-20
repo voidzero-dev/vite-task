@@ -6,13 +6,10 @@
 /// accept any stack lifetime; it cannot require `InitialStack<'static>`.
 ///
 /// ```compile_fail,E0308
-/// #![no_std]
-/// #![no_main]
-///
 /// fn run(_: fspy_nostd::env::InitialStack<'static>) -> ! {
 ///     loop {}
 /// }
-/// fspy_nostd::main!(run);
+/// const _: for<'a> fn(fspy_nostd::env::InitialStack<'a>) -> ! = run;
 /// ```
 ///
 /// Supports `AArch64` and x86-64. The executable must use `#![no_main]` and
