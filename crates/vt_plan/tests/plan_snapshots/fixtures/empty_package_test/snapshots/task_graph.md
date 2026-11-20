@@ -35,6 +35,7 @@ flowchart TD
       "cwd": "<workspace>/packages/another-empty",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -97,6 +98,7 @@ flowchart TD
       "cwd": "<workspace>/packages/another-empty",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -137,6 +139,7 @@ flowchart TD
       "cwd": "<workspace>/packages/another-empty",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -177,6 +180,7 @@ flowchart TD
       "cwd": "<workspace>/packages/empty-name",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -217,6 +221,7 @@ flowchart TD
       "cwd": "<workspace>/packages/empty-name",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -257,6 +262,7 @@ flowchart TD
       "cwd": "<workspace>/packages/empty-name",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -297,6 +303,7 @@ flowchart TD
       "cwd": "<workspace>/packages/normal-package",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -337,6 +344,7 @@ flowchart TD
       "cwd": "<workspace>/packages/normal-package",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [

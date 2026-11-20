@@ -29,7 +29,8 @@
                                     "url": "https://cache.example/projects/inner",
                                     "auth": {
                                       "kind": "anonymous"
-                                    }
+                                    },
+                                    "cross_platform": false
                                   }
                                 }
                               }

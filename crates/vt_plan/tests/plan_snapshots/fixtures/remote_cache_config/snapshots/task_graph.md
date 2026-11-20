@@ -4,14 +4,16 @@
 flowchart TD
   task_0["<workspace>/#build"]
   task_1["<workspace>/#cli-read"]
-  task_2["<workspace>/#endpoints"]
-  task_3["<workspace>/#env-off"]
-  task_4["<workspace>/#inherit"]
-  task_5["<workspace>/#local-only"]
-  task_6["<workspace>/#prefix"]
-  task_7["<workspace>/#siblings"]
-  task_8["<workspace>/#synthetic"]
-  task_9["<workspace>/#tracked-controls"]
+  task_2["<workspace>/#cross-platform"]
+  task_3["<workspace>/#endpoints"]
+  task_4["<workspace>/#env-off"]
+  task_5["<workspace>/#inherit"]
+  task_6["<workspace>/#local-only"]
+  task_7["<workspace>/#prefix"]
+  task_8["<workspace>/#siblings"]
+  task_9["<workspace>/#synthetic"]
+  task_10["<workspace>/#synthetic-cross-platform"]
+  task_11["<workspace>/#tracked-controls"]
 ```
 
 ## `<workspace>/#build`
@@ -31,6 +33,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -71,6 +74,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -94,6 +98,47 @@ flowchart TD
 }
 ```
 
+## `<workspace>/#cross-platform`
+
+```json
+{
+  "task_display": {
+    "package_name": "@test/remote-cache-config",
+    "task_name": "cross-platform",
+    "package_path": "<workspace>/"
+  },
+  "resolved_config": {
+    "commands": [
+      "vtt print-file package.json"
+    ],
+    "resolved_options": {
+      "cwd": "<workspace>/",
+      "cache_config": {
+        "remote_cache_allowed": true,
+        "remote_cache_cross_platform": true,
+        "env_config": {
+          "fingerprinted_envs": [],
+          "untracked_env": [
+            "<default untracked envs>"
+          ]
+        },
+        "input_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        },
+        "output_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        }
+      }
+    }
+  },
+  "source": "TaskConfig"
+}
+```
+
 ## `<workspace>/#endpoints`
 
 ```json
@@ -111,6 +156,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -151,6 +197,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -191,6 +238,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -231,6 +279,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": false,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -271,6 +320,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -311,6 +361,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -351,6 +402,48 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": false,
+        "remote_cache_cross_platform": false,
+        "env_config": {
+          "fingerprinted_envs": [],
+          "untracked_env": [
+            "<default untracked envs>"
+          ]
+        },
+        "input_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        },
+        "output_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        }
+      }
+    }
+  },
+  "source": "TaskConfig"
+}
+```
+
+## `<workspace>/#synthetic-cross-platform`
+
+```json
+{
+  "task_display": {
+    "package_name": "@test/remote-cache-config",
+    "task_name": "synthetic-cross-platform",
+    "package_path": "<workspace>/"
+  },
+  "resolved_config": {
+    "commands": [
+      "vt tool print-file package.json"
+    ],
+    "resolved_options": {
+      "cwd": "<workspace>/",
+      "cache_config": {
+        "remote_cache_allowed": true,
+        "remote_cache_cross_platform": true,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -391,6 +484,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [
             "VP_REMOTE_CACHE",

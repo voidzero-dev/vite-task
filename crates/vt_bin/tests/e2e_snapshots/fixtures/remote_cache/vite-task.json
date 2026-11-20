@@ -30,6 +30,14 @@
       "command": "vtt exit 1",
       "dependsOn": ["build"],
       "cache": false
+    },
+    "generate": {
+      "command": "vtt write-file dist/generated.txt generated",
+      "cache": {
+        "input": ["src/**"],
+        "output": ["dist/**"],
+        "remote": { "crossPlatform": true }
+      }
     }
   }
 }

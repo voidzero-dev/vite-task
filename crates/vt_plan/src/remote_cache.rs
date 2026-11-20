@@ -47,6 +47,17 @@ pub struct ResolvedRemoteCacheConfig {
     pub auth: RemoteCacheAuth,
 }
 
+/// The remote cache that an execution uses: the one resolved for its `vp run`
+/// level, with the task's own `cache.remote` settings.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExecutionRemoteCache {
+    #[serde(flatten)]
+    pub config: ResolvedRemoteCacheConfig,
+    /// Whether the task's `cache.remote.crossPlatform` shares its entries
+    /// between platforms. Their remote keys then name no OS or architecture.
+    pub cross_platform: bool,
+}
+
 /// How requests to the remote cache authenticate. It holds everything needed
 /// to build the credentials, so nothing reads envs after planning.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]

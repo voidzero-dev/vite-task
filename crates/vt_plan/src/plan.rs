@@ -40,7 +40,7 @@ use crate::{
         CacheOverride, PlanOptions, PlanRequest, QueryPlanRequest, ScriptCommand,
         SyntheticPlanRequest,
     },
-    remote_cache::{self, ResolvedRemoteCacheConfig},
+    remote_cache::{self, ExecutionRemoteCache, ResolvedRemoteCacheConfig},
     resolve_cache_with_override,
 };
 
@@ -462,6 +462,8 @@ pub enum ParentCacheConfig {
 /// - If the parent enables caching but the synthetic disables it, caching is disabled.
 /// - If both parent and synthetic enable caching, the synthetic inherits the parent's
 ///   env config and merges in any additional envs the synthetic command needs.
+///   It uses the remote cache only if both allow it, and shares its remote entries
+///   between platforms if either declares `crossPlatform`.
 /// - If there is no parent (top-level invocation), the synthetic task's own
 ///   [`UserCacheConfig`] is resolved with defaults.
 fn resolve_synthetic_cache_config(
@@ -496,7 +498,12 @@ fn resolve_synthetic_cache_config(
                 Some(enabled_cache_config) => {
                     let EnabledCacheConfig { env, untracked_env, input, output, remote } =
                         enabled_cache_config;
-                    parent_config.remote_cache_allowed &= remote.unwrap_or(true);
+                    let synthetic_remote = remote.unwrap_or_default().into_enabled();
+                    parent_config.remote_cache_allowed &= synthetic_remote.is_some();
+                    parent_config.remote_cache_cross_platform = parent_config.remote_cache_allowed
+                        && (parent_config.remote_cache_cross_platform
+                            || synthetic_remote
+                                .is_some_and(|remote| remote.cross_platform.unwrap_or(false)));
                     parent_config.env_config.fingerprinted_envs.extend(env.unwrap_or_default());
                     parent_config
                         .env_config
@@ -696,7 +703,10 @@ fn plan_spawn_execution(
                 input_config: cache_config.input_config.clone(),
                 output_config: cache_config.output_config.clone(),
                 remote_cache: if cache_config.remote_cache_allowed {
-                    resolved_remote_cache.cloned()
+                    resolved_remote_cache.map(|config| ExecutionRemoteCache {
+                        config: config.clone(),
+                        cross_platform: cache_config.remote_cache_cross_platform,
+                    })
                 } else {
                     None
                 },
@@ -961,7 +971,8 @@ mod tests {
 
     use rustc_hash::FxHashSet;
     use vt_graph::config::{
-        CacheConfig, EnabledCacheConfig, EnvConfig, GlobResolver, ResolvedGlobConfig,
+        CacheConfig, EnabledCacheConfig, EnabledTaskRemoteCacheConfig, EnvConfig, GlobResolver,
+        ResolvedGlobConfig, UserTaskRemoteCacheConfig,
         user::{UserCacheConfig, UserInputEntry},
     };
     use vt_path::AbsolutePathBuf;
@@ -986,6 +997,7 @@ mod tests {
     fn parent_config(includes_auto: bool, positive_globs: &[&str]) -> CacheConfig {
         CacheConfig {
             remote_cache_allowed: true,
+            remote_cache_cross_platform: false,
             env_config: EnvConfig {
                 fingerprinted_envs: FxHashSet::default(),
                 untracked_env: FxHashSet::default(),
@@ -1186,7 +1198,7 @@ mod tests {
                 untracked_env: None,
                 input: None,
                 output: None,
-                remote: Some(false),
+                remote: Some(UserTaskRemoteCacheConfig::Bool(false)),
             }),
             &pkg,
             &ws,
@@ -1195,6 +1207,56 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(!result.remote_cache_allowed);
+    }
+
+    /// Resolve a synthetic task whose `cache.remote` is `synthetic_remote`
+    /// under a parent whose remote cache settings are the given ones. Returns
+    /// the result's `remote_cache_allowed` and `remote_cache_cross_platform`.
+    fn synthetic_remote_cache(
+        parent_allowed: bool,
+        parent_cross_platform: bool,
+        synthetic_remote: Option<UserTaskRemoteCacheConfig>,
+    ) -> (bool, bool) {
+        let (pkg, ws) = test_paths();
+        let mut parent = parent_config(true, &["src/**"]);
+        parent.remote_cache_allowed = parent_allowed;
+        parent.remote_cache_cross_platform = parent_cross_platform;
+        let result = resolve_synthetic_cache_config(
+            ParentCacheConfig::Inherited(parent),
+            UserCacheConfig::with_config(EnabledCacheConfig {
+                env: None,
+                untracked_env: None,
+                input: None,
+                output: None,
+                remote: synthetic_remote,
+            }),
+            &pkg,
+            &ws,
+            &GlobResolver::default(),
+        )
+        .unwrap()
+        .unwrap();
+        (result.remote_cache_allowed, result.remote_cache_cross_platform)
+    }
+
+    #[test]
+    fn synthetic_remote_cache_cross_platform() {
+        let cross_platform = || {
+            Some(UserTaskRemoteCacheConfig::Config(EnabledTaskRemoteCacheConfig {
+                cross_platform: Some(true),
+            }))
+        };
+        // The parent's declaration is kept when the synthetic sets nothing.
+        assert_eq!(synthetic_remote_cache(true, true, None), (true, true));
+        // The synthetic's declaration applies when the parent sets nothing.
+        assert_eq!(synthetic_remote_cache(true, false, cross_platform()), (true, true));
+        assert_eq!(synthetic_remote_cache(true, false, None), (true, false));
+        // A side that turns off the remote cache turns off sharing too.
+        assert_eq!(
+            synthetic_remote_cache(true, true, Some(UserTaskRemoteCacheConfig::Bool(false))),
+            (false, false)
+        );
+        assert_eq!(synthetic_remote_cache(false, false, cross_platform()), (false, false));
     }
 
     #[test]

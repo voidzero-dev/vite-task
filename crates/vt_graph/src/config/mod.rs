@@ -6,10 +6,11 @@ use hashbrown::hash_map::EntryRef;
 use rustc_hash::{FxBuildHasher, FxHashSet};
 use serde::Serialize;
 pub use user::{
-    AutoTracking, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
-    UserCacheConfig, UserDependencyType, UserDependsOnEntry, UserDependsOnFrom,
-    UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
+    AutoTracking, Command, EnabledCacheConfig, EnabledTaskRemoteCacheConfig, GlobWithBase,
+    InputBase, ResolvedGlobalCacheConfig, UserCacheConfig, UserDependencyType, UserDependsOnEntry,
+    UserDependsOnFrom, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
     UserPackageDependency, UserRunConfig, UserTaskConfig, UserTaskDefinition,
+    UserTaskRemoteCacheConfig,
 };
 use vt_path::AbsolutePath;
 use vt_str::Str;
@@ -85,8 +86,11 @@ impl ResolvedTaskOptions {
                     glob_resolver,
                 )?;
 
+                let remote = enabled_cache_config.remote.unwrap_or_default().into_enabled();
                 Some(CacheConfig {
-                    remote_cache_allowed: enabled_cache_config.remote.unwrap_or(true),
+                    remote_cache_allowed: remote.is_some(),
+                    remote_cache_cross_platform: remote
+                        .is_some_and(|remote| remote.cross_platform.unwrap_or(false)),
                     env_config: EnvConfig {
                         fingerprinted_envs: enabled_cache_config
                             .env
@@ -108,6 +112,9 @@ pub struct CacheConfig {
     /// Whether the task's `cache.remote` allows remote caching. An execution uses
     /// the remote cache only if its `vp run` level also resolves one.
     pub remote_cache_allowed: bool,
+    /// Whether the task's `cache.remote.crossPlatform` shares its remote cache
+    /// entries between platforms. It's `false` when remote caching isn't allowed.
+    pub remote_cache_cross_platform: bool,
     pub env_config: EnvConfig,
     pub input_config: ResolvedGlobConfig,
     pub output_config: ResolvedGlobConfig,

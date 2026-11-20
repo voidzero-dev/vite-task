@@ -46,6 +46,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -86,6 +87,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "remote_cache_cross_platform": false,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [

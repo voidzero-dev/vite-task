@@ -29,7 +29,8 @@
                         "request_url": "https://token.example/idtoken?api-version=2.0",
                         "request_token": "<redacted>",
                         "audience": "https://cache.example/projects/test"
-                      }
+                      },
+                      "cross_platform": false
                     }
                   },
                   "spawn_command": {

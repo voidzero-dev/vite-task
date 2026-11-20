@@ -9,7 +9,7 @@ use vt_str::{self, Str};
 use wincode::{SchemaRead, SchemaWrite};
 
 pub use crate::envs::EnvValueHash;
-use crate::{envs::EnvFingerprints, remote_cache::ResolvedRemoteCacheConfig};
+use crate::{envs::EnvFingerprints, remote_cache::ExecutionRemoteCache};
 
 /// Key to identify an execution across sessions.
 #[derive(Debug, SchemaWrite, SchemaRead, Serialize)]
@@ -56,8 +56,9 @@ pub struct CacheMetadata {
     pub output_config: ResolvedGlobConfig,
 
     /// Remote cache for this execution: the one resolved for its `vp run` level,
-    /// unless the task sets `cache.remote: false`. `None` means local caching only.
-    pub remote_cache: Option<ResolvedRemoteCacheConfig>,
+    /// with the task's `cache.remote` settings, unless the task sets
+    /// `cache.remote: false`. `None` means local caching only.
+    pub remote_cache: Option<ExecutionRemoteCache>,
 
     /// The unfiltered env context for runner-aware APIs. This is the planning
     /// context's envs before spawn-env filtering, including command prefix envs

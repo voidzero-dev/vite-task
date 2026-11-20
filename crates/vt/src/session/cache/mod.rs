@@ -29,7 +29,7 @@ use vt_graph::config::ResolvedGlobConfig;
 use vt_path::{AbsolutePath, AbsolutePathBuf, RelativePathBuf};
 use vt_plan::{
     cache_metadata::{CacheMetadata, ExecutionCacheKey, SpawnFingerprint},
-    remote_cache::{RemoteCacheAccess, ResolvedRemoteCacheConfig},
+    remote_cache::{ExecutionRemoteCache, RemoteCacheAccess, ResolvedRemoteCacheConfig},
 };
 use vt_remote_cache::Fetched;
 use vt_str::Str;
@@ -39,7 +39,7 @@ use wincode::{
     error::{ReadResult, WriteResult},
 };
 
-use self::remote::{ReadError, RemoteClients, RemoteUploads, Restore, UploadError};
+use self::remote::{KeyPlatform, ReadError, RemoteClients, RemoteUploads, Restore, UploadError};
 use super::{
     event::RunKind,
     execute::{
@@ -676,19 +676,23 @@ impl ExecutionCache {
             clippy::manual_let_else,
             reason = "naming every access mode makes adding one a compile error here"
         )]
-        let remote_config = match &cache_metadata.remote_cache {
+        let remote_cache = match &cache_metadata.remote_cache {
             Some(
-                remote_config @ ResolvedRemoteCacheConfig {
-                    access: RemoteCacheAccess::Read | RemoteCacheAccess::ReadWrite,
+                remote_cache @ ExecutionRemoteCache {
+                    config:
+                        ResolvedRemoteCacheConfig {
+                            access: RemoteCacheAccess::Read | RemoteCacheAccess::ReadWrite,
+                            ..
+                        },
                     ..
                 },
-            ) => remote_config,
+            ) => remote_cache,
             None => return Ok(Some(Err(local_miss))),
         };
         let start = Instant::now();
         let remote_lookup = self
             .try_hit_remote(
-                remote_config,
+                remote_cache,
                 cache_metadata,
                 &cache_key,
                 &validation,
@@ -782,7 +786,7 @@ impl ExecutionCache {
         Ok(Some(Err(CacheMiss::NotFound)))
     }
 
-    /// Fetch the entry from the remote cache that `remote_config` configures.
+    /// Fetch the entry from `remote_cache`.
     /// An exact entry that passes validation is a hit once its output archive
     /// is downloaded, or right away in a dry run.
     /// A fallback entry, a failed validation, or a failed read is a miss. An
@@ -792,7 +796,7 @@ impl ExecutionCache {
     #[expect(clippy::too_many_arguments, reason = "forwarded from `try_hit`")]
     async fn try_hit_remote(
         &self,
-        remote_config: &ResolvedRemoteCacheConfig,
+        remote_cache: &ExecutionRemoteCache,
         cache_metadata: &CacheMetadata,
         cache_key: &CacheEntryKey,
         validation: &Validation,
@@ -803,7 +807,7 @@ impl ExecutionCache {
         let start = Instant::now();
         let fetched = self
             .remote_clients
-            .fetch(remote_config, cache_key, &cache_metadata.execution_cache_key, cancel_token)
+            .fetch(remote_cache, cache_key, &cache_metadata.execution_cache_key, cancel_token)
             .await;
         let (outcome, entries) = match &fetched {
             Ok(Some(Fetched::Exact { entries })) => ("exact", entries.len()),
@@ -820,9 +824,11 @@ impl ExecutionCache {
         );
         let (cache_key, validation, dir) =
             (cache_key.clone(), validation.clone(), self.dir.clone());
+        let platform = KeyPlatform::of(remote_cache);
         let check = move || {
             remote::resolve(
                 fetched,
+                platform,
                 &cache_key,
                 |cache_value| validation.validate(cache_value),
                 |cache_value| {
@@ -857,7 +863,7 @@ impl ExecutionCache {
             Some(blob_id) => {
                 match self
                     .remote_clients
-                    .download_archive(remote_config, &blob_id, cache_dir, cancel_token)
+                    .download_archive(&remote_cache.config, &blob_id, cache_dir, cancel_token)
                     .await
                 {
                     Ok(archive_name) => Some(archive_name),
@@ -995,19 +1001,23 @@ impl ExecutionCache {
         tracing::debug!(elapsed = ?start.elapsed(), "recorded the cache entry locally");
 
         let upload_error = Arc::new(OnceLock::new());
-        let remote_config = match &cache_metadata.remote_cache {
+        let remote_cache = match &cache_metadata.remote_cache {
             Some(
-                remote_config @ ResolvedRemoteCacheConfig {
-                    access: RemoteCacheAccess::ReadWrite,
+                remote_cache @ ExecutionRemoteCache {
+                    config: ResolvedRemoteCacheConfig { access: RemoteCacheAccess::ReadWrite, .. },
                     ..
                 },
-            ) => remote_config,
-            Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::Read, .. }) | None => {
+            ) => remote_cache,
+            Some(ExecutionRemoteCache {
+                config: ResolvedRemoteCacheConfig { access: RemoteCacheAccess::Read, .. },
+                ..
+            })
+            | None => {
                 return Ok(upload_error);
             }
         };
         match self.remote_clients.prepare_upload(
-            remote_config,
+            remote_cache,
             &cache_key,
             execution_cache_key,
             &cache_value,

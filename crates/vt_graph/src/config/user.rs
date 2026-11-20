@@ -243,7 +243,11 @@ pub struct EnabledCacheConfig {
     #[cfg_attr(all(test, not(clippy)), ts(inline))]
     pub output: Option<Vec<UserOutputEntry>>,
 
-    /// Whether this task can use the remote cache. Defaults to `true`.
+    /// Whether and how this task uses the remote cache.
+    ///
+    /// - Omitted or `true`: the remote cache is used with default settings (same as `{}`)
+    /// - `false`: the remote cache isn't used
+    /// - Object: the remote cache is used with the given settings
     ///
     /// The remote cache is used only when these also hold:
     /// - Caching isn't turned off by `--no-cache` or the workspace root's `cache` setting.
@@ -253,7 +257,66 @@ pub struct EnabledCacheConfig {
     ///   defaults to `read`, which downloads cached results without uploading new ones.
     // Parsed but left out of the public types while remote caching is unreleased.
     #[cfg_attr(all(test, not(clippy)), ts(skip))]
-    pub remote: Option<bool>,
+    pub remote: Option<UserTaskRemoteCacheConfig>,
+}
+
+/// The value of a task's `cache.remote` field.
+#[derive(Debug, PartialEq, Eq)]
+pub enum UserTaskRemoteCacheConfig {
+    /// `true` uses the remote cache with default settings; `false` doesn't use it.
+    Bool(bool),
+    /// Uses the remote cache with the given settings.
+    Config(EnabledTaskRemoteCacheConfig),
+}
+
+// Not `#[serde(untagged)]`, which replaces each variant's error with a generic one.
+impl<'de> Deserialize<'de> for UserTaskRemoteCacheConfig {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        UntaggedEnumVisitor::new()
+            .expecting("a boolean or an object of remote cache settings")
+            .bool(|enabled| Ok(Self::Bool(enabled)))
+            .map(|map| map.deserialize().map(Self::Config))
+            .deserialize(deserializer)
+    }
+}
+
+impl Default for UserTaskRemoteCacheConfig {
+    /// The remote cache used with default settings, used when `cache.remote` is omitted.
+    fn default() -> Self {
+        Self::Bool(true)
+    }
+}
+
+impl UserTaskRemoteCacheConfig {
+    /// Returns the remote cache settings, or `None` if the remote cache isn't used.
+    #[must_use]
+    pub fn into_enabled(self) -> Option<EnabledTaskRemoteCacheConfig> {
+        match self {
+            Self::Bool(true) => Some(EnabledTaskRemoteCacheConfig::default()),
+            Self::Bool(false) => None,
+            Self::Config(config) => Some(config),
+        }
+    }
+}
+
+/// A task's remote cache settings when it uses the remote cache.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct EnabledTaskRemoteCacheConfig {
+    /// Whether the task's remote cache entries are shared between platforms. Defaults to
+    /// `false`.
+    ///
+    /// Set it only on a task whose outputs are the same on every OS and architecture, such
+    /// as a code generator that runs on Node.js. Its remote entries then don't name an OS or
+    /// architecture, so an entry stored on Linux CI can be restored on macOS. A fetched
+    /// entry is still checked against this machine's inputs, and the rest of the key, such
+    /// as the command, its arguments, and its working directory, must still match. If the
+    /// outputs depend on the platform in a way that the cache doesn't track, such as a check
+    /// of `process.platform`, another platform's outputs are restored.
+    ///
+    /// The setting doesn't change the local cache. Changing it changes the task's remote
+    /// keys, so the task misses the remote cache once.
+    pub cross_platform: Option<bool>,
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
@@ -807,8 +870,34 @@ mod tests {
                 untracked_env: Some(std::iter::once("FOO".into()).collect()),
                 input: Some(vec![UserInputEntry::Glob("src/**".into())]),
                 output: Some(vec![UserOutputEntry::Glob("dist/**".into())]),
-                remote: Some(false),
+                remote: Some(UserTaskRemoteCacheConfig::Bool(false)),
             })
+        );
+    }
+
+    #[test]
+    fn test_cache_remote_forms() {
+        let cases = [
+            (json!(true), Some(EnabledTaskRemoteCacheConfig::default())),
+            (json!(false), None),
+            (json!({}), Some(EnabledTaskRemoteCacheConfig::default())),
+            (
+                json!({ "crossPlatform": true }),
+                Some(EnabledTaskRemoteCacheConfig { cross_platform: Some(true) }),
+            ),
+            (
+                json!({ "crossPlatform": false }),
+                Some(EnabledTaskRemoteCacheConfig { cross_platform: Some(false) }),
+            ),
+        ];
+        for (remote, expected) in cases {
+            let user_config_json = json!({ "command": "echo test", "cache": { "remote": remote } });
+            let remote = task_cache_config(user_config_json).unwrap().remote.unwrap();
+            assert_eq!(remote.into_enabled(), expected);
+        }
+        assert_eq!(
+            UserTaskRemoteCacheConfig::default().into_enabled(),
+            Some(EnabledTaskRemoteCacheConfig::default())
         );
     }
 
@@ -1105,6 +1194,15 @@ mod tests {
             (
                 json!({ "command": "echo", "cache": "yes" }),
                 "invalid type: string \"yes\", expected a boolean or an object of cache settings",
+            ),
+            (
+                json!({ "command": "echo", "cache": { "remote": "yes" } }),
+                "invalid type: string \"yes\", expected a boolean or an object of remote cache \
+                 settings",
+            ),
+            (
+                json!({ "command": "echo", "cache": { "remote": { "crossplatform": true } } }),
+                "unknown field `crossplatform`, expected `crossPlatform`",
             ),
             (json!({ "cache": false }), "missing field `command`"),
             (json!(["echo one", 2]), "invalid type: integer `2`, expected a string"),
