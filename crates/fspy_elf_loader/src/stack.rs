@@ -154,7 +154,7 @@ pub unsafe fn build<'a>(
     envp: impl Iterator<Item = CStr<'a, Thin>>,
     inherited: impl Iterator<Item = AuxEntry>,
     image: &Image,
-    interpreter: &Image,
+    interpreter: Option<&Image>,
     page: usize,
 ) -> *mut usize {
     let mut stack = Builder::new(page);
@@ -199,14 +199,14 @@ pub unsafe fn build<'a>(
         }
         stack.aux(key, entry.value);
     }
-    // Describe the main executable even though we enter the interpreter first:
-    // PHDR/PHENT/PHNUM locate and size its header table; ENTRY is its startup
-    // address. BASE identifies the interpreter's load bias for its own linking.
+    // PHDR/PHENT/PHNUM locate and size the executable's header table; ENTRY
+    // is its startup address. With PT_INTERP we enter the interpreter first
+    // and BASE is that image's load bias. Without one, BASE is 0 as on Linux.
     stack.aux(abi::AT_PHDR, image.phdr.expect("program headers are not mapped by PT_LOAD"));
     stack.aux(abi::AT_PHENT, 56);
     stack.aux(abi::AT_PHNUM, image.phnum);
     stack.aux(abi::AT_ENTRY, image.entry);
-    stack.aux(abi::AT_BASE, interpreter.bias);
+    stack.aux(abi::AT_BASE, interpreter.map_or(0, |image| image.bias));
     stack.aux(abi::AT_FLAGS, 0);
     let execfn = stack.string(execfn);
     // Execution name and argv[0] are independent: callers can choose a custom

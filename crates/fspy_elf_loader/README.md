@@ -10,7 +10,11 @@ This crate handles loading an ELF program and transferring execution to it. The 
 
 The current implementation is a proof of concept for evaluating compatibility. It does not yet provide a complete replacement for Linux exec.
 
-It loads native ELF64 dynamic executables on AArch64 and x86-64, including PIE (`ET_DYN`) and fixed-address (`ET_EXEC`) images. Fixed-address images are rejected if their address range overlaps any existing mapping. Static executables remain unsupported.
+It loads native ELF64 executables on AArch64 and x86-64, including PIE
+(`ET_DYN`) and fixed-address (`ET_EXEC`) images, with or without `PT_INTERP`.
+Fixed-address images are rejected if their address range overlaps any existing
+mapping. Images with `PT_INTERP` enter the dynamic linker; images without it
+enter the executable and receive `AT_BASE` 0.
 
 The freestanding launcher is a static fixed-address executable with no startup relocation:
 

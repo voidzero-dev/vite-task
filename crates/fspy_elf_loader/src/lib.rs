@@ -6,6 +6,10 @@
 //! fixes addresses through relocations, and enters the executable's startup
 //! code. That startup code eventually calls the application's `main`.
 //!
+//! For a static executable there is no `PT_INTERP`. The kernel maps only the
+//! executable and enters its `e_entry`. `AT_BASE` is 0. Static-PIE images are
+//! `ET_DYN` without an interpreter; their CRT applies `RELATIVE` relocations.
+//!
 //! We implement the mapping, stack, and entry steps after the kernel has
 //! already executed our freestanding loader. We leave its mappings and signal
 //! handlers in place. Calling another kernel exec here would discard them.
@@ -25,8 +29,9 @@ mod stack;
 /// Loads an ELF executable into the current process and enters it.
 ///
 /// Takes ownership of a private executable descriptor and closes it after
-/// mapping. Loads the executable and its `PT_INTERP`, builds an initial stack,
-/// and transfers control to the interpreter entry point.
+/// mapping. Loads the executable and, when present, its `PT_INTERP`. Builds an
+/// initial stack and transfers control to the interpreter, or to the
+/// executable when there is no interpreter.
 ///
 /// `execfn` is the original execution name used for `AT_EXECFN`; it need not
 /// match `argv[0]`. Arguments and environment entries are copied to the new
@@ -42,9 +47,9 @@ mod stack;
 /// Loading failures terminate the process; they cannot return to the program
 /// that executed the loader.
 ///
-/// Currently supports native little-endian ELF64 dynamic executables on
-/// `AArch64` and x86-64, with an ELF interpreter and a non-executable stack.
-/// Both PIE (`ET_DYN`) and fixed-address (`ET_EXEC`) executables are supported.
+/// Currently supports native little-endian ELF64 executables on `AArch64` and
+/// x86-64, with a non-executable stack. Both PIE (`ET_DYN`) and fixed-address
+/// (`ET_EXEC`) images are supported, with or without `PT_INTERP`.
 /// Fixed-address images must not overlap any existing process mappings.
 /// The new stack has a fixed 8 MiB capacity and a guard page. Existing loader
 /// mappings, the old stack, and kernel process metadata (including `/proc`
@@ -85,18 +90,21 @@ pub unsafe fn exec_elf<'a>(
     let executable = image::File::new(elf_file);
     // PT_INTERP names a second ELF file. Loading it here lets us delegate
     // dynamic linking and libc startup to the program's own interpreter.
-    let interpreter = executable.interpreter().expect("executable has no PT_INTERP");
-    let interpreter = fspy_nostd::fs::openat(
-        fspy_nostd::CWD,
-        interpreter,
-        fspy_nostd::fs::OFlags::RDONLY | fspy_nostd::fs::OFlags::CLOEXEC,
-        fspy_nostd::fs::Mode::empty(),
-    )
-    .expect("cannot open ELF interpreter");
-    let interpreter = image::File::new(interpreter);
-    assert!(interpreter.interpreter().is_none(), "nested PT_INTERP is unsupported");
+    // Static and static-PIE images omit it; the executable is the startup image.
+    let interpreter = executable.interpreter().map(|path| {
+        let fd = fspy_nostd::fs::openat(
+            fspy_nostd::CWD,
+            path,
+            fspy_nostd::fs::OFlags::RDONLY | fspy_nostd::fs::OFlags::CLOEXEC,
+            fspy_nostd::fs::Mode::empty(),
+        )
+        .expect("cannot open ELF interpreter");
+        let file = image::File::new(fd);
+        assert!(file.interpreter().is_none(), "nested PT_INTERP is unsupported");
+        file
+    });
     let executable_image = executable.map(page_size);
-    let interpreter_image = interpreter.map(page_size);
+    let interpreter_image = interpreter.as_ref().map(|file| file.map(page_size));
     // SAFETY: the caller supplies live auxiliary payloads from this process.
     let stack = unsafe {
         stack::build(
@@ -105,21 +113,23 @@ pub unsafe fn exec_elf<'a>(
             envp,
             inherited_auxv.iter().copied(),
             &executable_image,
-            &interpreter_image,
+            interpreter_image.as_ref(),
             page_size,
         )
     };
-    // The interpreter must run first, even though AT_ENTRY on the new stack
-    // points at the executable. The interpreter uses that value to hand off
-    // after dynamic linking; it does not call the application's main itself.
-    let entry = interpreter_image.entry;
+    // With PT_INTERP, the interpreter runs first even though AT_ENTRY points
+    // at the executable. It uses that value to hand off after linking.
+    // Without PT_INTERP, AT_BASE is 0 and the executable's e_entry starts.
+    let entry = interpreter_image.as_ref().map_or(executable_image.entry, |image| image.entry);
     // File mappings keep their backing storage alive after close. Release
     // only our parsing views and descriptors, then retain the execution maps
     // so Rust destructors cannot unmap code the target is about to use.
     drop(interpreter);
     drop(executable);
     executable_image.retain();
-    interpreter_image.retain();
+    if let Some(image) = interpreter_image {
+        image.retain();
+    }
     // SAFETY: the images and stack are initialized and retained. The caller
     // permits abandoning the current stack and entering the trusted image.
     unsafe { enter(entry, stack) }

@@ -136,6 +136,13 @@ fn rejects_overlapping_load_segments() {
 }
 
 #[test]
+fn reports_no_interpreter_when_pt_interp_is_absent() {
+    let page = fspy_nostd::param::page_size();
+    let file = File::new(open_bytes(&fixture(page, 0x180, abi::PF_R | abi::PF_W)));
+    assert!(file.interpreter().is_none());
+}
+
+#[test]
 fn accepts_pt_interp_padded_with_extra_nuls() {
     let file = File::new(open_bytes(&interp_image(b"ld.so\0\0\0")));
     let path = file.interpreter().unwrap();

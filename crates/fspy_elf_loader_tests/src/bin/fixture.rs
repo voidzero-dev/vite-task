@@ -59,11 +59,12 @@ fn main() {
                     ..bias + usize::try_from(ph.p_vaddr + ph.p_memsz).unwrap())
                     .contains(&entry)
         }));
-        let interpreter = std::slice::from_raw_parts(
-            std::ptr::with_exposed_provenance::<u8>(aux(libc::AT_BASE)),
-            4,
-        );
-        assert_eq!(interpreter, b"\x7fELF");
+        let base = aux(libc::AT_BASE);
+        if base != 0 {
+            let interpreter =
+                std::slice::from_raw_parts(std::ptr::with_exposed_provenance::<u8>(base), 4);
+            assert_eq!(interpreter, b"\x7fELF");
+        }
         let random = std::slice::from_raw_parts(
             std::ptr::with_exposed_provenance::<u8>(aux(libc::AT_RANDOM)),
             16,
