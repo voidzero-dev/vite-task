@@ -13,11 +13,13 @@ use ntest::timeout;
 const LAUNCHER: &str = env!("CARGO_BIN_FILE_FSPY_ELF_LOADER_fspy_elf_loader_test_launcher");
 const FIXTURE: &str = env!("CARGO_BIN_EXE_fixture");
 const FIXTURE_EXEC: &str = env!("CARGO_BIN_EXE_fixture_exec");
+const FIXTURE_STATIC: &str = env!("FIXTURE_STATIC");
+const FIXTURE_STATIC_PIE: &str = env!("FIXTURE_STATIC_PIE");
 
 #[test]
 #[timeout(10_000)]
 fn echo_matches_kernel_exec() {
-    assert_dynamic_image("/bin/echo", elf::abi::ET_DYN);
+    assert_image("/bin/echo", elf::abi::ET_DYN, true);
     let mut direct = Command::new("/bin/echo");
     direct.args(["hello", "world"]);
     let mut loaded = launcher();
@@ -57,7 +59,11 @@ fn initializes_fixed_runtime() {
 }
 
 fn check_runtime(fixture: &str, image_type: u16) {
-    assert_dynamic_image(fixture, image_type);
+    check_runtime_image(fixture, image_type, true);
+}
+
+fn check_runtime_image(fixture: &str, image_type: u16, interpreter: bool) {
+    assert_image(fixture, image_type, interpreter);
     let mut command = launcher();
     command.args([fixture, "custom-argv-zero", ""]);
     command.arg(OsStr::from_bytes(b"\xff"));
@@ -74,12 +80,14 @@ fn check_runtime(fixture: &str, image_type: u16) {
 
 #[test]
 #[timeout(10_000)]
-fn rejects_unsupported_static_image() {
-    let mut command = launcher();
-    command.args([LAUNCHER, "target-argv-zero"]);
-    let output = output(command);
-    assert_eq!(output.status.code(), Some(101), "{output:?}");
-    assert!(str::from_utf8(&output.stderr).unwrap().contains("executable has no PT_INTERP"));
+fn initializes_static_runtime() {
+    check_runtime_image(FIXTURE_STATIC, elf::abi::ET_EXEC, false);
+}
+
+#[test]
+#[timeout(10_000)]
+fn initializes_static_pie_runtime() {
+    check_runtime_image(FIXTURE_STATIC_PIE, elf::abi::ET_DYN, false);
 }
 
 #[test]
@@ -222,11 +230,12 @@ fn launcher() -> Command {
     command
 }
 
-fn assert_dynamic_image(path: &str, image_type: u16) {
+fn assert_image(path: &str, image_type: u16, interpreter: bool) {
     let bytes = std::fs::read(path).unwrap();
     let elf = elf::ElfBytes::<elf::endian::LittleEndian>::minimal_parse(&bytes).unwrap();
     assert_eq!(elf.ehdr.e_type, image_type, "unexpected fixture image type: {path}");
-    assert!(elf.segments().unwrap().iter().any(|ph| ph.p_type == elf::abi::PT_INTERP));
+    let has_interp = elf.segments().unwrap().iter().any(|ph| ph.p_type == elf::abi::PT_INTERP);
+    assert_eq!(has_interp, interpreter, "unexpected PT_INTERP: {path}");
 }
 
 fn output(mut command: Command) -> Output {
