@@ -30,8 +30,15 @@ windows-sys = { workspace = true, features = [
   "Win32_System_Threading",
 ] }
 
+[lib]
+doctest = false
+
 [lints]
 workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[package.metadata.cargo-shear]
+# Compiled by rustc from tests/no_global_alloc.rs, not as a crate module.
+ignored-paths = ["tests/support/no_global_alloc.rs"]

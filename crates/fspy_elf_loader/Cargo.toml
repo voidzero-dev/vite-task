@@ -25,5 +25,8 @@ path = "tests/support/launcher.rs"
 test = false
 bench = false
 
+[lib]
+doctest = false
+
 [lints]
 workspace = true
