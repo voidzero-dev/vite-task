@@ -12,8 +12,9 @@
 //! Both keys start with a header containing the cache schema version, the
 //! remote value format, and the target OS and architecture. Platforms share an
 //! endpoint's namespace, but their keys differ. A task that sets
-//! `cache.remote.crossPlatform` shares its entries between platforms instead:
-//! its header has an empty OS and architecture (see [`KeyPlatform`]).
+//! `cache.remote.crossPlatform` shares its entries between platforms whose
+//! keys otherwise match: its header has an empty OS and architecture (see
+//! [`KeyPlatform`]).
 
 use std::{
     fs::File,
@@ -540,9 +541,11 @@ pub(super) enum KeyPlatform {
     /// This build's OS and architecture, so only builds for the same target
     /// share the entries.
     Current,
-    /// An empty OS and architecture, so builds for every target share the
-    /// entries. No target has an empty name, so these keys never equal a
-    /// [`Self::Current`] key.
+    /// An empty OS and architecture, so the header doesn't keep builds for
+    /// different targets apart. No target has an empty name, so these keys
+    /// never equal a [`Self::Current`] key. The rest of the key must still
+    /// match. It names the resolved program, such as `node.exe` on Windows
+    /// and `node` elsewhere, so Windows entries don't match other platforms'.
     Any,
 }
 

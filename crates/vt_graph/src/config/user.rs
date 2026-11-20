@@ -314,6 +314,12 @@ pub struct EnabledTaskRemoteCacheConfig {
     /// outputs depend on the platform in a way that the cache doesn't track, such as a check
     /// of `process.platform`, another platform's outputs are restored.
     ///
+    /// The key names the program that the command resolves to, not the command as written.
+    /// A program outside the workspace is named by its file name, and a program inside it by
+    /// its path in the workspace. Windows resolves `node` to `node.exe` and a
+    /// `node_modules/.bin` program to its `.cmd` shim, so Windows entries don't match Linux
+    /// or macOS entries.
+    ///
     /// The setting doesn't change the local cache. Changing it changes the task's remote
     /// keys, so the task misses the remote cache once.
     pub cross_platform: Option<bool>,
