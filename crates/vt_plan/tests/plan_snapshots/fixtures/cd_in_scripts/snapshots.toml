@@ -7,3 +7,7 @@ args = ["run", "cd-build"]
 [[plan]]
 name = "cd_before_vt_lint_should_put_synthetic_task_under_cwd"
 args = ["run", "cd-lint"]
+
+[[plan]]
+name = "handler_cwd_applies_to_synthetic_task_only"
+args = ["run", "dir-lint"]

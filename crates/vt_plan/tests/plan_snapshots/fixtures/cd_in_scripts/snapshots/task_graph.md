@@ -5,6 +5,7 @@ flowchart TD
   task_0["<workspace>/#build"]
   task_1["<workspace>/#cd-build"]
   task_2["<workspace>/#cd-lint"]
+  task_3["<workspace>/#dir-lint"]
 ```
 
 ## `<workspace>/#build`
@@ -99,6 +100,46 @@ flowchart TD
   "resolved_config": {
     "commands": [
       "cd src && vt tool print lint"
+    ],
+    "resolved_options": {
+      "cwd": "<workspace>/",
+      "cache_config": {
+        "remote_cache_allowed": true,
+        "env_config": {
+          "fingerprinted_envs": [],
+          "untracked_env": [
+            "<default untracked envs>"
+          ]
+        },
+        "input_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        },
+        "output_config": {
+          "includes_auto": true,
+          "positive_globs": [],
+          "negative_globs": []
+        }
+      }
+    }
+  },
+  "source": "PackageJsonScript"
+}
+```
+
+## `<workspace>/#dir-lint`
+
+```json
+{
+  "task_display": {
+    "package_name": "",
+    "task_name": "dir-lint",
+    "package_path": "<workspace>/"
+  },
+  "resolved_config": {
+    "commands": [
+      "vt tool -C src print lint && vt tool print lint"
     ],
     "resolved_options": {
       "cwd": "<workspace>/",
