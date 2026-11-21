@@ -23,6 +23,7 @@ use vt_str::Str;
 
 use crate::{
     DependencyType, PackageInfo, PackageIx, PackageNodeIndex,
+    changed_since::{ChangedSinceError, uses_changed_catalog, workspace_changes},
     package_filter::{
         DirectoryPattern, GraphTraversal, PackageFilter, PackageNamePattern, PackageSelector,
         TraversalDirection,
@@ -124,7 +125,18 @@ pub enum PackageQueryResolveError {
 
     #[error("Package '{package_name}' not found in the workspace")]
     PackageNotFound { package_name: Str },
+
+    #[error("Failed to find the packages changed since '{since}'")]
+    ChangedSince {
+        since: Str,
+        #[source]
+        error: ChangedSinceError,
+    },
 }
+
+/// Packages changed since each `[<since>]` revision, so filters that share a
+/// revision run `git` once.
+type ChangedSinceCache = FxHashMap<Str, FxHashSet<PackageNodeIndex>>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // IndexedPackageGraph
@@ -211,6 +223,8 @@ impl IndexedPackageGraph {
     /// Returns [`PackageQueryResolveError::AmbiguousPackageName`] when an exact
     /// package name (from a `pkg#task` specifier) matches multiple packages, and
     /// [`PackageQueryResolveError::PackageNotFound`] when it matches none.
+    /// Returns [`PackageQueryResolveError::ChangedSince`] when the changes for
+    /// a `[<since>]` selector can't be read from git.
     pub fn resolve_query(
         &self,
         query: &PackageQuery,
@@ -256,6 +270,7 @@ impl IndexedPackageGraph {
         filters: &[PackageFilter],
     ) -> Result<FilterResolution, PackageQueryResolveError> {
         let mut unmatched_selectors = Vec::new();
+        let mut changed_since_cache = ChangedSinceCache::default();
 
         let (inclusions, exclusions): (Vec<_>, Vec<_>) = filters.iter().partition(|f| !f.exclude);
 
@@ -268,7 +283,8 @@ impl IndexedPackageGraph {
 
         // Apply inclusions: union each filter's resolved set into `selected`.
         for filter in &inclusions {
-            let matched = self.resolve_selector_entries(&filter.selector)?;
+            let matched =
+                self.resolve_selector_entries(&filter.selector, &mut changed_since_cache)?;
             let expanded = self.expand_traversal(matched, filter.traversal.as_ref());
             // Track filters that contribute nothing (typo, no-match glob, or a
             // traversal like `^...` that collapsed an otherwise-matching seed
@@ -284,7 +300,8 @@ impl IndexedPackageGraph {
 
         // Apply exclusions: subtract each filter's resolved set from `selected`.
         for filter in &exclusions {
-            let matched = self.resolve_selector_entries(&filter.selector)?;
+            let matched =
+                self.resolve_selector_entries(&filter.selector, &mut changed_since_cache)?;
             let to_remove = self.expand_traversal(matched, filter.traversal.as_ref());
             for pkg in to_remove {
                 selected.remove(&pkg);
@@ -300,6 +317,7 @@ impl IndexedPackageGraph {
     fn resolve_selector_entries(
         &self,
         selector: &PackageSelector,
+        changed_since_cache: &mut ChangedSinceCache,
     ) -> Result<FxHashSet<PackageNodeIndex>, PackageQueryResolveError> {
         let mut matched = FxHashSet::default();
 
@@ -329,17 +347,75 @@ impl IndexedPackageGraph {
             }
 
             PackageSelector::WorkspaceRoot => {
-                // The workspace root package has an empty relative path.
-                for idx in self.graph.node_indices() {
-                    if self.graph[idx].path.as_str().is_empty() {
-                        matched.insert(idx);
-                        break;
-                    }
+                matched.extend(self.workspace_root_index());
+            }
+
+            PackageSelector::ChangedSince { since, name, directory } => {
+                if !changed_since_cache.contains_key(since) {
+                    let changed = self.changed_since(since).map_err(|error| {
+                        PackageQueryResolveError::ChangedSince { since: since.clone(), error }
+                    })?;
+                    changed_since_cache.insert(since.clone(), changed);
+                }
+                matched.clone_from(&changed_since_cache[since]);
+                if let Some(name) = name {
+                    let mut by_name = FxHashSet::default();
+                    self.match_by_name_pattern(name, &mut by_name)?;
+                    matched.retain(|idx| by_name.contains(idx));
+                }
+                if let Some(directory) = directory {
+                    let mut by_dir = FxHashSet::default();
+                    self.match_by_directory_pattern(directory, &mut by_dir);
+                    matched.retain(|idx| by_dir.contains(idx));
                 }
             }
         }
 
         Ok(matched)
+    }
+
+    /// The workspace root package, the one with an empty relative path.
+    fn workspace_root_index(&self) -> Option<PackageNodeIndex> {
+        self.graph.node_indices().find(|&idx| self.graph[idx].path.as_str().is_empty())
+    }
+
+    /// The packages with files changed since the git revision `since`.
+    ///
+    /// Follows pnpm's `get_changed_projects`: a changed file belongs to the
+    /// deepest package that contains it, which is the workspace root package
+    /// for files outside every other package. When `pnpm-workspace.yaml`
+    /// changed, packages that take a changed catalog entry (`catalog:`,
+    /// `catalog:<name>`) count as changed too.
+    fn changed_since(&self, since: &str) -> Result<FxHashSet<PackageNodeIndex>, ChangedSinceError> {
+        let mut changed = FxHashSet::default();
+        // Every workspace has a root package (see `load_package_graph`).
+        let Some(root) = self.workspace_root_index() else {
+            return Ok(changed);
+        };
+        let workspace = workspace_changes(&self.graph[root].absolute_path, since)?;
+
+        let indices_by_relative_path: FxHashMap<&str, PackageNodeIndex> =
+            self.graph.node_indices().map(|idx| (self.graph[idx].path.as_str(), idx)).collect();
+        for file in &workspace.files {
+            let mut dir = file.as_str();
+            let owner = loop {
+                dir = dir.rsplit_once('/').map_or("", |(parent, _)| parent);
+                if let Some(&idx) = indices_by_relative_path.get(dir) {
+                    break idx;
+                }
+                if dir.is_empty() {
+                    break root;
+                }
+            };
+            changed.insert(owner);
+        }
+
+        if !workspace.catalogs.is_empty() {
+            changed.extend(self.graph.node_indices().filter(|&idx| {
+                uses_changed_catalog(&self.graph[idx].package_json, &workspace.catalogs)
+            }));
+        }
+        Ok(changed)
     }
 
     /// Match packages by a name pattern, inserting into `out`.
@@ -550,5 +626,293 @@ impl IndexedPackageGraph {
             }
         }
         subgraph
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, process::Command};
+
+    use tempfile::TempDir;
+    use vt_path::AbsolutePathBuf;
+
+    use super::*;
+    use crate::{discover_package_graph, package_filter::parse_filter};
+
+    fn git(cwd: &AbsolutePath, args: &[&str]) -> std::process::Output {
+        Command::new("git")
+            .args(["-c", "user.name=test", "-c", "user.email=test@example.com"])
+            .args(["-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"])
+            .args(args)
+            .current_dir(cwd.as_path())
+            .output()
+            .unwrap()
+    }
+
+    fn select(
+        workspace: &AbsolutePath,
+        filters: &[&str],
+    ) -> Result<Vec<Str>, PackageQueryResolveError> {
+        let graph = IndexedPackageGraph::index(discover_package_graph(workspace).unwrap());
+        let filters = filters
+            .iter()
+            .map(|filter| parse_filter(filter, workspace).unwrap())
+            .collect::<Vec<_>>();
+        let query = PackageQuery::filters(Vec1::try_from_vec(filters).unwrap());
+        let resolution = graph.resolve_query(&query)?;
+        let mut names: Vec<Str> = resolution
+            .package_subgraph
+            .nodes()
+            .map(|idx| graph.package_graph()[idx].package_json.name.clone())
+            .collect();
+        names.sort_unstable();
+        Ok(names)
+    }
+
+    fn changed_since_error(workspace: &AbsolutePath, filter: &str) -> ChangedSinceError {
+        match select(workspace, &[filter]) {
+            Err(PackageQueryResolveError::ChangedSince { error, .. }) => error,
+            other => panic!("expected a ChangedSince error, got {other:?}"),
+        }
+    }
+
+    /// A git repository holding a pnpm workspace in `workspace_dir` (relative
+    /// to the repository root): root `monorepo`, and `app` → `lib` → `utils`
+    /// under `packages/`. `app` takes `react` from the default catalog.
+    struct Repo {
+        _temp_dir: TempDir,
+        root: AbsolutePathBuf,
+        workspace: AbsolutePathBuf,
+    }
+
+    impl Repo {
+        fn new() -> Self {
+            Self::with_workspace_dir("")
+        }
+
+        fn with_workspace_dir(workspace_dir: &str) -> Self {
+            let temp_dir = TempDir::new().unwrap();
+            let root = AbsolutePathBuf::new(temp_dir.path().canonicalize().unwrap()).unwrap();
+            let workspace = root.join(workspace_dir);
+            let repo = Self { _temp_dir: temp_dir, root, workspace };
+            repo.git(&["-c", "init.defaultBranch=main", "init", "-q"]);
+            repo.write(
+                "pnpm-workspace.yaml",
+                "packages:\n  - packages/*\ncatalog:\n  react: ^18.0.0\n  lodash: ^4.0.0\n",
+            );
+            repo.write("package.json", r#"{ "name": "monorepo" }"#);
+            for (name, deps) in [
+                ("app", r#""lib": "workspace:*", "react": "catalog:""#),
+                ("lib", r#""utils": "workspace:*""#),
+                ("utils", ""),
+            ] {
+                repo.write(
+                    &vt_str::format!("packages/{name}/package.json"),
+                    &vt_str::format!(r#"{{ "name": "{name}", "dependencies": {{ {deps} }} }}"#),
+                );
+                repo.write(&vt_str::format!("packages/{name}/src/index.js"), "export {}\n");
+            }
+            repo.commit("init");
+            repo
+        }
+
+        fn write(&self, path: &str, content: &str) {
+            let path = self.workspace.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        }
+
+        fn git(&self, args: &[&str]) {
+            let output = git(&self.root, args);
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        }
+
+        fn commit(&self, message: &str) {
+            self.git(&["add", "-A"]);
+            self.git(&["commit", "-q", "-m", message]);
+        }
+
+        fn select(&self, filters: &[&str]) -> Vec<Str> {
+            select(&self.workspace, filters).unwrap()
+        }
+    }
+
+    #[test]
+    fn leaf_change_selects_leaf_and_dependents() {
+        let repo = Repo::new();
+        repo.write("packages/utils/src/index.js", "export const x = 1\n");
+        repo.commit("change utils");
+
+        assert_eq!(repo.select(&["[HEAD~1]"]), ["utils"]);
+        assert_eq!(repo.select(&["...[HEAD~1]"]), ["app", "lib", "utils"]);
+        assert_eq!(repo.select(&["...^[HEAD~1]"]), ["app", "lib"]);
+        assert_eq!(repo.select(&["[HEAD~1]..."]), ["utils"]);
+        assert!(repo.select(&["[HEAD]"]).is_empty());
+    }
+
+    #[test]
+    fn middle_change_with_dependencies() {
+        let repo = Repo::new();
+        repo.write("packages/lib/src/index.js", "export const x = 1\n");
+        repo.commit("change lib");
+
+        assert_eq!(repo.select(&["[HEAD~1]..."]), ["lib", "utils"]);
+        assert_eq!(repo.select(&["[HEAD~1]^..."]), ["utils"]);
+        assert_eq!(repo.select(&["...[HEAD~1]..."]), ["app", "lib", "utils"]);
+    }
+
+    #[test]
+    fn files_outside_every_package_belong_to_the_root() {
+        let repo = Repo::new();
+        repo.write("README.md", "hi\n");
+        repo.write("packages/README.md", "hi\n");
+        repo.commit("docs");
+
+        assert_eq!(repo.select(&["[HEAD~1]"]), ["monorepo"]);
+    }
+
+    #[test]
+    fn uncommitted_tracked_changes_count_and_untracked_files_do_not() {
+        let repo = Repo::new();
+        repo.write("packages/lib/src/index.js", "export const changed = 1\n");
+        repo.write("packages/utils/src/untracked.js", "export {}\n");
+
+        assert_eq!(repo.select(&["[HEAD]"]), ["lib"]);
+    }
+
+    #[test]
+    fn moved_file_changes_both_packages() {
+        let repo = Repo::new();
+        repo.git(&["mv", "packages/lib/src/index.js", "packages/utils/src/moved.js"]);
+        repo.commit("move");
+
+        assert_eq!(repo.select(&["[HEAD~1]"]), ["lib", "utils"]);
+    }
+
+    #[test]
+    fn compares_with_the_merge_base() {
+        let repo = Repo::new();
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        repo.write("packages/lib/src/index.js", "export const feature = 1\n");
+        repo.commit("feature");
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("packages/utils/src/index.js", "export const main = 1\n");
+        repo.commit("main moved on");
+        repo.git(&["checkout", "-q", "feature"]);
+
+        // `utils` changed only on `main`, after `feature` forked from it.
+        assert_eq!(repo.select(&["[main]"]), ["lib"]);
+    }
+
+    #[test]
+    fn name_and_directory_narrow_the_changed_packages() {
+        let repo = Repo::new();
+        repo.write("packages/lib/src/index.js", "export const x = 1\n");
+        repo.write("packages/utils/src/index.js", "export const x = 1\n");
+        repo.commit("change lib and utils");
+
+        assert_eq!(repo.select(&["lib[HEAD~1]"]), ["lib"]);
+        assert!(repo.select(&["app[HEAD~1]"]).is_empty());
+        assert_eq!(repo.select(&["{./packages/utils}[HEAD~1]"]), ["utils"]);
+        assert_eq!(repo.select(&["{packages/*}[HEAD~1]"]), ["lib", "utils"]);
+        assert_eq!(repo.select(&["...utils{packages/*}[HEAD~1]"]), ["app", "lib", "utils"]);
+    }
+
+    #[test]
+    fn exclusion_removes_changed_packages() {
+        let repo = Repo::new();
+        repo.write("packages/utils/src/index.js", "export const x = 1\n");
+        repo.commit("change utils");
+
+        assert_eq!(repo.select(&["!...[HEAD~1]"]), ["monorepo"]);
+        assert_eq!(repo.select(&["...[HEAD~1]", "!lib"]), ["app", "utils"]);
+    }
+
+    #[test]
+    fn catalog_change_selects_the_packages_that_use_it() {
+        let repo = Repo::new();
+        repo.write(
+            "pnpm-workspace.yaml",
+            "packages:\n  - packages/*\ncatalog:\n  react: ^19.0.0\n  lodash: ^4.0.0\n",
+        );
+        repo.commit("bump react");
+
+        // The root owns `pnpm-workspace.yaml`; `app` takes `react: catalog:`.
+        assert_eq!(repo.select(&["[HEAD~1]"]), ["app", "monorepo"]);
+        assert_eq!(repo.select(&["...{packages/*}[HEAD~1]"]), ["app"]);
+    }
+
+    #[test]
+    fn catalog_change_to_an_unused_entry_selects_only_the_root() {
+        let repo = Repo::new();
+        repo.write(
+            "pnpm-workspace.yaml",
+            "packages:\n  - packages/*\ncatalog:\n  react: ^18.0.0\n  lodash: ^4.17.0\n",
+        );
+        repo.commit("bump lodash");
+
+        assert_eq!(repo.select(&["[HEAD~1]"]), ["monorepo"]);
+    }
+
+    #[test]
+    fn workspace_in_a_repository_subdirectory() {
+        let repo = Repo::with_workspace_dir("js");
+        fs::write(repo.root.join("outside.txt"), "outside the workspace\n").unwrap();
+        repo.write("packages/utils/src/index.js", "export const x = 1\n");
+        repo.write(
+            "pnpm-workspace.yaml",
+            "packages:\n  - packages/*\ncatalog:\n  react: ^19.0.0\n  lodash: ^4.0.0\n",
+        );
+        repo.commit("change");
+
+        assert_eq!(repo.select(&["[HEAD~1]"]), ["app", "monorepo", "utils"]);
+
+        fs::write(repo.root.join("outside.txt"), "changed again\n").unwrap();
+        repo.commit("change outside the workspace");
+        assert!(repo.select(&["[HEAD~1]"]).is_empty());
+    }
+
+    #[test]
+    fn unknown_revision_is_an_error() {
+        let repo = Repo::new();
+        let error = changed_since_error(&repo.workspace, "...[no-such-branch]");
+        assert!(
+            matches!(&error, ChangedSinceError::UnknownRevision { since } if since == "no-such-branch"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn option_like_revision_is_an_error() {
+        let repo = Repo::new();
+        let error = changed_since_error(&repo.workspace, "[--output=x]");
+        assert!(matches!(&error, ChangedSinceError::InvalidRevision { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn unrelated_history_is_an_error() {
+        let repo = Repo::new();
+        repo.git(&["checkout", "-q", "--orphan", "unrelated"]);
+        repo.commit("unrelated root");
+
+        let error = changed_since_error(&repo.workspace, "[main]");
+        assert!(
+            matches!(&error, ChangedSinceError::NoMergeBase { since, shallow: false } if since == "main"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn not_a_repository_is_an_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let workspace = AbsolutePathBuf::new(temp_dir.path().canonicalize().unwrap()).unwrap();
+        assert!(
+            !git(&workspace, &["rev-parse", "--git-dir"]).status.success(),
+            "the system temp dir must not be inside a git repository"
+        );
+        fs::write(workspace.join("package.json"), r#"{ "name": "solo" }"#).unwrap();
+
+        let error = changed_since_error(&workspace, "[HEAD~1]");
+        assert!(matches!(&error, ChangedSinceError::NotARepository { .. }), "{error:?}");
     }
 }

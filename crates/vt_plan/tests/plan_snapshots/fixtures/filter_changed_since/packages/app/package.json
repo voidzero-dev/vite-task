@@ -1,0 +1,10 @@
+{
+  "name": "app",
+  "scripts": {
+    "build": "echo building app"
+  },
+  "dependencies": {
+    "lib": "workspace:*",
+    "react": "catalog:"
+  }
+}

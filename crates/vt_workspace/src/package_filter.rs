@@ -21,6 +21,14 @@
 //! - `...^foo`       → foo's dependents only (exclude foo itself)
 //! - `...foo...`     → foo + dependencies + dependents
 //! - `!foo`          → exclude foo from results
+//! - `[<since>]`     → packages with files changed since a git revision
+//! - `foo[<since>]`  → same, narrowed to packages matching `foo`
+//!   (`{./dir}[<since>]` and `foo{./dir}[<since>]` narrow by directory)
+//! - `...[<since>]`  → changed packages + their dependents (all traversal
+//!   markers above apply)
+//!
+//! As in pnpm, a trailing `[...]` group is the `<since>` revision, so
+//! `foo[ab]` is not a glob character class; one elsewhere, as in `foo[ab]*`, is.
 //!
 //! The `ContainingPackage` selector variant is NOT produced by `parse_filter`.
 //! It is synthesized internally for `vp run build` (implicit cwd) and `vp run -t build`
@@ -142,6 +150,16 @@ pub(crate) enum PackageSelector {
     /// Select the workspace root package (the package with empty relative path).
     /// Produced by `-w` / `--workspace-root`.
     WorkspaceRoot,
+
+    /// Packages with files changed since a git revision, optionally narrowed
+    /// to those that also match `name` and `directory`.
+    /// Produced by `--filter "[<since>]"`, `"foo[<since>]"`, `"{./dir}[<since>]"`
+    /// and `"foo{./dir}[<since>]"`.
+    ChangedSince {
+        since: Str,
+        name: Option<PackageNamePattern>,
+        directory: Option<DirectoryPattern>,
+    },
 }
 
 /// Direction to traverse the package dependency graph from the initially matched packages.
@@ -275,6 +293,8 @@ Match packages by name, directory, or glob pattern.
   --filter <pattern>...     Select package and its dependencies
   --filter ...<pattern>     Select package and its dependents
   --filter <pattern>^...    Select only the dependencies (exclude the package itself)
+  --filter [<since>]        Select packages changed since a git revision (e.g. [origin/main])
+  --filter ...[<since>]     Select changed packages and their dependents
   --filter !<pattern>       Exclude packages matching the pattern"
     )]
     filters: Vec<Str>,
@@ -513,11 +533,13 @@ pub(crate) fn parse_filter(
 
 /// Parse the core selector string (after stripping `!` and `...` markers).
 ///
-/// Implements pnpm's [`SELECTOR_REGEX`] logic: `^([^.][^{}[\]]*)?(\{[^}]+\})?$`
+/// Implements pnpm's [`SELECTOR_REGEX`] logic: `^([^.][^{}[\]]*)?(\{[^}]+\})?(\[[^\]]+\])?$`
 ///
 /// [`SELECTOR_REGEX`]: https://github.com/pnpm/pnpm/blob/05dd45ea82fff9c0b687cdc8f478a1027077d343/workspace/filter-workspace-packages/src/parsePackageSelector.ts#L37
 ///
 /// Decision tree:
+/// 0. If the string ends with a `[<since>]` group (see [`split_since`]), parse
+///    the rest as an optional name and brace-directory narrowing the changed packages.
 /// 1. If the string ends with `}` and contains a `{`, split name and brace-directory.
 ///    The name part must not start with `.` for the brace split to be valid
 ///    (per the regex rule that Group 1 must not start with `.`).
@@ -530,6 +552,12 @@ fn parse_core_selector(
     core: &str,
     cwd: &AbsolutePath,
 ) -> Result<(PackageSelector, bool), PackageFilterParseError> {
+    if let Some((name_part, dir_inner, since)) = split_since(core) {
+        let name = if name_part.is_empty() { None } else { Some(build_name_pattern(name_part)?) };
+        let directory = dir_inner.map(|dir| resolve_directory_pattern(dir, cwd)).transpose()?;
+        return Ok((PackageSelector::ChangedSince { since: since.into(), name, directory }, true));
+    }
+
     // Try to extract a brace-enclosed directory suffix: `{...}`.
     // The name part before the brace must not start with `.` (pnpm regex Group 1 constraint).
     if let Some(without_closing) = core.strip_suffix('}')
@@ -570,6 +598,47 @@ fn parse_core_selector(
 
     // Plain name or glob pattern.
     Ok((PackageSelector::Name(build_name_pattern(core)?), true))
+}
+
+/// Split a selector that ends with a `[<since>]` group into its name, its
+/// brace-directory contents and the revision.
+///
+/// Mirrors the `^([^.][^{}[\]]*)?(\{[^}]+\})?(\[[^\]]+\])?$` regex of pnpm's
+/// [`parse_project_selector`]: the revision is non-empty and has no `]`, the
+/// brace group (if any) has no `}`, and the name doesn't start with `.` and has
+/// no `{`, `}`, `[` or `]` after its first character. Returns `None` when the
+/// selector doesn't have that shape, so it's parsed as before (e.g. `[ab]*`
+/// stays a glob).
+///
+/// [`parse_project_selector`]: https://github.com/pnpm/pnpm/blob/main/pnpm/crates/workspace-projects-filter/src/parse_project_selector.rs
+fn split_since(core: &str) -> Option<(&str, Option<&str>, &str)> {
+    let without_closing = core.strip_suffix(']')?;
+    let open = without_closing.rfind('[')?;
+    let since = &without_closing[open + 1..];
+    if since.is_empty() || since.contains(']') {
+        return None;
+    }
+    let before = &without_closing[..open];
+
+    let (name, dir_inner) =
+        match before.strip_suffix('}').and_then(|b| b.rfind('{').map(|i| (b, i))) {
+            Some((without_brace, brace)) => {
+                let dir_inner = &without_brace[brace + 1..];
+                if dir_inner.is_empty() || dir_inner.contains('}') {
+                    return None;
+                }
+                (&without_brace[..brace], Some(dir_inner))
+            }
+            None => (before, None),
+        };
+
+    let mut name_chars = name.chars();
+    if let Some(first) = name_chars.next()
+        && (first == '.' || name_chars.any(|c| matches!(c, '{' | '}' | '[' | ']')))
+    {
+        return None;
+    }
+    Some((name, dir_inner, since))
 }
 
 /// Resolve a directory selector string into a [`DirectoryPattern`].
@@ -1119,6 +1188,190 @@ mod tests {
         let f = parse_filter("{./foo}...", cwd).unwrap();
         assert_directory(&f, abs("/workspace/foo"));
         assert_traversal(&f, TraversalDirection::Dependencies, false);
+    }
+
+    // ── [<since>] changed-since selectors ──────────────────────────────────
+
+    /// The `ChangedSince` parts of `filter`: revision, name, directory.
+    fn changed_since(
+        filter: &PackageFilter,
+    ) -> (&str, Option<&PackageNamePattern>, Option<&DirectoryPattern>) {
+        match &filter.selector {
+            PackageSelector::ChangedSince { since, name, directory } => {
+                (since.as_str(), name.as_ref(), directory.as_ref())
+            }
+            other => panic!("expected ChangedSince, got {other:?}"),
+        }
+    }
+
+    fn exact(name: &str) -> PackageNamePattern {
+        PackageNamePattern::Exact { name: name.into(), exactly_one: false }
+    }
+
+    #[test]
+    fn since_alone() {
+        let f = parse_filter("[origin/main]", abs("/workspace")).unwrap();
+        assert!(!f.exclude);
+        assert_eq!(changed_since(&f), ("origin/main", None, None));
+        assert_no_traversal(&f);
+    }
+
+    #[test]
+    fn since_with_dependents() {
+        let f = parse_filter("...[HEAD~1]", abs("/workspace")).unwrap();
+        assert_eq!(changed_since(&f), ("HEAD~1", None, None));
+        assert_traversal(&f, TraversalDirection::Dependents, false);
+    }
+
+    #[test]
+    fn since_with_dependencies() {
+        let f = parse_filter("[HEAD~1]...", abs("/workspace")).unwrap();
+        assert_eq!(changed_since(&f), ("HEAD~1", None, None));
+        assert_traversal(&f, TraversalDirection::Dependencies, false);
+    }
+
+    #[test]
+    fn since_with_both_directions() {
+        let f = parse_filter("...[HEAD~1]...", abs("/workspace")).unwrap();
+        assert_eq!(changed_since(&f), ("HEAD~1", None, None));
+        assert_traversal(&f, TraversalDirection::Both, false);
+    }
+
+    #[test]
+    fn since_with_dependents_exclude_self() {
+        let f = parse_filter("...^[main]", abs("/workspace")).unwrap();
+        assert_eq!(changed_since(&f), ("main", None, None));
+        assert_traversal(&f, TraversalDirection::Dependents, true);
+    }
+
+    #[test]
+    fn since_with_dependencies_exclude_self() {
+        let f = parse_filter("[main]^...", abs("/workspace")).unwrap();
+        assert_eq!(changed_since(&f), ("main", None, None));
+        assert_traversal(&f, TraversalDirection::Dependencies, true);
+    }
+
+    #[test]
+    fn since_excluded() {
+        let f = parse_filter("!...[main]", abs("/workspace")).unwrap();
+        assert!(f.exclude);
+        assert_eq!(changed_since(&f), ("main", None, None));
+        assert_traversal(&f, TraversalDirection::Dependents, false);
+    }
+
+    #[test]
+    fn since_with_name() {
+        let f = parse_filter("@test/app[main]", abs("/workspace")).unwrap();
+        assert_eq!(changed_since(&f), ("main", Some(&exact("@test/app")), None));
+    }
+
+    #[test]
+    fn since_with_name_glob() {
+        let f = parse_filter("...@test/*[main]", abs("/workspace")).unwrap();
+        let (since, name, directory) = changed_since(&f);
+        assert_eq!(since, "main");
+        assert!(
+            matches!(name, Some(PackageNamePattern::Glob(g)) if g.to_string() == "@test/*"),
+            "{name:?}"
+        );
+        assert!(directory.is_none());
+        assert_traversal(&f, TraversalDirection::Dependents, false);
+    }
+
+    #[test]
+    fn since_with_directory() {
+        let f = parse_filter("{./packages/app}[main]", abs("/workspace")).unwrap();
+        assert_eq!(
+            changed_since(&f),
+            ("main", None, Some(&DirectoryPattern::Exact(abs("/workspace/packages/app").into())))
+        );
+    }
+
+    #[test]
+    fn since_with_directory_glob_and_traversal() {
+        let f = parse_filter("...{packages/**}[origin/main]...", abs("/workspace")).unwrap();
+        let (since, name, directory) = changed_since(&f);
+        assert_eq!(since, "origin/main");
+        assert!(name.is_none());
+        assert!(
+            matches!(
+                directory,
+                Some(DirectoryPattern::Glob { base, pattern })
+                    if base.as_ref() == abs("/workspace/packages") && pattern.to_string() == "**"
+            ),
+            "{directory:?}"
+        );
+        assert_traversal(&f, TraversalDirection::Both, false);
+    }
+
+    #[test]
+    fn since_with_name_and_directory() {
+        let f = parse_filter("app{./packages/app}[main]", abs("/workspace")).unwrap();
+        assert_eq!(
+            changed_since(&f),
+            (
+                "main",
+                Some(&exact("app")),
+                Some(&DirectoryPattern::Exact(abs("/workspace/packages/app").into()))
+            )
+        );
+    }
+
+    #[test]
+    fn since_keeps_revision_syntax() {
+        // `^`, `~`, `@{...}` and `..` belong to the revision, not to the selector.
+        for since in ["HEAD^", "HEAD~2", "main@{1}", "v1.0.0", "a1b2c3d", "origin/feat/x"] {
+            let f = parse_filter(&vt_str::format!("...[{since}]"), abs("/workspace")).unwrap();
+            assert_eq!(changed_since(&f), (since, None, None));
+        }
+        let f = parse_filter("[HEAD^]...", abs("/workspace")).unwrap();
+        assert_eq!(changed_since(&f), ("HEAD^", None, None));
+        assert_traversal(&f, TraversalDirection::Dependencies, false);
+    }
+
+    #[test]
+    fn trailing_bracket_group_is_since_not_glob_class() {
+        // Behavior change: `foo[ab]` was a glob matching `fooa` and `foob`.
+        let f = parse_filter("foo[ab]", abs("/workspace")).unwrap();
+        assert_eq!(changed_since(&f), ("ab", Some(&exact("foo")), None));
+    }
+
+    #[test]
+    fn bracket_group_not_at_the_end_stays_glob() {
+        let f = parse_filter("foo[ab]*", abs("/workspace")).unwrap();
+        assert_glob_name(&f, "foo[ab]*");
+        let f = parse_filter("[ab]*", abs("/workspace")).unwrap();
+        assert_glob_name(&f, "[ab]*");
+    }
+
+    #[test]
+    fn bracket_groups_pnpm_regex_rejects_stay_names() {
+        // Two bracket groups: the name may not contain `]` after its first character.
+        let f = parse_filter("[x][y]", abs("/workspace")).unwrap();
+        assert_glob_name(&f, "[x][y]");
+        // A `]` in the revision.
+        let f = parse_filter("a[b]c]", abs("/workspace"));
+        assert!(!matches!(
+            f,
+            Ok(PackageFilter { selector: PackageSelector::ChangedSince { .. }, .. })
+        ));
+    }
+
+    #[test]
+    fn empty_since_is_not_a_since_selector() {
+        // pnpm's `\[[^\]]+\]` needs at least one character.
+        let f = parse_filter("foo[]", abs("/workspace"));
+        assert!(!matches!(
+            f,
+            Ok(PackageFilter { selector: PackageSelector::ChangedSince { .. }, .. })
+        ));
+    }
+
+    #[test]
+    fn unbraced_path_with_bracket_stays_a_path() {
+        // As in pnpm, a `.`-prefixed selector is a location; use `{./dir}[<since>]`.
+        let f = parse_filter("./foo[main]", abs("/workspace")).unwrap();
+        assert!(matches!(&f.selector, PackageSelector::Directory(_)), "{:?}", f.selector);
     }
 
     // ── -w / --workspace-root flag ──────────────────────────────────────────

@@ -1,0 +1,9 @@
+{
+  "name": "@test/lib",
+  "scripts": {
+    "build": "vtt print built-lib"
+  },
+  "dependencies": {
+    "@test/utils": "workspace:*"
+  }
+}

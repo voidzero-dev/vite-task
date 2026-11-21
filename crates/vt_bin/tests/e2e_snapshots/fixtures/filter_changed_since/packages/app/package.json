@@ -1,0 +1,10 @@
+{
+  "name": "@test/app",
+  "scripts": {
+    "build": "vtt print built-app"
+  },
+  "dependencies": {
+    "@test/lib": "workspace:*",
+    "react": "catalog:"
+  }
+}

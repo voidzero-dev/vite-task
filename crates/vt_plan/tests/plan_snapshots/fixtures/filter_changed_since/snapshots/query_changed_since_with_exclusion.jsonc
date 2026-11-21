@@ -1,0 +1,7 @@
+// run --filter ...[HEAD~2] --filter !...[HEAD~1] build
+{
+  "packages/lib#build": [
+    "packages/utils#build"
+  ],
+  "packages/utils#build": []
+}

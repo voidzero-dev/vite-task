@@ -1,0 +1,5 @@
+// run --filter [HEAD~1] build
+{
+  "#build": [],
+  "packages/app#build": []
+}

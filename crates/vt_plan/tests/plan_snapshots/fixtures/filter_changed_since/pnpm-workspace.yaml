@@ -1,0 +1,7 @@
+packages:
+  - packages/*
+catalog:
+  react: ^18.0.0
+catalogs:
+  legacy:
+    lodash: ^4.0.0

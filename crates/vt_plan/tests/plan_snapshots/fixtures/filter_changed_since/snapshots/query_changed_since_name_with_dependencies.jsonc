@@ -1,0 +1,10 @@
+// run --filter app[HEAD~2]... build
+{
+  "packages/app#build": [
+    "packages/lib#build"
+  ],
+  "packages/lib#build": [
+    "packages/utils#build"
+  ],
+  "packages/utils#build": []
+}

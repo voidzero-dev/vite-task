@@ -23,6 +23,10 @@ pub struct PackageJson {
     pub dev_dependencies: FxHashMap<Str, Str>,
     #[serde(default)]
     pub peer_dependencies: FxHashMap<Str, Str>,
+    /// Read only to find the packages that use a changed catalog entry
+    /// (`--filter "[<since>]"`); not part of the package graph.
+    #[serde(default)]
+    pub optional_dependencies: FxHashMap<Str, Str>,
 }
 
 impl std::fmt::Debug for PackageJson {
@@ -30,12 +34,13 @@ impl std::fmt::Debug for PackageJson {
         if std::env::var("VITE_DEBUG_VERBOSE").is_ok_and(|v| v != "0" && v != "false") {
             write!(
                 f,
-                "PackageJson {{ name: {:?}, scripts: {:?}, dependencies: {:?}, dev_dependencies: {:?}, peer_dependencies: {:?} }}",
+                "PackageJson {{ name: {:?}, scripts: {:?}, dependencies: {:?}, dev_dependencies: {:?}, peer_dependencies: {:?}, optional_dependencies: {:?} }}",
                 self.name,
                 self.scripts,
                 self.dependencies,
                 self.dev_dependencies,
-                self.peer_dependencies
+                self.peer_dependencies,
+                self.optional_dependencies
             )
         } else {
             write!(f, "PackageJson {{ name: {:?}, scripts: {:?} }}", self.name, self.scripts)

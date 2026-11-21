@@ -57,8 +57,55 @@ struct SnapshotsFile {
     /// filter used by the e2e harness.
     #[serde(default)]
     pub platform: Option<Str>,
+    /// Commits made after the staged fixture is committed into a new git
+    /// repository. Without it, the staged fixture is not a git repository.
+    #[serde(default)]
+    pub git: Option<GitHistory>,
     #[serde(rename = "plan", default)] // toml usually uses singular for arrays
     pub plan_cases: Vec<Plan>,
+}
+
+/// A git history for the staged fixture: an initial commit of the fixture,
+/// then one commit per entry, each writing its `files` (path → content).
+#[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+struct GitHistory {
+    #[serde(default)]
+    pub commits: Vec<GitCommit>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+struct GitCommit {
+    pub files: BTreeMap<Str, Str>,
+}
+
+impl GitHistory {
+    #[expect(clippy::disallowed_types, reason = "Path required for std::process::Command")]
+    fn create(&self, repo: &std::path::Path) {
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(["-c", "user.name=test", "-c", "user.email=test@example.com"])
+                .args(["-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"])
+                .args(args)
+                .current_dir(repo)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        };
+        git(&["-c", "init.defaultBranch=main", "init", "-q"]);
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "fixture"]);
+        for (index, commit) in self.commits.iter().enumerate() {
+            for (path, content) in &commit.files {
+                let path = repo.join(path.as_str());
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, content.as_str()).unwrap();
+            }
+            git(&["add", "-A"]);
+            git(&["commit", "-q", "-m", vt_str::format!("commit {}", index + 1).as_str()]);
+        }
+    }
 }
 
 /// Returns whether the current build should run the fixture. Panics on an
@@ -193,6 +240,11 @@ fn run_case_inner(
     // Copy the case directory to a temporary directory to avoid discovering workspace outside of the test case.
     let stage_path = tmpdir.join(fixture_name);
     copy_dir(fixture_path, &stage_path).unwrap();
+    if let Some(git) = &cases_file.git {
+        // `snapshots/` and `snapshots.toml` are copied too; they are committed
+        // with the fixture, so they never show up as changes.
+        git.create(stage_path.as_path());
+    }
 
     let (workspace_root, _cwd) = find_workspace_root(&stage_path).unwrap();
 

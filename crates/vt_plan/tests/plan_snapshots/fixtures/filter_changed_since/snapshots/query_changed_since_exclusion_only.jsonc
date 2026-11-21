@@ -1,0 +1,5 @@
+// run --filter ![HEAD~2] build
+{
+  "packages/docs#build": [],
+  "packages/lib#build": []
+}
