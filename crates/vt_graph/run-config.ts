@@ -145,4 +145,16 @@ tasks?: { [key in string]: TaskDefinition },
  * This option can only be set in the workspace root's config file.
  * Setting it in a package's config will result in an error.
  */
-enablePrePostScripts?: boolean, };
+enablePrePostScripts?: boolean,
+/**
+ * Keep running other tasks after a task fails, as `--continue` does.
+ *
+ * Tasks that depend on a failed task don't run, and the run still exits
+ * with a non-zero code.
+ *
+ * Default: `false`
+ *
+ * This option can only be set in the workspace root's config file.
+ * Setting it in a package's config will result in an error.
+ */
+continue?: boolean, };

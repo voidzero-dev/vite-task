@@ -469,6 +469,18 @@ pub struct UserRunConfig {
     /// This option can only be set in the workspace root's config file.
     /// Setting it in a package's config will result in an error.
     pub enable_pre_post_scripts: Option<bool>,
+
+    /// Keep running other tasks after a task fails, as `--continue` does.
+    ///
+    /// Tasks that depend on a failed task don't run, and the run still exits
+    /// with a non-zero code.
+    ///
+    /// Default: `false`
+    ///
+    /// This option can only be set in the workspace root's config file.
+    /// Setting it in a package's config will result in an error.
+    #[serde(rename = "continue")]
+    pub continue_on_failure: Option<bool>,
 }
 
 impl UserRunConfig {

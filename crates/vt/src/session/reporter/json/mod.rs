@@ -513,7 +513,7 @@ mod tests {
     fn a_failed_lookup_prints_no_plan() {
         let mut graph = petgraph::graph::DiGraph::default();
         let node = graph.add_node(spawn_task("build"));
-        let graph = ExecutionGraph::try_from_graph(graph, 1).unwrap();
+        let graph = ExecutionGraph::try_from_graph(graph, 1, false).unwrap();
         let builder = JsonReporterBuilder::new(
             &graph,
             &test_path(),

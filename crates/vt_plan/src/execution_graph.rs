@@ -164,11 +164,12 @@ impl<N: vt_graph_ser::GetKey + Serialize, Ix: IndexType> Serialize for AcyclicGr
 /// The default concurrency limit for task execution within a single graph level.
 pub const DEFAULT_CONCURRENCY_LIMIT: usize = 4;
 
-/// An execution graph with a per-level concurrency limit.
+/// An execution graph with per-level execution options.
 ///
 /// Wraps an [`AcyclicGraph`] of task executions together with the maximum number
-/// of tasks that may run concurrently within this graph level. Nested `Expanded`
-/// graphs carry their own concurrency limit, enabling per-level control.
+/// of tasks that may run concurrently within this graph level, and whether a
+/// failure at this level cancels the run. Nested `Expanded` graphs carry their
+/// own options, enabling per-level control.
 #[derive(Debug, Serialize)]
 pub struct ExecutionGraph {
     /// The underlying acyclic task execution graph.
@@ -176,11 +177,17 @@ pub struct ExecutionGraph {
 
     /// Maximum number of tasks that can execute concurrently within this graph level.
     pub concurrency_limit: usize,
+
+    /// Set by `--continue` at this level or an outer one. A failed task at
+    /// this level doesn't cancel the run; only its dependents are skipped.
+    /// Omitted from the serialized plan when `false`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub continue_on_failure: bool,
 }
 
 impl ExecutionGraph {
     /// Validate that `graph` is acyclic and wrap it in an `ExecutionGraph` with
-    /// the given concurrency limit.
+    /// the given options.
     ///
     /// # Errors
     ///
@@ -188,8 +195,13 @@ impl ExecutionGraph {
     pub fn try_from_graph(
         graph: InnerExecutionGraph,
         concurrency_limit: usize,
+        continue_on_failure: bool,
     ) -> Result<Self, CycleError<ExecutionIx>> {
-        Ok(Self { graph: AcyclicGraph::try_from_graph(graph)?, concurrency_limit })
+        Ok(Self {
+            graph: AcyclicGraph::try_from_graph(graph)?,
+            concurrency_limit,
+            continue_on_failure,
+        })
     }
 }
 

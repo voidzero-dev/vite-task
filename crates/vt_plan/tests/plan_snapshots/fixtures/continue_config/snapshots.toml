@@ -1,0 +1,5 @@
+# Tests that `continue: true` in the workspace root config marks the run as `--continue`.
+
+[[plan]]
+name = "continue_set_in_root_config"
+args = ["run", "build"]

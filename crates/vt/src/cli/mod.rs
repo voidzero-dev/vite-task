@@ -57,6 +57,15 @@ pub struct RunFlags {
     #[clap(default_value = "false", long)]
     pub ignore_depends_on: bool,
 
+    /// Keep running other tasks after a task fails.
+    ///
+    /// Tasks that depend on a failed task don't run, and the run still exits
+    /// with a non-zero code. `continue: true` in the workspace root config
+    /// turns it on for every run.
+    // `--no-bail` is pnpm's name for the same behavior.
+    #[clap(default_value = "false", long = "continue", alias = "no-bail")]
+    pub continue_on_failure: bool,
+
     /// Show full detailed summary after execution. A cache miss checks every
     /// input, so the summary lists every change. Twice (`-vv`), it also lists
     /// everything each cached run depends on, and its outputs.
@@ -357,6 +366,7 @@ impl ResolvedRunCommand {
         let include_explicit_deps = !self.flags.ignore_depends_on;
         let concurrency_limit = self.flags.concurrency_limit.map(|n| n.max(1));
         let parallel = self.flags.parallel;
+        let continue_on_failure = self.flags.continue_on_failure;
         // Read before `into_package_query` consumes the args.
         let fail_if_no_match = self.flags.package_query.fail_if_no_match;
 
@@ -376,6 +386,7 @@ impl ResolvedRunCommand {
                     remote_cache_mode: self.flags.remote_cache.map(Into::into),
                     concurrency_limit,
                     parallel,
+                    continue_on_failure,
                     fail_if_no_match,
                 },
             },

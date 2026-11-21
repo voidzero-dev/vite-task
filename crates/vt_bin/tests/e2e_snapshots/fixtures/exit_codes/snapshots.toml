@@ -32,3 +32,227 @@ steps = [
     "pkg-a#chained",
   ], comment = "first fails with exit code 3, second should not run" },
 ]
+
+[[e2e]]
+name = "continue_keeps_running_independent_tasks"
+comment = """
+With `--continue`, a failing task doesn't cancel the run: a task running beside it finishes and is cached, new tasks still start, and a task that depends on the failure doesn't run.
+
+`failing` and the two `independent-*` tasks share a barrier: `failing` waits for 2 participants, the others for 3. With a concurrency limit of 2, `failing` and `setup` start first. When `setup` exits, one `independent-*` task takes its slot and joins the barrier, so `failing` exits 42 while that task keeps waiting. Only the slot `failing` frees can start the third participant. If the failure cancelled the run, the waiting task would be killed; if it only stopped scheduling, the run would time out. `keep-going` depends on `failing`, so it doesn't run.
+"""
+cwd = "packages/pkg-c"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--continue",
+    "--concurrency-limit",
+    "2",
+    "keep-going",
+  ], comment = "failing exits 42, the independent tasks pass, keep-going doesn't run" },
+  { argv = [
+    "vt",
+    "run",
+    "--continue",
+    "--concurrency-limit",
+    "2",
+    "keep-going",
+  ], comment = "the independent tasks replay from the cache, failing runs again" },
+]
+
+[[e2e]]
+name = "continue_skips_dependents_of_failure"
+comment = """
+With `--continue`, a task that depends on a failed task still doesn't run.
+"""
+cwd = "packages/pkg-b"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--continue",
+    "-t",
+    "check",
+  ], comment = "pkg-a fails, pkg-b is skipped" },
+]
+
+[[e2e]]
+name = "continue_chained_command_stops_at_first_failure"
+comment = """
+With `--continue`, a `&&`-chained command still stops at its first failing sub-command.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--continue",
+    "pkg-a#chained",
+  ], comment = "first fails with exit code 3, second should not run" },
+]
+
+[[e2e]]
+name = "continue_exits_1_when_several_tasks_fail"
+comment = """
+With `--continue`, independent failing tasks all run. With more than one failure, the run exits 1 instead of a task's exit code.
+"""
+cwd = "packages/pkg-c"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--continue",
+    "two-failures",
+  ], comment = "fail-3 and fail-5 both run" },
+]
+
+[[e2e]]
+name = "no_bail_is_an_alias_for_continue"
+comment = """
+`--no-bail`, pnpm's name for the same behavior, works like `--continue`. With a concurrency limit of 1, fail-3 and fail-5 run one after the other, so the second only runs if the first failure doesn't cancel the run.
+"""
+cwd = "packages/pkg-c"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--no-bail",
+    "--concurrency-limit",
+    "1",
+    "two-failures",
+  ], comment = "fail-3 and fail-5 both run" },
+]
+
+[[e2e]]
+name = "continue_skips_dependents_of_nested_run_failure"
+comment = """
+With `--continue`, a failure inside a nested `vt run` counts as its task failing, so that task's dependents don't run.
+"""
+cwd = "packages/pkg-c"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--continue",
+    "after-nested",
+  ], comment = "nested runs fail-3, which exits 3, so after-nested doesn't run" },
+]
+
+[[e2e]]
+name = "continue_in_nested_run_applies_to_that_run"
+comment = """
+A `vt run --continue` in a task's script applies to the tasks it runs, even when the outer `vt run` has no `--continue`. With a concurrency limit of 1, fail-3 and fail-5 run one after the other, so the second only runs if the first failure doesn't cancel the run.
+"""
+cwd = "packages/pkg-c"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "nested-continue",
+  ], comment = "the nested run has --continue: fail-3 and fail-5 both run" },
+]
+
+[[e2e]]
+name = "continue_is_inherited_by_nested_run"
+comment = """
+`--continue` on the outer `vt run` also applies to a `vt run` in a task's script that doesn't pass it.
+"""
+cwd = "packages/pkg-c"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--continue",
+    "nested-plain",
+  ], comment = "the nested run inherits --continue: fail-3 and fail-5 both run" },
+]
+
+[[e2e]]
+name = "continue_is_inherited_by_vt_run_spawned_by_task"
+comment = """
+`--continue` also reaches a `vt run` that a task starts as a separate process instead of one expanded in place, here through `vtt pipe-stdin`.
+"""
+cwd = "packages/pkg-c"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--continue",
+    "spawned-plain",
+  ], comment = "the spawned vt run inherits --continue: fail-3 and fail-5 both run" },
+]
+
+[[e2e]]
+name = "nested_continue_failure_fast_fails_outer_run"
+comment = """
+When a nested `vt run --continue` finishes with a failure, its task fails, and an outer run without `--continue` fast-fails as usual. `fails-after-barrier` (in the nested run) and `hangs-beside-nested` (in the outer run) share a 2-way barrier, so the hanging task is running when the nested run fails. Completing without a timeout shows the outer run killed it.
+"""
+cwd = "packages/pkg-c"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "nested-failure-stops-outer",
+  ], comment = "the nested run fails, so the outer run kills hangs-beside-nested" },
+]
+
+[[e2e]]
+name = "fast_fail_kills_tasks_in_nested_continue_run"
+comment = """
+A nested `vt run --continue` doesn't protect its tasks from an outer run that fast-fails. `fails-beside-nested` (in the outer run) and `hangs-after-barrier` (in the nested run) share a 2-way barrier, so the hanging task is running when the outer task fails. Completing without a timeout shows the outer failure killed it.
+"""
+cwd = "packages/pkg-c"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "failure-stops-nested-continue",
+  ], comment = "fails-beside-nested fails, so hangs-after-barrier in the nested run is killed" },
+]
+
+[[e2e]]
+name = "continue_applies_to_task_picked_in_selector"
+comment = """
+When the task name doesn't match and the task selector opens, `--continue` applies to the task picked there. `VP_RUN_CONCURRENCY_LIMIT=1` runs fail-3 and fail-5 one after the other, so the second only runs if the first failure doesn't cancel the run.
+"""
+cwd = "packages/pkg-c"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--continue",
+    "two-failure",
+  ], envs = [
+    [
+      "VP_RUN_CONCURRENCY_LIMIT",
+      "1",
+    ],
+  ], interactions = [
+    { "expect-milestone" = "task-select:two-failure:0" },
+    { "write-key" = "enter" },
+  ], comment = "pick two-failures: fail-3 and fail-5 both run" },
+]
+
+[[e2e]]
+name = "continue_survives_output_forwarding_failure"
+comment = """
+With `--continue`, a task that fails because its output can't be forwarded doesn't cancel the run. `vtt broken-stdout` gives `vt` a stdout whose writes all fail, so `noisy` fails when it prints. The scheduling is the same as in `continue_keeps_running_independent_tasks`: `noisy` waits at the barrier for one `independent-*` task, then prints and fails, and only the slot it frees can start the other `independent-*` task. The first step's output can't be seen. The second step, with a working stdout, replays `independent-1` from the cache (the two `independent-*` tasks run the same command, so they share a cache entry). Had the failure cancelled the run, the `independent-*` task waiting at the barrier would have been killed and the other never started, leaving nothing to replay.
+"""
+cwd = "packages/pkg-c"
+steps = [
+  { argv = [
+    "vtt",
+    "broken-stdout",
+    "--",
+    "vt",
+    "run",
+    "--continue",
+    "--concurrency-limit",
+    "2",
+    "forward-failure",
+  ], comment = "noisy fails to forward its output, the independent tasks pass" },
+  { argv = [
+    "vt",
+    "run",
+    "independent-1",
+  ], comment = "setup and independent-1 replay from the cache" },
+]
