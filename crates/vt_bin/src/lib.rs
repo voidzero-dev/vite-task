@@ -61,6 +61,10 @@ enum Args {
     /// then synthesizes a cached invocation with the given arguments. The `--` separator,
     /// if present, is stripped before forwarding.
     Tool {
+        /// Run `vtt` in this directory, relative to the script's cwd. This exercises
+        /// a handler that changes the command's cwd, like `vp -C <dir>`.
+        #[clap(short = 'C')]
+        dir: Option<Str>,
         #[clap(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<Str>,
     },
@@ -89,7 +93,10 @@ impl vt::CommandHandler for CommandHandler {
             std::iter::once(command.program.as_str()).chain(command.args.iter().map(Str::as_str)),
         )?;
         match args {
-            Args::Tool { args } => {
+            Args::Tool { dir, args } => {
+                if let Some(dir) = dir {
+                    command.cwd = command.cwd.join(dir.as_str()).into();
+                }
                 let program = find_executable(get_path_env(&command.envs), &command.cwd, "vtt")?;
                 Ok(HandledCommand::Synthesized(SyntheticPlanRequest {
                     program,

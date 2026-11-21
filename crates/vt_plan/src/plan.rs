@@ -300,7 +300,7 @@ async fn plan_task_as_execution_node(
                             &and_item.envs,
                             synthetic_plan_request,
                             Some(task_execution_cache_key),
-                            &cwd,
+                            &script_command.cwd,
                             package_path,
                             parent_cache_config,
                             context.resolved_remote_cache(),
