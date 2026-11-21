@@ -1,3 +1,4 @@
+mod changed_since;
 mod error;
 pub mod package;
 pub mod package_filter;
@@ -19,6 +20,7 @@ use wax::{
 };
 
 pub use crate::{
+    changed_since::ChangedSinceError,
     error::Error,
     package::{DependencyType, PackageJson},
     package_manager::{

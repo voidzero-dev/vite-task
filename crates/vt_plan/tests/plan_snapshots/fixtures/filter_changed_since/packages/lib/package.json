@@ -1,0 +1,9 @@
+{
+  "name": "lib",
+  "scripts": {
+    "build": "echo building lib"
+  },
+  "dependencies": {
+    "utils": "workspace:*"
+  }
+}

@@ -65,6 +65,25 @@ plan. The option applies to non-compact plan cases in the file; it is not accept
 inside `[[plan]]`. Cases with `compact = true` keep their compact format and ignore
 `fields`. Task graph Markdown and error snapshots are unaffected.
 
+## Git history
+
+A fixture that needs a git repository, such as one testing `--filter "[<since>]"`,
+sets `git` at the file level. The staged fixture is committed into a new
+repository on `main`, then each entry of `commits` writes its files and is
+committed on top:
+
+```toml
+[[git.commits]]
+files = { "packages/utils/src/index.js" = "export const changed = 1
+" }
+
+[[plan]]
+name = "changed_since_with_dependents"
+args = ["run", "--filter", "...[HEAD~1]", "build"]
+```
+
+Without `git`, the staged fixture is not in a git repository.
+
 ## Adding a new test
 
 1. Create a new fixture directory under `fixtures/`

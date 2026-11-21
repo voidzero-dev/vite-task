@@ -1,0 +1,7 @@
+{
+  "name": "utils",
+  "scripts": {
+    "build": "echo building utils"
+  },
+  "dependencies": {}
+}

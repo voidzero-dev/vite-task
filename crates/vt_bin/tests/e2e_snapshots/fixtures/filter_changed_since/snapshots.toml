@@ -1,0 +1,251 @@
+# pnpm's changed-since `--filter "[<since>]"` selector, against a real git
+# repository created in the staged fixture. Dependencies: app -> lib -> utils.
+
+[[e2e]]
+name = "changed_leaf_selects_it_and_its_dependents"
+comment = """
+A commit changes only the leaf `@test/utils`. `...[HEAD~1]` selects it and every package that depends on it, and builds them in dependency order.
+"""
+steps = [
+  [
+    "git",
+    "-c",
+    "init.defaultBranch=main",
+    "init",
+    "-q",
+  ],
+  [
+    "git",
+    "-c",
+    "core.autocrlf=false",
+    "add",
+    "-A",
+  ],
+  [
+    "git",
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "--no-verify",
+    "-m",
+    "init",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "packages/utils/src/index.js",
+    "export {};",
+    "export const changed = 1;",
+  ],
+  [
+    "git",
+    "-c",
+    "core.autocrlf=false",
+    "add",
+    "-A",
+  ],
+  [
+    "git",
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "--no-verify",
+    "-m",
+    "change",
+  ],
+  [
+    "vt",
+    "run",
+    "--filter",
+    "...[HEAD~1]",
+    "build",
+  ],
+  [
+    "vt",
+    "run",
+    "--filter",
+    "[HEAD~1]",
+    "build",
+  ],
+]
+
+[[e2e]]
+name = "uncommitted_change_counts"
+comment = """
+An uncommitted change to a tracked file counts as a change since `HEAD`.
+"""
+steps = [
+  [
+    "git",
+    "-c",
+    "init.defaultBranch=main",
+    "init",
+    "-q",
+  ],
+  [
+    "git",
+    "-c",
+    "core.autocrlf=false",
+    "add",
+    "-A",
+  ],
+  [
+    "git",
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "--no-verify",
+    "-m",
+    "init",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "packages/lib/src/index.js",
+    "export {};",
+    "export const changed = 1;",
+  ],
+  [
+    "vt",
+    "run",
+    "--filter",
+    "[HEAD]",
+    "build",
+  ],
+]
+
+[[e2e]]
+name = "catalog_change_selects_its_users"
+comment = """
+A commit changes only the default catalog's `react` in `pnpm-workspace.yaml`. `@test/app`, which takes `react: catalog:`, counts as changed, and so does the root package that holds the file (it has no `build`).
+"""
+steps = [
+  [
+    "git",
+    "-c",
+    "init.defaultBranch=main",
+    "init",
+    "-q",
+  ],
+  [
+    "git",
+    "-c",
+    "core.autocrlf=false",
+    "add",
+    "-A",
+  ],
+  [
+    "git",
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "--no-verify",
+    "-m",
+    "init",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "pnpm-workspace.yaml",
+    "react: ^18.0.0",
+    "react: ^19.0.0",
+  ],
+  [
+    "git",
+    "-c",
+    "core.autocrlf=false",
+    "add",
+    "-A",
+  ],
+  [
+    "git",
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "--no-verify",
+    "-m",
+    "change",
+  ],
+  [
+    "vt",
+    "run",
+    "--filter",
+    "[HEAD~1]",
+    "build",
+  ],
+]
+
+[[e2e]]
+name = "unknown_revision_errors"
+comment = """
+A revision git doesn't know is an error, not an empty match that exits 0.
+"""
+steps = [
+  [
+    "git",
+    "-c",
+    "init.defaultBranch=main",
+    "init",
+    "-q",
+  ],
+  [
+    "git",
+    "-c",
+    "core.autocrlf=false",
+    "add",
+    "-A",
+  ],
+  [
+    "git",
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "--no-verify",
+    "-m",
+    "init",
+  ],
+  [
+    "vt",
+    "run",
+    "--filter",
+    "...[no-such-branch]",
+    "build",
+  ],
+]
+
+[[e2e]]
+name = "outside_git_repository_errors"
+comment = """
+Outside a git repository, `[<since>]` is an error, not an empty match that exits 0.
+"""
+steps = [["vt", "run", "--filter", "...[HEAD~1]", "build"]]

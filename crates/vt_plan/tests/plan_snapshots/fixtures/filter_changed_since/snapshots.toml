@@ -1,0 +1,68 @@
+# Tests pnpm's changed-since `--filter "[<since>]"` selector.
+#
+# History: the fixture (HEAD~2), then a change in the leaf `utils` (HEAD~1),
+# then a bump of the default catalog's `react`, which `app` takes (HEAD).
+# Dependencies: app -> lib -> utils; docs takes lodash from the `legacy` catalog.
+
+[[git.commits]]
+files = { "packages/utils/src/index.js" = "export const changed = 1;\n" }
+
+[[git.commits]]
+files = { "pnpm-workspace.yaml" = "packages:\n  - packages/*\ncatalog:\n  react: ^19.0.0\ncatalogs:\n  legacy:\n    lodash: ^4.0.0\n" }
+
+# Only pnpm-workspace.yaml changed: its owner (the root) and the package that
+# takes the changed catalog entry are selected; docs uses another catalog.
+[[plan]]
+compact = true
+name = "changed_since_catalog_only"
+args = ["run", "--filter", "[HEAD~1]", "build"]
+
+[[plan]]
+compact = true
+name = "changed_since_catalog_only_in_packages_dir"
+args = ["run", "--filter", "{packages/*}[HEAD~1]", "build"]
+
+# The changed leaf, the catalog change, and every dependent.
+[[plan]]
+compact = true
+name = "changed_since_with_dependents"
+args = ["run", "--filter", "...[HEAD~2]", "build"]
+
+[[plan]]
+compact = true
+name = "changed_since_directory_dependents_only"
+args = ["run", "--filter", "...^{packages/utils}[HEAD~2]", "build"]
+
+[[plan]]
+compact = true
+name = "changed_since_name_with_dependencies"
+args = ["run", "--filter", "app[HEAD~2]...", "build"]
+
+# docs didn't change, so the name narrows the changed packages to nothing.
+[[plan]]
+compact = true
+name = "changed_since_name_not_changed"
+args = ["run", "--filter", "docs[HEAD~2]", "build"]
+
+[[plan]]
+compact = true
+name = "changed_since_with_exclusion"
+args = ["run", "--filter", "...[HEAD~2]", "--filter", "!...[HEAD~1]", "build"]
+
+[[plan]]
+compact = true
+name = "changed_since_exclusion_only"
+args = ["run", "--filter", "![HEAD~2]", "build"]
+
+[[plan]]
+compact = true
+name = "changed_since_head_selects_nothing"
+args = ["run", "--filter", "[HEAD]", "build"]
+
+[[plan]]
+name = "changed_since_unknown_revision"
+args = ["run", "--filter", "...[no-such-branch]", "build"]
+
+[[plan]]
+name = "changed_since_option_like_revision"
+args = ["run", "--filter", "[--output=x]", "build"]

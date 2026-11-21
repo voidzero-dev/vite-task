@@ -1,0 +1,6 @@
+{
+  "name": "@test/utils",
+  "scripts": {
+    "build": "vtt print built-utils"
+  }
+}

@@ -236,3 +236,8 @@ args = ["run", "-w", "-r", "check"]
 compact = true
 name = "workspace_root_with_transitive"
 args = ["run", "-w", "-t", "check"]
+
+# The fixture isn't in a git repository, so `[<since>]` is an error, not an empty match
+[[plan]]
+name = "filter_changed_since_outside_git_repository"
+args = ["run", "--filter", "...[main]", "build"]
