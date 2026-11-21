@@ -1,0 +1,29 @@
+// run os-only
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "os-only"
+      ],
+      "node": {
+        "items": [
+          {
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "platform": {
+                      "os": true,
+                      "arch": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

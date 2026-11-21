@@ -18,14 +18,6 @@
       "command": "vt tool print-file package.json",
       "cache": { "remote": false }
     },
-    "cross-platform": {
-      "command": "vtt print-file package.json",
-      "cache": { "remote": { "crossPlatform": true } }
-    },
-    "synthetic-cross-platform": {
-      "command": "vt tool print-file package.json",
-      "cache": { "remote": { "crossPlatform": true } }
-    },
     "tracked-controls": {
       "command": "vtt print-file package.json",
       "cache": {

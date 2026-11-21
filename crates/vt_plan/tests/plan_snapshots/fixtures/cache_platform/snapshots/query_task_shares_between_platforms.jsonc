@@ -1,0 +1,29 @@
+// run shared
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "shared"
+      ],
+      "node": {
+        "items": [
+          {
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "platform": {
+                      "os": false,
+                      "arch": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

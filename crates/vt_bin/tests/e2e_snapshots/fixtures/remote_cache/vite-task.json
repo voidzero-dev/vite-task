@@ -36,7 +36,7 @@
       "cache": {
         "input": ["src/**"],
         "output": ["dist/**"],
-        "remote": { "crossPlatform": true }
+        "platform": []
       }
     }
   }

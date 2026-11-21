@@ -1,0 +1,29 @@
+// run inherit
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "inherit"
+      ],
+      "node": {
+        "items": [
+          {
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "platform": {
+                      "os": false,
+                      "arch": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

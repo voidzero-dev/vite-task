@@ -44,7 +44,7 @@ flowchart TD
       "cwd": "<workspace>/packages/api",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -85,7 +85,7 @@ flowchart TD
       "cwd": "<workspace>/packages/api",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -126,7 +126,7 @@ flowchart TD
       "cwd": "<workspace>/packages/api",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -167,7 +167,7 @@ flowchart TD
       "cwd": "<workspace>/packages/api",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -208,7 +208,7 @@ flowchart TD
       "cwd": "<workspace>/packages/app",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -249,7 +249,7 @@ flowchart TD
       "cwd": "<workspace>/packages/app",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -290,7 +290,7 @@ flowchart TD
       "cwd": "<workspace>/packages/app",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -331,7 +331,7 @@ flowchart TD
       "cwd": "<workspace>/packages/app",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -372,7 +372,7 @@ flowchart TD
       "cwd": "<workspace>/packages/app",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -413,7 +413,7 @@ flowchart TD
       "cwd": "<workspace>/packages/config",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -454,7 +454,7 @@ flowchart TD
       "cwd": "<workspace>/packages/config",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -495,7 +495,7 @@ flowchart TD
       "cwd": "<workspace>/packages/pkg#special",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -536,7 +536,7 @@ flowchart TD
       "cwd": "<workspace>/packages/pkg#special",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -577,7 +577,7 @@ flowchart TD
       "cwd": "<workspace>/packages/shared",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -618,7 +618,7 @@ flowchart TD
       "cwd": "<workspace>/packages/shared",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -659,7 +659,7 @@ flowchart TD
       "cwd": "<workspace>/packages/shared",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -700,7 +700,7 @@ flowchart TD
       "cwd": "<workspace>/packages/shared",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -741,7 +741,7 @@ flowchart TD
       "cwd": "<workspace>/packages/tools",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -782,7 +782,7 @@ flowchart TD
       "cwd": "<workspace>/packages/tools",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -823,7 +823,7 @@ flowchart TD
       "cwd": "<workspace>/packages/ui",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -864,7 +864,7 @@ flowchart TD
       "cwd": "<workspace>/packages/ui",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -905,7 +905,7 @@ flowchart TD
       "cwd": "<workspace>/packages/ui",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -946,7 +946,7 @@ flowchart TD
       "cwd": "<workspace>/packages/ui",
       "cache_config": {
         "remote_cache_allowed": true,
-        "remote_cache_cross_platform": false,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [

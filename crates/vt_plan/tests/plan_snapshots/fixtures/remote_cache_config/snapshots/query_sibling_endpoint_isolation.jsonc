@@ -37,8 +37,7 @@
                                     "url": "https://other.example/projects/nested",
                                     "auth": {
                                       "kind": "anonymous"
-                                    },
-                                    "cross_platform": false
+                                    }
                                   }
                                 },
                                 "spawn_command": {
@@ -86,8 +85,7 @@
                                     "url": "https://cache.example/projects/test",
                                     "auth": {
                                       "kind": "anonymous"
-                                    },
-                                    "cross_platform": false
+                                    }
                                   }
                                 },
                                 "spawn_command": {

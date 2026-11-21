@@ -35,16 +35,6 @@ env = { "VP_REMOTE_CACHE" = "read-write" }
 name = "synthetic_local_only"
 args = ["run", "synthetic"]
 
-# `cache.remote.crossPlatform` shares the task's remote entries between
-# platforms. A built-in tool keeps the declaration of the task that runs it.
-[[plan]]
-name = "cross_platform"
-args = ["run", "cross-platform"]
-
-[[plan]]
-name = "synthetic_cross_platform"
-args = ["run", "synthetic-cross-platform"]
-
 [[plan]]
 name = "empty_env_endpoint_uses_config"
 args = ["run", "build"]

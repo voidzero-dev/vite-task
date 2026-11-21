@@ -3,13 +3,13 @@ use std::{ffi::OsStr, sync::Arc};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use vt_casefold::EnvName;
-use vt_graph::config::ResolvedGlobConfig;
+use vt_graph::config::{CachePlatform, ResolvedGlobConfig};
 use vt_path::RelativePathBuf;
 use vt_str::{self, Str};
 use wincode::{SchemaRead, SchemaWrite};
 
 pub use crate::envs::EnvValueHash;
-use crate::{envs::EnvFingerprints, remote_cache::ExecutionRemoteCache};
+use crate::{envs::EnvFingerprints, remote_cache::ResolvedRemoteCacheConfig};
 
 /// Key to identify an execution across sessions.
 #[derive(Debug, SchemaWrite, SchemaRead, Serialize)]
@@ -55,10 +55,14 @@ pub struct CacheMetadata {
     /// Used at execution time to determine what output files to archive.
     pub output_config: ResolvedGlobConfig,
 
+    /// The parts of the platform that the entries depend on: the task's
+    /// `cache.platform`, or the workspace's. Remote keys name only these parts
+    /// of this machine's platform. Local keys don't depend on it.
+    pub platform: CachePlatform,
+
     /// Remote cache for this execution: the one resolved for its `vp run` level,
-    /// with the task's `cache.remote` settings, unless the task sets
-    /// `cache.remote: false`. `None` means local caching only.
-    pub remote_cache: Option<ExecutionRemoteCache>,
+    /// unless the task sets `cache.remote: false`. `None` means local caching only.
+    pub remote_cache: Option<ResolvedRemoteCacheConfig>,
 
     /// The unfiltered env context for runner-aware APIs. This is the planning
     /// context's envs before spawn-env filtering, including command prefix envs

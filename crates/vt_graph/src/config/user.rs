@@ -11,6 +11,8 @@ use vec1::Vec1;
 use vt_path::RelativePathBuf;
 use vt_str::Str;
 
+use super::CachePlatform;
+
 mod top_level_cache_fields;
 
 pub(crate) use top_level_cache_fields::TopLevelCacheFieldsCollector;
@@ -243,11 +245,7 @@ pub struct EnabledCacheConfig {
     #[cfg_attr(all(test, not(clippy)), ts(inline))]
     pub output: Option<Vec<UserOutputEntry>>,
 
-    /// Whether and how this task uses the remote cache.
-    ///
-    /// - Omitted or `true`: the remote cache is used with default settings (same as `{}`)
-    /// - `false`: the remote cache isn't used
-    /// - Object: the remote cache is used with the given settings
+    /// Whether this task can use the remote cache. Defaults to `true`.
     ///
     /// The remote cache is used only when these also hold:
     /// - Caching isn't turned off by `--no-cache` or the workspace root's `cache` setting.
@@ -257,62 +255,22 @@ pub struct EnabledCacheConfig {
     ///   defaults to `read`, which downloads cached results without uploading new ones.
     // Parsed but left out of the public types while remote caching is unreleased.
     #[cfg_attr(all(test, not(clippy)), ts(skip))]
-    pub remote: Option<UserTaskRemoteCacheConfig>,
-}
+    pub remote: Option<bool>,
 
-/// The value of a task's `cache.remote` field.
-#[derive(Debug, PartialEq, Eq)]
-pub enum UserTaskRemoteCacheConfig {
-    /// `true` uses the remote cache with default settings; `false` doesn't use it.
-    Bool(bool),
-    /// Uses the remote cache with the given settings.
-    Config(EnabledTaskRemoteCacheConfig),
-}
-
-// Not `#[serde(untagged)]`, which replaces each variant's error with a generic one.
-impl<'de> Deserialize<'de> for UserTaskRemoteCacheConfig {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        UntaggedEnumVisitor::new()
-            .expecting("a boolean or an object of remote cache settings")
-            .bool(|enabled| Ok(Self::Bool(enabled)))
-            .map(|map| map.deserialize().map(Self::Config))
-            .deserialize(deserializer)
-    }
-}
-
-impl Default for UserTaskRemoteCacheConfig {
-    /// The remote cache used with default settings, used when `cache.remote` is omitted.
-    fn default() -> Self {
-        Self::Bool(true)
-    }
-}
-
-impl UserTaskRemoteCacheConfig {
-    /// Returns the remote cache settings, or `None` if the remote cache isn't used.
-    #[must_use]
-    pub fn into_enabled(self) -> Option<EnabledTaskRemoteCacheConfig> {
-        match self {
-            Self::Bool(true) => Some(EnabledTaskRemoteCacheConfig::default()),
-            Self::Bool(false) => None,
-            Self::Config(config) => Some(config),
-        }
-    }
-}
-
-/// A task's remote cache settings when it uses the remote cache.
-#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct EnabledTaskRemoteCacheConfig {
-    /// Whether the task's remote cache entries are shared between platforms. Defaults to
-    /// `false`.
+    /// The parts of the platform that this task's outputs depend on. Defaults to the
+    /// workspace root's `cache.platform`, which defaults to `["os", "arch"]`.
     ///
-    /// Set it only on a task whose outputs are the same on every OS and architecture, such
-    /// as a code generator that runs on Node.js. Its remote entries then don't name an OS or
-    /// architecture, so an entry stored on Linux CI can be restored on macOS. A fetched
-    /// entry is still checked against this machine's inputs, and the rest of the key, such
-    /// as the command, its arguments, and its working directory, must still match. If the
-    /// outputs depend on the platform in a way that the cache doesn't track, such as a check
-    /// of `process.platform`, another platform's outputs are restored.
+    /// - `"os"`: the operating system, such as `linux` or `macos`
+    /// - `"arch"`: the CPU architecture, such as `x86_64` or `aarch64`
+    /// - `[]`: neither, for a task whose outputs are the same on every platform, such as a
+    ///   code generator that runs on Node.js
+    ///
+    /// Remote cache entries are shared only between machines whose listed parts match, so
+    /// with `[]` an entry stored on Linux CI can be restored on macOS. A fetched entry is
+    /// still checked against this machine's inputs, and the rest of the key, such as the
+    /// command, its arguments, and its working directory, must still match. If the outputs
+    /// depend on a part that isn't listed, in a way that the cache doesn't track, such as a
+    /// check of `process.platform`, another platform's outputs are restored.
     ///
     /// The key names the program that the command resolves to, not the command as written.
     /// A program outside the workspace is named by its file name, and a program inside it by
@@ -320,9 +278,21 @@ pub struct EnabledTaskRemoteCacheConfig {
     /// `node_modules/.bin` program to its `.cmd` shim, so Windows entries don't match Linux
     /// or macOS entries.
     ///
-    /// The setting doesn't change the local cache. Changing it changes the task's remote
-    /// keys, so the task misses the remote cache once.
-    pub cross_platform: Option<bool>,
+    /// The local cache is the same whatever this lists. Changing it changes the task's
+    /// remote keys, so the task misses the remote cache once.
+    // Parsed but left out of the public types while remote caching is unreleased.
+    #[cfg_attr(all(test, not(clippy)), ts(skip))]
+    pub platform: Option<Vec<PlatformDimension>>,
+}
+
+/// A part of the platform that a task's outputs can depend on.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PlatformDimension {
+    /// The operating system.
+    Os,
+    /// The CPU architecture.
+    Arch,
 }
 
 /// Options for user-defined tasks in `vite.config.*`, excluding the command.
@@ -466,6 +436,14 @@ pub enum UserGlobalCacheConfig {
         // Parsed but left out of the public types while remote caching is unreleased.
         #[cfg_attr(all(test, not(clippy)), ts(skip))]
         remote: Option<UserRemoteCacheConfig>,
+
+        /// The parts of the platform that task outputs depend on, for every task and cached
+        /// script that doesn't set its own `cache.platform`. See the task's `cache.platform`.
+        ///
+        /// Default: `["os", "arch"]`
+        // Parsed but left out of the public types while remote caching is unreleased.
+        #[cfg_attr(all(test, not(clippy)), ts(skip))]
+        platform: Option<Vec<PlatformDimension>>,
     },
 }
 
@@ -477,26 +455,34 @@ pub struct ResolvedGlobalCacheConfig {
     /// Remote cache endpoint from `cache.remote.url`, if configured. Planning
     /// uses `VP_REMOTE_CACHE_URL` instead when it's set.
     pub remote_url: Option<Arc<str>>,
+    /// The workspace's `cache.platform`, for tasks that don't set their own.
+    pub platform: CachePlatform,
 }
 
 impl ResolvedGlobalCacheConfig {
     /// Resolve from an optional user config, using defaults when `None`.
     ///
-    /// Default: `{ scripts: false, tasks: true }`
+    /// Default: `{ scripts: false, tasks: true, platform: ["os", "arch"] }`
     #[must_use]
     pub fn resolve_from(config: Option<&UserGlobalCacheConfig>) -> Self {
+        let default_platform = CachePlatform::ALL;
         match config {
-            None => Self { scripts: false, tasks: true, remote_url: None },
+            None => {
+                Self { scripts: false, tasks: true, remote_url: None, platform: default_platform }
+            }
             Some(UserGlobalCacheConfig::Bool(true)) => {
-                Self { scripts: true, tasks: true, remote_url: None }
+                Self { scripts: true, tasks: true, remote_url: None, platform: default_platform }
             }
             Some(UserGlobalCacheConfig::Bool(false)) => {
-                Self { scripts: false, tasks: false, remote_url: None }
+                Self { scripts: false, tasks: false, remote_url: None, platform: default_platform }
             }
-            Some(UserGlobalCacheConfig::Detailed { scripts, tasks, remote }) => Self {
+            Some(UserGlobalCacheConfig::Detailed { scripts, tasks, remote, platform }) => Self {
                 scripts: scripts.unwrap_or(false),
                 tasks: tasks.unwrap_or(true),
                 remote_url: remote.as_ref().map(|remote| Arc::clone(&remote.url)),
+                platform: platform
+                    .as_deref()
+                    .map_or(default_platform, CachePlatform::from_dimensions),
             },
         }
     }
@@ -865,6 +851,7 @@ mod tests {
                 "input": ["src/**"],
                 "output": ["dist/**"],
                 "remote": false,
+                "platform": ["os"],
             },
         });
         let user_config: UserTaskConfig = serde_json::from_value(user_config_json.clone()).unwrap();
@@ -876,35 +863,27 @@ mod tests {
                 untracked_env: Some(std::iter::once("FOO".into()).collect()),
                 input: Some(vec![UserInputEntry::Glob("src/**".into())]),
                 output: Some(vec![UserOutputEntry::Glob("dist/**".into())]),
-                remote: Some(UserTaskRemoteCacheConfig::Bool(false)),
+                remote: Some(false),
+                platform: Some(vec![PlatformDimension::Os]),
             })
         );
     }
 
     #[test]
-    fn test_cache_remote_forms() {
+    fn test_cache_platform() {
         let cases = [
-            (json!(true), Some(EnabledTaskRemoteCacheConfig::default())),
-            (json!(false), None),
-            (json!({}), Some(EnabledTaskRemoteCacheConfig::default())),
-            (
-                json!({ "crossPlatform": true }),
-                Some(EnabledTaskRemoteCacheConfig { cross_platform: Some(true) }),
-            ),
-            (
-                json!({ "crossPlatform": false }),
-                Some(EnabledTaskRemoteCacheConfig { cross_platform: Some(false) }),
-            ),
+            (json!([]), CachePlatform { os: false, arch: false }),
+            (json!(["os"]), CachePlatform { os: true, arch: false }),
+            (json!(["arch"]), CachePlatform { os: false, arch: true }),
+            (json!(["arch", "os"]), CachePlatform::ALL),
+            (json!(["os", "os"]), CachePlatform { os: true, arch: false }),
         ];
-        for (remote, expected) in cases {
-            let user_config_json = json!({ "command": "echo test", "cache": { "remote": remote } });
-            let remote = task_cache_config(user_config_json).unwrap().remote.unwrap();
-            assert_eq!(remote.into_enabled(), expected);
+        for (platform, expected) in cases {
+            let user_config_json =
+                json!({ "command": "echo test", "cache": { "platform": platform } });
+            let platform = task_cache_config(user_config_json).unwrap().platform.unwrap();
+            assert_eq!(CachePlatform::from_dimensions(&platform), expected);
         }
-        assert_eq!(
-            UserTaskRemoteCacheConfig::default().into_enabled(),
-            Some(EnabledTaskRemoteCacheConfig::default())
-        );
     }
 
     #[test]
@@ -1162,6 +1141,21 @@ mod tests {
     }
 
     #[test]
+    fn test_global_cache_platform() {
+        for (config, expected) in [
+            (json!({ "platform": [] }), CachePlatform { os: false, arch: false }),
+            (json!({ "platform": ["arch"] }), CachePlatform { os: false, arch: true }),
+            (json!({ "scripts": true }), CachePlatform::ALL),
+            (json!(true), CachePlatform::ALL),
+            (json!(false), CachePlatform::ALL),
+        ] {
+            let config: UserGlobalCacheConfig = serde_json::from_value(config).unwrap();
+            assert_eq!(ResolvedGlobalCacheConfig::resolve_from(Some(&config)).platform, expected);
+        }
+        assert_eq!(ResolvedGlobalCacheConfig::resolve_from(None).platform, CachePlatform::ALL);
+    }
+
+    #[test]
     fn test_global_cache_none_defaults() {
         let resolved = ResolvedGlobalCacheConfig::resolve_from(None);
         assert!(!resolved.scripts); // defaults to false
@@ -1195,20 +1189,15 @@ mod tests {
             (
                 json!({ "command": "echo", "cache": { "outputs": [] } }),
                 "unknown field `outputs`, expected one of `env`, `untrackedEnv`, `input`, \
-                 `output`, `remote`",
+                 `output`, `remote`, `platform`",
             ),
             (
                 json!({ "command": "echo", "cache": "yes" }),
                 "invalid type: string \"yes\", expected a boolean or an object of cache settings",
             ),
             (
-                json!({ "command": "echo", "cache": { "remote": "yes" } }),
-                "invalid type: string \"yes\", expected a boolean or an object of remote cache \
-                 settings",
-            ),
-            (
-                json!({ "command": "echo", "cache": { "remote": { "crossplatform": true } } }),
-                "unknown field `crossplatform`, expected `crossPlatform`",
+                json!({ "command": "echo", "cache": { "platform": ["linux"] } }),
+                "unknown variant `linux`, expected `os` or `arch`",
             ),
             (json!({ "cache": false }), "missing field `command`"),
             (json!(["echo one", 2]), "invalid type: integer `2`, expected a string"),

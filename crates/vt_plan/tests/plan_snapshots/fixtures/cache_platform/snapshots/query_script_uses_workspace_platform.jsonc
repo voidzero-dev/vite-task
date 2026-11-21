@@ -1,0 +1,29 @@
+// run script
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "script"
+      ],
+      "node": {
+        "items": [
+          {
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "platform": {
+                      "os": false,
+                      "arch": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

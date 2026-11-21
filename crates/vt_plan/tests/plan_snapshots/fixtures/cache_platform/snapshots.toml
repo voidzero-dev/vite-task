@@ -1,0 +1,27 @@
+# `cache.platform` lists the parts of the platform that a task's remote cache
+# entries depend on. A task or a cached script that doesn't set it uses the
+# workspace root's, which is `["arch"]` here.
+[fields]
+key = true
+cache_metadata = { platform = true }
+
+[[plan]]
+name = "script_uses_workspace_platform"
+args = ["run", "script"]
+
+[[plan]]
+name = "task_uses_workspace_platform"
+args = ["run", "inherit"]
+
+[[plan]]
+name = "task_shares_between_platforms"
+args = ["run", "shared"]
+
+[[plan]]
+name = "task_depends_on_os"
+args = ["run", "os-only"]
+
+# `vt tool` lists no platform, so it keeps the platform of the task that runs it.
+[[plan]]
+name = "tool_keeps_task_platform"
+args = ["run", "tool"]

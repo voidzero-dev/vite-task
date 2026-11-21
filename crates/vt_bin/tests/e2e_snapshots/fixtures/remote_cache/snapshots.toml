@@ -290,12 +290,12 @@ steps = [
   ],
 ]
 
-# `generate` sets `cache.remote.crossPlatform`, so its remote keys name no OS
-# or architecture. Only one platform runs here, so this case checks that its
-# entry round trips and that the setting changes the remote keys but not the
-# local cache.
+# `generate` sets `cache.platform: []`, so its remote keys name no OS or
+# architecture. Only one platform runs here, so this case checks that its entry
+# round trips and that the setting changes the remote keys but not the local
+# cache.
 [[e2e]]
-name = "cross_platform"
+name = "platform_independent"
 cfg = 'not(target_env = "musl")'
 ignore = true
 steps = [
@@ -337,7 +337,7 @@ steps = [
     "vt",
     "run",
     "generate",
-  ], comment = "The entry stored under the cross-platform keys is a remote hit." },
+  ], comment = "The entry stored under the keys that name no platform is a remote hit." },
   { argv = [
     "vtt",
     "print-file",
@@ -347,8 +347,8 @@ steps = [
     "vtt",
     "replace-file-content",
     "vite-task.json",
-    '"crossPlatform": true',
-    '"crossPlatform": false',
+    '"platform": []',
+    '"platform": ["os", "arch"]',
   ],
   { argv = [
     "remote-cache-server",

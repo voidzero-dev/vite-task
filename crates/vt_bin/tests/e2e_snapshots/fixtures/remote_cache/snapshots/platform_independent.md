@@ -1,4 +1,4 @@
-# cross_platform
+# platform_independent
 
 ## `remote-cache-server start`
 
@@ -26,7 +26,7 @@ $ vtt write-file dist/generated.txt generated
 
 ## `remote-cache-server run vt run generate`
 
-The entry stored under the cross-platform keys is a remote hit.
+The entry stored under the keys that name no platform is a remote hit.
 
 ```
 $ vtt write-file dist/generated.txt generated ◉ remote cache hit, replaying
@@ -45,7 +45,7 @@ The outputs are restored.
 generated
 ```
 
-## `vtt replace-file-content vite-task.json '"crossPlatform": true' '"crossPlatform": false'`
+## `vtt replace-file-content vite-task.json '"platform": []' '"platform": ["os", "arch"]'`
 
 ```
 ```
