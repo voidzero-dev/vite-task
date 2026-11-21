@@ -4,9 +4,9 @@ mod syscall_handler;
 #[cfg(target_os = "macos")]
 mod macos_artifacts;
 
+use std::io;
 #[cfg(target_os = "linux")]
 use std::sync::Arc;
-use std::{io, path::Path};
 
 #[cfg(target_os = "linux")]
 use fspy_seccomp_unotify::supervisor::supervise;
@@ -45,11 +45,12 @@ pub struct SpyImpl {
 }
 
 impl SpyImpl {
-    /// Initialize the fs access spy by writing the preload library on disk.
+    /// Initialize the fs access spy by writing the preload library on disk, in
+    /// the current user's own `vp_run` folder in the system temp dir.
     ///
     /// On musl targets, we don't build a preload library —
     /// only seccomp-based tracking is used.
-    pub fn init_in(#[cfg_attr(target_env = "musl", allow(unused))] dir: &Path) -> io::Result<Self> {
+    pub fn init() -> io::Result<Self> {
         #[cfg(not(target_env = "musl"))]
         let preload_path = {
             use vt_materialized_artifact::{Artifact, artifact};
@@ -57,7 +58,8 @@ impl SpyImpl {
             const PRELOAD_CDYLIB: Artifact =
                 artifact!("fspy_preload", "CARGO_CDYLIB_FILE_FSPY_PRELOAD_UNIX");
 
-            let preload_cdylib_path = PRELOAD_CDYLIB.materialize().suffix(".dylib").at(dir)?;
+            let preload_cdylib_path =
+                PRELOAD_CDYLIB.materialize().suffix(".dylib").at_user_temp_dir("vp_run")?;
             preload_cdylib_path.as_path().into()
         };
 
@@ -68,14 +70,14 @@ impl SpyImpl {
             bash_path: macos_artifacts::OILS_BINARY
                 .materialize()
                 .executable()
-                .at(dir)?
+                .at_user_temp_dir("vp_run")?
                 .as_path()
                 .into(),
             #[cfg(target_os = "macos")]
             coreutils_path: macos_artifacts::COREUTILS_BINARY
                 .materialize()
                 .executable()
-                .at(dir)?
+                .at_user_temp_dir("vp_run")?
                 .as_path()
                 .into(),
         })

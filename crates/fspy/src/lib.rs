@@ -14,7 +14,7 @@ mod os_impl;
 mod arena;
 mod command;
 
-use std::{env::temp_dir, fs::create_dir, io, process::ExitStatus, sync::LazyLock};
+use std::{io, process::ExitStatus, sync::LazyLock};
 
 pub use command::Command;
 pub use error::TrackingIncomplete;
@@ -57,8 +57,5 @@ pub struct TrackedChild {
     pub process_handle: std::os::windows::io::OwnedHandle,
 }
 
-pub(crate) static SPY_IMPL: LazyLock<SpyImpl> = LazyLock::new(|| {
-    let tmp_dir = temp_dir().join("fspy");
-    let _ = create_dir(&tmp_dir);
-    SpyImpl::init_in(&tmp_dir).expect("Failed to initialize global spy")
-});
+pub(crate) static SPY_IMPL: LazyLock<SpyImpl> =
+    LazyLock::new(|| SpyImpl::init().expect("Failed to initialize global spy"));

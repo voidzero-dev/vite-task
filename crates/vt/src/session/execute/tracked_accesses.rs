@@ -7,7 +7,7 @@
 
 use fspy::{IpcPath, PathAccess, PathAccessIterable};
 use rustc_hash::FxHashSet;
-use vt_path::{AbsolutePath, RelativePathBuf};
+use vt_path::{AbsolutePath, RelativePath, RelativePathBuf};
 
 use super::fingerprint::PathRead;
 use crate::collections::HashMap;
@@ -20,21 +20,36 @@ pub struct TrackedPathAccesses {
 
     /// Tracked path writes
     pub path_writes: FxHashSet<RelativePathBuf>,
+
+    /// Tracked rename targets: the new paths of renamed files and folders
+    pub rename_targets: FxHashSet<RelativePathBuf>,
+
+    /// Tracked mkdirs: the folders the task made, or tried to make
+    pub mkdirs: FxHashSet<RelativePathBuf>,
 }
 
 impl TrackedPathAccesses {
-    /// Build from fspy's raw iterable by stripping the workspace prefix and
-    /// normalizing `..` components. `.git/*` paths and pnpm's workspace state
-    /// files are skipped. User-configured negatives are applied by the caller
-    /// (see module docs).
-    pub fn from_raw(raw: &PathAccessIterable, workspace_root: &AbsolutePath) -> Self {
-        // Strip workspace root and clean `..` components in one pass.
-        // fspy may report paths like `packages/sub-pkg/../shared/dist/output.js`.
-        let relative_path = |path: &IpcPath| {
-            path.strip_path_prefix(workspace_root, |strip_result| {
-                normalize_tracked_workspace_path(strip_result.ok()?)
-            })
-        };
+    /// Build from fspy's raw iterable by resolving `..` components and then
+    /// stripping the workspace prefix, so paths outside the workspace are
+    /// skipped. `.git/*` paths, pnpm's workspace state files and paths in the
+    /// task cache at `cache_root` are skipped too.
+    /// User-configured negatives are applied by the caller (see module docs).
+    pub fn from_raw(
+        raw: &PathAccessIterable,
+        workspace_root: &AbsolutePath,
+        cache_root: &AbsolutePath,
+    ) -> Self {
+        // The task cache, when it's inside the workspace. A cache at the
+        // workspace root itself isn't skipped, since that would skip every
+        // access.
+        let cache_root = cache_root
+            .strip_prefix(workspace_root)
+            .ok()
+            .flatten()
+            .filter(|cache_root| !cache_root.as_str().is_empty());
+
+        let relative_path =
+            |path: &IpcPath| tracked_workspace_path(path, workspace_root, cache_root.as_deref());
 
         let mut accesses = Self::default();
         for access in raw.iter() {
@@ -60,6 +75,16 @@ impl TrackedPathAccesses {
                         accesses.add_read(path).read_dir_entries = true;
                     }
                 }
+                PathAccess::RenameTarget(path) => {
+                    if let Some(path) = relative_path(path) {
+                        accesses.rename_targets.insert(path);
+                    }
+                }
+                PathAccess::Mkdir(path) => {
+                    if let Some(path) = relative_path(path) {
+                        accesses.mkdirs.insert(path);
+                    }
+                }
             }
         }
         accesses
@@ -70,20 +95,34 @@ impl TrackedPathAccesses {
     }
 }
 
+/// The workspace-relative path of the tracked `path`, or `None` if it's
+/// outside the workspace or skipped (see [`normalize_tracked_workspace_path`]).
+fn tracked_workspace_path(
+    path: &IpcPath,
+    workspace_root: &AbsolutePath,
+    cache_root: Option<&RelativePath>,
+) -> Option<RelativePathBuf> {
+    // Resolve `..` components before stripping the workspace root. fspy may
+    // report paths like `<workspace>/packages/sub-pkg/../shared/dist/output.js`,
+    // which is `packages/shared/dist/output.js`, and on Unix reports a relative
+    // open of `../site/index.html` from the workspace root as
+    // `<workspace>/../site/index.html`, which is outside the workspace. On
+    // Windows, cleaning also turns malformed paths like
+    // `c:\workspace\subdir\c:\workspace\subdir` into ones outside it.
+    let stripped_path = path.clean_and_strip_path_prefix(workspace_root).ok()?;
+    normalize_tracked_workspace_path(&stripped_path, cache_root)
+}
+
 #[expect(
     clippy::disallowed_types,
-    reason = "fspy strip_path_prefix exposes std::path::Path; convert to RelativePathBuf immediately"
+    reason = "fspy clean_and_strip_path_prefix returns std::path::PathBuf; convert to RelativePathBuf immediately"
 )]
-fn normalize_tracked_workspace_path(stripped_path: &std::path::Path) -> Option<RelativePathBuf> {
-    // On Windows, paths are possible to be still absolute after stripping the workspace root.
-    // For example: c:\workspace\subdir\c:\workspace\subdir
-    // Just ignore those accesses.
+fn normalize_tracked_workspace_path(
+    stripped_path: &std::path::Path,
+    cache_root: Option<&RelativePath>,
+) -> Option<RelativePathBuf> {
+    // Ignore paths that aren't portable, like ones with non-UTF-8 names.
     let relative = RelativePathBuf::new(stripped_path).ok()?;
-
-    // Clean `..` components — fspy may report paths like
-    // `packages/sub-pkg/../shared/dist/output.js`. Normalize them for
-    // consistent behavior across platforms and clean user-facing messages.
-    let relative = relative.clean().ok()?;
 
     // Skip .git directory accesses (workaround for tools like oxlint)
     if relative.as_path().strip_prefix(".git").is_ok() {
@@ -91,6 +130,12 @@ fn normalize_tracked_workspace_path(stripped_path: &std::path::Path) -> Option<R
     }
 
     if is_pnpm_workspace_state(&relative) {
+        return None;
+    }
+
+    // Skip the task cache. vp rewrites it after every run, so a task that
+    // reads it, like a tool crawling the project, would never hit.
+    if cache_root.is_some_and(|cache_root| relative.strip_prefix(cache_root).is_some()) {
         return None;
     }
 
@@ -115,13 +160,46 @@ fn is_pnpm_workspace_state(relative: &RelativePathBuf) -> bool {
 mod tests {
     use super::*;
 
+    /// The workspace-relative path of `path` under the workspace root `/repo`
+    /// (`C:\repo` on Windows), tracked as fspy reports it: joined to the root,
+    /// `..` included.
+    fn tracked(path: &str) -> Option<RelativePathBuf> {
+        let workspace_root =
+            AbsolutePath::new(if cfg!(windows) { r"C:\repo" } else { "/repo" }).unwrap();
+        let path = workspace_root.join(path);
+        #[cfg(unix)]
+        let ipc_path = <&IpcPath>::from(path.as_path());
+        #[cfg(windows)]
+        let wide: Vec<u16> = {
+            use std::os::windows::ffi::OsStrExt as _;
+            path.as_path().as_os_str().encode_wide().collect()
+        };
+        #[cfg(windows)]
+        let ipc_path = IpcPath::from_wide(&wide);
+        tracked_workspace_path(ipc_path, workspace_root, None)
+    }
+
+    #[test]
+    fn dot_dot_is_resolved_before_the_workspace_root_is_stripped() {
+        let rel = |path: &str| Some(RelativePathBuf::new(path).unwrap());
+        assert_eq!(
+            tracked("packages/sub-pkg/../shared/dist/output.js"),
+            rel("packages/shared/dist/output.js")
+        );
+        assert_eq!(tracked("../repo/dist/output.js"), rel("dist/output.js"));
+        // A relative open of `../site/index.html` from the workspace root.
+        assert_eq!(tracked("../site/index.html"), None);
+        assert_eq!(tracked(".."), None);
+    }
+
     #[test]
     fn pnpm_workspace_state_is_ignored() {
         #[expect(
             clippy::disallowed_types,
             reason = "normalize_tracked_workspace_path requires std::path::Path for fspy strip_path_prefix output"
         )]
-        let normalize = |path: &str| normalize_tracked_workspace_path(std::path::Path::new(path));
+        let normalize =
+            |path: &str| normalize_tracked_workspace_path(std::path::Path::new(path), None);
         assert!(normalize("node_modules/.pnpm-workspace-state-v1.json").is_none());
         assert!(normalize("node_modules/.pnpm-workspace-state-v2.json").is_none());
         assert!(normalize("packages/a/node_modules/.pnpm-workspace-state-v1.json").is_none());
@@ -130,14 +208,26 @@ mod tests {
         assert!(normalize("node_modules/a/.pnpm-workspace-state-v1.json").is_some());
     }
 
-    #[cfg(windows)]
     #[test]
-    fn malformed_windows_drive_path_after_workspace_strip_is_ignored() {
+    fn task_cache_is_ignored() {
+        let cache_root = RelativePathBuf::new("node_modules/.vite/task-cache").unwrap();
         #[expect(
             clippy::disallowed_types,
             reason = "normalize_tracked_workspace_path requires std::path::Path for fspy strip_path_prefix output"
         )]
-        let relative_path = normalize_tracked_workspace_path(std::path::Path::new(r"foo\C:\bar"));
-        assert!(relative_path.is_none());
+        let normalize = |path: &str| {
+            normalize_tracked_workspace_path(std::path::Path::new(path), Some(&cache_root))
+        };
+        assert!(normalize("node_modules/.vite/task-cache").is_none());
+        assert!(normalize("node_modules/.vite/task-cache/v21/cache.db").is_none());
+        assert!(normalize("node_modules/.vite").is_some());
+        assert!(normalize("node_modules/.vite/task-cache-old/cache.db").is_some());
+        assert!(normalize("node_modules/.vite/deps/react.js").is_some());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn malformed_windows_drive_path_after_workspace_strip_is_ignored() {
+        assert!(tracked(r"foo\C:\bar").is_none());
     }
 }

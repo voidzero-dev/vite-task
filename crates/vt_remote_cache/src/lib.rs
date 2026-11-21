@@ -5,7 +5,10 @@ pub mod auth;
 #[cfg(test)]
 mod test_server;
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use bytes::Bytes;
 use reqwest::{
@@ -13,7 +16,7 @@ use reqwest::{
     header::{CONTENT_TYPE, HeaderMap},
     multipart::{Form, Part},
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use url::{ParseError, Url};
 use vt_path::AbsolutePath;
 use vt_str::Str;
@@ -106,23 +109,31 @@ struct FetchRequest<'a> {
     secondary_key: &'a [u8],
 }
 
+/// One of the entries stored under a key.
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+pub struct Entry {
+    /// The stored value.
+    #[serde(with = "serde_bytes")]
+    pub value: Vec<u8>,
+    /// The ID to download the entry's blob with, if it has one. The field
+    /// must be present, with null for no blob.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub blob_id: Option<Str>,
+}
+
 /// The body of a 200 fetch response: an exact or fallback match.
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Fetched {
-    /// The entry stored under the requested key.
+    /// The entries stored under the requested key, newest first.
     Exact {
-        /// The stored value.
-        #[serde(with = "serde_bytes")]
-        value: Vec<u8>,
-        /// The ID to download the entry's blob with, if it has one. The field
-        /// must be present, with null for no blob.
-        #[serde(deserialize_with = "Option::deserialize")]
-        blob_id: Option<Str>,
+        /// At least one entry. An empty list is a malformed response.
+        #[serde(deserialize_with = "non_empty")]
+        entries: Vec<Entry>,
     },
     /// No entry is stored under the requested key, but the secondary key is
-    /// associated with the entry stored under `key`. The fallback entry's
-    /// value and blob ID aren't decoded.
+    /// associated with the entries stored under `key`. Their values and blob
+    /// IDs aren't decoded.
     Fallback {
         /// The key the fallback entry is stored under.
         #[serde(with = "serde_bytes")]
@@ -175,8 +186,8 @@ impl Client {
         self.auth.headers(operation, &self.http).await.map_err(Error::Auth)
     }
 
-    /// Fetch the entry stored under `key` with `POST {endpoint}/fetch`,
-    /// falling back to the entry associated with `secondary_key`. Returns
+    /// Fetch the entries stored under `key` with `POST {endpoint}/fetch`,
+    /// falling back to the key associated with `secondary_key`. Returns
     /// `None` for a 404 response, which means neither key matched.
     ///
     /// # Errors
@@ -184,7 +195,9 @@ impl Client {
     /// Returns an error if the credentials can't be obtained, the request
     /// fails, the server responds with a status other than 200 or 404, or the
     /// body of a 200 response isn't an exact or fallback match.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub async fn fetch(&self, key: &[u8], secondary_key: &[u8]) -> Result<Option<Fetched>, Error> {
+        let start = Instant::now();
         let headers = self.auth_headers(Operation::Fetch).await?;
         let body = encode_cbor(&FetchRequest { key, secondary_key });
         let response = self
@@ -196,6 +209,7 @@ impl Client {
             .send()
             .await
             .map_err(network_error)?;
+        log_response(&response, start);
         if response.status() == StatusCode::NOT_FOUND {
             // Read the body so the connection can be reused. It doesn't matter
             // if that fails, because the status alone is the answer.
@@ -203,6 +217,7 @@ impl Client {
             return Ok(None);
         }
         let body = check_status(response).await?.bytes().await.map_err(network_error)?;
+        tracing::debug!(bytes = body.len(), elapsed = ?start.elapsed(), "remote cache fetch received");
         decode_fetched(&body).map(Some)
     }
 
@@ -214,11 +229,14 @@ impl Client {
     ///
     /// Returns an error if the credentials can't be obtained, the request
     /// fails, or the server responds with a status other than 200.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub async fn download(&self, blob_id: &str) -> Result<Download, Error> {
+        let start = Instant::now();
         let mut url = self.blob_url.clone();
         url.path_segments_mut().map_err(|()| Error::InvalidEndpoint(None))?.push(blob_id);
         let headers = self.auth_headers(Operation::Download).await?;
         let response = self.http.get(url).headers(headers).send().await.map_err(network_error)?;
+        log_response(&response, start);
         Ok(Download { response: check_status(response).await? })
     }
 
@@ -231,6 +249,7 @@ impl Client {
     /// Returns an error if the credentials can't be obtained, the blob file
     /// can't be opened, the request fails, or the server responds with a
     /// status other than 200.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub async fn store(
         &self,
         key: &[u8],
@@ -238,12 +257,24 @@ impl Client {
         value: &[u8],
         blob: Option<&AbsolutePath>,
     ) -> Result<(), Error> {
+        let start = Instant::now();
         let headers = self.auth_headers(Operation::Store).await?;
+        let auth = start.elapsed();
         let metadata = StoreMetadata { key, secondary_key, value };
         let mut form = Form::new().part("metadata", metadata_part(&metadata));
-        if let Some(blob) = blob {
-            form = form.part("blob", blob_part(blob).await?);
-        }
+        let blob_bytes = if let Some(blob) = blob {
+            let (part, length) = blob_part(blob).await?;
+            form = form.part("blob", part);
+            Some(length)
+        } else {
+            None
+        };
+        tracing::debug!(
+            value_bytes = value.len(),
+            blob_bytes,
+            ?auth,
+            "sending a remote cache store"
+        );
         let response = self
             .http
             .post(self.store_url.clone())
@@ -252,11 +283,24 @@ impl Client {
             .send()
             .await
             .map_err(network_error)?;
+        log_response(&response, start);
         // The response's blob ID isn't needed. Read the body anyway, so the
         // connection can be reused.
         check_status(response).await?.bytes().await.map_err(network_error)?;
         Ok(())
     }
+}
+
+/// Log the status and length of `response`, and the time since `start`, when
+/// the operation started. The request URL is left out, since the endpoint may
+/// contain credentials.
+fn log_response(response: &Response, start: Instant) {
+    tracing::debug!(
+        status = response.status().as_u16(),
+        content_length = response.content_length(),
+        elapsed = ?start.elapsed(),
+        "remote cache responded"
+    );
 }
 
 /// Only HTTP 200 counts as success. For other statuses, the error includes the
@@ -275,6 +319,14 @@ async fn check_status(response: Response) -> Result<Response, Error> {
 
 fn network_error(err: reqwest::Error) -> Error {
     Error::Network(err.without_url())
+}
+
+fn non_empty<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Entry>, D::Error> {
+    let entries = Vec::<Entry>::deserialize(deserializer)?;
+    if entries.is_empty() {
+        return Err(serde::de::Error::invalid_length(0, &"at least one entry"));
+    }
+    Ok(entries)
 }
 
 fn decode_fetched(body: &[u8]) -> Result<Fetched, Error> {
@@ -306,12 +358,14 @@ fn metadata_part(metadata: &StoreMetadata<'_>) -> Part {
     Part::bytes(encode_cbor(metadata)).mime_str("application/cbor").expect("valid MIME type")
 }
 
-async fn blob_part(path: &AbsolutePath) -> Result<Part, Error> {
+/// The blob part streamed from the file at `path`, and its length.
+async fn blob_part(path: &AbsolutePath) -> Result<(Part, u64), Error> {
     let file = tokio::fs::File::open(path).await.map_err(Error::ReadBlob)?;
     let length = file.metadata().await.map_err(Error::ReadBlob)?.len();
-    Ok(Part::stream_with_length(file, length)
+    let part = Part::stream_with_length(file, length)
         .mime_str("application/octet-stream")
-        .expect("valid MIME type"))
+        .expect("valid MIME type");
+    Ok((part, length))
 }
 
 #[cfg(test)]
@@ -367,27 +421,30 @@ mod tests {
         encode_cbor(&ciborium::Value::Map(map))
     }
 
+    fn cbor_value(fields: Vec<(&str, ciborium::Value)>) -> ciborium::Value {
+        ciborium::Value::Map(fields.into_iter().map(|(name, value)| (name.into(), value)).collect())
+    }
+
+    /// A fetch response with an exact match of `entries`.
+    fn exact(entries: Vec<ciborium::Value>) -> Vec<u8> {
+        cbor_map(vec![("kind", "exact".into()), ("entries", ciborium::Value::Array(entries))])
+    }
+
     #[test]
     fn decodes_each_kind_of_fetch_response() {
         let bytes = |bytes: &[u8]| ciborium::Value::Bytes(bytes.to_vec());
-        let exact = cbor_map(vec![
-            ("kind", "exact".into()),
-            ("value", bytes(b"\x00value")),
-            ("blob_id", "1".into()),
+        let entries = exact(vec![
+            cbor_value(vec![("value", bytes(b"\x00newest")), ("blob_id", "2".into())]),
+            cbor_value(vec![("blob_id", ciborium::Value::Null), ("value", bytes(b"older"))]),
         ]);
         assert_eq!(
-            decode_fetched(&exact).unwrap(),
-            Fetched::Exact { value: b"\x00value".to_vec(), blob_id: Some(Str::from("1")) }
-        );
-
-        let without_blob = cbor_map(vec![
-            ("kind", "exact".into()),
-            ("value", bytes(b"value")),
-            ("blob_id", ciborium::Value::Null),
-        ]);
-        assert_eq!(
-            decode_fetched(&without_blob).unwrap(),
-            Fetched::Exact { value: b"value".to_vec(), blob_id: None }
+            decode_fetched(&entries).unwrap(),
+            Fetched::Exact {
+                entries: vec![
+                    Entry { value: b"\x00newest".to_vec(), blob_id: Some(Str::from("2")) },
+                    Entry { value: b"older".to_vec(), blob_id: None },
+                ]
+            }
         );
 
         let fallback = cbor_map(vec![
@@ -409,17 +466,18 @@ mod tests {
             cbor_map(vec![("kind", "unknown".into())]),
             // A miss is a 404 response, not a kind.
             cbor_map(vec![("kind", "not_found".into())]),
-            // The value must be a byte string.
-            cbor_map(vec![
-                ("kind", "exact".into()),
-                ("value", 1.into()),
-                ("blob_id", ciborium::Value::Null),
-            ]),
-            // `blob_id` is nullable, but it must be present.
+            // An exact match has at least one entry.
+            exact(vec![]),
+            // The entries must be a list, not the single entry that earlier servers sent.
             cbor_map(vec![
                 ("kind", "exact".into()),
                 ("value", ciborium::Value::Bytes(b"value".to_vec())),
+                ("blob_id", ciborium::Value::Null),
             ]),
+            // The value must be a byte string.
+            exact(vec![cbor_value(vec![("value", 1.into()), ("blob_id", ciborium::Value::Null)])]),
+            // `blob_id` is nullable, but it must be present.
+            exact(vec![cbor_value(vec![("value", ciborium::Value::Bytes(b"value".to_vec()))])]),
         ] {
             let error = decode_fetched(&body).unwrap_err();
             assert!(matches!(error, Error::MalformedResponse(_)), "{error:?}");
@@ -452,16 +510,15 @@ mod tests {
     async fn fetch_posts_the_keys_as_cbor() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let client = client_for(&listener);
-        let body = cbor_map(vec![
-            ("kind", "exact".into()),
+        let body = exact(vec![cbor_value(vec![
             ("value", ciborium::Value::Bytes(b"v".to_vec())),
             ("blob_id", ciborium::Value::Null),
-        ]);
+        ])]);
         let server = std::thread::spawn(move || serve_once(&listener, "HTTP/1.1 200 OK", &body));
 
         assert_eq!(
             client.fetch(b"k", b"s").await.unwrap(),
-            Some(Fetched::Exact { value: b"v".to_vec(), blob_id: None })
+            Some(Fetched::Exact { entries: vec![Entry { value: b"v".to_vec(), blob_id: None }] })
         );
 
         let request = server.join().unwrap();

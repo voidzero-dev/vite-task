@@ -1,0 +1,10 @@
+{
+  "name": "@test/web",
+  "dependencies": {
+    "@test/ui": "workspace:*",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@test/ui": "workspace:*"
+  }
+}

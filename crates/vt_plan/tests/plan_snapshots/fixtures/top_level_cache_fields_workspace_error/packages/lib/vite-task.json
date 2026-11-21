@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "build": {
+      "command": "echo build",
+      "input": ["src/**"]
+    }
+  }
+}

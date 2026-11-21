@@ -1,0 +1,610 @@
+# These cases use the remote cache backend, so they are ignored because it
+# runs on Node.js, and skipped on musl because workerd's prebuilt binaries
+# require glibc. Each starts its own backend first and stops it last. Steps
+# that upload run with `--github-actions`, as a job of a push to the main
+# branch, and hide the message about pending uploads, whose timing varies.
+# Request lines list an exact fetch's entries by blob number, newest first.
+[[e2e]]
+name = "older_entries"
+comment = "A key keeps its newest entries. A lookup checks them newest first and restores the first one that matches."
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "The first entry, for `src/a.txt` with 1, has blob 1." },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "2",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "The fetch returns the key's only entry, which doesn't match. The entry for 2 is added." },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "3",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "The entries come newest first." },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "1",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The local entry is for 3. Of the remote entries, only the oldest matches, so its blob is downloaded." },
+  { argv = [
+    "vtt",
+    "print-file",
+    "output.txt",
+  ], comment = "The outputs of the run for 1 are restored." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "newest_entry_explains_miss"
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vtt",
+    "write-file",
+    "src/b.txt",
+    "x",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "The entry for `src/b.txt` with x is added." },
+  [
+    "vtt",
+    "write-file",
+    "src/b.txt",
+    "y",
+  ],
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], comment = "No entry matches. The miss is explained against the newest entry, in which `src/b.txt` had other contents. The older entry had no `src/b.txt`." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "entries_per_key"
+comment = "The namespace keeps two entries per key."
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+    "--entries-per-key",
+    "2",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "2",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "3",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "The third entry retires the oldest one." },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "1",
+  ],
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The entry for 1 was retired, so the run misses." },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "2",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The entry for 2 is still kept." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "entries_per_key_isolation"
+comment = "The namespace keeps one entry per key. Tasks with other values of `MODE` have other keys."
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+    "--entries-per-key",
+    "1",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+    [
+      "MODE",
+      "a",
+    ],
+  ], comment = "The entry for `MODE` a and `src/a.txt` with 1 has blob 1." },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+    [
+      "MODE",
+      "b",
+    ],
+  ], comment = "Key b has no entry yet, so the fetch falls back to key a." },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "2",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+    [
+      "MODE",
+      "b",
+    ],
+  ], comment = "The entry for 2 replaces key b's entry for 1." },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "1",
+  ],
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "MODE",
+      "b",
+    ],
+  ], comment = "Key b only has its entry for 2, so the run misses." },
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "MODE",
+      "a",
+    ],
+  ], comment = "Key a still has its entry for 1: entries of other keys don't take its place." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "expired_entries"
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "2",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "remote-cache-server",
+    "expire-entry",
+    "2",
+  ],
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The expired entry isn't fetched, and the miss is explained against the newest entry that hasn't expired." },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "1",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The entry for 1 hasn't expired." },
+  [
+    "remote-cache-server",
+    "expire-entry",
+    "1",
+  ],
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], comment = "Once every entry of the key has expired, the fetch finds nothing, not even a fallback." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "expired_entry_takes_no_slot"
+comment = "The namespace keeps two entries per key."
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+    "--entries-per-key",
+    "2",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "2",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "remote-cache-server",
+    "expire-entry",
+    "2",
+  ],
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "3",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ], comment = "Only the entry for 1 hasn't expired, so the entry for 3 retires nothing, although the key has two entries." },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "1",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "build",
+  ], comment = "The entry for 1 is still kept." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]

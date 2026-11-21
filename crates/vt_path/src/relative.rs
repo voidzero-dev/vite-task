@@ -63,6 +63,19 @@ impl RelativePath {
         relative_path_buf
     }
 
+    /// Returns `self` without its final component, or [`None`] if `self` is
+    /// empty. The parent of a single component is the empty path.
+    #[must_use]
+    pub fn parent(&self) -> Option<&Self> {
+        if self.0.is_empty() {
+            return None;
+        }
+        let parent = self.0.rsplit_once('/').map_or("", |(parent, _)| parent);
+        // SAFETY: The components before a separator of a portable path are
+        // still a portable path.
+        Some(unsafe { Self::assume_portable(parent) })
+    }
+
     /// Lexically normalizes the path by resolving `..` components without
     /// accessing the filesystem. (`.` components are already stripped by
     /// [`RelativePathBuf::new`].)
@@ -461,6 +474,16 @@ mod tests {
     fn clean_malformed_drive_path() {
         let rel_path = RelativePathBuf::new(r"foo\C:\bar").unwrap();
         assert!(let Err(FromPathError::NonRelative) = rel_path.clean());
+    }
+
+    #[test]
+    fn parent() {
+        let rel_path = RelativePathBuf::new("foo/bar").unwrap();
+        let parent = rel_path.parent().unwrap();
+        assert_eq!(parent.as_str(), "foo");
+        let root = parent.parent().unwrap();
+        assert_eq!(root.as_str(), "");
+        assert!(root.parent().is_none());
     }
 
     #[test]

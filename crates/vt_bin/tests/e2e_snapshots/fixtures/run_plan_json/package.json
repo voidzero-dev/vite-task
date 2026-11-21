@@ -1,0 +1,7 @@
+{
+  "name": "run-plan",
+  "private": true,
+  "scripts": {
+    "b%c": "echo id"
+  }
+}

@@ -23,7 +23,7 @@ use plan_request::{CacheOverride, PlanRequest, QueryPlanRequest, SyntheticPlanRe
 use rustc_hash::FxHashMap;
 use serde::{Serialize, ser::SerializeMap as _};
 use vt_casefold::EnvName;
-use vt_graph::{TaskGraphLoadError, config::GlobResolver, display::TaskDisplay};
+use vt_graph::{IndexedTaskGraph, config::GlobResolver, display::TaskDisplay};
 use vt_path::AbsolutePath;
 use vt_str::Str;
 
@@ -174,11 +174,6 @@ pub trait PlanRequestParser: Debug {
     ) -> anyhow::Result<Option<PlanRequest>>;
 }
 
-#[async_trait::async_trait(?Send)]
-pub trait TaskGraphLoader {
-    async fn load_task_graph(&mut self) -> Result<&vt_graph::IndexedTaskGraph, TaskGraphLoadError>;
-}
-
 /// Output of [`plan_query`] (and the internal `plan_query_request`).
 ///
 /// Wraps the [`ExecutionGraph`] together with a diagnostic flag that lets the
@@ -193,10 +188,10 @@ pub struct PlanResult {
     pub no_packages_matched: bool,
 }
 
-/// Plan a query execution: load the task graph, query it, and build the execution graph.
+/// Plan a query execution: query the task graph and build the execution graph.
 ///
 /// # Errors
-/// Returns an error if task graph loading, query, or execution planning fails.
+/// Returns an error if loading the tasks it reads, the query, or execution planning fails.
 #[tracing::instrument(level = "debug", skip_all)]
 #[expect(clippy::implicit_hasher, reason = "FxHashMap is the only hasher used in this codebase")]
 pub async fn plan_query(
@@ -205,11 +200,9 @@ pub async fn plan_query(
     cwd: &Arc<AbsolutePath>,
     envs: &Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
     plan_request_parser: &mut (dyn PlanRequestParser + '_),
-    task_graph_loader: &mut (dyn TaskGraphLoader + '_),
+    indexed_task_graph: &IndexedTaskGraph<'_>,
     glob_resolver: &Rc<GlobResolver>,
 ) -> Result<PlanResult, Error> {
-    let indexed_task_graph = task_graph_loader.load_task_graph().await?;
-
     let resolved_global_cache = indexed_task_graph.global_cache_config().clone();
 
     let QueryPlanRequest { query, plan_options } = query_plan_request;

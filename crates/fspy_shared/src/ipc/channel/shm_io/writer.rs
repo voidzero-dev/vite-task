@@ -35,9 +35,10 @@ unsafe impl<M: Sync> Sync for ShmWriter<M> {}
 /// Why a frame could not be claimed.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClaimError {
-    /// The CLOSED gate is set, by a seal or by an earlier failed claim.
-    /// Dropping the record is right either way: the receiver had stopped
-    /// collecting, or that same bit already fails its seal.
+    /// The CLOSED gate is set, by a seal, by an earlier failed claim, or by
+    /// [`ShmWriter::report_loss`]. Dropping the record is right in every
+    /// case: the receiver had stopped collecting, or that same bit already
+    /// fails its seal.
     #[error("the channel has been closed")]
     Closed,
     /// No room left, or a frame longer than the `u32::MAX` a descriptor
@@ -69,9 +70,26 @@ impl<M: AsRawSlice> ShmWriter<M> {
         Some(Self { mapped, _mem: mem })
     }
 
-    /// Whether the CLOSED gate is set, by a seal or by a failed claim.
+    /// Whether the CLOSED gate is set, by a seal, by a failed claim, or by
+    /// [`ShmWriter::report_loss`].
     pub fn is_closed(&self) -> bool {
         self.mapped.claims().load(Ordering::Relaxed) & CLOSED != 0
+    }
+
+    /// Sets the CLOSED gate to report that this writer went on to perform an
+    /// operation it could not record.
+    ///
+    /// The seal then fails and every later claim is refused, so the receiver
+    /// learns the frames are incomplete rather than mistaking what arrived
+    /// for the whole trace.
+    ///
+    /// Storing the gate rather than or-ing it in drops the claim count,
+    /// which nothing reads once the gate is set. The seal fails on the
+    /// bit before it looks at the count, and a claim that reads the
+    /// cleared count reads the gate along with it, so it gives up
+    /// before using a slot index.
+    pub fn report_loss(&self) {
+        self.mapped.claims().store(CLOSED, Ordering::Relaxed);
     }
 
     /// Claims a frame of exactly `frame_size` bytes. Wait-free: two
@@ -87,14 +105,8 @@ impl<M: AsRawSlice> ShmWriter<M> {
 
         // The loss report (rule 1): the gate marks the frames incomplete
         // and shuts the channel down for later claims.
-        //
-        // Storing the gate rather than or-ing it in drops the claim count,
-        // which nothing reads once the gate is set. The seal fails on the
-        // bit before it looks at the count, and a claim that reads the
-        // cleared count reads the gate along with it, so it gives up
-        // before using a slot index.
         let report_loss = || {
-            mapped.claims().store(CLOSED, Ordering::Relaxed);
+            self.report_loss();
             ClaimError::Capacity
         };
 

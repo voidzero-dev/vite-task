@@ -1,0 +1,130 @@
+[[e2e]]
+name = "nothing_runs_or_is_written"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "build",
+  ], comment = "No cache yet. Nothing runs, so the file isn't printed." },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "A real run caches the task." },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "build",
+  ], comment = "A hit isn't replayed." },
+  [
+    "vtt",
+    "write-file",
+    "src/a.txt",
+    "changed",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "build",
+  ], comment = "A miss names the changed file, without running." },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "build",
+  ], comment = "Nothing was recorded, so it's the same miss again." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "The last run is still the real one." },
+]
+
+[[e2e]]
+name = "summary"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "test",
+  ], comment = "Two tasks, so there is a summary line. No blank line between commands." },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "-v",
+    "test",
+  ], comment = "The detailed summary has no exit icons, and the hit saves nothing." },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--log",
+    "labeled",
+    "test",
+  ], comment = "`--log` only shapes task output, so it does nothing in a dry run." },
+]
+
+[[e2e]]
+name = "steps_and_disabled_caching"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "steps",
+  ], comment = "Each `&&` part is a step. The built-in `echo` prints nothing." },
+  [
+    "vt",
+    "run",
+    "--dry-run",
+    "uncached",
+  ],
+]
+
+[[e2e]]
+name = "nested_runs"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "nested",
+  ], comment = "A nested `vt run` is part of the dry run." },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "nested-dry-run",
+  ], comment = "A nested `vt run --dry-run` is a process of its own, which a dry run doesn't start." },
+  { argv = [
+    "vt",
+    "run",
+    "nested-dry-run",
+  ], comment = "A real run starts it, and it prints its own dry run." },
+]
+
+[[e2e]]
+name = "flag_placement"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "args",
+    "--dry-run",
+  ], comment = "After the task name, `--dry-run` is passed to the task, which runs." },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+  ], comment = "Without a task, there is nothing to preview." },
+]

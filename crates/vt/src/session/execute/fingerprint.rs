@@ -4,18 +4,20 @@
 //! fingerprints of file system state after task execution.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ffi::OsStr,
     fs::File,
     io::{self, BufRead},
     sync::Arc,
+    time::Instant,
 };
 
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use vt_casefold::EnvName;
-use vt_path::{AbsolutePath, RelativePathBuf};
+use vt_glob::path::PathGlobSet;
+use vt_path::{AbsolutePath, RelativePath, RelativePathBuf};
 use vt_plan::cache_metadata::EnvValueHash;
 use vt_str::Str;
 use wincode::{SchemaRead, SchemaWrite};
@@ -23,7 +25,7 @@ use wincode::{SchemaRead, SchemaWrite};
 use super::rebuildable::Rebuildable;
 use crate::{
     collections::HashMap,
-    session::cache::{EnvMismatch, InputChangeKind},
+    session::cache::{Change, EnvMismatch, EnvSource, FileCheck, InputChangeKind},
 };
 
 #[derive(
@@ -68,18 +70,6 @@ pub struct PostRunFingerprint {
     pub tracked_env_queries: BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>,
 }
 
-/// A mismatch between the stored post-run fingerprint and the current state.
-#[derive(Debug, Clone)]
-pub enum PostRunMismatch {
-    /// An inferred input file or directory changed.
-    Input { kind: InputChangeKind, path: RelativePathBuf },
-    /// A tool-tracked env var changed value, appeared, or disappeared.
-    TrackedEnv(EnvMismatch),
-    /// A tool-tracked bulk env query's match-set changed between runs. Carries
-    /// the first differing entry in env-name order.
-    TrackedEnvQuery { query: TrackedEnvQuery, mismatch: EnvMismatch },
-}
-
 /// A path the task read, as the task left it.
 #[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct InferredInput {
@@ -99,8 +89,24 @@ pub enum PathFingerprint {
     /// Directory with optional entry listing.
     /// `Folder(None)` means the directory was opened but entries were not read
     /// (e.g., for `openat` calls).
-    /// `Folder(Some(_))` contains the directory entries sorted by name.
-    Folder(Option<BTreeMap<Str, DirEntryKind>>),
+    /// `Folder(Some(_))` contains the directory entries.
+    Folder(Option<DirListing>),
+}
+
+/// The entries of a listed directory.
+#[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+pub struct DirListing {
+    /// The entries sorted by name, without those in `ignored_entries` and
+    /// those the input negative globs exclude.
+    pub entries: BTreeMap<Str, DirEntryKind>,
+    /// Names left out of `entries` that a later run may find missing or
+    /// present: the entries the task can rebuild, and those that
+    /// tool-reported `ignoreInput` paths name, whether or not they were there
+    /// after the run. They're left out of the current listing before
+    /// comparing, and so are the entries the input negative globs exclude,
+    /// which aren't recorded: the globs are part of the cache key, so
+    /// validation has the same ones.
+    pub ignored_entries: BTreeSet<Str>,
 }
 
 /// Kind of directory entry
@@ -114,92 +120,196 @@ pub enum DirEntryKind {
 impl PostRunFingerprint {
     /// Creates a new fingerprint from path accesses after task execution.
     ///
-    /// Negative glob filtering is done upstream (see
-    /// [`super::tracked_accesses::TrackedPathAccesses::from_raw`]).
-    /// Paths already present in `globbed_inputs` are skipped — they are
-    /// already tracked by the prerun glob fingerprint. Every other path is
-    /// fingerprinted as the task left it, including a file the task rewrote.
+    /// Input negative globs and tool-reported `ignoreInput` paths have
+    /// already been applied to `inferred_path_reads` (see
+    /// `cache_update::observe_fspy`). Paths already present in
+    /// `globbed_inputs` are skipped — they are already tracked by the prerun
+    /// glob fingerprint. Empty folders the task made and folders holding only
+    /// what the task can rebuild are skipped too: a hit restores them if
+    /// they're among the task's outputs. Every other path is fingerprinted as
+    /// the task left it, including a file the task rewrote, except that a
+    /// folder listing leaves out the entries the task can rebuild and those
+    /// that `input_negative_globs` or `ignored_inputs` exclude, and records
+    /// the names validation can't tell from the globs (see [`DirListing`]).
     ///
     /// # Arguments
     /// * `inferred_path_reads` - Map of paths that were read during execution (from fspy)
     /// * `rebuildable` - What the task can rebuild, so a later run may find it missing
+    /// * `input_negative_globs` - The input negative globs, which also exclude listing entries
+    /// * `ignored_inputs` - Tool-reported `ignoreInput` paths, which also exclude listing entries
     /// * `base_dir` - Workspace root for resolving relative paths
     /// * `globbed_inputs` - Prerun glob fingerprint; paths here are skipped
     /// * `tracked_envs` - Tool-requested env vars (name -> value hash), validated on lookup
     /// * `tracked_env_queries` - Tool-requested bulk env queries (query -> match-set hashes)
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "listing entries need the input exclusions next to the run's records"
+    )]
     #[tracing::instrument(level = "debug", skip_all, name = "create_post_run_fingerprint")]
     pub fn create(
         inferred_path_reads: &HashMap<RelativePathBuf, PathRead>,
         rebuildable: &Rebuildable,
+        input_negative_globs: &PathGlobSet<'_>,
+        ignored_inputs: &FxHashSet<RelativePathBuf>,
         base_dir: &AbsolutePath,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
         tracked_env_queries: BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>,
     ) -> anyhow::Result<Self> {
+        let start = Instant::now();
+        // Rayon's threads don't run in this thread's span, so the per-input
+        // events name it as their parent, which keeps them under the task.
+        let span = tracing::Span::current();
         let inferred_inputs = inferred_path_reads
             .par_iter()
-            .filter(|(path, _)| !globbed_inputs.contains_key(*path))
+            .filter(|(path, _)| {
+                !globbed_inputs.contains_key(*path) && !rebuildable.is_rebuildable_folder(path)
+            })
             .map(|(relative_path, path_read)| {
                 let full_path = Arc::<AbsolutePath>::from(base_dir.join(relative_path));
-                let fingerprint = fingerprint_path(&full_path, *path_read)?;
-                let may_be_missing = rebuildable.may_be_missing(relative_path);
+                let mut fingerprint = fingerprint_path(&full_path, *path_read)?;
+                tracing::trace!(
+                    parent: &span,
+                    path = relative_path.as_str(),
+                    "fingerprinted an inferred input"
+                );
+                if let PathFingerprint::Folder(Some(listing)) = &mut fingerprint {
+                    if !rebuildable.is_empty() {
+                        let DirListing { entries, ignored_entries } = listing;
+                        entries.retain(|name, kind| {
+                            let is_dir = matches!(kind, DirEntryKind::Dir);
+                            let ignored =
+                                rebuildable.is_rebuildable_entry(relative_path, name, is_dir);
+                            if ignored {
+                                ignored_entries.insert(name.clone());
+                            }
+                            !ignored
+                        });
+                    }
+                    listing
+                        .ignored_entries
+                        .extend(ignored_input_names(relative_path, ignored_inputs));
+                    leave_out_excluded_entries(listing, relative_path, input_negative_globs);
+                }
+                let may_be_missing =
+                    rebuildable.may_be_missing(relative_path, &fingerprint, base_dir);
                 Ok((relative_path.clone(), InferredInput { fingerprint, may_be_missing }))
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
+        tracing::debug!(
+            reads = inferred_path_reads.len(),
+            inputs = inferred_inputs.len(),
+            elapsed = ?start.elapsed(),
+            "created the post-run fingerprint"
+        );
 
         Ok(Self { inferred_inputs, tracked_envs, tracked_env_queries })
     }
 
-    /// Validates the fingerprint against current filesystem state and the
-    /// unfiltered env context used by runner-aware IPC. `unfiltered_envs` must
-    /// be the same plan env context that served the original `getEnv` request,
-    /// not the filtered env passed to the spawned process.
-    ///
-    /// Returns `Some(mismatch)` if anything changed, `None` if all valid.
-    /// Returns an error if a tracked env is currently present but cannot be
-    /// represented as UTF-8; treating that value as unset would make cache
-    /// validation unsound.
-    #[tracing::instrument(level = "debug", skip_all, name = "validate_post_run_fingerprint")]
-    pub fn validate(
+    /// What checking the inferred inputs against the filesystem found, one
+    /// result per change, or per input or folder entry that can't be checked:
+    /// with [`FileCheck::First`], the first one found, and with
+    /// [`FileCheck::All`], every one, listing every entry added to or removed
+    /// from a listed folder. The inputs are checked in parallel, so when
+    /// several changed, which one is found first isn't defined. `input_negative_globs` are the
+    /// task's input negative globs, part of the cache key and so the same as
+    /// when the fingerprint was created.
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn input_changes(
         &self,
         base_dir: &AbsolutePath,
-        unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
-    ) -> anyhow::Result<Option<PostRunMismatch>> {
-        let input_mismatch =
-            self.inferred_inputs.par_iter().find_map_any(|(input_relative_path, input)| {
-                let InferredInput { fingerprint: path_fingerprint, may_be_missing } = input;
-                let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
-                let path_read = PathRead {
-                    read_dir_entries: matches!(path_fingerprint, PathFingerprint::Folder(Some(_))),
-                };
-                let current_path_fingerprint = match fingerprint_path(&input_full_path, path_read) {
-                    Ok(ok) => ok,
-                    Err(err) => return Some(Err(err)),
-                };
-                if path_fingerprint == &current_path_fingerprint
-                    || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound)
-                {
-                    None
-                } else {
-                    let (kind, entry_name) =
-                        determine_change_kind(path_fingerprint, &current_path_fingerprint);
+        input_negative_globs: &PathGlobSet<'_>,
+        file_check: FileCheck,
+    ) -> Vec<anyhow::Result<Change>> {
+        let start = Instant::now();
+        // As in `create`, the per-input events name this span as their parent.
+        let span = tracing::Span::current();
+        // At most `limit` changes of one input.
+        let check_input = |(input_relative_path, input): (&RelativePathBuf, &InferredInput),
+                           limit: usize|
+         -> Vec<anyhow::Result<Change>> {
+            let InferredInput { fingerprint: path_fingerprint, may_be_missing } = input;
+            let input_full_path = Arc::<AbsolutePath>::from(base_dir.join(input_relative_path));
+            let path_read = PathRead {
+                read_dir_entries: matches!(path_fingerprint, PathFingerprint::Folder(Some(_))),
+            };
+            let mut current_path_fingerprint = match fingerprint_path(&input_full_path, path_read) {
+                Ok(ok) => ok,
+                Err(err) => return vec![Err(err)],
+            };
+            // The ignored entries may be missing or present, so the current
+            // listing records and leaves out the same names, and the entries
+            // the input negative globs exclude.
+            if let (PathFingerprint::Folder(Some(stored)), PathFingerprint::Folder(Some(current))) =
+                (path_fingerprint, &mut current_path_fingerprint)
+            {
+                current.ignored_entries.clone_from(&stored.ignored_entries);
+                leave_out_excluded_entries(current, input_relative_path, input_negative_globs);
+            }
+            let unchanged = path_fingerprint == &current_path_fingerprint
+                || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound);
+            tracing::trace!(
+                parent: &span,
+                path = input_relative_path.as_str(),
+                unchanged,
+                "validated an inferred input"
+            );
+            if unchanged {
+                return Vec::new();
+            }
+            determine_change_kinds(path_fingerprint, &current_path_fingerprint)
+                .into_iter()
+                .take(limit)
+                .map(|(kind, entry_name)| {
                     let path = if let Some(name) = entry_name {
                         // For folder changes, build `dir/entry` path
-                        let entry = match RelativePathBuf::new(name.as_str()) {
-                            Ok(p) => p,
-                            Err(e) => return Some(Err(e.into())),
-                        };
-                        input_relative_path.as_relative_path().join(entry)
+                        input_relative_path
+                            .as_relative_path()
+                            .join(RelativePathBuf::new(name.as_str())?)
                     } else {
                         input_relative_path.clone()
                     };
-                    Some(Ok(PostRunMismatch::Input { kind, path }))
-                }
-            });
-        if let Some(result) = input_mismatch {
-            return result.map(Some);
-        }
+                    Ok(Change::File { kind, path })
+                })
+                .collect()
+        };
+        let changes: Vec<_> = match file_check {
+            FileCheck::First => self
+                .inferred_inputs
+                .par_iter()
+                .find_map_any(|input| check_input(input, 1).pop())
+                .into_iter()
+                .collect(),
+            FileCheck::All | FileCheck::AllAndBaseline => self
+                .inferred_inputs
+                .par_iter()
+                .flat_map_iter(|input| check_input(input, usize::MAX))
+                .collect(),
+        };
+        tracing::debug!(
+            inputs = self.inferred_inputs.len(),
+            valid = changes.is_empty(),
+            elapsed = ?start.elapsed(),
+            "validated the inferred inputs"
+        );
+        changes
+    }
 
+    /// Every tracked env var and tracked query match that differs from the
+    /// unfiltered env context used by runner-aware IPC, one result per change,
+    /// or per env or query that can't be compared, so one that can't doesn't
+    /// hide the others' changes. `unfiltered_envs` must be the same plan env
+    /// context that served the original `getEnv` request, not the filtered
+    /// env passed to the spawned process.
+    ///
+    /// A tracked env that's currently present but can't be represented as
+    /// UTF-8 is an error; treating that value as unset would make cache
+    /// validation unsound.
+    pub fn env_changes(
+        &self,
+        unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
+    ) -> Vec<anyhow::Result<Change>> {
+        let mut checked = Vec::new();
         for (name, stored_value) in &self.tracked_envs {
             let current_value = unfiltered_envs
                 .get(EnvName::from_ref(OsStr::new(name.as_str())))
@@ -209,43 +319,40 @@ impl PostRunFingerprint {
                     })?;
                     Ok::<_, anyhow::Error>(EnvValueHash::new(value_str))
                 })
-                .transpose()?;
-            if let Some(mismatch) =
-                EnvMismatch::compare(name, stored_value.as_ref(), current_value.as_ref())
-            {
-                return Ok(Some(PostRunMismatch::TrackedEnv(mismatch)));
+                .transpose();
+            match current_value {
+                Ok(current_value) => checked.extend(
+                    EnvMismatch::compare(name, stored_value.as_ref(), current_value.as_ref())
+                        .map(Ok),
+                ),
+                Err(err) => checked.push(Err(err)),
             }
         }
 
         for (query, stored_matches) in &self.tracked_env_queries {
-            let current_matches = match match_env_query(query, unfiltered_envs)? {
-                EnvQueryValidation::Matches(matches) => matches,
-                EnvQueryValidation::NonUtf8Value(mismatch) => {
-                    return Ok(Some(PostRunMismatch::TrackedEnvQuery {
-                        query: query.clone(),
-                        mismatch,
-                    }));
-                }
-            };
-            if let Some(mismatch) = first_env_glob_mismatch(stored_matches, &current_matches) {
-                return Ok(Some(PostRunMismatch::TrackedEnvQuery {
-                    query: query.clone(),
-                    mismatch,
-                }));
+            match match_env_query(query, unfiltered_envs) {
+                Ok(current_matches) => checked.extend(
+                    env_query_mismatches(stored_matches, &current_matches).into_iter().map(Ok),
+                ),
+                Err(err) => checked.push(Err(err)),
             }
         }
 
-        Ok(None)
+        checked
+            .into_iter()
+            .map(|mismatch| {
+                mismatch.map(|mismatch| Change::Env { mismatch, source: EnvSource::Tracked })
+            })
+            .collect()
     }
 }
 
 /// Build the current match-set for `query` by enumerating the given env
-/// snapshot and keeping matching UTF-8 names. If a matching env has a non-UTF-8
-/// value, return a changed mismatch so the stale cache entry is not replayed.
+/// snapshot and keeping matching UTF-8 names.
 fn match_env_query(
     query: &TrackedEnvQuery,
     envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
-) -> anyhow::Result<EnvQueryValidation> {
+) -> anyhow::Result<EnvQueryMatches> {
     Ok(match query {
         TrackedEnvQuery::Glob(pattern) => {
             let glob = vt_glob::env::EnvGlob::new(pattern.as_str())?;
@@ -260,8 +367,8 @@ fn match_env_query(
 fn collect_matching_envs(
     envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
     is_match: impl Fn(&str) -> bool,
-) -> EnvQueryValidation {
-    let mut matches = BTreeMap::new();
+) -> EnvQueryMatches {
+    let mut matches = EnvQueryMatches::default();
     for (name, value) in envs {
         let Some(name_str) = name.inner().to_str() else {
             continue;
@@ -269,116 +376,164 @@ fn collect_matching_envs(
         if !is_match(name_str) {
             continue;
         }
-        let Some(value_str) = value.to_str() else {
-            return EnvQueryValidation::NonUtf8Value(EnvMismatch::Changed {
-                name: Str::from(name_str),
-            });
-        };
-        matches.insert(Str::from(name_str), EnvValueHash::new(value_str));
-    }
-    EnvQueryValidation::Matches(matches)
-}
-
-enum EnvQueryValidation {
-    Matches(BTreeMap<Str, EnvValueHash>),
-    NonUtf8Value(EnvMismatch),
-}
-
-/// Find the first deterministic difference between stored and current env
-/// glob match-sets.
-fn first_env_glob_mismatch(
-    stored: &BTreeMap<Str, EnvValueHash>,
-    current: &BTreeMap<Str, EnvValueHash>,
-) -> Option<EnvMismatch> {
-    let mut stored_iter = stored.iter();
-    let mut current_iter = current.iter();
-    let mut s = stored_iter.next();
-    let mut c = current_iter.next();
-
-    loop {
-        match (s, c) {
-            (None, None) => return None,
-            (Some((name, _)), None) => return Some(EnvMismatch::Removed { name: name.clone() }),
-            (None, Some((name, _))) => return Some(EnvMismatch::Added { name: name.clone() }),
-            (Some((sn, sv)), Some((cn, cv))) => match sn.cmp(cn) {
-                std::cmp::Ordering::Equal => {
-                    if sv != cv {
-                        return Some(EnvMismatch::Changed { name: sn.clone() });
-                    }
-                    s = stored_iter.next();
-                    c = current_iter.next();
-                }
-                std::cmp::Ordering::Less => return Some(EnvMismatch::Removed { name: sn.clone() }),
-                std::cmp::Ordering::Greater => {
-                    return Some(EnvMismatch::Added { name: cn.clone() });
-                }
-            },
+        if let Some(value_str) = value.to_str() {
+            matches.values.insert(Str::from(name_str), EnvValueHash::new(value_str));
+        } else {
+            matches.non_utf8_values.insert(Str::from(name_str));
         }
     }
+    matches
 }
 
-/// Determine the kind of change between two differing path fingerprints.
+/// The envs a tracked query matches now.
+#[derive(Default)]
+struct EnvQueryMatches {
+    /// The matched envs with UTF-8 values.
+    values: BTreeMap<Str, EnvValueHash>,
+    /// The matched envs whose values aren't UTF-8. The JS client errors when
+    /// it queries such a value, so each one is a change, which keeps a stale
+    /// cache entry from being replayed.
+    non_utf8_values: BTreeSet<Str>,
+}
+
+/// Every difference between the stored match-set of a tracked env query and
+/// the current one, in env-name order, after the envs whose values aren't
+/// UTF-8.
+fn env_query_mismatches(
+    stored: &BTreeMap<Str, EnvValueHash>,
+    current: &EnvQueryMatches,
+) -> Vec<EnvMismatch> {
+    let mut mismatches: Vec<EnvMismatch> = current
+        .non_utf8_values
+        .iter()
+        .map(|name| EnvMismatch::Changed { name: name.clone() })
+        .collect();
+    mismatches.extend(
+        EnvMismatch::diff(stored, &current.values)
+            .filter(|mismatch| !current.non_utf8_values.contains(mismatch.name())),
+    );
+    mismatches
+}
+
+/// Determine the kinds of change between two differing path fingerprints.
 /// Caller guarantees `stored != current`.
 ///
-/// Returns `(kind, entry_name)` where `entry_name` is `Some` for folder changes
-/// when a specific added/removed entry can be identified.
-fn determine_change_kind<'a>(
+/// Returns `(kind, entry_name)` pairs, never empty, where `entry_name` is
+/// `Some` for folder changes when a specific added or removed entry can be
+/// identified. A folder's changes are in entry-name order.
+fn determine_change_kinds<'a>(
     stored: &'a PathFingerprint,
     current: &'a PathFingerprint,
-) -> (InputChangeKind, Option<&'a Str>) {
+) -> Vec<(InputChangeKind, Option<&'a Str>)> {
     match (stored, current) {
-        (PathFingerprint::NotFound, _) => (InputChangeKind::Added, None),
-        (_, PathFingerprint::NotFound) => (InputChangeKind::Removed, None),
+        (PathFingerprint::NotFound, _) => vec![(InputChangeKind::Added, None)],
+        (_, PathFingerprint::NotFound) => vec![(InputChangeKind::Removed, None)],
         (PathFingerprint::FileContentHash(_), PathFingerprint::FileContentHash(_)) => {
-            (InputChangeKind::ContentModified, None)
+            vec![(InputChangeKind::ContentModified, None)]
         }
         (PathFingerprint::Folder(old), PathFingerprint::Folder(new)) => {
-            determine_folder_change_kind(old.as_ref(), new.as_ref())
+            determine_folder_change_kinds(old.as_ref(), new.as_ref())
         }
         // Type changed (file ↔ folder)
-        _ => (InputChangeKind::Added, None),
+        _ => vec![(InputChangeKind::Added, None)],
     }
 }
 
-/// Determine whether a folder change is an addition or removal by comparing entries.
-/// Both maps are `BTreeMap` so we iterate them in sorted lockstep.
-/// Returns the specific entry name that was added or removed, if identifiable.
-fn determine_folder_change_kind<'a>(
-    old: Option<&'a BTreeMap<Str, DirEntryKind>>,
-    new: Option<&'a BTreeMap<Str, DirEntryKind>>,
-) -> (InputChangeKind, Option<&'a Str>) {
-    let (Some(old_entries), Some(new_entries)) = (old, new) else {
-        return (InputChangeKind::Added, None);
+/// Determine which entries of a folder were added or removed by comparing
+/// entries. Both maps are `BTreeMap` so we iterate them in sorted lockstep.
+/// Returns each added or removed entry's name, or the folder itself as added
+/// if no entry can be identified.
+fn determine_folder_change_kinds<'a>(
+    old: Option<&'a DirListing>,
+    new: Option<&'a DirListing>,
+) -> Vec<(InputChangeKind, Option<&'a Str>)> {
+    let (Some(old_listing), Some(new_listing)) = (old, new) else {
+        return vec![(InputChangeKind::Added, None)];
     };
 
-    let mut old_iter = old_entries.iter();
-    let mut new_iter = new_entries.iter();
+    let mut changes = Vec::new();
+    let mut old_iter = old_listing.entries.iter();
+    let mut new_iter = new_listing.entries.iter();
     let mut o = old_iter.next();
     let mut n = new_iter.next();
 
     loop {
         match (o, n) {
-            (None, None) => return (InputChangeKind::Added, None),
-            (Some((name, _)), None) => return (InputChangeKind::Removed, Some(name)),
-            (None, Some((name, _))) => return (InputChangeKind::Added, Some(name)),
+            (None, None) => break,
+            (Some((name, _)), None) => {
+                changes.push((InputChangeKind::Removed, Some(name)));
+                o = old_iter.next();
+            }
+            (None, Some((name, _))) => {
+                changes.push((InputChangeKind::Added, Some(name)));
+                n = new_iter.next();
+            }
             (Some((ok, ov)), Some((nk, nv))) => match ok.cmp(nk) {
                 std::cmp::Ordering::Equal => {
                     if ov != nv {
-                        return (InputChangeKind::Added, Some(ok));
+                        changes.push((InputChangeKind::Added, Some(ok)));
                     }
                     o = old_iter.next();
                     n = new_iter.next();
                 }
-                std::cmp::Ordering::Less => return (InputChangeKind::Removed, Some(ok)),
-                std::cmp::Ordering::Greater => return (InputChangeKind::Added, Some(nk)),
+                std::cmp::Ordering::Less => {
+                    changes.push((InputChangeKind::Removed, Some(ok)));
+                    o = old_iter.next();
+                }
+                std::cmp::Ordering::Greater => {
+                    changes.push((InputChangeKind::Added, Some(nk)));
+                    n = new_iter.next();
+                }
             },
         }
     }
+    if changes.is_empty() {
+        changes.push((InputChangeKind::Added, None));
+    }
+    changes
+}
+
+/// The names of the entries of the folder `dir` that `ignored_inputs`,
+/// tool-reported `ignoreInput` paths, cover, whether or not they're there. A
+/// path covers itself and everything under it, but a listed folder is never
+/// covered, since covered reads are left out, so an entry of `dir` is covered
+/// only by a path naming it.
+fn ignored_input_names<'a>(
+    dir: &'a RelativePath,
+    ignored_inputs: &'a FxHashSet<RelativePathBuf>,
+) -> impl Iterator<Item = Str> + 'a {
+    ignored_inputs.iter().filter(move |path| path.parent() == Some(dir)).map(|path| {
+        let path = path.as_str();
+        Str::from(path.rsplit_once('/').map_or(path, |(_, name)| name))
+    })
+}
+
+/// Leaves out of `listing`, a listing of the folder `dir`, the entries named
+/// in its `ignored_entries` and those whose path `input_negative_globs`
+/// match. A folder entry is matched by its own path: `build/**` matches the
+/// `build` folder itself, since `**` matches zero or more components, so it
+/// leaves out the entry, while `build/*` or `build/**/*.js` exclude only
+/// what is in the folder and leave the entry in.
+fn leave_out_excluded_entries(
+    listing: &mut DirListing,
+    dir: &RelativePath,
+    input_negative_globs: &PathGlobSet<'_>,
+) {
+    let DirListing { entries, ignored_entries } = listing;
+    if ignored_entries.is_empty() && input_negative_globs.is_empty() {
+        return;
+    }
+    entries.retain(|name, _| {
+        !ignored_entries.contains(name)
+            && (input_negative_globs.is_empty()
+                || !RelativePathBuf::new(name.as_str())
+                    .is_ok_and(|name| input_negative_globs.is_match(dir.join(name))))
+    });
 }
 
 /// Check if a directory entry should be ignored in fingerprinting
 const fn should_ignore_entry(name: &[u8]) -> bool {
-    matches!(name, b"." | b".." | b".DS_Store") || name.eq_ignore_ascii_case(b"dist")
+    matches!(name, b"." | b".." | b".DS_Store")
 }
 
 /// Fingerprint a single path
@@ -468,7 +623,7 @@ fn process_directory(
         entries.insert(Str::from(name_str.as_ref()), kind);
     }
 
-    Ok(PathFingerprint::Folder(Some(entries)))
+    Ok(PathFingerprint::Folder(Some(DirListing { entries, ignored_entries: BTreeSet::new() })))
 }
 
 /// Process a directory on Unix using nix for efficiency
@@ -496,7 +651,26 @@ fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<Pa
             Some(nix::dir::Type::Directory) => DirEntryKind::Dir,
             Some(nix::dir::Type::Symlink) => DirEntryKind::Symlink,
             // Treat files and other types as files for fingerprinting
-            _ => DirEntryKind::File,
+            Some(_) => DirEntryKind::File,
+            // The file system doesn't report entry types: stat the entry
+            // without following a symlink, as std does, so this agrees with
+            // `Rebuildable`'s folder climb.
+            None => {
+                use nix::{
+                    fcntl::AtFlags,
+                    sys::stat::{SFlag, fstatat},
+                };
+
+                let stat = fstatat(fd, entry.file_name(), AtFlags::AT_SYMLINK_NOFOLLOW)?;
+                let file_type = SFlag::from_bits_truncate(stat.st_mode) & SFlag::S_IFMT;
+                if file_type == SFlag::S_IFDIR {
+                    DirEntryKind::Dir
+                } else if file_type == SFlag::S_IFLNK {
+                    DirEntryKind::Symlink
+                } else {
+                    DirEntryKind::File
+                }
+            }
         };
 
         #[expect(
@@ -507,7 +681,7 @@ fn process_directory_unix(file: &File, path_read: PathRead) -> anyhow::Result<Pa
         entries.insert(Str::from(name_str.as_ref()), kind);
     }
 
-    Ok(PathFingerprint::Folder(Some(entries)))
+    Ok(PathFingerprint::Folder(Some(DirListing { entries, ignored_entries: BTreeSet::new() })))
 }
 
 #[cfg(test)]
@@ -519,6 +693,13 @@ mod tests {
 
     use super::*;
 
+    /// The tracked envs' changes, or the first env that can't be compared.
+    fn env_changes(
+        fingerprint: &PostRunFingerprint,
+        unfiltered_envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
+    ) -> anyhow::Result<Vec<Change>> {
+        fingerprint.env_changes(unfiltered_envs).into_iter().collect()
+    }
     #[cfg(unix)]
     fn non_utf8_os_string() -> OsString {
         use std::os::unix::ffi::OsStringExt;
@@ -533,6 +714,29 @@ mod tests {
         OsString::from_wide(&[0xD800])
     }
 
+    /// A listed folder reports every entry added or removed, in name order.
+    #[test]
+    fn folder_changes_name_every_added_and_removed_entry() {
+        let listing = |names: &[&str]| DirListing {
+            entries: names.iter().map(|name| (Str::from(*name), DirEntryKind::File)).collect(),
+            ignored_entries: BTreeSet::new(),
+        };
+        let (old, new) = (listing(&["a", "b"]), listing(&["b", "c", "d"]));
+        let changes: Vec<(InputChangeKind, Option<&str>)> =
+            determine_folder_change_kinds(Some(&old), Some(&new))
+                .into_iter()
+                .map(|(kind, name)| (kind, name.map(Str::as_str)))
+                .collect();
+        assert_eq!(
+            changes,
+            [
+                (InputChangeKind::Removed, Some("a")),
+                (InputChangeKind::Added, Some("c")),
+                (InputChangeKind::Added, Some("d")),
+            ]
+        );
+    }
+
     #[test]
     fn validate_errors_on_current_non_utf8_tracked_env_value() {
         let mut tracked_envs = BTreeMap::new();
@@ -545,9 +749,7 @@ mod tests {
             Arc::<OsStr>::from(non_utf8_os_string()),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let err = fingerprint
-            .validate(&workspace_root, &unfiltered_envs)
+        let err = env_changes(&fingerprint, &unfiltered_envs)
             .expect_err("non-UTF-8 tracked env values must error");
 
         assert!(err.to_string().contains("tracked env value for PROBE_ENV is not valid UTF-8"));
@@ -566,18 +768,12 @@ mod tests {
             Arc::<OsStr>::from(non_utf8_os_string()),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let changes = env_changes(&fingerprint, &unfiltered_envs).expect("validation succeeds");
 
-        match mismatch {
-            Some(PostRunMismatch::TrackedEnvQuery {
-                query,
-                mismatch: EnvMismatch::Changed { name },
-            }) => {
-                assert_eq!(query, TrackedEnvQuery::Glob(Str::from("PROBE_*")));
-                assert_eq!(name.as_str(), "PROBE_BAD");
-            }
+        match changes.as_slice() {
+            [
+                Change::Env { mismatch: EnvMismatch::Changed { name }, source: EnvSource::Tracked },
+            ] => assert_eq!(name.as_str(), "PROBE_BAD"),
             other => panic!("expected changed tracked env query mismatch, got {other:?}"),
         }
     }
@@ -601,11 +797,9 @@ mod tests {
             Arc::<OsStr>::from(OsStr::new("wildcard if interpreted as glob")),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let changes = env_changes(&fingerprint, &unfiltered_envs).expect("validation succeeds");
 
-        assert!(mismatch.is_none());
+        assert!(changes.is_empty());
     }
 
     #[test]
@@ -621,11 +815,9 @@ mod tests {
             Arc::<OsStr>::from(OsStr::new("value")),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let changes = env_changes(&fingerprint, &unfiltered_envs).expect("validation succeeds");
 
-        assert!(mismatch.is_none());
+        assert!(changes.is_empty());
     }
 
     #[test]
@@ -640,11 +832,9 @@ mod tests {
             Arc::<OsStr>::from(OsStr::new("value")),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let changes = env_changes(&fingerprint, &unfiltered_envs).expect("validation succeeds");
 
-        assert_eq!(mismatch.is_none(), cfg!(windows));
+        assert_eq!(changes.is_empty(), cfg!(windows));
     }
 
     #[test]
@@ -662,11 +852,9 @@ mod tests {
             Arc::<OsStr>::from(OsStr::new("value")),
         );
 
-        let workspace_root = vt_path::current_dir().expect("cwd");
-        let mismatch =
-            fingerprint.validate(&workspace_root, &unfiltered_envs).expect("validation succeeds");
+        let changes = env_changes(&fingerprint, &unfiltered_envs).expect("validation succeeds");
 
-        assert_eq!(mismatch.is_none(), cfg!(windows));
+        assert_eq!(changes.is_empty(), cfg!(windows));
     }
 
     #[test]
@@ -681,7 +869,14 @@ mod tests {
         let create = |written| {
             PostRunFingerprint::create(
                 &path_reads,
-                &Rebuildable::new(written),
+                &Rebuildable::new(
+                    written,
+                    FxHashSet::default(),
+                    FxHashSet::default(),
+                    &workspace_root,
+                ),
+                &PathGlobSet::default(),
+                &FxHashSet::default(),
                 &workspace_root,
                 &BTreeMap::new(),
                 BTreeMap::new(),
@@ -692,20 +887,388 @@ mod tests {
         let written = create(FxHashSet::from_iter([path]));
         let read_only = create(FxHashSet::default());
         let validate = |fingerprint: &PostRunFingerprint| {
-            fingerprint.validate(&workspace_root, &FxHashMap::default()).unwrap()
+            fingerprint
+                .input_changes(&workspace_root, &PathGlobSet::default(), FileCheck::First)
+                .pop()
+                .map(Result::unwrap)
         };
 
         std::fs::remove_file(full_path.as_path()).unwrap();
         assert!(validate(&written).is_none());
         assert!(matches!(
             validate(&read_only),
-            Some(PostRunMismatch::Input { kind: InputChangeKind::Removed, .. })
+            Some(Change::File { kind: InputChangeKind::Removed, .. })
         ));
 
         std::fs::write(full_path.as_path(), "garbage").unwrap();
         assert!(matches!(
             validate(&written),
-            Some(PostRunMismatch::Input { kind: InputChangeKind::ContentModified, .. })
+            Some(Change::File { kind: InputChangeKind::ContentModified, .. })
         ));
+    }
+
+    #[test]
+    fn create_skips_folders_holding_only_written_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        for dir in ["out/sub", "mixed", "holds_empty/empty"] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        let written = ["out/a.txt", "out/sub/b.txt", "mixed/a.txt", "holds_empty/a.txt"];
+        for file in written.iter().copied().chain(["out/.DS_Store", "mixed/notes.txt"]) {
+            std::fs::write(workspace_root.join(file).as_path(), "x").unwrap();
+        }
+
+        let path_reads = ["out", "out/sub", "mixed", "holds_empty"]
+            .into_iter()
+            .map(|dir| (rel(dir), PathRead { read_dir_entries: true }))
+            .collect();
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &Rebuildable::new(
+                written.into_iter().map(rel).collect(),
+                FxHashSet::default(),
+                FxHashSet::default(),
+                &workspace_root,
+            )
+            .with_folders(&workspace_root),
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+
+        let mut fingerprinted: Vec<&str> =
+            fingerprint.inferred_inputs.keys().map(|path| path.as_str()).collect();
+        fingerprinted.sort_unstable();
+        assert_eq!(fingerprinted, ["holds_empty", "mixed"]);
+    }
+
+    #[test]
+    fn folders_gone_after_the_run_play_no_part() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        std::fs::create_dir(workspace_root.join("out").as_path()).unwrap();
+        std::fs::write(workspace_root.join("out/a.txt").as_path(), "x").unwrap();
+
+        // `out/tmp` and the file the task wrote in it are gone after the run,
+        // like Astro's `dist/.prerender`.
+        let rebuildable = Rebuildable::new(
+            ["out/a.txt", "out/tmp/b.txt"].into_iter().map(rel).collect(),
+            FxHashSet::default(),
+            FxHashSet::default(),
+            &workspace_root,
+        )
+        .with_folders(&workspace_root);
+        assert!(rebuildable.is_rebuildable_folder(&rel("out")));
+        assert!(!rebuildable.is_rebuildable_folder(&rel("out/tmp")));
+    }
+
+    #[test]
+    fn empty_folders_the_task_made_are_rebuildable() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        for dir in ["out/empty", "out/drained", "mixed/made"] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        for file in ["out/a.txt", "out/empty/.DS_Store", "mixed/made/notes.txt"] {
+            std::fs::write(workspace_root.join(file).as_path(), "x").unwrap();
+        }
+
+        // `out/tmp` and the file the task wrote in it are gone after the run,
+        // and so is the file it wrote in `out/drained`.
+        let new = || {
+            Rebuildable::new(
+                ["out/a.txt", "out/tmp/b.txt", "out/drained/c.txt"].into_iter().map(rel).collect(),
+                FxHashSet::default(),
+                ["out", "out/empty", "out/tmp", "out/drained", "mixed/made"]
+                    .into_iter()
+                    .map(rel)
+                    .collect(),
+                &workspace_root,
+            )
+        };
+        let empty_folders = FxHashSet::from_iter([rel("out/empty"), rel("out/drained")]);
+        let rebuildable = new().with_folders(&workspace_root);
+        assert_eq!(rebuildable.empty_folders(), &empty_folders);
+        // Without climbing, the archive gets the same empty folders.
+        assert_eq!(new().with_empty_folders(&workspace_root).empty_folders(), &empty_folders);
+
+        let path_reads = ["out", "out/empty", "mixed", "mixed/made"]
+            .into_iter()
+            .map(|dir| (rel(dir), PathRead { read_dir_entries: false }))
+            .collect();
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &rebuildable,
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let mut fingerprinted: Vec<&str> =
+            fingerprint.inferred_inputs.keys().map(|path| path.as_str()).collect();
+        fingerprinted.sort_unstable();
+        assert_eq!(fingerprinted, ["mixed", "mixed/made"]);
+    }
+
+    #[test]
+    fn files_under_a_renamed_folder_count_as_written() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        std::fs::create_dir_all(workspace_root.join("deps/sub").as_path()).unwrap();
+        for file in ["deps/a.js", "deps/sub/b.js", "deps/.DS_Store"] {
+            std::fs::write(workspace_root.join(file).as_path(), "x").unwrap();
+        }
+
+        // `deps` was renamed into place, so only the folder was recorded. Its
+        // `.DS_Store` doesn't count.
+        let rebuildable = Rebuildable::new(
+            FxHashSet::default(),
+            FxHashSet::from_iter([rel("deps")]),
+            FxHashSet::default(),
+            &workspace_root,
+        )
+        .with_folders(&workspace_root);
+        let mut written: Vec<&str> =
+            rebuildable.written().iter().map(|path| path.as_str()).collect();
+        written.sort_unstable();
+        assert_eq!(written, ["deps/a.js", "deps/sub/b.js"]);
+
+        let path_reads = HashMap::from([
+            (rel("deps"), PathRead { read_dir_entries: true }),
+            (rel("deps/a.js"), PathRead { read_dir_entries: false }),
+        ]);
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &rebuildable,
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let fingerprinted: Vec<&str> =
+            fingerprint.inferred_inputs.keys().map(|path| path.as_str()).collect();
+        assert_eq!(fingerprinted, ["deps/a.js"]);
+        assert!(fingerprint.inferred_inputs[&rel("deps/a.js")].may_be_missing);
+    }
+
+    #[test]
+    fn a_gone_folder_the_task_wrote_in_counts_as_written() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        // Vite's dependency optimizer probes a fresh folder name, makes the
+        // folder, writes in it, and renames it into place. fspy records the
+        // probe as a read, the folder as made, the file as a write, and
+        // `.vite/deps` as the rename target, but nothing for the rename's
+        // source.
+        let full_path = |path: &str| workspace_root.join(rel(path));
+        std::fs::create_dir_all(full_path(".vite/deps_temp_1a2b").as_path()).unwrap();
+        std::fs::write(full_path(".vite/deps_temp_1a2b/package.json").as_path(), "{}").unwrap();
+        std::fs::write(full_path(".vite/notes.txt").as_path(), "").unwrap();
+        std::fs::rename(
+            full_path(".vite/deps_temp_1a2b").as_path(),
+            full_path(".vite/deps").as_path(),
+        )
+        .unwrap();
+
+        let path_reads = [".vite", ".vite/deps_temp_1a2b", ".vite/probe"]
+            .map(|read| (rel(read), PathRead { read_dir_entries: false }));
+        let fingerprint = PostRunFingerprint::create(
+            &HashMap::from(path_reads),
+            &Rebuildable::new(
+                FxHashSet::from_iter([rel(".vite/deps_temp_1a2b/package.json")]),
+                FxHashSet::from_iter([rel(".vite/deps")]),
+                FxHashSet::from_iter([rel(".vite/deps_temp_1a2b")]),
+                &workspace_root,
+            )
+            .with_folders(&workspace_root),
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+
+        let may_be_missing = |read: &str| fingerprint.inferred_inputs[&rel(read)].may_be_missing;
+        assert!(may_be_missing(".vite/deps_temp_1a2b"));
+        // A folder that is still there with other files, or a path the task
+        // only probed, isn't.
+        assert!(!may_be_missing(".vite"));
+        assert!(!may_be_missing(".vite/probe"));
+    }
+
+    #[test]
+    fn a_write_record_on_a_folder_is_ignored() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        std::fs::create_dir_all(workspace_root.join("deps").as_path()).unwrap();
+        std::fs::write(workspace_root.join("deps/a.js").as_path(), "x").unwrap();
+
+        // An open of `deps` with write access puts nothing under it, and a read
+        // of it must still find it.
+        let rebuildable = Rebuildable::new(
+            FxHashSet::from_iter([rel("deps")]),
+            FxHashSet::default(),
+            FxHashSet::default(),
+            &workspace_root,
+        )
+        .with_folders(&workspace_root);
+        let file = PathFingerprint::FileContentHash(0);
+        assert!(!rebuildable.may_be_missing(&rel("deps/a.js"), &file, &workspace_root));
+        assert!(!rebuildable.may_be_missing(
+            &rel("deps"),
+            &PathFingerprint::Folder(None),
+            &workspace_root
+        ));
+        assert!(!rebuildable.is_rebuildable_folder(&rel("deps")));
+        let path_reads = HashMap::from([(rel("deps"), PathRead { read_dir_entries: false })]);
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &rebuildable,
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(!fingerprint.inferred_inputs[&rel("deps")].may_be_missing);
+    }
+
+    #[test]
+    fn listings_leave_out_entries_the_task_can_rebuild() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        for dir in ["pkg/gen", "pkg/mixed"] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        let written = ["pkg/gen/a.txt", "pkg/out.txt", "pkg/mixed/a.txt"];
+        for file in written.iter().copied().chain(["pkg/mixed/notes.txt"]) {
+            std::fs::write(workspace_root.join(file).as_path(), "x").unwrap();
+        }
+
+        let path_reads = HashMap::from([(rel("pkg"), PathRead { read_dir_entries: true })]);
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &Rebuildable::new(
+                written.into_iter().map(rel).collect(),
+                FxHashSet::default(),
+                FxHashSet::default(),
+                &workspace_root,
+            )
+            .with_folders(&workspace_root),
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            fingerprint.inferred_inputs[&rel("pkg")].fingerprint,
+            PathFingerprint::Folder(Some(DirListing {
+                entries: BTreeMap::from([("mixed".into(), DirEntryKind::Dir)]),
+                ignored_entries: BTreeSet::from(["gen".into(), "out.txt".into()]),
+            }))
+        );
+
+        let validate = || {
+            fingerprint
+                .input_changes(&workspace_root, &PathGlobSet::default(), FileCheck::First)
+                .pop()
+                .map(Result::unwrap)
+        };
+        assert!(validate().is_none());
+        std::fs::remove_dir_all(workspace_root.join("pkg/gen").as_path()).unwrap();
+        std::fs::remove_file(workspace_root.join("pkg/out.txt").as_path()).unwrap();
+        assert!(validate().is_none());
+
+        std::fs::write(workspace_root.join("pkg/notes.txt").as_path(), "x").unwrap();
+        match validate() {
+            Some(Change::File { kind: InputChangeKind::Added, path }) => {
+                assert_eq!(path.as_str(), "pkg/notes.txt");
+            }
+            other => panic!("expected `pkg/notes.txt` added, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn listings_leave_out_entries_the_input_config_excludes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        for dir in ["pkg/gen", "pkg/src"] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        std::fs::write(workspace_root.join("pkg/tool.log").as_path(), "x").unwrap();
+
+        // `pkg/out/**` matches `pkg/out` itself, `pkg/gen/*` only what is in
+        // `pkg/gen`. The tool reported `pkg/tool.log`, which is there, and
+        // `pkg/.cache`, which isn't, as ignored inputs.
+        let input_negative_globs = PathGlobSet::new(&["pkg/out/**", "pkg/gen/*"]).unwrap();
+        let ignored_inputs =
+            FxHashSet::from_iter([rel("pkg/tool.log"), rel("pkg/.cache"), rel("other/x")]);
+        let path_reads = HashMap::from([(rel("pkg"), PathRead { read_dir_entries: true })]);
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &Rebuildable::default(),
+            &input_negative_globs,
+            &ignored_inputs,
+            &workspace_root,
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            fingerprint.inferred_inputs[&rel("pkg")].fingerprint,
+            PathFingerprint::Folder(Some(DirListing {
+                entries: BTreeMap::from([
+                    ("gen".into(), DirEntryKind::Dir),
+                    ("src".into(), DirEntryKind::Dir),
+                ]),
+                ignored_entries: BTreeSet::from([".cache".into(), "tool.log".into()]),
+            }))
+        );
+
+        let validate = || {
+            fingerprint
+                .input_changes(&workspace_root, &input_negative_globs, FileCheck::First)
+                .pop()
+                .map(Result::unwrap)
+        };
+        std::fs::create_dir(workspace_root.join("pkg/out").as_path()).unwrap();
+        std::fs::create_dir(workspace_root.join("pkg/.cache").as_path()).unwrap();
+        std::fs::remove_file(workspace_root.join("pkg/tool.log").as_path()).unwrap();
+        assert!(validate().is_none());
+
+        std::fs::write(workspace_root.join("pkg/notes.txt").as_path(), "x").unwrap();
+        match validate() {
+            Some(Change::File { kind: InputChangeKind::Added, path }) => {
+                assert_eq!(path.as_str(), "pkg/notes.txt");
+            }
+            other => panic!("expected `pkg/notes.txt` added, got {other:?}"),
+        }
     }
 }

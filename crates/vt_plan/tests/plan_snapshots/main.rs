@@ -219,16 +219,19 @@ fn run_case_inner(
     runtime.block_on(async {
         let workspace_root_str = workspace_root.path.as_path().to_str().unwrap();
         let mut owned_config = vt_bin::OwnedSessionConfig::default();
-        let mut session = Session::init_with(
+        let session = Session::init_with(
             plan_envs.clone(),
             Arc::clone(&workspace_root.path),
             owned_config.as_config(),
         )
         .unwrap();
 
-        let task_graph_result = session.ensure_task_graph_loaded().await;
-        let task_graph = match task_graph_result {
-            Ok(task_graph) => task_graph,
+        let task_graph_markdown = match session.task_graph().await {
+            Ok(task_graph) => render_task_graph_markdown(task_graph, &workspace_root.path).await,
+            Err(err) => Err(err),
+        };
+        let task_graph_markdown = match task_graph_markdown {
+            Ok(task_graph_markdown) => task_graph_markdown,
             Err(err) => {
                 let err_formatted = vt_str::format!("{err:#}");
                 let err_str = err_formatted.as_str().cow_replace(workspace_root_str, "<workspace>");
@@ -238,8 +241,6 @@ fn run_case_inner(
                 return Ok(());
             }
         };
-        let task_graph_markdown =
-            render_task_graph_markdown(task_graph.task_graph(), &workspace_root.path);
         snapshots.check_snapshot("task_graph.md", task_graph_markdown.as_str())?;
 
         for plan in cases_file.plan_cases {
@@ -280,7 +281,18 @@ fn run_case_inner(
             let mut case_session =
                 Session::init_with(case_envs, Arc::clone(&case_cwd), case_owned_config.as_config())
                     .unwrap();
-            case_session.ensure_task_graph_loaded().await.unwrap();
+            if run_command.is_task_graph_json() {
+                let document = case_session.task_graph_json().await.unwrap();
+                let mut json = redact_snapshot(&document, workspace_root_str);
+                // The schema is copied into the system temp dir; unit tests cover its URL.
+                json["$schema"] = serde_json::Value::from("<schema>");
+                snapshots.check_json_snapshot(
+                    snapshot_base.as_str(),
+                    vt_str::format!("{args_display}").as_str(),
+                    &json,
+                )?;
+                continue;
+            }
 
             let plan_result = case_session.plan_from_cli_run(case_cwd, run_command).await;
 

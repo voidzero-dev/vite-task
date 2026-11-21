@@ -1,0 +1,6 @@
+{
+  "name": "@test/broken",
+  "scripts": {
+    "build": "echo 'Building broken'"
+  }
+}

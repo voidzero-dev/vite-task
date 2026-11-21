@@ -1,0 +1,54 @@
+[[e2e]]
+name = "lists_what_cached_runs_depend_on"
+comment = """
+With `-vv`, the detailed summary also lists what each cached run depends on that didn't change, and the files it restores. The steps list a folder, read a file, look for a missing one, and write an output.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "vv",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "-vv",
+    "vv",
+  ], comment = "Every step hits." },
+  [
+    "vtt",
+    "write-file",
+    "src/b.txt",
+    "new",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "-vv",
+    "vv",
+  ], comment = "The listed folder changed, so it isn't among what's unchanged." },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "-vv",
+    "vv",
+  ], comment = "The JSON has each baseline's fingerprint and outputs. Hashes depend on file contents, so they're redacted.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*"' = '"program":"<vtt>"', '"durationMs":\d+' = '"durationMs":<ms>', '"hash":"[0-9a-f]{16}"' = '"hash":"<hash>"' } },
+  { argv = [
+    "vt",
+    "run",
+    "-vv",
+    "vv",
+  ], comment = "A real run lists the same." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "So does the saved summary." },
+]

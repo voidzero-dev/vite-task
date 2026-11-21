@@ -7,7 +7,7 @@ use std::{
 use vt_server::Error as IpcServerError;
 use vt_str::Str;
 
-use super::cache::{CacheHitSource, CacheMiss, remote::UploadError};
+use super::cache::{BaselineDetails, CacheHitSource, CacheMiss, remote::UploadError};
 
 /// The cache operation that failed.
 #[derive(Debug)]
@@ -88,6 +88,9 @@ pub enum CacheDisabledReason {
 pub enum CacheNotUpdatedReason {
     /// Cache was hit - task was replayed from cache, no update needed
     CacheHit,
+    /// A dry run (`vp run --dry-run`) checked the cache without running the
+    /// command.
+    DryRun,
     /// Caching was disabled for this task
     CacheDisabled,
     /// Execution exited with non-zero status
@@ -111,11 +114,12 @@ pub enum CacheNotUpdatedReason {
     /// A runner-aware tool explicitly requested that this run not be cached
     /// (e.g. vite dev-server, a watch task).
     ToolRequested,
-    /// A tracked process could not record a file access it went on to
-    /// perform: the channel it reports them through had no room left, or
-    /// none for a record that long. The accesses that did arrive are a
-    /// subset of what the task touched, so caching from them would bake in
-    /// inputs and outputs that are not all of them.
+    /// A tracked process could not record everything it did. For example,
+    /// the channel it reports file accesses through had no room left, or
+    /// the seccomp filter could not be installed and an exec continued
+    /// untracked. The accesses that did arrive are a subset of what the
+    /// task touched, so caching from them would bake in inputs and outputs
+    /// that are not all of them.
     #[cfg_attr(not(fspy), expect(dead_code, reason = "only fspy tracking can be incomplete"))]
     TrackingIncomplete,
 }
@@ -138,15 +142,26 @@ pub enum CacheUpdateStatus {
     NotUpdated(CacheNotUpdatedReason),
 }
 
+/// Whether a run runs its commands, or is a dry run (`vp run --dry-run`),
+/// which plans them and checks the cache without running anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunKind {
+    Real,
+    Dry,
+}
+
 #[derive(Debug, Clone)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "CacheMiss variant is intentionally large and infrequently cloned"
-)]
 pub enum CacheStatus {
     Disabled(CacheDisabledReason),
     Miss(CacheMiss),
-    Hit { replayed_duration: Duration, source: CacheHitSource },
+    Hit {
+        replayed_duration: Duration,
+        source: CacheHitSource,
+        /// The hit has output files, which a real run restores.
+        restores_outputs: bool,
+        /// With `vp run -vv`, what the cached run depends on and its outputs.
+        baseline: Option<Arc<BaselineDetails>>,
+    },
 }
 
 /// Convert `ExitStatus` to an i32 exit code.
