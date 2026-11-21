@@ -60,7 +60,8 @@ pub struct RunFlags {
     /// Keep running other tasks after a task fails.
     ///
     /// Tasks that depend on a failed task don't run, and the run still exits
-    /// with a non-zero code.
+    /// with a non-zero code. `continue: true` in the workspace root config
+    /// turns it on for every run.
     // `--no-bail` is pnpm's name for the same behavior.
     #[clap(default_value = "false", long = "continue", alias = "no-bail")]
     pub continue_on_failure: bool,

@@ -781,12 +781,13 @@ pub async fn plan_query_request(
     context.set_resolved_remote_cache(resolved_remote_cache);
 
     // Resolve `--continue` for this level the same way: write this level's
-    // flag to `VP_RUN_INTERNAL_CONTINUE` first, so nested levels inherit it,
-    // whether they're expanded here or run by a `vp run` that a task spawns.
-    // A nested flag can turn it on but not off, so a level without it never
-    // sits below one with it. The scheduler's single fast-fail token relies
-    // on that.
-    if plan_options.continue_on_failure {
+    // flag, or the workspace's `continue` setting, to
+    // `VP_RUN_INTERNAL_CONTINUE` first, so nested levels inherit it, whether
+    // they're expanded here or run by a `vp run` that a task spawns. A nested
+    // level can turn it on but not off, so a level without it never sits
+    // below one with it. The scheduler's single fast-fail token relies on
+    // that.
+    if plan_options.continue_on_failure || context.indexed_task_graph().continue_on_failure() {
         context.add_envs(std::iter::once((CONTINUE_ENV_NAME, "1")));
     }
     let continue_on_failure = continue_from_env(context.envs());

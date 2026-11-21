@@ -1,0 +1,48 @@
+// run build
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "build"
+      ],
+      "node": {
+        "task_display": {
+          "package_name": "@test/continue-config",
+          "task_name": "build",
+          "package_path": "<workspace>/"
+        },
+        "items": [
+          {
+            "execution_item_display": {
+              "task_display": {
+                "package_name": "@test/continue-config",
+                "task_name": "build",
+                "package_path": "<workspace>/"
+              },
+              "command": "echo build",
+              "cwd": "<workspace>/"
+            },
+            "kind": {
+              "Leaf": {
+                "InProcess": {
+                  "kind": {
+                    "Echo": {
+                      "strings": [
+                        "build"
+                      ],
+                      "trailing_newline": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "neighbors": []
+    }
+  ],
+  "concurrency_limit": 4,
+  "continue_on_failure": true
+}

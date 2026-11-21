@@ -9,8 +9,8 @@ the nested run fails, so the outer run kills hangs-beside-nested
 **Exit code:** 1
 
 ```
-~/packages/pkg-c$ vtt barrier ../../.barrier nested 2 --exit=3
 ~/packages/pkg-c$ vtt barrier ../../.barrier nested 2 --hang
+~/packages/pkg-c$ vtt barrier ../../.barrier nested 2 --exit=3
 
 
 ---

@@ -20,6 +20,8 @@ When any task exits with non-zero status:
 
 With `--continue` (or `--no-bail`, as in pnpm), a failed task doesn't cancel the run. Running tasks aren't killed, new tasks keep being scheduled, and tasks that succeed are cached as usual. Tasks that depend on a failed task, directly or through other tasks, don't run. Like tasks that fast-fail never started, they aren't shown in the summary. A task whose script runs `vp run` fails if any task in that run fails, and in a `&&`-chained command, the commands after a failed one don't run. Once every task that can run has finished, `vp run` exits with a non-zero status: the failed task's exit code if one task failed, or 1 if more did. Ctrl-C still cancels the run.
 
+To keep going by default, set `continue: true` in the `run` block of the workspace root's `vite.config.*`. Every `vp run` in the workspace then behaves as if `--continue` were passed. Only the workspace root's config can set it.
+
 `--continue` carries over to every `vp run` in the scripts of the tasks it runs, including one that a task starts as a separate process. A `vp run --continue` in a task's script applies to the tasks that it runs: when one of them fails, the others keep going, and once they're done, the task with that script fails like any other. If the outer `vp run` has no `--continue`, it then fast-fails, and a failure elsewhere in the outer run kills the tasks still running in the nested one.
 
 ## Remote cache lookups

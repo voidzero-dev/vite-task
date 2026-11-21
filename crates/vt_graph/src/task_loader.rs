@@ -15,7 +15,7 @@ use crate::{
         UserTaskDefinition,
         user::{
             TopLevelCacheFields, TopLevelCacheFieldsCollector, UserDependencyType,
-            UserDependsOnEntry, UserPackageDependency, UserTaskOptions,
+            UserDependsOnEntry, UserPackageDependency, UserRunConfig, UserTaskOptions,
         },
     },
     display::TaskDisplay,
@@ -36,6 +36,8 @@ impl Keyed for TaskNode {
 pub struct RootSettings {
     pub global_cache: ResolvedGlobalCacheConfig,
     pub pre_post_scripts_enabled: bool,
+    /// Whether a failure leaves other tasks running (`continue` in the root config).
+    pub continue_on_failure: bool,
 }
 
 impl Default for RootSettings {
@@ -43,6 +45,7 @@ impl Default for RootSettings {
         Self {
             global_cache: ResolvedGlobalCacheConfig::resolve_from(None),
             pre_post_scripts_enabled: true,
+            continue_on_failure: false,
         }
     }
 }
@@ -110,6 +113,40 @@ impl<'l> TaskLoader<'l> {
         }
         Ok(*package_indices.first())
     }
+
+    /// Records the settings only the workspace root's config can set, or
+    /// rejects them in another package's config.
+    fn apply_root_settings(
+        &self,
+        user_config: &UserRunConfig,
+        package_dir: &Arc<AbsolutePath>,
+        is_workspace_root: bool,
+    ) -> Result<(), TaskGraphLoadError> {
+        if is_workspace_root {
+            self.root_settings.get_or_init(|| RootSettings {
+                global_cache: ResolvedGlobalCacheConfig::resolve_from(user_config.cache.as_ref()),
+                pre_post_scripts_enabled: user_config.enable_pre_post_scripts.unwrap_or(true),
+                continue_on_failure: user_config.continue_on_failure.unwrap_or(false),
+            });
+        } else {
+            if user_config.cache.is_some() {
+                return Err(TaskGraphLoadError::CacheInNonRootPackage {
+                    package_path: Arc::clone(package_dir),
+                });
+            }
+            if user_config.enable_pre_post_scripts.is_some() {
+                return Err(TaskGraphLoadError::PrePostScriptsInNonRootPackage {
+                    package_path: Arc::clone(package_dir),
+                });
+            }
+            if user_config.continue_on_failure.is_some() {
+                return Err(TaskGraphLoadError::ContinueInNonRootPackage {
+                    package_path: Arc::clone(package_dir),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -148,23 +185,7 @@ impl Loader for TaskLoader<'_> {
             })?
             .unwrap_or_default();
 
-        if is_workspace_root {
-            self.root_settings.get_or_init(|| RootSettings {
-                global_cache: ResolvedGlobalCacheConfig::resolve_from(user_config.cache.as_ref()),
-                pre_post_scripts_enabled: user_config.enable_pre_post_scripts.unwrap_or(true),
-            });
-        } else {
-            if user_config.cache.is_some() {
-                return Err(TaskGraphLoadError::CacheInNonRootPackage {
-                    package_path: Arc::clone(&package_dir),
-                });
-            }
-            if user_config.enable_pre_post_scripts.is_some() {
-                return Err(TaskGraphLoadError::PrePostScriptsInNonRootPackage {
-                    package_path: Arc::clone(&package_dir),
-                });
-            }
-        }
+        self.apply_root_settings(&user_config, &package_dir, is_workspace_root)?;
 
         // Collect package.json scripts into a mutable map for draining lookup.
         let mut package_json_scripts: FxHashMap<&str, &str> = package

@@ -101,6 +101,9 @@ pub enum TaskGraphLoadError {
     )]
     PrePostScriptsInNonRootPackage { package_path: Arc<AbsolutePath> },
 
+    #[error("`continue` can only be set in the workspace root config, but found in {package_path}")]
+    ContinueInNonRootPackage { package_path: Arc<AbsolutePath> },
+
     #[error(transparent)]
     TopLevelCacheFields(config::user::TopLevelCacheFieldsError),
 }
@@ -150,6 +153,9 @@ pub struct IndexedTaskGraph<'l> {
 
     /// Whether pre/post script hooks are enabled (from `enablePrePostScripts` in workspace root config).
     pre_post_scripts_enabled: bool,
+
+    /// Whether a failure leaves other tasks running (from `continue` in workspace root config).
+    continue_on_failure: bool,
 }
 
 impl<'l> IndexedTaskGraph<'l> {
@@ -196,6 +202,7 @@ impl<'l> IndexedTaskGraph<'l> {
             graph,
             resolved_global_cache: root_settings.global_cache,
             pre_post_scripts_enabled: root_settings.pre_post_scripts_enabled,
+            continue_on_failure: root_settings.continue_on_failure,
         })
     }
 
@@ -262,6 +269,13 @@ impl<'l> IndexedTaskGraph<'l> {
     #[must_use]
     pub const fn pre_post_scripts_enabled(&self) -> bool {
         self.pre_post_scripts_enabled
+    }
+
+    /// Whether `continue` is set workspace-wide, so a failure leaves other
+    /// tasks running as `--continue` does.
+    #[must_use]
+    pub const fn continue_on_failure(&self) -> bool {
+        self.continue_on_failure
     }
 
     /// Returns the pre/post hook for a `PackageJsonScript` task.
