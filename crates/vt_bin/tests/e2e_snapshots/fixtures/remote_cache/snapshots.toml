@@ -290,6 +290,91 @@ steps = [
   ],
 ]
 
+# `generate` sets `cache.platform: []`, so its remote keys name no OS or
+# architecture. Only one platform runs here, so this case checks that its entry
+# round trips and that the setting changes the remote keys but not the local
+# cache.
+[[e2e]]
+name = "platform_independent"
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "vt",
+    "run",
+    "generate",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+  ] },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  [
+    "vtt",
+    "rm",
+    "-rf",
+    "dist",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "generate",
+  ], comment = "The entry stored under the keys that name no platform is a remote hit." },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/generated.txt",
+  ], comment = "The outputs are restored." },
+  [
+    "vtt",
+    "replace-file-content",
+    "vite-task.json",
+    '"platform": []',
+    '"platform": ["os", "arch"]',
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "generate",
+  ], comment = "The local cache doesn't depend on the setting, so this is a local hit with no requests." },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "vt",
+    "run",
+    "generate",
+  ], comment = "The remote keys name this platform now, so neither matches the stored entry's keys." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
 [[e2e]]
 name = "corrupt_archive"
 cfg = 'not(target_env = "musl")'

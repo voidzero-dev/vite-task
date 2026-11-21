@@ -22,6 +22,7 @@ flowchart TD
       "cwd": "<workspace>/packages/self-dep",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [

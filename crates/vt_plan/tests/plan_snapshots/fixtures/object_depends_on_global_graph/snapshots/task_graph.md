@@ -37,6 +37,7 @@ flowchart TD
       "cwd": "<workspace>/packages/app",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -77,6 +78,7 @@ flowchart TD
       "cwd": "<workspace>/packages/app",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -117,6 +119,7 @@ flowchart TD
       "cwd": "<workspace>/packages/app",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -157,6 +160,7 @@ flowchart TD
       "cwd": "<workspace>/packages/app",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -197,6 +201,7 @@ flowchart TD
       "cwd": "<workspace>/packages/dev-a",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -237,6 +242,7 @@ flowchart TD
       "cwd": "<workspace>/packages/dev-a",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -277,6 +283,7 @@ flowchart TD
       "cwd": "<workspace>/packages/peer-a",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -317,6 +324,7 @@ flowchart TD
       "cwd": "<workspace>/packages/prod-a",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -357,6 +365,7 @@ flowchart TD
       "cwd": "<workspace>/packages/prod-missing-task",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -397,6 +406,7 @@ flowchart TD
       "cwd": "<workspace>/packages/shared",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [

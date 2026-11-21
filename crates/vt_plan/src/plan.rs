@@ -17,7 +17,7 @@ use vt_casefold::EnvName;
 use vt_graph::{
     TaskId, TaskNode, TaskSource,
     config::{
-        CacheConfig, EnabledCacheConfig, GlobResolver, ResolvedGlobConfig,
+        CacheConfig, CachePlatform, EnabledCacheConfig, GlobResolver, ResolvedGlobConfig,
         ResolvedGlobalCacheConfig, ResolvedTaskOptions,
         user::{UserCacheConfig, UserTaskOptions},
     },
@@ -66,9 +66,10 @@ fn which(
 
 /// Compute the effective cache config for a task, applying the global cache config.
 ///
-/// The task graph stores per-task cache config without applying the global kill switch.
-/// This function applies the global config at plan time, checking `cache.scripts` for
-/// package.json scripts and `cache.tasks` for task-map entries.
+/// The task graph stores per-task cache config without applying the global config.
+/// This function applies it at plan time, checking `cache.scripts` for package.json
+/// scripts and `cache.tasks` for task-map entries, and using the workspace's
+/// `cache.platform` for a task that doesn't set its own.
 fn effective_cache_config(
     task_cache_config: Option<&CacheConfig>,
     source: TaskSource,
@@ -78,7 +79,12 @@ fn effective_cache_config(
         TaskSource::PackageJsonScript => resolved_global_cache.scripts,
         TaskSource::TaskConfig => resolved_global_cache.tasks,
     };
-    if enabled { task_cache_config.cloned() } else { None }
+    if !enabled {
+        return None;
+    }
+    let mut cache_config = task_cache_config?.clone();
+    cache_config.platform.get_or_insert(resolved_global_cache.platform);
+    Some(cache_config)
 }
 
 /// - `with_hooks`: whether to look up `preX`/`postX` lifecycle hooks for this task.
@@ -462,6 +468,8 @@ pub enum ParentCacheConfig {
 /// - If the parent enables caching but the synthetic disables it, caching is disabled.
 /// - If both parent and synthetic enable caching, the synthetic inherits the parent's
 ///   env config and merges in any additional envs the synthetic command needs.
+///   It uses the remote cache only if both allow it, and its `platform` is the
+///   parent's plus any parts that the synthetic command lists.
 /// - If there is no parent (top-level invocation), the synthetic task's own
 ///   [`UserCacheConfig`] is resolved with defaults.
 fn resolve_synthetic_cache_config(
@@ -494,9 +502,18 @@ fn resolve_synthetic_cache_config(
             Ok(match synthetic_cache_config.into_enabled() {
                 Option::None => Option::None,
                 Some(enabled_cache_config) => {
-                    let EnabledCacheConfig { env, untracked_env, input, output, remote } =
+                    let EnabledCacheConfig { env, untracked_env, input, output, remote, platform } =
                         enabled_cache_config;
                     parent_config.remote_cache_allowed &= remote.unwrap_or(true);
+                    if let Some(platform) = platform {
+                        // The parent's platform is set by `effective_cache_config`.
+                        parent_config.platform = Some(
+                            parent_config
+                                .platform
+                                .unwrap_or(CachePlatform::ALL)
+                                .union(CachePlatform::from_dimensions(&platform)),
+                        );
+                    }
                     parent_config.env_config.fingerprinted_envs.extend(env.unwrap_or_default());
                     parent_config
                         .env_config
@@ -695,6 +712,10 @@ fn plan_spawn_execution(
                 execution_cache_key,
                 input_config: cache_config.input_config.clone(),
                 output_config: cache_config.output_config.clone(),
+                // A task's platform is set by `effective_cache_config`. A
+                // synthetic run outside `vp run` has no workspace config, and no
+                // remote cache either.
+                platform: cache_config.platform.unwrap_or(CachePlatform::ALL),
                 remote_cache: if cache_config.remote_cache_allowed {
                     resolved_remote_cache.cloned()
                 } else {
@@ -961,7 +982,8 @@ mod tests {
 
     use rustc_hash::FxHashSet;
     use vt_graph::config::{
-        CacheConfig, EnabledCacheConfig, EnvConfig, GlobResolver, ResolvedGlobConfig,
+        CacheConfig, CachePlatform, EnabledCacheConfig, EnvConfig, GlobResolver, PlatformDimension,
+        ResolvedGlobConfig,
         user::{UserCacheConfig, UserInputEntry},
     };
     use vt_path::AbsolutePathBuf;
@@ -986,6 +1008,7 @@ mod tests {
     fn parent_config(includes_auto: bool, positive_globs: &[&str]) -> CacheConfig {
         CacheConfig {
             remote_cache_allowed: true,
+            platform: Some(CachePlatform::ALL),
             env_config: EnvConfig {
                 fingerprinted_envs: FxHashSet::default(),
                 untracked_env: FxHashSet::default(),
@@ -1019,6 +1042,7 @@ mod tests {
                 input: None,
                 output: None,
                 remote: None,
+                platform: None,
             }),
             &pkg,
             &ws,
@@ -1043,6 +1067,7 @@ mod tests {
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
                 output: None,
                 remote: None,
+                platform: None,
             }),
             &pkg,
             &ws,
@@ -1067,6 +1092,7 @@ mod tests {
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
                 output: None,
                 remote: None,
+                platform: None,
             }),
             &pkg,
             &ws,
@@ -1097,6 +1123,7 @@ mod tests {
                 ]),
                 output: None,
                 remote: None,
+                platform: None,
             }),
             &pkg,
             &ws,
@@ -1125,6 +1152,7 @@ mod tests {
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
                 output: None,
                 remote: None,
+                platform: None,
             }),
             &pkg,
             &ws,
@@ -1151,6 +1179,7 @@ mod tests {
                 input: Some(vec![UserInputEntry::Glob("config/**".into())]),
                 output: None,
                 remote: None,
+                platform: None,
             }),
             &pkg,
             &ws,
@@ -1175,10 +1204,18 @@ mod tests {
         assert!(result.is_none());
     }
 
-    #[test]
-    fn synthetic_disables_remote_cache_despite_parent() {
+    /// Resolve a synthetic task whose `cache.remote` and `cache.platform` are
+    /// `synthetic_remote` and `synthetic_platform`, under a parent that allows
+    /// the remote cache and depends on `parent_platform`. Returns the result's
+    /// `remote_cache_allowed` and `platform`.
+    fn synthetic_remote_settings(
+        parent_platform: CachePlatform,
+        synthetic_remote: Option<bool>,
+        synthetic_platform: Option<Vec<PlatformDimension>>,
+    ) -> (bool, Option<CachePlatform>) {
         let (pkg, ws) = test_paths();
-        let parent = parent_config(true, &["src/**"]);
+        let mut parent = parent_config(true, &["src/**"]);
+        parent.platform = Some(parent_platform);
         let result = resolve_synthetic_cache_config(
             ParentCacheConfig::Inherited(parent),
             UserCacheConfig::with_config(EnabledCacheConfig {
@@ -1186,7 +1223,8 @@ mod tests {
                 untracked_env: None,
                 input: None,
                 output: None,
-                remote: Some(false),
+                remote: synthetic_remote,
+                platform: synthetic_platform,
             }),
             &pkg,
             &ws,
@@ -1194,7 +1232,34 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert!(!result.remote_cache_allowed);
+        (result.remote_cache_allowed, result.platform)
+    }
+
+    #[test]
+    fn synthetic_disables_remote_cache_despite_parent() {
+        let (allowed, _) = synthetic_remote_settings(CachePlatform::ALL, Some(false), None);
+        assert!(!allowed);
+    }
+
+    #[test]
+    fn synthetic_platform_adds_to_the_parents() {
+        let none = CachePlatform { os: false, arch: false };
+        let os = CachePlatform { os: true, arch: false };
+        // A synthetic command that lists nothing keeps the parent's platform.
+        assert_eq!(synthetic_remote_settings(none, None, None), (true, Some(none)));
+        // Its parts are added to the parent's, so it can't remove any.
+        assert_eq!(
+            synthetic_remote_settings(none, None, Some(vec![PlatformDimension::Os])),
+            (true, Some(os))
+        );
+        assert_eq!(
+            synthetic_remote_settings(os, None, Some(vec![PlatformDimension::Arch])),
+            (true, Some(CachePlatform::ALL))
+        );
+        assert_eq!(
+            synthetic_remote_settings(CachePlatform::ALL, None, Some(vec![])),
+            (true, Some(CachePlatform::ALL))
+        );
     }
 
     #[test]
@@ -1209,6 +1274,7 @@ mod tests {
                 input: Some(vec![UserInputEntry::Glob("!dist/**".into())]),
                 output: None,
                 remote: None,
+                platform: None,
             }),
             &pkg,
             &ws,

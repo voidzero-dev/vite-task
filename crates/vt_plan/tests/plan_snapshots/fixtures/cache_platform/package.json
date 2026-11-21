@@ -1,0 +1,6 @@
+{
+  "name": "@test/cache-platform",
+  "scripts": {
+    "script": "vtt print-file package.json"
+  }
+}

@@ -89,6 +89,10 @@
                                     "positive_globs": [],
                                     "negative_globs": []
                                   },
+                                  "platform": {
+                                    "os": true,
+                                    "arch": true
+                                  },
                                   "remote_cache": null
                                 },
                                 "spawn_command": {

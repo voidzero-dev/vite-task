@@ -803,7 +803,13 @@ impl ExecutionCache {
         let start = Instant::now();
         let fetched = self
             .remote_clients
-            .fetch(remote_config, cache_key, &cache_metadata.execution_cache_key, cancel_token)
+            .fetch(
+                remote_config,
+                cache_metadata.platform,
+                cache_key,
+                &cache_metadata.execution_cache_key,
+                cancel_token,
+            )
             .await;
         let (outcome, entries) = match &fetched {
             Ok(Some(Fetched::Exact { entries })) => ("exact", entries.len()),
@@ -820,9 +826,11 @@ impl ExecutionCache {
         );
         let (cache_key, validation, dir) =
             (cache_key.clone(), validation.clone(), self.dir.clone());
+        let platform = cache_metadata.platform;
         let check = move || {
             remote::resolve(
                 fetched,
+                platform,
                 &cache_key,
                 |cache_value| validation.validate(cache_value),
                 |cache_value| {
@@ -1008,6 +1016,7 @@ impl ExecutionCache {
         };
         match self.remote_clients.prepare_upload(
             remote_config,
+            cache_metadata.platform,
             &cache_key,
             execution_cache_key,
             &cache_value,

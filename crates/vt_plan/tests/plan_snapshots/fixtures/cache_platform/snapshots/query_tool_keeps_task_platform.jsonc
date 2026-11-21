@@ -1,0 +1,29 @@
+// run tool
+{
+  "graph": [
+    {
+      "key": [
+        "<workspace>/",
+        "tool"
+      ],
+      "node": {
+        "items": [
+          {
+            "kind": {
+              "Leaf": {
+                "Spawn": {
+                  "cache_metadata": {
+                    "platform": {
+                      "os": false,
+                      "arch": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

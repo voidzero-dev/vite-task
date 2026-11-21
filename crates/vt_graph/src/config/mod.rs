@@ -6,9 +6,9 @@ use hashbrown::hash_map::EntryRef;
 use rustc_hash::{FxBuildHasher, FxHashSet};
 use serde::Serialize;
 pub use user::{
-    AutoTracking, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
-    UserCacheConfig, UserDependencyType, UserDependsOnEntry, UserDependsOnFrom,
-    UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
+    AutoTracking, Command, EnabledCacheConfig, GlobWithBase, InputBase, PlatformDimension,
+    ResolvedGlobalCacheConfig, UserCacheConfig, UserDependencyType, UserDependsOnEntry,
+    UserDependsOnFrom, UserGlobalCacheConfig, UserInputEntry, UserInputsConfig, UserOutputEntry,
     UserPackageDependency, UserRunConfig, UserTaskConfig, UserTaskDefinition,
 };
 use vt_path::AbsolutePath;
@@ -87,6 +87,10 @@ impl ResolvedTaskOptions {
 
                 Some(CacheConfig {
                     remote_cache_allowed: enabled_cache_config.remote.unwrap_or(true),
+                    platform: enabled_cache_config
+                        .platform
+                        .as_deref()
+                        .map(CachePlatform::from_dimensions),
                     env_config: EnvConfig {
                         fingerprinted_envs: enabled_cache_config
                             .env
@@ -108,9 +112,42 @@ pub struct CacheConfig {
     /// Whether the task's `cache.remote` allows remote caching. An execution uses
     /// the remote cache only if its `vp run` level also resolves one.
     pub remote_cache_allowed: bool,
+    /// The task's `cache.platform`, or `None` if it doesn't set one. Planning
+    /// replaces `None` with the workspace's `cache.platform`.
+    pub platform: Option<CachePlatform>,
     pub env_config: EnvConfig,
     pub input_config: ResolvedGlobConfig,
     pub output_config: ResolvedGlobConfig,
+}
+
+/// The parts of the platform that a task's cache entries depend on. Remote
+/// cache entries are shared only between machines whose listed parts match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CachePlatform {
+    /// Whether the entries depend on the operating system.
+    pub os: bool,
+    /// Whether the entries depend on the CPU architecture.
+    pub arch: bool,
+}
+
+impl CachePlatform {
+    /// Every part of the platform: the default.
+    pub const ALL: Self = Self { os: true, arch: true };
+
+    /// The parts that `dimensions` lists.
+    #[must_use]
+    pub fn from_dimensions(dimensions: &[PlatformDimension]) -> Self {
+        Self {
+            os: dimensions.contains(&PlatformDimension::Os),
+            arch: dimensions.contains(&PlatformDimension::Arch),
+        }
+    }
+
+    /// The parts that either `self` or `other` lists.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self { os: self.os || other.os, arch: self.arch || other.arch }
+    }
 }
 
 /// Resolved input configuration for cache fingerprinting.

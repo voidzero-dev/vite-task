@@ -3,7 +3,7 @@ use std::{ffi::OsStr, sync::Arc};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use vt_casefold::EnvName;
-use vt_graph::config::ResolvedGlobConfig;
+use vt_graph::config::{CachePlatform, ResolvedGlobConfig};
 use vt_path::RelativePathBuf;
 use vt_str::{self, Str};
 use wincode::{SchemaRead, SchemaWrite};
@@ -54,6 +54,11 @@ pub struct CacheMetadata {
     /// Resolved output configuration for cache restoration.
     /// Used at execution time to determine what output files to archive.
     pub output_config: ResolvedGlobConfig,
+
+    /// The parts of the platform that the entries depend on: the task's
+    /// `cache.platform`, or the workspace's. Remote keys name only these parts
+    /// of this machine's platform. Local keys don't depend on it.
+    pub platform: CachePlatform,
 
     /// Remote cache for this execution: the one resolved for its `vp run` level,
     /// unless the task sets `cache.remote: false`. `None` means local caching only.

@@ -100,6 +100,7 @@ impl vt::CommandHandler for CommandHandler {
                         input: None,
                         output: None,
                         remote: None,
+                        platform: None,
                     }),
                     envs: Arc::clone(&command.envs),
                 }))

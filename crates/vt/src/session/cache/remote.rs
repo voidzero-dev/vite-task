@@ -11,7 +11,12 @@
 //!
 //! Both keys start with a header containing the cache schema version, the
 //! remote value format, and the target OS and architecture. Platforms share an
-//! endpoint's namespace, but their keys differ.
+//! endpoint's namespace, but their keys differ. A part of the platform that the
+//! task's `cache.platform` doesn't list is empty in the header, so platforms
+//! that differ only in that part share the task's entries if the rest of their
+//! keys match. The rest names the resolved program, such as `node.exe` on
+//! Windows and `node` elsewhere, so Windows entries don't match other
+//! platforms' entries.
 
 use std::{
     fs::File,
@@ -25,6 +30,7 @@ use rustc_hash::FxHashMap;
 use tokio::sync::mpsc;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::Instrument as _;
+use vt_graph::config::CachePlatform;
 use vt_path::AbsolutePath;
 use vt_plan::{
     cache_metadata::ExecutionCacheKey,
@@ -126,10 +132,12 @@ pub(super) struct Restore {
 /// `describe` describes it for `vp run -vv`. If no entry passes, the miss is
 /// the newest entry's: the changes it found, or a read failure if it doesn't
 /// decode, its blob doesn't match its value, or it can't be validated. A
-/// fallback's miss reason compares its key with `cache_key`, and no match is
-/// a miss without an entry. A failed fetch is a read failure.
+/// fallback's miss reason compares its key, which has the header for
+/// `platform`, with `cache_key`, and no match is a miss without an entry. A
+/// failed fetch is a read failure.
 pub(super) fn resolve(
     fetched: Result<Option<Fetched>, ReadError>,
+    platform: CachePlatform,
     cache_key: &CacheEntryKey,
     mut validate: impl FnMut(&CacheEntryValue) -> anyhow::Result<Checked>,
     mut describe: impl FnMut(&CacheEntryValue) -> Option<Arc<BaselineDetails>>,
@@ -137,7 +145,7 @@ pub(super) fn resolve(
     let entries = match fetched.map_err(ReadError::into_miss)? {
         Some(Fetched::Exact { entries }) => entries,
         Some(Fetched::Fallback { key }) => {
-            let key = decode_key(&key).map_err(ReadError::into_miss)?;
+            let key = decode_key(platform, &key).map_err(ReadError::into_miss)?;
             return Err(CacheMiss::Changed(Comparison::of_key(&key, cache_key)));
         }
         None => return Err(CacheMiss::NotFound),
@@ -221,18 +229,20 @@ impl RemoteClients {
 
     /// Fetch the entries stored under `cache_key` in the remote cache that
     /// `remote_config` configures, falling back to the key last stored for
-    /// `execution_cache_key`. Returns `None` if neither key matched. Stops
-    /// when `cancel_token` is cancelled.
+    /// `execution_cache_key`. Both keys name the parts of this machine's
+    /// platform that `platform` lists. Returns `None` if neither key matched.
+    /// Stops when `cancel_token` is cancelled.
     pub(super) async fn fetch(
         &self,
         remote_config: &ResolvedRemoteCacheConfig,
+        platform: CachePlatform,
         cache_key: &CacheEntryKey,
         execution_cache_key: &ExecutionCacheKey,
         cancel_token: &CancellationToken,
     ) -> Result<Option<Fetched>, ReadError> {
         let client = self.client(remote_config).map_err(ReadError::Fetch)?;
-        let key = encode_key(cache_key)?;
-        let secondary_key = encode_key(execution_cache_key)?;
+        let key = encode_key(platform, cache_key)?;
+        let secondary_key = encode_key(platform, execution_cache_key)?;
         cancel_token
             .run_until_cancelled(client.fetch(&key, &secondary_key))
             .await
@@ -277,13 +287,15 @@ impl RemoteClients {
 
     /// Prepare to upload an entry that was just recorded locally, along with
     /// its output archive in `cache_dir`, to the remote cache that
-    /// `remote_config` configures: get its client and encode the entry.
-    /// Nothing is sent until the returned future is polled, so an invalid
-    /// endpoint or an entry that doesn't encode fails here. The future owns
-    /// everything the upload needs, so it can run in a spawned task.
+    /// `remote_config` configures: get its client and encode the entry, with
+    /// keys for `platform`. Nothing is sent until the returned future is
+    /// polled, so an invalid endpoint or an entry that doesn't encode fails
+    /// here. The future owns everything the upload needs, so it can run in a
+    /// spawned task.
     pub(super) fn prepare_upload(
         &self,
         remote_config: &ResolvedRemoteCacheConfig,
+        platform: CachePlatform,
         cache_key: &CacheEntryKey,
         execution_cache_key: &ExecutionCacheKey,
         cache_value: &CacheEntryValue,
@@ -291,8 +303,8 @@ impl RemoteClients {
     ) -> Result<impl Future<Output = Result<(), UploadError>> + Send + use<>, UploadError> {
         let start = Instant::now();
         let client = self.client(remote_config)?;
-        let key = encode_key(cache_key)?;
-        let secondary_key = encode_key(execution_cache_key)?;
+        let key = encode_key(platform, cache_key)?;
+        let secondary_key = encode_key(platform, execution_cache_key)?;
         let value = encode_value(cache_value)?;
         let archive = cache_value.output_archive.as_ref().map(|name| cache_dir.join(name.as_str()));
         tracing::debug!(
@@ -528,26 +540,31 @@ struct KeyHeader {
     arch: Str,
 }
 
-/// The key header for this build.
-fn encode_header() -> WriteResult<Vec<u8>> {
+/// The key header for this build. It names the parts of this build's target
+/// that `platform` lists, and the other parts are empty. No target has an
+/// empty OS or architecture, so a key without a part never equals a key with it.
+fn encode_header(platform: CachePlatform) -> WriteResult<Vec<u8>> {
     serialize_cache(&KeyHeader {
         cache_schema_version: CACHE_SCHEMA_VERSION,
         remote_value_format: REMOTE_VALUE_FORMAT,
-        os: Str::from(std::env::consts::OS),
-        arch: Str::from(std::env::consts::ARCH),
+        os: Str::from(if platform.os { std::env::consts::OS } else { "" }),
+        arch: Str::from(if platform.arch { std::env::consts::ARCH } else { "" }),
     })
 }
 
-/// Encode a key with the header for this build.
-fn encode_key<K: SchemaWrite<TaskCacheConfig, Src = K>>(key: &K) -> WriteResult<Vec<u8>> {
-    let mut bytes = encode_header()?;
+/// Encode a key with the header for this build and `platform`.
+fn encode_key<K: SchemaWrite<TaskCacheConfig, Src = K>>(
+    platform: CachePlatform,
+    key: &K,
+) -> WriteResult<Vec<u8>> {
+    let mut bytes = encode_header(platform)?;
     bytes.extend(serialize_cache(key)?);
     Ok(bytes)
 }
 
-/// Decode a key stored with the header for this build.
-fn decode_key(bytes: &[u8]) -> Result<CacheEntryKey, ReadError> {
-    let header = encode_header()?;
+/// Decode a key stored with the header for this build and `platform`.
+fn decode_key(platform: CachePlatform, bytes: &[u8]) -> Result<CacheEntryKey, ReadError> {
+    let header = encode_header(platform)?;
     let key = bytes.strip_prefix(header.as_slice()).ok_or(ReadError::CorruptKey(None))?;
     deserialize_cache(key).map_err(|err| ReadError::CorruptKey(Some(err)))
 }
@@ -691,7 +708,7 @@ mod tests {
     fn corrupt_value(value: Vec<u8>) -> Arc<ReadError> {
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let fetched = Ok(Some(Fetched::Exact { entries: vec![Entry { value, blob_id: None }] }));
-        match resolve(fetched, &key, not_validated, no_baseline).unwrap_err() {
+        match resolve(fetched, CachePlatform::ALL, &key, not_validated, no_baseline).unwrap_err() {
             CacheMiss::RemoteReadFailed(error) => {
                 assert_eq!(vt_str::format!("{error}"), "remote cache value is corrupt");
                 error
@@ -705,6 +722,7 @@ mod tests {
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let restore = resolve(
             Ok(Some(exact(&cache_value()))),
+            CachePlatform::ALL,
             &key,
             validate_against(BTreeMap::new()),
             no_baseline,
@@ -720,6 +738,7 @@ mod tests {
         let current_inputs = BTreeMap::from([(RelativePathBuf::new("src/a.txt").unwrap(), 1)]);
         let miss = resolve(
             Ok(Some(exact(&cache_value()))),
+            CachePlatform::ALL,
             &cache_key(ResolvedGlobConfig::default_auto()),
             validate_against(current_inputs),
             no_baseline,
@@ -741,6 +760,7 @@ mod tests {
         let entries = vec![entry(&cache_value(), "2"), entry(&cache_value(), "1")];
         let restore = resolve(
             Ok(Some(Fetched::Exact { entries })),
+            CachePlatform::ALL,
             &key,
             validate_against(BTreeMap::new()),
             no_baseline,
@@ -762,6 +782,7 @@ mod tests {
         let mut validate = validate_against(inputs(&["src/a.txt"]));
         let restore = resolve(
             Ok(Some(Fetched::Exact { entries })),
+            CachePlatform::ALL,
             &key,
             |value| {
                 validated += 1;
@@ -782,6 +803,7 @@ mod tests {
         let entries = vec![entry(&cache_value(), "2"), entry(&with_inputs(&["src/b.txt"]), "1")];
         let miss = resolve(
             Ok(Some(Fetched::Exact { entries })),
+            CachePlatform::ALL,
             &key,
             validate_against(inputs(&["src/a.txt"])),
             no_baseline,
@@ -795,6 +817,7 @@ mod tests {
         ];
         let miss = resolve(
             Ok(Some(Fetched::Exact { entries })),
+            CachePlatform::ALL,
             &key,
             validate_against(inputs(&["src/a.txt"])),
             no_baseline,
@@ -813,6 +836,7 @@ mod tests {
             .insert(TrackedEnvQuery::Glob(Str::from("PROBE_[")), BTreeMap::new());
         let miss = resolve(
             Ok(Some(exact(&value))),
+            CachePlatform::ALL,
             &cache_key(ResolvedGlobConfig::default_auto()),
             validate_against(BTreeMap::new()),
             no_baseline,
@@ -823,11 +847,13 @@ mod tests {
 
     #[test]
     fn fallback_is_a_mismatch_with_the_stored_key() {
-        let stored_key = encode_key(&cache_key(ResolvedGlobConfig::default_auto())).unwrap();
+        let stored_key =
+            encode_key(CachePlatform::ALL, &cache_key(ResolvedGlobConfig::default_auto())).unwrap();
         let mut input_config = ResolvedGlobConfig::default_auto();
         input_config.positive_globs.insert(Str::from("src/**"));
         let miss = resolve(
             Ok(Some(Fetched::Fallback { key: stored_key })),
+            CachePlatform::ALL,
             &cache_key(input_config),
             not_validated,
             no_baseline,
@@ -849,7 +875,8 @@ mod tests {
     #[test]
     fn no_match_is_a_miss_without_an_entry() {
         let key = cache_key(ResolvedGlobConfig::default_auto());
-        let miss = resolve(Ok(None), &key, not_validated, no_baseline).unwrap_err();
+        let miss =
+            resolve(Ok(None), CachePlatform::ALL, &key, not_validated, no_baseline).unwrap_err();
         assert!(matches!(miss, CacheMiss::NotFound), "{miss:?}");
     }
 
@@ -857,7 +884,8 @@ mod tests {
     fn failed_fetch_is_a_read_failure() {
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let fetched = Err(ReadError::Fetch(vt_remote_cache::Error::InvalidEndpoint(None)));
-        let miss = resolve(fetched, &key, not_validated, no_baseline).unwrap_err();
+        let miss =
+            resolve(fetched, CachePlatform::ALL, &key, not_validated, no_baseline).unwrap_err();
         assert_eq!(read_failure(miss), "remote cache fetch failed");
     }
 
@@ -924,7 +952,8 @@ mod tests {
         for (value, blob_id) in [(cache_value(), None), (without_archive, Some(Str::from("1")))] {
             let value = encode_value(&value).unwrap();
             let fetched = Ok(Some(Fetched::Exact { entries: vec![Entry { value, blob_id }] }));
-            let miss = resolve(fetched, &key, not_validated, no_baseline).unwrap_err();
+            let miss =
+                resolve(fetched, CachePlatform::ALL, &key, not_validated, no_baseline).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache entry's blob doesn't match its value");
         }
     }
@@ -945,12 +974,72 @@ mod tests {
         };
         let other_schema = other_header(CACHE_SCHEMA_VERSION + 1, REMOTE_VALUE_FORMAT);
         let other_format = other_header(CACHE_SCHEMA_VERSION, REMOTE_VALUE_FORMAT + 1);
-        let mut garbage = encode_header().unwrap();
+        let mut garbage = encode_header(CachePlatform::ALL).unwrap();
         garbage.extend(b"not a cache key");
         for stored_key in [b"not a cache key".to_vec(), other_schema, other_format, garbage] {
             let fetched = Ok(Some(Fetched::Fallback { key: stored_key }));
-            let miss = resolve(fetched, &key, not_validated, no_baseline).unwrap_err();
+            let miss =
+                resolve(fetched, CachePlatform::ALL, &key, not_validated, no_baseline).unwrap_err();
             assert_eq!(read_failure(miss), "remote cache key is corrupt");
+        }
+    }
+
+    /// A platform with no part listed, so that every platform shares the keys.
+    const NO_PLATFORM: CachePlatform = CachePlatform { os: false, arch: false };
+
+    /// The header of a key stored for `os` and `arch` by this build.
+    fn header_for(os: &str, arch: &str) -> Vec<u8> {
+        serialize_cache(&KeyHeader {
+            cache_schema_version: CACHE_SCHEMA_VERSION,
+            remote_value_format: REMOTE_VALUE_FORMAT,
+            os: Str::from(os),
+            arch: Str::from(arch),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn keys_name_only_the_listed_parts_of_the_platform() {
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let encoded = serialize_cache(&key).unwrap();
+        let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+        for (platform, header) in [
+            (CachePlatform::ALL, header_for(os, arch)),
+            (CachePlatform { os: true, arch: false }, header_for(os, "")),
+            (CachePlatform { os: false, arch: true }, header_for("", arch)),
+            // No part is named, so every platform encodes the same key.
+            (NO_PLATFORM, header_for("", "")),
+        ] {
+            assert_eq!(encode_key(platform, &key).unwrap(), [header, encoded.clone()].concat());
+        }
+    }
+
+    #[test]
+    fn fallback_key_decodes_only_with_its_platform() {
+        let stored = cache_key(ResolvedGlobConfig::default_auto());
+        let mut input_config = ResolvedGlobConfig::default_auto();
+        input_config.positive_globs.insert(Str::from("src/**"));
+        let key = cache_key(input_config);
+        for (stored_platform, platform, decodes) in [
+            (NO_PLATFORM, NO_PLATFORM, true),
+            (CachePlatform::ALL, NO_PLATFORM, false),
+            (NO_PLATFORM, CachePlatform::ALL, false),
+        ] {
+            let fetched =
+                Ok(Some(Fetched::Fallback { key: encode_key(stored_platform, &stored).unwrap() }));
+            let miss = resolve(fetched, platform, &key, not_validated, no_baseline).unwrap_err();
+            if decodes {
+                assert!(
+                    matches!(
+                        &miss,
+                        CacheMiss::Changed(comparison)
+                            if comparison.changes == [Change::InputConfig]
+                    ),
+                    "{miss:?}"
+                );
+            } else {
+                assert_eq!(read_failure(miss), "remote cache key is corrupt");
+            }
         }
     }
 
@@ -1015,7 +1104,8 @@ mod tests {
         let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
 
         let clients = RemoteClients::default();
-        let fetch = clients.fetch(&remote_config, &key, &execution_key, &cancel_token);
+        let fetch =
+            clients.fetch(&remote_config, CachePlatform::ALL, &key, &execution_key, &cancel_token);
         let (fetched, ()) = tokio::join!(fetch, async {
             requested.await.unwrap();
             cancel_token.cancel();
@@ -1058,7 +1148,14 @@ mod tests {
         let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
         let value = CacheEntryValue { output_archive: None, ..cache_value() };
         let cache_dir = vt_path::current_dir().unwrap();
-        clients.prepare_upload(remote_config, &key, &execution_key, &value, &cache_dir)
+        clients.prepare_upload(
+            remote_config,
+            CachePlatform::ALL,
+            &key,
+            &execution_key,
+            &value,
+            &cache_dir,
+        )
     }
 
     fn upload_error(error: &OnceLock<UploadError>) -> Option<Str> {
