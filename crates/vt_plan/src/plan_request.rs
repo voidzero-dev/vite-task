@@ -11,7 +11,8 @@ use vt_str::Str;
 /// All fields use `Arc` for cheap reassignment. The implementation can mutate
 /// these fields to modify how the command is executed when it falls through as a
 /// normal process (i.e., when `get_plan_request` returns `None`). A mutated `cwd`
-/// also applies to synthetic and nested query requests.
+/// also applies to synthetic requests. A query request uses the cwd that the
+/// parser puts into its query.
 #[derive(Debug)]
 pub struct ScriptCommand {
     pub program: Str,
