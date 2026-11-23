@@ -167,7 +167,8 @@ pub trait PlanRequestParser: Debug {
     /// - If it returns `Ok(Some(PlanRequest::Query))`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
     /// - If it returns `Ok(Some(PlanRequest::Synthetic))`, the command will become a `SpawnExecution` with the synthetic task.
     ///
-    /// When a `PlanRequest` is returned, any mutations to `command` are discarded.
+    /// When a `PlanRequest` is returned, mutations to `command` are discarded, except that
+    /// a `PlanRequest::Synthetic` runs in the (potentially mutated) `command.cwd`.
     async fn get_plan_request(
         &mut self,
         command: &mut plan_request::ScriptCommand,
