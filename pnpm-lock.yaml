@@ -17,7 +17,7 @@ catalogs:
       version: 1.63.0
     '@tsconfig/strictest':
       specifier: ^2.0.8
-      version: 2.0.8
+      version: 2.0.9
     '@types/cross-spawn':
       specifier: 6.0.6
       version: 6.0.6
@@ -97,7 +97,7 @@ importers:
     devDependencies:
       '@tsconfig/strictest':
         specifier: 'catalog:'
-        version: 2.0.8
+        version: 2.0.9
       '@types/node':
         specifier: 'catalog:'
         version: 25.0.3
@@ -1890,8 +1890,8 @@ packages:
     peerDependencies:
       '@testing-library/dom': '>=7.21.4'
 
-  '@tsconfig/strictest@2.0.8':
-    resolution: {integrity: sha512-XnQ7vNz5HRN0r88GYf1J9JJjqtZPiHt2woGJOo2dYqyHGGcd6OLGqSlBB6p1j9mpzja6Oe5BoPqWmeDx6X9rLw==}
+  '@tsconfig/strictest@2.0.9':
+    resolution: {integrity: sha512-CbwIySRXoGapLZYXqQHF15cg0wQImJa25Ynmubb7816vnHqTdQrmQlSbZxkJrrBusHLbF1kFbNVn8XtxmQ3EpQ==}
 
   '@tybys/wasm-util@0.10.4':
     resolution: {integrity: sha512-W3c4gRigFS0T/Ma4qIYF3GDAc5AQdHb1yL5znJT1Zv1YaD9Kitx656wBjvr19qbiosmZT8lWDM5BEMynUqX65A==}
@@ -2128,7 +2128,7 @@ packages:
     libc: [musl]
 
   '@voidzero-dev/vite-plus-remote-cache-cloudflare@https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/b0c6302efe0345cb2925c06347504c80e4bf0773':
-    resolution: {gitHosted: true, tarball: https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/b0c6302efe0345cb2925c06347504c80e4bf0773}
+    resolution: {gitHosted: true, integrity: sha512-LIpUS9FNHaRd1GDrx0xokg2O7XpGXdiSC40NiwLc6yKqIyvSQkmW0X/L0bSuoVAICp4VUDL8oF8wQPmSuKFJjg==, tarball: https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/b0c6302efe0345cb2925c06347504c80e4bf0773}
     version: 0.0.0
     engines: {node: ^22.18.0 || ^24.11.0 || >=26.0.0}
 
@@ -4765,7 +4765,7 @@ snapshots:
     dependencies:
       '@testing-library/dom': 10.4.1
 
-  '@tsconfig/strictest@2.0.8': {}
+  '@tsconfig/strictest@2.0.9': {}
 
   '@tybys/wasm-util@0.10.4':
     dependencies:
