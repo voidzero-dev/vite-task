@@ -2128,7 +2128,7 @@ packages:
     libc: [musl]
 
   '@voidzero-dev/vite-plus-remote-cache-cloudflare@https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/b0c6302efe0345cb2925c06347504c80e4bf0773':
-    resolution: {gitHosted: true, tarball: https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/b0c6302efe0345cb2925c06347504c80e4bf0773}
+    resolution: {gitHosted: true, integrity: sha512-LIpUS9FNHaRd1GDrx0xokg2O7XpGXdiSC40NiwLc6yKqIyvSQkmW0X/L0bSuoVAICp4VUDL8oF8wQPmSuKFJjg==, tarball: https://codeload.github.com/voidzero-dev/vite-plus-remote-cache-cloudflare/tar.gz/b0c6302efe0345cb2925c06347504c80e4bf0773}
     version: 0.0.0
     engines: {node: ^22.18.0 || ^24.11.0 || >=26.0.0}
 
