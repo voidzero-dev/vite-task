@@ -76,6 +76,13 @@ impl RelativePath {
         Some(unsafe { Self::assume_portable(parent) })
     }
 
+    /// Returns the final normal component of `self`, or [`None`] if `self` is
+    /// empty or ends in `..`.
+    #[must_use]
+    pub fn file_name(&self) -> Option<&str> {
+        self.as_path().file_name().and_then(std::ffi::OsStr::to_str)
+    }
+
     /// Lexically normalizes the path by resolving `..` components without
     /// accessing the filesystem. (`.` components are already stripped by
     /// [`RelativePathBuf::new`].)
@@ -484,6 +491,15 @@ mod tests {
         let root = parent.parent().unwrap();
         assert_eq!(root.as_str(), "");
         assert!(root.parent().is_none());
+    }
+
+    #[test]
+    fn file_name() {
+        assert_eq!(RelativePathBuf::new("foo/bar").unwrap().file_name(), Some("bar"));
+        assert_eq!(RelativePathBuf::new("bar").unwrap().file_name(), Some("bar"));
+        assert_eq!(RelativePathBuf::new("").unwrap().file_name(), None);
+        assert_eq!(RelativePathBuf::new("..").unwrap().file_name(), None);
+        assert_eq!(RelativePathBuf::new("foo/..").unwrap().file_name(), None);
     }
 
     #[test]

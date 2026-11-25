@@ -22,7 +22,7 @@ use vt_plan::cache_metadata::EnvValueHash;
 use vt_str::Str;
 use wincode::{SchemaRead, SchemaWrite};
 
-use super::{ignored_paths::is_ignored_dir_entry, rebuildable::Rebuildable};
+use super::{ignored_paths::IgnoredDirEntries, rebuildable::Rebuildable};
 use crate::{
     collections::HashMap,
     session::cache::{Change, EnvMismatch, EnvSource, FileCheck, InputChangeKind},
@@ -539,8 +539,15 @@ fn leave_out_excluded_entries(
     cache_root: Option<&RelativePath>,
 ) {
     let DirListing { entries, ignored_entries } = listing;
+    let built_in = IgnoredDirEntries::for_dir(dir, cache_root);
+    if !built_in.has_non_ds_store_rules()
+        && ignored_entries.is_empty()
+        && input_negative_globs.is_empty()
+    {
+        return;
+    }
     entries.retain(|name, _| {
-        !is_ignored_dir_entry(dir, name.as_str(), cache_root)
+        !built_in.is_ignored(name.as_str())
             && !ignored_entries.contains(name)
             && (input_negative_globs.is_empty()
                 || !RelativePathBuf::new(name.as_str())
@@ -891,6 +898,7 @@ mod tests {
                     FxHashSet::default(),
                     FxHashSet::default(),
                     &workspace_root,
+                    None,
                 ),
                 &PathGlobSet::default(),
                 &FxHashSet::default(),
@@ -949,8 +957,9 @@ mod tests {
                 FxHashSet::default(),
                 FxHashSet::default(),
                 &workspace_root,
+                None,
             )
-            .with_folders(&workspace_root),
+            .with_folders(&workspace_root, None),
             &PathGlobSet::default(),
             &FxHashSet::default(),
             &workspace_root,
@@ -982,8 +991,9 @@ mod tests {
             FxHashSet::default(),
             FxHashSet::default(),
             &workspace_root,
+            None,
         )
-        .with_folders(&workspace_root);
+        .with_folders(&workspace_root, None);
         assert!(rebuildable.is_rebuildable_folder(&rel("out")));
         assert!(!rebuildable.is_rebuildable_folder(&rel("out/tmp")));
     }
@@ -1011,13 +1021,14 @@ mod tests {
                     .map(rel)
                     .collect(),
                 &workspace_root,
+                None,
             )
         };
         let empty_folders = FxHashSet::from_iter([rel("out/empty"), rel("out/drained")]);
-        let rebuildable = new().with_folders(&workspace_root);
+        let rebuildable = new().with_folders(&workspace_root, None);
         assert_eq!(rebuildable.empty_folders(), &empty_folders);
         // Without climbing, the archive gets the same empty folders.
-        assert_eq!(new().with_empty_folders(&workspace_root).empty_folders(), &empty_folders);
+        assert_eq!(new().with_empty_folders(&workspace_root, None).empty_folders(), &empty_folders);
 
         let path_reads = ["out", "out/empty", "mixed", "mixed/made"]
             .into_iter()
@@ -1058,8 +1069,9 @@ mod tests {
             FxHashSet::from_iter([rel("deps")]),
             FxHashSet::default(),
             &workspace_root,
+            None,
         )
-        .with_folders(&workspace_root);
+        .with_folders(&workspace_root, None);
         let mut written: Vec<&str> =
             rebuildable.written().iter().map(|path| path.as_str()).collect();
         written.sort_unstable();
@@ -1116,8 +1128,9 @@ mod tests {
                 FxHashSet::from_iter([rel(".vite/deps")]),
                 FxHashSet::from_iter([rel(".vite/deps_temp_1a2b")]),
                 &workspace_root,
+                None,
             )
-            .with_folders(&workspace_root),
+            .with_folders(&workspace_root, None),
             &PathGlobSet::default(),
             &FxHashSet::default(),
             &workspace_root,
@@ -1151,8 +1164,9 @@ mod tests {
             FxHashSet::default(),
             FxHashSet::default(),
             &workspace_root,
+            None,
         )
-        .with_folders(&workspace_root);
+        .with_folders(&workspace_root, None);
         let file = PathFingerprint::FileContentHash(0);
         assert!(!rebuildable.may_be_missing(&rel("deps/a.js"), &file, &workspace_root));
         assert!(!rebuildable.may_be_missing(
@@ -1198,8 +1212,9 @@ mod tests {
                 FxHashSet::default(),
                 FxHashSet::default(),
                 &workspace_root,
+                None,
             )
-            .with_folders(&workspace_root),
+            .with_folders(&workspace_root, None),
             &PathGlobSet::default(),
             &FxHashSet::default(),
             &workspace_root,
@@ -1390,5 +1405,54 @@ mod tests {
             }
             other => panic!("expected `packages/app/node_modules/extra` added, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rebuildable_skips_built_in_ignored_entries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        let cache_root = rel("node_modules/.vite/task-cache");
+
+        // `node_modules` holds a task-written file under `.vite/deps`, plus
+        // built-in ignored entries (`.vite-temp`, `.pnpm-workspace-state-*`,
+        // and the task cache). Those ignored entries don't block rebuildability.
+        for dir in [
+            "node_modules/.vite/deps",
+            "node_modules/.vite/task-cache/v24",
+            "node_modules/.vite-temp",
+            "renamed/node_modules/.vite-temp",
+        ] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        for file in [
+            "node_modules/.vite/deps/a.js",
+            "node_modules/.vite/task-cache/v24/cache.db",
+            "node_modules/.pnpm-workspace-state-v1.json",
+            "renamed/node_modules/out.js",
+            "renamed/node_modules/.pnpm-workspace-state-v1.json",
+            "renamed/node_modules/.vite-temp/config.timestamp.mjs",
+        ] {
+            std::fs::write(workspace_root.join(file).as_path(), "x").unwrap();
+        }
+
+        let rebuildable = Rebuildable::new(
+            FxHashSet::from_iter([rel("node_modules/.vite/deps/a.js")]),
+            FxHashSet::from_iter([rel("renamed")]),
+            FxHashSet::from_iter([rel("node_modules/.vite")]),
+            &workspace_root,
+            Some(&cache_root),
+        )
+        .with_folders(&workspace_root, Some(&cache_root));
+
+        assert!(rebuildable.is_rebuildable_folder(&rel("node_modules/.vite/deps")));
+        assert!(rebuildable.is_rebuildable_folder(&rel("node_modules/.vite")));
+        assert!(rebuildable.is_rebuildable_folder(&rel("node_modules")));
+
+        // Renamed folders don't pull built-in ignored files into the archive.
+        let mut written: Vec<&str> =
+            rebuildable.written().iter().map(|path| path.as_str()).collect();
+        written.sort_unstable();
+        assert_eq!(written, ["node_modules/.vite/deps/a.js", "renamed/node_modules/out.js"]);
     }
 }

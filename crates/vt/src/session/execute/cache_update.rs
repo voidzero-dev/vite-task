@@ -246,6 +246,7 @@ fn observe_fspy(
                 tracked.rename_targets,
                 tracked.mkdirs,
                 workspace_root,
+                cache_root,
             );
             let filtered_path_reads: HashMap<RelativePathBuf, PathRead> =
                 // fspy can be attached for auto-output-only tasks. In that
@@ -282,9 +283,9 @@ fn observe_fspy(
             // without them, the archive still takes the empty folders the
             // task made.
             rebuildable = if filtered_path_reads.is_empty() {
-                rebuildable.with_empty_folders(workspace_root)
+                rebuildable.with_empty_folders(workspace_root, cache_root)
             } else {
-                rebuildable.with_folders(workspace_root)
+                rebuildable.with_folders(workspace_root, cache_root)
             };
             TrackingOutcome {
                 path_reads: filtered_path_reads,

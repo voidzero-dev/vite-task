@@ -1,10 +1,11 @@
-//! Built-in workspace-relative paths ignored by automatic tracking and
-//! directory listing fingerprints.
+//! Built-in workspace-relative paths ignored by automatic tracking, directory
+//! listing fingerprints, and rebuildable-folder scans.
 //!
-//! Both direct fspy path accesses (`tracked_accesses`) and directory listing
-//! entries ([`super::fingerprint`]) filter through this module so they agree
-//! on which volatile or internal workspace paths never participate in cache
-//! keys, inferred inputs, or outputs.
+//! Direct fspy path accesses (`tracked_accesses`), directory listing entries
+//! ([`super::fingerprint`]), and rebuildable folder scans
+//! ([`super::rebuildable`]) all filter through this module so they agree on
+//! which volatile or internal workspace paths never participate in cache keys,
+//! inferred inputs, or outputs.
 
 use vt_path::{AbsolutePath, RelativePath, RelativePathBuf};
 
@@ -24,80 +25,93 @@ pub fn relative_cache_root(
         .filter(|cache_root| !cache_root.as_str().is_empty())
 }
 
+/// Built-in ignored entry matcher precomputed for one workspace-relative
+/// directory, so per-entry checks in large directories avoid repeating
+/// directory-level prefix checks.
+pub(super) struct IgnoredDirEntries<'a> {
+    /// Every entry in this directory is ignored because the directory itself
+    /// lies inside an ignored subtree (root `.git`, `node_modules/.vite-temp`,
+    /// or `cache_root`).
+    all: bool,
+    /// The directory is the workspace root (`""`), where `.git` is ignored.
+    is_root: bool,
+    /// The directory is a `node_modules` directory, where
+    /// `.pnpm-workspace-state-*.json` and `.vite-temp` are ignored.
+    is_node_modules: bool,
+    /// The entry name of `cache_root` when the directory is its immediate
+    /// parent.
+    cache_root_name: Option<&'a str>,
+}
+
+impl<'a> IgnoredDirEntries<'a> {
+    /// Build a matcher for entries directly inside `dir`.
+    #[must_use]
+    pub(super) fn for_dir(dir: &RelativePath, cache_root: Option<&'a RelativePath>) -> Self {
+        let dir_str = dir.as_str();
+        let all = is_under_root_git(dir)
+            || is_under_node_modules_vite_temp(dir_str)
+            || cache_root
+                .is_some_and(|root| !root.as_str().is_empty() && dir.strip_prefix(root).is_some());
+        let cache_root_name = cache_root
+            .filter(|root| !root.as_str().is_empty() && root.parent() == Some(dir))
+            .and_then(RelativePath::file_name);
+        Self {
+            all,
+            is_root: dir_str.is_empty(),
+            is_node_modules: is_node_modules_dir(dir_str),
+            cache_root_name,
+        }
+    }
+
+    /// Whether this directory has any built-in ignored entries beyond
+    /// `.DS_Store`, which raw directory listing already skips.
+    #[must_use]
+    pub(super) const fn has_non_ds_store_rules(&self) -> bool {
+        self.all || self.is_root || self.is_node_modules || self.cache_root_name.is_some()
+    }
+
+    /// Whether the entry `name` in this directory is a built-in ignored path:
+    ///
+    /// - `.DS_Store` (Finder metadata in any folder on macOS)
+    /// - `.git` at the workspace root (workaround for tools like oxlint, and
+    ///   keeps worktrees/clones/exports with different `.git` layouts from
+    ///   busting the cache)
+    /// - `node_modules/.pnpm-workspace-state-*.json` (pnpm's dependency check
+    ///   record before `pnpm run`/`pnpm exec`, rewritten with timestamps and
+    ///   absolute paths)
+    /// - `node_modules/.vite-temp` and anything under it (Vite's transient
+    ///   compiled `vite.config.*` folder)
+    /// - `cache_root` and anything under it (the task cache `vp` rewrites
+    ///   after every run)
+    #[must_use]
+    pub(super) fn is_ignored(&self, name: &str) -> bool {
+        self.all
+            || name == ".DS_Store"
+            || (self.is_root && name == ".git")
+            || (self.is_node_modules
+                && (name == ".vite-temp" || is_pnpm_workspace_state_file(name)))
+            || self.cache_root_name == Some(name)
+    }
+}
+
 /// Whether `path`, relative to the workspace root, is a built-in ignored path.
-#[cfg_attr(not(fspy), expect(dead_code, reason = "only called when filtering fspy path accesses"))]
+#[cfg_attr(
+    all(not(fspy), not(test)),
+    expect(dead_code, reason = "only called when filtering fspy path accesses")
+)]
 #[must_use]
 pub(super) fn is_ignored_workspace_path(
     path: &RelativePath,
     cache_root: Option<&RelativePath>,
 ) -> bool {
-    let path = path.as_str();
-    if path.is_empty() {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
         return false;
-    }
-    let (dir, name) = path.rsplit_once('/').unwrap_or(("", path));
-    is_ignored_entry(dir, name, cache_root)
+    };
+    IgnoredDirEntries::for_dir(dir, cache_root).is_ignored(name)
 }
 
-/// Whether the entry `name` in the workspace-relative folder `dir` is a
-/// built-in ignored path.
-///
-/// For any non-empty single-component `name`, this agrees with
-/// [`is_ignored_workspace_path`] on `dir.join(name)` without allocating.
-#[must_use]
-pub(super) fn is_ignored_dir_entry(
-    dir: &RelativePath,
-    name: &str,
-    cache_root: Option<&RelativePath>,
-) -> bool {
-    is_ignored_entry(dir.as_str(), name, cache_root)
-}
-
-fn is_ignored_entry(dir: &str, name: &str, cache_root: Option<&RelativePath>) -> bool {
-    // Finder metadata files can appear in any folder on macOS.
-    if name == ".DS_Store" || has_component(dir, ".DS_Store") {
-        return true;
-    }
-
-    // Skip .git directory accesses and root listings (workaround for tools like
-    // oxlint, and keeps worktrees/clones/exports with different `.git` layouts
-    // from busting the cache).
-    if is_root_git(dir, name) {
-        return true;
-    }
-
-    // pnpm's record of its dependency check before `pnpm run` and `pnpm exec`
-    // (`node_modules/.pnpm-workspace-state-*.json`). pnpm rewrites it with a
-    // new timestamp whenever it rechecks dependencies, and it holds absolute
-    // project paths. Whether the check passes doesn't change what a cached
-    // task outputs.
-    if is_node_modules_dir(dir) && is_pnpm_workspace_state_file(name) {
-        return true;
-    }
-
-    // Vite's transient compiled config folder (`node_modules/.vite-temp`).
-    // Vite writes timestamped `.mjs` files here while loading `vite.config.*`
-    // and leaves the directory behind, which otherwise causes spurious misses
-    // for any task that lists `node_modules` or walks into it.
-    if (is_node_modules_dir(dir) && name == ".vite-temp") || is_under_node_modules_vite_temp(dir) {
-        return true;
-    }
-
-    // Skip the task cache. vp rewrites it after every run, so a task that
-    // reads or lists it, like a tool crawling the project, would never hit.
-    if cache_root.is_some_and(|cache_root| is_at_or_under(dir, name, cache_root.as_str())) {
-        return true;
-    }
-
-    false
-}
-
-fn has_component(dir: &str, target: &str) -> bool {
-    !dir.is_empty() && dir.split('/').any(|component| component == target)
-}
-
-fn is_root_git(dir: &str, name: &str) -> bool {
-    (dir.is_empty() && name == ".git") || dir == ".git" || dir.starts_with(".git/")
+fn is_under_root_git(dir: &RelativePath) -> bool {
+    dir.as_path().strip_prefix(".git").is_ok()
 }
 
 fn is_node_modules_dir(dir: &str) -> bool {
@@ -114,16 +128,6 @@ fn is_under_node_modules_vite_temp(dir: &str) -> bool {
         || dir.starts_with("node_modules/.vite-temp/")
         || dir.ends_with("/node_modules/.vite-temp")
         || dir.contains("/node_modules/.vite-temp/")
-}
-
-fn is_at_or_under(dir: &str, name: &str, root: &str) -> bool {
-    if root.is_empty() {
-        return false;
-    }
-    if dir == root || dir.strip_prefix(root).is_some_and(|rest| rest.starts_with('/')) {
-        return true;
-    }
-    root.rsplit_once('/').unwrap_or(("", root)) == (dir, name)
 }
 
 #[cfg(test)]
@@ -143,10 +147,9 @@ mod tests {
             expected,
             "workspace path `{path}`"
         );
-        if let Some(parent) = relative.parent() {
-            let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
+        if let (Some(parent), Some(name)) = (relative.parent(), relative.file_name()) {
             assert_eq!(
-                is_ignored_dir_entry(parent, name, cache_root),
+                IgnoredDirEntries::for_dir(parent, cache_root).is_ignored(name),
                 expected,
                 "dir entry `{name}` in `{}`",
                 parent.as_str()
@@ -219,6 +222,27 @@ mod tests {
         let empty = rel("");
         assert!(!is_ignored_workspace_path(&empty, None));
         assert!(!is_ignored_workspace_path(&empty, Some(&empty)));
+    }
+
+    #[test]
+    fn non_special_dir_has_no_non_ds_store_rules() {
+        let cache_root = rel("node_modules/.vite/task-cache");
+        assert!(
+            !IgnoredDirEntries::for_dir(&rel("src"), Some(&cache_root)).has_non_ds_store_rules()
+        );
+        assert!(
+            !IgnoredDirEntries::for_dir(&rel("packages/a/src"), Some(&cache_root))
+                .has_non_ds_store_rules()
+        );
+        assert!(IgnoredDirEntries::for_dir(&rel(""), Some(&cache_root)).has_non_ds_store_rules());
+        assert!(
+            IgnoredDirEntries::for_dir(&rel("node_modules"), Some(&cache_root))
+                .has_non_ds_store_rules()
+        );
+        assert!(
+            IgnoredDirEntries::for_dir(&rel("node_modules/.vite"), Some(&cache_root))
+                .has_non_ds_store_rules()
+        );
     }
 
     #[test]
