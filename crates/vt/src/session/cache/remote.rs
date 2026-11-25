@@ -13,16 +13,18 @@
 //! remote value format, and the target OS and architecture. Platforms share an
 //! endpoint's namespace, but their keys differ.
 
+mod retry;
+
 use std::{
     fs::File,
     io::{self, Read as _, Write as _},
     sync::{Arc, Mutex, OnceLock, PoisonError},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::Instrument as _;
 use vt_path::AbsolutePath;
@@ -40,10 +42,18 @@ use wincode::{
     error::{WriteError, WriteResult},
 };
 
+use self::retry::{OutageBreaker, RateLimit, RetryConfig, RetryableError};
 use super::{
     BaselineDetails, CACHE_SCHEMA_VERSION, CacheEntryKey, CacheEntryValue, CacheMiss, Checked,
     Comparison, TaskCacheConfig, archive, deserialize_cache, serialize_cache,
 };
+
+/// Maximum number of concurrent remote cache uploads in flight per endpoint.
+///
+/// Bounding uploads per endpoint shapes bursts against backends with
+/// per-isolate admission limits, prevents uplink thrashing, and caps open
+/// archive file handles.
+const MAX_CONCURRENT_STORES: usize = 4;
 
 /// Why an entry wasn't uploaded.
 #[derive(Debug, thiserror::Error)]
@@ -60,6 +70,43 @@ pub enum UploadError {
     /// Ctrl-C cancelled the upload before it finished.
     #[error("interrupted")]
     Interrupted,
+    /// The remote cache endpoint recently failed repeatedly, so this upload
+    /// was skipped during the outage cooldown window.
+    #[error("remote cache temporarily unavailable")]
+    Unavailable,
+}
+
+impl RetryableError for UploadError {
+    fn is_retryable(&self) -> bool {
+        matches!(self, Self::Remote(err) if err.is_retryable())
+    }
+
+    fn is_outage(&self) -> bool {
+        matches!(self, Self::Remote(err) if err.is_outage())
+    }
+
+    fn is_rate_limited(&self) -> bool {
+        matches!(self, Self::Remote(err) if err.is_rate_limited())
+    }
+
+    fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Interrupted)
+    }
+
+    fn retry_after(&self) -> Option<Duration> {
+        match self {
+            Self::Remote(err) => err.retry_after(),
+            Self::Encode(_)
+            | Self::Compress(_)
+            | Self::TooLarge
+            | Self::Interrupted
+            | Self::Unavailable => None,
+        }
+    }
+
+    fn unavailable() -> Self {
+        Self::Unavailable
+    }
 }
 
 /// Why no entry could be read from the remote cache. It's a cache miss, and
@@ -91,6 +138,47 @@ pub enum ReadError {
     /// finished. The task doesn't start then, so this miss isn't reported.
     #[error("cancelled")]
     Cancelled,
+    /// The remote cache endpoint recently failed repeatedly, so this read was
+    /// skipped during the outage cooldown window.
+    #[error("remote cache temporarily unavailable")]
+    Unavailable,
+}
+
+impl RetryableError for ReadError {
+    fn is_retryable(&self) -> bool {
+        matches!(self, Self::Fetch(err) | Self::Download(err) if err.is_retryable())
+    }
+
+    fn is_outage(&self) -> bool {
+        matches!(self, Self::Fetch(err) | Self::Download(err) if err.is_outage())
+    }
+
+    fn is_rate_limited(&self) -> bool {
+        matches!(self, Self::Fetch(err) | Self::Download(err) if err.is_rate_limited())
+    }
+
+    fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled)
+    }
+
+    fn retry_after(&self) -> Option<Duration> {
+        match self {
+            Self::Fetch(err) | Self::Download(err) => err.retry_after(),
+            Self::CorruptValue(_)
+            | Self::CorruptKey(_)
+            | Self::MismatchedBlob
+            | Self::CorruptArchive(_)
+            | Self::WriteArchive(_)
+            | Self::Validate(_)
+            | Self::Encode(_)
+            | Self::Cancelled
+            | Self::Unavailable => None,
+        }
+    }
+
+    fn unavailable() -> Self {
+        Self::Unavailable
+    }
 }
 
 impl ReadError {
@@ -195,28 +283,146 @@ struct ClientKey {
     auth: RemoteCacheAuth,
 }
 
+/// Per-endpoint client and session resilience state (upload concurrency cap,
+/// `429` cooldown gates, and read/store outage circuit breakers).
+#[derive(Debug)]
+struct RemoteEndpoint {
+    client: Client,
+    /// Bounds concurrent uploads in flight for this endpoint.
+    store_permits: Semaphore,
+    /// Shared cooldown for `429 Too Many Requests` on read operations so
+    /// upload rate limits do not stall fetches on the task critical path.
+    read_rate_limit: RateLimit,
+    /// Shared cooldown for `429 Too Many Requests` on store operations.
+    store_rate_limit: RateLimit,
+    /// Circuit breaker that short-circuits read requests (fetch and download)
+    /// during sustained outages. Kept separate from stores so store failures
+    /// do not block the task-critical read path.
+    read_outage: OutageBreaker,
+    /// Circuit breaker that short-circuits store requests during sustained
+    /// outages. Kept separate from reads so successful reads cannot reset
+    /// consecutive store failures.
+    store_outage: OutageBreaker,
+    retry: RetryConfig,
+}
+
+impl RemoteEndpoint {
+    fn new(
+        remote_config: &ResolvedRemoteCacheConfig,
+        retry: RetryConfig,
+    ) -> Result<Self, vt_remote_cache::Error> {
+        let client = Client::new(&remote_config.url, build_auth(&remote_config.auth))?;
+        Ok(Self {
+            client,
+            store_permits: Semaphore::new(MAX_CONCURRENT_STORES),
+            read_rate_limit: RateLimit::default(),
+            store_rate_limit: RateLimit::default(),
+            read_outage: OutageBreaker::new(retry.outage_threshold, retry.outage_cooldown),
+            store_outage: OutageBreaker::new(retry.outage_threshold, retry.outage_cooldown),
+            retry,
+        })
+    }
+
+    async fn fetch(
+        &self,
+        key: &[u8],
+        secondary_key: &[u8],
+        cancel_token: &CancellationToken,
+    ) -> Result<Option<Fetched>, ReadError> {
+        cancel_token
+            .run_until_cancelled(retry::run(
+                "fetch",
+                self.retry.read,
+                &self.read_rate_limit,
+                &self.read_outage,
+                || async { self.client.fetch(key, secondary_key).await.map_err(ReadError::Fetch) },
+            ))
+            .await
+            .ok_or(ReadError::Cancelled)?
+    }
+
+    async fn download_checked(
+        &self,
+        blob_id: &str,
+        path: &AbsolutePath,
+        cancel_token: &CancellationToken,
+    ) -> Result<(), ReadError> {
+        cancel_token
+            .run_until_cancelled(retry::run(
+                "download",
+                self.retry.read,
+                &self.read_rate_limit,
+                &self.read_outage,
+                || download_once(&self.client, blob_id, path, cancel_token),
+            ))
+            .await
+            .ok_or(ReadError::Cancelled)?
+    }
+
+    async fn store(
+        &self,
+        key: &[u8],
+        secondary_key: &[u8],
+        value: &[u8],
+        blob: Option<&AbsolutePath>,
+    ) -> Result<(), UploadError> {
+        let queue_start = Instant::now();
+        let permit = self.store_permits.acquire().await.expect("store semaphore is never closed");
+        let queued = queue_start.elapsed();
+        if !queued.is_zero() {
+            tracing::debug!(?queued, "acquired remote cache upload slot");
+        }
+        let result = retry::run(
+            "store",
+            self.retry.store,
+            &self.store_rate_limit,
+            &self.store_outage,
+            || async {
+                self.client
+                    .store(key, secondary_key, value, blob)
+                    .await
+                    .map_err(UploadError::Remote)
+            },
+        )
+        .await;
+        drop(permit);
+        result
+    }
+}
+
 /// Remote cache clients, each created when its endpoint is first used with
 /// its auth.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RemoteClients {
-    clients: Mutex<FxHashMap<ClientKey, Arc<Client>>>,
+    clients: Mutex<FxHashMap<ClientKey, Arc<RemoteEndpoint>>>,
+    retry: RetryConfig,
+}
+
+impl Default for RemoteClients {
+    fn default() -> Self {
+        Self::with_retry(RetryConfig::DEFAULT)
+    }
 }
 
 impl RemoteClients {
-    fn client(
+    fn with_retry(retry: RetryConfig) -> Self {
+        Self { clients: Mutex::new(FxHashMap::default()), retry }
+    }
+
+    fn endpoint(
         &self,
         remote_config: &ResolvedRemoteCacheConfig,
-    ) -> Result<Arc<Client>, vt_remote_cache::Error> {
+    ) -> Result<Arc<RemoteEndpoint>, vt_remote_cache::Error> {
         let key =
             ClientKey { url: Arc::clone(&remote_config.url), auth: remote_config.auth.clone() };
         let mut clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(client) = clients.get(&key) {
-            return Ok(Arc::clone(client));
+        if let Some(endpoint) = clients.get(&key) {
+            return Ok(Arc::clone(endpoint));
         }
-        let client = Arc::new(Client::new(&remote_config.url, build_auth(&remote_config.auth))?);
-        clients.insert(key, Arc::clone(&client));
+        let endpoint = Arc::new(RemoteEndpoint::new(remote_config, self.retry)?);
+        clients.insert(key, Arc::clone(&endpoint));
         drop(clients);
-        Ok(client)
+        Ok(endpoint)
     }
 
     /// Fetch the entries stored under `cache_key` in the remote cache that
@@ -230,14 +436,10 @@ impl RemoteClients {
         execution_cache_key: &ExecutionCacheKey,
         cancel_token: &CancellationToken,
     ) -> Result<Option<Fetched>, ReadError> {
-        let client = self.client(remote_config).map_err(ReadError::Fetch)?;
+        let endpoint = self.endpoint(remote_config).map_err(ReadError::Fetch)?;
         let key = encode_key(cache_key)?;
         let secondary_key = encode_key(execution_cache_key)?;
-        cancel_token
-            .run_until_cancelled(client.fetch(&key, &secondary_key))
-            .await
-            .ok_or(ReadError::Cancelled)?
-            .map_err(ReadError::Fetch)
+        endpoint.fetch(&key, &secondary_key, cancel_token).await
     }
 
     /// Download the blob `blob_id` from the remote cache that `remote_config`
@@ -253,12 +455,12 @@ impl RemoteClients {
         cancel_token: &CancellationToken,
     ) -> Result<Str, ReadError> {
         let start = Instant::now();
-        let client = self.client(remote_config).map_err(ReadError::Download)?;
+        let endpoint = self.endpoint(remote_config).map_err(ReadError::Download)?;
         let archive_name = vt_str::format!("{}.tar.zst", uuid::Uuid::new_v4());
         let archive_path = cache_dir.join(archive_name.as_str());
         let temp_path = cache_dir.join(vt_str::format!("{archive_name}.tmp").as_str());
         let result =
-            download_checked(&client, blob_id, &temp_path, cancel_token).await.and_then(|()| {
+            endpoint.download_checked(blob_id, &temp_path, cancel_token).await.and_then(|()| {
                 std::fs::rename(temp_path.as_path(), archive_path.as_path())
                     .map_err(ReadError::WriteArchive)
             });
@@ -290,7 +492,7 @@ impl RemoteClients {
         cache_dir: &AbsolutePath,
     ) -> Result<impl Future<Output = Result<(), UploadError>> + Send + use<>, UploadError> {
         let start = Instant::now();
-        let client = self.client(remote_config)?;
+        let endpoint = self.endpoint(remote_config)?;
         let key = encode_key(cache_key)?;
         let secondary_key = encode_key(execution_cache_key)?;
         let value = encode_value(cache_value)?;
@@ -301,10 +503,7 @@ impl RemoteClients {
             elapsed = ?start.elapsed(),
             "prepared a remote cache upload"
         );
-        Ok(async move {
-            client.store(&key, &secondary_key, &value, archive.as_deref()).await?;
-            Ok(())
-        })
+        Ok(async move { endpoint.store(&key, &secondary_key, &value, archive.as_deref()).await })
     }
 }
 
@@ -397,69 +596,49 @@ impl RemoteUploads {
 /// Chunks buffered between the download and the archive check.
 const CHECK_BUFFER_CHUNKS: usize = 16;
 
-/// Download the blob `blob_id` to the file at `path`, until `cancel_token` is
-/// cancelled. The chunks flow one way: from the network to the archive check
-/// on a blocking thread, which writes each one to the file as it takes it.
-/// If the stream drops mid-transfer with a network error, the download is
-/// retried once from the start (with a single header attempt), overwriting the
-/// partial `.tmp` file.
-async fn download_checked(
+/// Single attempt to download the blob `blob_id` to `path` while streaming it
+/// through the archive check on a blocking thread, stopping if `cancel_token`
+/// is cancelled. Always waits for the blocking check task to finish so the
+/// file handle is closed before the caller removes it or retries.
+async fn download_once(
     client: &Client,
     blob_id: &str,
     path: &AbsolutePath,
     cancel_token: &CancellationToken,
 ) -> Result<(), ReadError> {
-    const MAX_STREAM_ATTEMPTS: usize = 2;
-
-    for attempt in 0..MAX_STREAM_ATTEMPTS {
-        let download_fut = async {
-            if attempt == 0 {
-                client.download(blob_id).await
-            } else {
-                client.download_once(blob_id).await
-            }
-        };
-        let download = cancel_token
-            .run_until_cancelled(download_fut)
-            .await
-            .ok_or(ReadError::Cancelled)?
-            .map_err(ReadError::Download)?;
-        let file = File::create(path.as_path()).map_err(ReadError::WriteArchive)?;
-        let (sender, receiver) = mpsc::channel(CHECK_BUFFER_CHUNKS);
-        let check = tokio::task::spawn_blocking(move || {
-            let mut reader =
-                DownloadReader { receiver, chunk: Bytes::new(), file, write_error: None };
-            let checked = archive::read_output_archive(&mut reader, |_| {});
-            if let Some(err) = reader.write_error {
-                return Err(ReadError::WriteArchive(err));
-            }
-            checked.map_err(ReadError::CorruptArchive)
-        });
-        // Cancelling drops the sender, which ends the check.
-        let sent = cancel_token.run_until_cancelled(send_chunks(download, sender)).await;
-        // Wait for the check even after a network error or cancellation, so the
-        // file is closed before the caller removes it or retries.
-        let checked = check.await.unwrap_or_else(|err| Err(ReadError::CorruptArchive(err.into())));
-        if cancel_token.is_cancelled() {
-            return Err(ReadError::Cancelled);
+    let download = cancel_token
+        .run_until_cancelled(client.download(blob_id))
+        .await
+        .ok_or(ReadError::Cancelled)?
+        .map_err(ReadError::Download)?;
+    let file = File::create(path.as_path()).map_err(ReadError::WriteArchive)?;
+    let (sender, receiver) = mpsc::channel(CHECK_BUFFER_CHUNKS);
+    let check = tokio::task::spawn_blocking(move || {
+        let mut reader = DownloadReader { receiver, chunk: Bytes::new(), file, write_error: None };
+        let checked = archive::read_output_archive(&mut reader, |_| {});
+        if let Some(err) = reader.write_error {
+            return Err(ReadError::WriteArchive(err));
         }
-        match sent.ok_or(ReadError::Cancelled)? {
-            Ok(()) => return checked,
-            Err(err @ vt_remote_cache::Error::Network(_)) if attempt + 1 < MAX_STREAM_ATTEMPTS => {
-                // Local disk write failures are not transient network drops.
-                if let Err(err @ ReadError::WriteArchive(_)) = checked {
-                    return Err(err);
-                }
-                tracing::debug!(
-                    ?err,
-                    attempt = attempt + 1,
-                    "retrying remote cache archive download after mid-stream network error"
-                );
+        checked.map_err(ReadError::CorruptArchive)
+    });
+    // Cancelling drops the sender, which ends the check.
+    let sent = cancel_token.run_until_cancelled(send_chunks(download, sender)).await;
+    // Wait for the check even after a network error or cancellation, so the
+    // file is closed before the caller removes it or retries.
+    let checked = check.await.unwrap_or_else(|err| Err(ReadError::CorruptArchive(err.into())));
+    if cancel_token.is_cancelled() {
+        return Err(ReadError::Cancelled);
+    }
+    match sent.ok_or(ReadError::Cancelled)? {
+        Ok(()) => checked,
+        Err(err) => {
+            // Local disk write failures are not transient network drops.
+            if let Err(err @ ReadError::WriteArchive(_)) = checked {
+                return Err(err);
             }
-            Err(err) => return Err(ReadError::Download(err)),
+            Err(ReadError::Download(err))
         }
     }
-    unreachable!("MAX_STREAM_ATTEMPTS is always at least 1")
 }
 
 /// Send the blob's chunks through `sender` until the blob ends or the receiver
@@ -586,7 +765,12 @@ fn decode_key(bytes: &[u8]) -> Result<CacheEntryKey, ReadError> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, net::TcpListener, time::Duration};
+    use std::{
+        collections::BTreeMap,
+        net::TcpListener,
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
 
     use tokio::sync::oneshot;
     use vt_glob::path::PathGlobSet;
@@ -597,13 +781,36 @@ mod tests {
         remote_cache::{GithubOidcAuth, RemoteCacheAccess, Secret},
     };
 
-    use super::*;
+    use super::{retry::RetryPolicy, *};
     use crate::session::{
         cache::{Change, FileCheck, InputChangeKind},
         execute::{
             fingerprint::{PostRunFingerprint, TrackedEnvQuery},
             pipe::{OutputKind, StdOutput},
         },
+    };
+
+    /// Zero-delay retry config with production attempt counts so tests
+    /// exercise the full retry loop without sleeping.
+    const FAST_RETRY: RetryConfig = RetryConfig {
+        read: RetryPolicy {
+            base_delay: Duration::ZERO,
+            max_delay: Duration::ZERO,
+            ..RetryPolicy::READ
+        },
+        store: RetryPolicy {
+            base_delay: Duration::ZERO,
+            max_delay: Duration::ZERO,
+            ..RetryPolicy::STORE
+        },
+        ..RetryConfig::DEFAULT
+    };
+
+    /// Single-attempt retry config for tests that expect immediate failure.
+    const NO_RETRY: RetryConfig = RetryConfig {
+        read: RetryPolicy { max_retries: 0, ..FAST_RETRY.read },
+        store: RetryPolicy { max_retries: 0, ..FAST_RETRY.store },
+        ..FAST_RETRY
     };
 
     /// A key whose spawn fingerprint runs `vtt build`. `SpawnFingerprint`'s
@@ -1124,7 +1331,7 @@ mod tests {
             }),
             ..unreachable.clone()
         };
-        let clients = RemoteClients::default();
+        let clients = RemoteClients::with_retry(NO_RETRY);
         let uploads = RemoteUploads::default();
 
         for (remote_config, message) in [
@@ -1140,13 +1347,57 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn mid_stream_download_network_error_is_retried() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache_dir = AbsolutePathBuf::new(dir.path().to_path_buf()).unwrap();
-        // Build a valid `.tar.zst` archive with a real entry so a strict prefix
-        // is valid zstd up to EOF (preventing the archive check from failing
-        // ahead of the network truncation error).
+    /// Read one complete HTTP/1.1 request (head + `Content-Length` body) from
+    /// `listener`, write `raw_response`, and return the raw request bytes.
+    fn serve_raw_once(listener: &TcpListener, raw_response: &[u8]) -> Vec<u8> {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        let mut buf = [0; 4096];
+        let header_end = loop {
+            let n = stream.read(&mut buf).unwrap();
+            assert_ne!(n, 0, "connection closed before the request head ended");
+            request.extend_from_slice(&buf[..n]);
+            if let Some(pos) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break pos + 4;
+            }
+        };
+        let content_length: usize = std::str::from_utf8(&request[..header_end])
+            .unwrap()
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse().unwrap())
+            })
+            .unwrap_or(0);
+        while request.len() < header_end + content_length {
+            let n = stream.read(&mut buf).unwrap();
+            assert_ne!(n, 0, "connection closed before the request body ended");
+            request.extend_from_slice(&buf[..n]);
+        }
+        stream.write_all(raw_response).unwrap();
+        request
+    }
+
+    fn serve_once(listener: &TcpListener, status_line: &str, body: &[u8]) -> Vec<u8> {
+        let head = vt_str::format!(
+            "{status_line}\r\nconnection: close\r\ncontent-length: {}\r\n\r\n",
+            body.len()
+        );
+        serve_raw_once(listener, &[head.as_bytes(), body].concat())
+    }
+
+    fn no_request_waiting(listener: &TcpListener) -> bool {
+        listener.set_nonblocking(true).unwrap();
+        let none = matches!(listener.accept(), Err(err) if err.kind() == io::ErrorKind::WouldBlock);
+        listener.set_nonblocking(false).unwrap();
+        none
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|window| window == needle)
+    }
+
+    fn build_valid_archive() -> Vec<u8> {
         let payload = vec![b'x'; 4096];
         let mut encoder = zstd::Encoder::new(Vec::new(), zstd::DEFAULT_COMPRESSION_LEVEL).unwrap();
         {
@@ -1158,16 +1409,55 @@ mod tests {
             tar.append_data(&mut header, "dist/out.txt", payload.as_slice()).unwrap();
             tar.finish().unwrap();
         }
-        let archive_bytes = encoder.finish().unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[tokio::test]
+    async fn fetch_retries_transient_statuses_and_network_errors() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote_config =
+            anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
+        let server = std::thread::spawn(move || {
+            // Attempt 1: 503 with Retry-After: 60 (must not stall or fail).
+            serve_raw_once(
+                &listener,
+                b"HTTP/1.1 503 Service Unavailable\r\nretry-after: 60\r\nconnection: close\r\ncontent-length: 39\r\n\r\nService unavailable (concurrency_limit)",
+            );
+            // Attempt 2: connection dropped mid-response (network error).
+            serve_raw_once(&listener, b"HTTP/1.1 200 OK\r\ncontent-length: 100\r\n\r\n");
+            // Attempt 3: 404 miss succeeds.
+            serve_once(&listener, "HTTP/1.1 404 Not Found", b"");
+        });
+
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
+        let start = Instant::now();
+        let fetched = RemoteClients::with_retry(FAST_RETRY)
+            .fetch(&remote_config, &key, &execution_key, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(fetched, None);
+        assert!(start.elapsed() < Duration::from_secs(5), "503 Retry-After: 60 should be ignored");
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn download_retries_header_and_mid_stream_network_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = AbsolutePathBuf::new(dir.path().to_path_buf()).unwrap();
+        let archive_bytes = build_valid_archive();
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let remote_config =
             anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
         let server = std::thread::spawn(move || {
             let truncated_prefix = &archive_bytes[..archive_bytes.len() / 2];
-            for response in [
-                // Attempt 1: valid prefix truncated before announced Content-Length -> mid-stream network error.
-                [
+            // Attempt 1: 503 before headers.
+            serve_once(&listener, "HTTP/1.1 503 Service Unavailable", b"busy");
+            // Attempt 2: valid prefix truncated before announced Content-Length -> mid-stream network error.
+            serve_raw_once(
+                &listener,
+                &[
                     vt_str::format!(
                         "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: {}\r\n\r\n",
                         archive_bytes.len()
@@ -1176,8 +1466,11 @@ mod tests {
                     truncated_prefix,
                 ]
                 .concat(),
-                // Attempt 2: complete valid archive.
-                [
+            );
+            // Attempt 3: complete valid archive.
+            serve_raw_once(
+                &listener,
+                &[
                     vt_str::format!(
                         "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: {}\r\n\r\n",
                         archive_bytes.len()
@@ -1186,20 +1479,10 @@ mod tests {
                     &archive_bytes,
                 ]
                 .concat(),
-            ] {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut request = Vec::new();
-                let mut buf = [0; 1024];
-                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-                    let n = stream.read(&mut buf).unwrap();
-                    assert_ne!(n, 0);
-                    request.extend_from_slice(&buf[..n]);
-                }
-                stream.write_all(&response).unwrap();
-            }
+            );
         });
 
-        let archive_name = RemoteClients::default()
+        let archive_name = RemoteClients::with_retry(FAST_RETRY)
             .download_archive(&remote_config, "1", &cache_dir, &CancellationToken::new())
             .await
             .unwrap();
@@ -1208,17 +1491,327 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn store_retries_transient_errors_and_resends_blob() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = AbsolutePathBuf::new(dir.path().to_path_buf()).unwrap();
+        std::fs::write(cache_dir.join("uploader.tar.zst").as_path(), b"archive bytes").unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote_config =
+            anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
+        let server = std::thread::spawn(move || {
+            let first = serve_raw_once(
+                &listener,
+                b"HTTP/1.1 503 Service Unavailable\r\nretry-after: 60\r\nconnection: close\r\ncontent-length: 0\r\n\r\n",
+            );
+            // Drop connection before sending headers on attempt 2.
+            {
+                let (stream, _) = listener.accept().unwrap();
+                drop(stream);
+            }
+            let third = serve_once(&listener, "HTTP/1.1 200 OK", b"");
+            (first, third)
+        });
+
+        let clients = RemoteClients::with_retry(FAST_RETRY);
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
+        clients
+            .prepare_upload(&remote_config, &key, &execution_key, &cache_value(), &cache_dir)
+            .unwrap()
+            .await
+            .unwrap();
+        let (first, third) = server.join().unwrap();
+        let blob_part =
+            b"name=\"blob\"\r\nContent-Type: application/octet-stream\r\n\r\narchive bytes\r\n";
+        assert!(contains(&first, blob_part));
+        assert!(contains(&third, blob_part));
+    }
+
+    #[tokio::test]
+    async fn non_retryable_statuses_fail_without_retrying() {
+        for status_line in [
+            "HTTP/1.1 400 Bad Request",
+            "HTTP/1.1 401 Unauthorized",
+            "HTTP/1.1 403 Forbidden",
+            "HTTP/1.1 413 Payload Too Large",
+            "HTTP/1.1 501 Not Implemented",
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let remote_config = anonymous(&vt_str::format!(
+                "http://{}/projects/test",
+                listener.local_addr().unwrap()
+            ));
+            let server = {
+                let listener = listener.try_clone().unwrap();
+                std::thread::spawn(move || serve_once(&listener, status_line, b"nope"))
+            };
+
+            let clients = RemoteClients::with_retry(FAST_RETRY);
+            let error = prepare_upload(&clients, &remote_config).unwrap().await.unwrap_err();
+            assert!(matches!(error, UploadError::Remote(_)), "{status_line}: {error:?}");
+            server.join().unwrap();
+            assert!(no_request_waiting(&listener), "{status_line} should not retry");
+        }
+    }
+
+    #[tokio::test]
+    async fn rate_limit_429_respects_retry_after() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote_config =
+            anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
+        let cooldown = Duration::from_millis(80);
+        let retry = RetryConfig {
+            read: RetryPolicy { max_retry_after: cooldown, ..FAST_RETRY.read },
+            store: RetryPolicy { max_retry_after: cooldown, ..FAST_RETRY.store },
+            ..FAST_RETRY
+        };
+        let server = std::thread::spawn(move || {
+            // `Retry-After: 5` is clamped to `cooldown` (80 ms).
+            serve_raw_once(
+                &listener,
+                b"HTTP/1.1 429 Too Many Requests\r\nretry-after: 5\r\nconnection: close\r\ncontent-length: 0\r\n\r\n",
+            );
+            serve_once(&listener, "HTTP/1.1 200 OK", b"");
+        });
+
+        let clients = RemoteClients::with_retry(retry);
+        let start = Instant::now();
+        prepare_upload(&clients, &remote_config).unwrap().await.unwrap();
+        assert!(
+            start.elapsed() >= Duration::from_millis(60),
+            "429 Retry-After cooldown was not respected: {:?}",
+            start.elapsed()
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn rate_limit_429_pauses_same_kind_peers_without_stalling_reads() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote_config =
+            anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
+        let cooldown = Duration::from_millis(80);
+        let retry = RetryConfig {
+            read: RetryPolicy { max_retries: 0, max_retry_after: cooldown, ..FAST_RETRY.read },
+            store: RetryPolicy { max_retries: 0, max_retry_after: cooldown, ..FAST_RETRY.store },
+            ..FAST_RETRY
+        };
+        let server = std::thread::spawn(move || {
+            serve_raw_once(
+                &listener,
+                b"HTTP/1.1 429 Too Many Requests\r\nretry-after: 5\r\nconnection: close\r\ncontent-length: 0\r\n\r\n",
+            );
+            serve_once(&listener, "HTTP/1.1 404 Not Found", b"");
+            serve_once(&listener, "HTTP/1.1 200 OK", b"");
+        });
+
+        let clients = RemoteClients::with_retry(retry);
+        let err = prepare_upload(&clients, &remote_config).unwrap().await.unwrap_err();
+        assert!(matches!(err, UploadError::Remote(ref r) if r.is_rate_limited()), "{err:?}");
+
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
+        let fetch_start = Instant::now();
+        assert_eq!(
+            clients
+                .fetch(&remote_config, &key, &execution_key, &CancellationToken::new())
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(
+            fetch_start.elapsed() < Duration::from_millis(50),
+            "store 429 should not stall fetch: {:?}",
+            fetch_start.elapsed()
+        );
+
+        let store_start = Instant::now();
+        prepare_upload(&clients, &remote_config).unwrap().await.unwrap();
+        assert!(
+            store_start.elapsed() >= Duration::from_millis(40),
+            "peer store did not wait for shared 429 cooldown: {:?}",
+            store_start.elapsed()
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn outage_breaker_short_circuits_per_kind_independently() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote_config =
+            anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
+        let retry = RetryConfig {
+            outage_threshold: 2,
+            outage_cooldown: Duration::from_secs(30),
+            ..NO_RETRY
+        };
+        let server = {
+            let listener = listener.try_clone().unwrap();
+            std::thread::spawn(move || {
+                // Store #1 fails, interleaved fetch succeeds (must not reset store failures),
+                // store #2 fails (opens store breaker), fetch still works,
+                // then two fetch failures open read breaker.
+                serve_once(&listener, "HTTP/1.1 503 Service Unavailable", b"down");
+                serve_once(&listener, "HTTP/1.1 404 Not Found", b"");
+                serve_once(&listener, "HTTP/1.1 503 Service Unavailable", b"down");
+                serve_once(&listener, "HTTP/1.1 404 Not Found", b"");
+                serve_once(&listener, "HTTP/1.1 503 Service Unavailable", b"down");
+                serve_once(&listener, "HTTP/1.1 503 Service Unavailable", b"down");
+            })
+        };
+
+        let clients = RemoteClients::with_retry(retry);
+        let key = cache_key(ResolvedGlobConfig::default_auto());
+        let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
+
+        let err = prepare_upload(&clients, &remote_config).unwrap().await.unwrap_err();
+        assert!(matches!(err, UploadError::Remote(ref r) if r.is_outage()), "{err:?}");
+        // A successful fetch must not reset consecutive store failures.
+        assert_eq!(
+            clients
+                .fetch(&remote_config, &key, &execution_key, &CancellationToken::new())
+                .await
+                .unwrap(),
+            None
+        );
+        let err = prepare_upload(&clients, &remote_config).unwrap().await.unwrap_err();
+        assert!(matches!(err, UploadError::Remote(ref r) if r.is_outage()), "{err:?}");
+
+        // Store breaker is now open, but reads still reach the server.
+        assert_eq!(
+            clients
+                .fetch(&remote_config, &key, &execution_key, &CancellationToken::new())
+                .await
+                .unwrap(),
+            None
+        );
+        let err = prepare_upload(&clients, &remote_config).unwrap().await.unwrap_err();
+        assert!(matches!(err, UploadError::Unavailable), "{err:?}");
+        assert_eq!(err.to_string(), "remote cache temporarily unavailable");
+
+        // Two consecutive fetch failures open the read breaker as well.
+        for _ in 0..2 {
+            let err = clients
+                .fetch(&remote_config, &key, &execution_key, &CancellationToken::new())
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ReadError::Fetch(ref r) if r.is_outage()), "{err:?}");
+        }
+        server.join().unwrap();
+
+        let err = clients
+            .fetch(&remote_config, &key, &execution_key, &CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ReadError::Unavailable), "{err:?}");
+        assert_eq!(err.to_string(), "remote cache temporarily unavailable");
+        assert!(no_request_waiting(&listener));
+    }
+
+    #[tokio::test]
+    async fn concurrent_stores_are_capped_at_max_concurrent_stores() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote_config =
+            anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
+        let total_stores = MAX_CONCURRENT_STORES * 2;
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let max_in_flight = Arc::new(AtomicUsize::new(0));
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let (filled_tx, filled_rx) = std::sync::mpsc::channel::<()>();
+
+        let server = {
+            let in_flight = Arc::clone(&in_flight);
+            let max_in_flight = Arc::clone(&max_in_flight);
+            std::thread::spawn(move || {
+                let mut handlers = Vec::with_capacity(total_stores);
+                for _ in 0..total_stores {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let in_flight = Arc::clone(&in_flight);
+                    let max_in_flight = Arc::clone(&max_in_flight);
+                    let release_rx = Arc::clone(&release_rx);
+                    let filled_tx = filled_tx.clone();
+                    handlers.push(std::thread::spawn(move || {
+                        let mut request = Vec::new();
+                        let mut buf = [0; 4096];
+                        let header_end = loop {
+                            let n = stream.read(&mut buf).unwrap();
+                            assert_ne!(n, 0);
+                            request.extend_from_slice(&buf[..n]);
+                            if let Some(pos) =
+                                request.windows(4).position(|window| window == b"\r\n\r\n")
+                            {
+                                break pos + 4;
+                            }
+                        };
+                        let content_length: usize = std::str::from_utf8(&request[..header_end])
+                            .unwrap()
+                            .lines()
+                            .find_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                name.eq_ignore_ascii_case("content-length")
+                                    .then(|| value.trim().parse().unwrap())
+                            })
+                            .unwrap_or(0);
+                        while request.len() < header_end + content_length {
+                            let n = stream.read(&mut buf).unwrap();
+                            assert_ne!(n, 0);
+                            request.extend_from_slice(&buf[..n]);
+                        }
+                        let current = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                        max_in_flight.fetch_max(current, Ordering::SeqCst);
+                        if current == MAX_CONCURRENT_STORES {
+                            let _ = filled_tx.send(());
+                        }
+                        let _ = release_rx.lock().unwrap().recv();
+                        in_flight.fetch_sub(1, Ordering::SeqCst);
+                        stream
+                            .write_all(b"HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: 0\r\n\r\n")
+                            .unwrap();
+                    }));
+                }
+                for handler in handlers {
+                    handler.join().unwrap();
+                }
+            })
+        };
+
+        let clients = RemoteClients::with_retry(FAST_RETRY);
+        let mut tasks = Vec::with_capacity(total_stores);
+        for _ in 0..total_stores {
+            let upload = prepare_upload(&clients, &remote_config).unwrap();
+            tasks.push(tokio::spawn(upload));
+        }
+
+        tokio::task::spawn_blocking(move || {
+            filled_rx.recv().unwrap();
+            for _ in 0..total_stores {
+                release_tx.send(()).unwrap();
+            }
+        })
+        .await
+        .unwrap();
+
+        for task in tasks {
+            task.await.unwrap().unwrap();
+        }
+        server.join().unwrap();
+        assert_eq!(max_in_flight.load(Ordering::SeqCst), MAX_CONCURRENT_STORES);
+    }
+
+    #[tokio::test]
     async fn interrupting_the_wait_cancels_the_uploads() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let remote_config =
             anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
-        let total = vt_remote_cache::MAX_CONCURRENT_STORES + 2;
+        let total = MAX_CONCURRENT_STORES + 2;
         let (all_slots_filled_tx, all_slots_filled_rx) = oneshot::channel();
         std::thread::spawn(move || {
             // Hold open `MAX_CONCURRENT_STORES` requests while more uploads are
             // pending so cancelling interrupts both active and queued uploads.
             let mut streams = Vec::new();
-            for _ in 0..vt_remote_cache::MAX_CONCURRENT_STORES {
+            for _ in 0..MAX_CONCURRENT_STORES {
                 let Ok((mut stream, _)) = listener.accept() else { break };
                 let mut request = Vec::new();
                 let mut buf = [0; 1024];

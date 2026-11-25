@@ -22,6 +22,7 @@ clap = { workspace = true, features = ["derive"] }
 ctrlc = { workspace = true }
 derive_more = { workspace = true, features = ["debug", "from"] }
 futures-util = { workspace = true }
+getrandom = { workspace = true }
 once_cell = { workspace = true }
 owo-colors = { workspace = true, features = ["supports-colors"] }
 petgraph = { workspace = true }
@@ -41,6 +42,7 @@ tokio = { workspace = true, features = [
   "macros",
   "process",
   "sync",
+  "time",
 ] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }

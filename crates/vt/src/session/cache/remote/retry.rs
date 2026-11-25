@@ -1,22 +1,17 @@
 //! Retry policy, jittered exponential backoff, shared `429` cooldown
-//! coordination, and a per-client outage circuit breaker for remote cache
+//! coordination, and per-kind outage circuit breakers for remote cache
 //! requests.
 
 use std::{
+    fmt::Debug,
     sync::{Mutex, PoisonError},
     time::Duration,
 };
 
-use reqwest::{
-    StatusCode,
-    header::{HeaderMap, RETRY_AFTER},
-};
 use tokio::time::Instant;
 
-use crate::Error;
-
 /// Maximum `Retry-After` delay honored on a `429 Too Many Requests` response.
-pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
+pub(super) const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
 
 /// Maximum extra jitter added when waking from a shared `429` cooldown so
 /// concurrent waiters do not fire in lockstep.
@@ -28,9 +23,28 @@ const OUTAGE_FAILURE_THRESHOLD: u32 = 3;
 /// How long the circuit breaker stays open before permitting one probe request.
 const OUTAGE_COOLDOWN: Duration = Duration::from_secs(30);
 
+/// Classification of an attempt's error for retry, `429` cooldown, and
+/// circuit-breaker handling.
+pub(super) trait RetryableError: Debug {
+    /// Whether this error is transient and safe to retry.
+    fn is_retryable(&self) -> bool;
+    /// Whether this error indicates a backend outage (network errors and
+    /// retryable `5xx`, excluding `429`, client errors, and local failures).
+    fn is_outage(&self) -> bool;
+    /// Whether this error is a `429 Too Many Requests` response.
+    fn is_rate_limited(&self) -> bool;
+    /// Whether the operation was cancelled locally and must neither retry nor
+    /// update outage circuit-breaker success/failure counts.
+    fn is_cancelled(&self) -> bool;
+    /// Parsed `Retry-After` delay from the server response, if any.
+    fn retry_after(&self) -> Option<Duration>;
+    /// Error returned when the outage circuit breaker is open.
+    fn unavailable() -> Self;
+}
+
 /// Retry parameters for one kind of remote cache operation.
 #[derive(Debug, Clone, Copy)]
-pub struct RetryPolicy {
+pub(super) struct RetryPolicy {
     /// Number of retries after the initial attempt (`0` means one attempt total).
     pub max_retries: u32,
     /// Nominal backoff before the first retry; doubles on each subsequent retry.
@@ -70,7 +84,7 @@ impl RetryPolicy {
 
     /// Single-attempt policy with no retries, preserving `max_retry_after` for
     /// recording `429` cooldowns.
-    pub const fn once(self) -> Self {
+    const fn once(self) -> Self {
         Self { max_retries: 0, ..self }
     }
 
@@ -82,9 +96,9 @@ impl RetryPolicy {
     }
 }
 
-/// Retry and circuit-breaker configuration shared across a [`crate::Client`].
+/// Retry and circuit-breaker configuration shared across a remote endpoint.
 #[derive(Debug, Clone, Copy)]
-pub struct RetryConfig {
+pub(super) struct RetryConfig {
     pub read: RetryPolicy,
     pub store: RetryPolicy,
     pub outage_threshold: u32,
@@ -106,7 +120,7 @@ impl RetryConfig {
 /// backends send with a coarse `Retry-After: 60` on transient admission errors)
 /// use per-request backoff instead so one `503` does not stall sibling requests.
 #[derive(Debug, Default)]
-pub struct RateLimit {
+pub(super) struct RateLimit {
     until: Mutex<Option<Instant>>,
 }
 
@@ -148,16 +162,15 @@ impl RateLimit {
     }
 }
 
-/// Per-client circuit breaker for sustained endpoint outages.
+/// Circuit breaker for sustained endpoint outages.
 ///
 /// Opens after `threshold` consecutive exhausted outage failures (network
 /// errors or retryable `5xx` responses, excluding `429`), fast-failing later
-/// requests with [`Error::Unavailable`] for `cooldown`. Once `cooldown`
-/// elapses, a single half-open probe request is permitted; if it succeeds,
-/// normal requests resume, and if it fails or is cancelled, another cooldown
-/// starts.
+/// requests for `cooldown`. Once `cooldown` elapses, a single half-open probe
+/// request is permitted; if it succeeds, normal requests resume, and if it
+/// fails or is cancelled, another cooldown starts.
 #[derive(Debug)]
-pub struct OutageBreaker {
+pub(super) struct OutageBreaker {
     threshold: u32,
     cooldown: Duration,
     state: Mutex<OutageState>,
@@ -215,7 +228,7 @@ impl OutageBreaker {
 /// Active lease on an [`OutageBreaker`]. Dropping an unfinished probe permit
 /// (for example on Ctrl-C cancellation) releases the probe slot and starts
 /// another cooldown so the circuit cannot get stuck.
-pub struct OutagePermit<'a> {
+pub(super) struct OutagePermit<'a> {
     breaker: &'a OutageBreaker,
     generation: u64,
     probe: bool,
@@ -227,13 +240,12 @@ impl OutagePermit<'_> {
         self.probe
     }
 
-    pub fn finish(mut self, result: Result<(), &Error>) {
+    pub fn finish(mut self, outage: bool) {
         if self.completed {
             return;
         }
         let mut state = self.breaker.state.lock().unwrap_or_else(PoisonError::into_inner);
         if state.generation == self.generation {
-            let outage = result.err().is_some_and(is_outage_error);
             if outage {
                 state.failures = state.failures.saturating_add(1);
                 if self.probe || state.failures >= self.breaker.threshold {
@@ -273,101 +285,53 @@ impl Drop for OutagePermit<'_> {
     }
 }
 
-/// Failure from a single attempt, carrying an optional `Retry-After` delay from
-/// a `429` response.
-pub struct AttemptError {
-    pub error: Error,
-    pub rate_limit_delay: Option<Duration>,
-}
-
-impl From<Error> for AttemptError {
-    fn from(error: Error) -> Self {
-        Self { error, rate_limit_delay: None }
-    }
-}
-
-/// Whether `error` is transient and safe to retry for an idempotent remote
-/// cache operation.
-pub const fn is_retryable(error: &Error) -> bool {
-    match error {
-        Error::Network(_) => true,
-        Error::Status(status, _) => is_retryable_status(*status),
-        Error::InvalidEndpoint(_)
-        | Error::HttpClient(_)
-        | Error::ReadBlob(_)
-        | Error::Auth(_)
-        | Error::MalformedResponse(_)
-        | Error::Unavailable => false,
-    }
-}
-
-/// Whether `error` counts toward tripping the outage circuit breaker. Excludes
-/// `429` rate limits and non-retryable `4xx` / `501` / `505` / `511` errors.
-const fn is_outage_error(error: &Error) -> bool {
-    match error {
-        Error::Network(_) => true,
-        Error::Status(status, _) => is_retryable_server_error(*status),
-        Error::InvalidEndpoint(_)
-        | Error::HttpClient(_)
-        | Error::ReadBlob(_)
-        | Error::Auth(_)
-        | Error::MalformedResponse(_)
-        | Error::Unavailable => false,
-    }
-}
-
-const fn is_retryable_status(status: StatusCode) -> bool {
-    matches!(status.as_u16(), 408 | 429) || is_retryable_server_error(status)
-}
-
-const fn is_retryable_server_error(status: StatusCode) -> bool {
-    matches!(status.as_u16(), 500 | 502..=504 | 506..=510 | 512..=599)
-}
-
-/// Parse an integer delta-seconds `Retry-After` header, clamped to `max`.
-/// Non-numeric values return `None` so callers fall back to exponential backoff.
-pub fn parse_retry_after(headers: &HeaderMap, max: Duration) -> Option<Duration> {
-    let value = headers.get(RETRY_AFTER)?.to_str().ok()?.trim();
-    let seconds: u64 = value.parse().ok()?;
-    Some(Duration::from_secs(seconds).min(max))
-}
-
 /// Run `attempt_fn` through `outage`, `rate_limit`, and `policy`.
-pub async fn run<T, F, Fut>(
+pub(super) async fn run<T, E, F, Fut>(
     operation: &'static str,
     policy: RetryPolicy,
     rate_limit: &RateLimit,
     outage: &OutageBreaker,
     mut attempt_fn: F,
-) -> Result<T, Error>
+) -> Result<T, E>
 where
+    E: RetryableError,
     F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, AttemptError>>,
+    Fut: Future<Output = Result<T, E>>,
 {
     let Some(permit) = outage.enter() else {
         tracing::debug!(operation, "skipping remote cache request while circuit is open");
-        return Err(Error::Unavailable);
+        return Err(E::unavailable());
     };
     // A half-open probe makes a single attempt so it either recovers or
     // re-opens promptly instead of holding the only probe slot across retries.
     let policy = if permit.is_probe() { policy.once() } else { policy };
     let started = Instant::now();
     let total_attempts = policy.max_retries.saturating_add(1);
-    let mut final_result = None;
     for attempt in 0..total_attempts {
         rate_limit.wait().await;
         match attempt_fn().await {
             Ok(value) => {
-                final_result = Some(Ok(value));
-                break;
+                permit.finish(false);
+                return Ok(value);
             }
-            Err(AttemptError { error, rate_limit_delay }) => {
-                let is_rate_limited =
-                    matches!(error, Error::Status(StatusCode::TOO_MANY_REQUESTS, _));
+            Err(error) => {
+                if error.is_cancelled() {
+                    // Drop `permit` without finishing so cancelling a probe
+                    // re-opens the cooldown and cancelling a normal request
+                    // does not reset consecutive failures.
+                    return Err(error);
+                }
+                let is_rate_limited = error.is_rate_limited();
                 let backoff = policy.delay(attempt);
                 // Floor 429 cooldowns at `backoff` so `Retry-After: 0` cannot
                 // trigger an immediate tight retry loop.
-                let cooldown = rate_limit_delay.map_or(backoff, |delay| delay.max(backoff));
+                let cooldown = if is_rate_limited {
+                    error
+                        .retry_after()
+                        .map_or(backoff, |delay| delay.min(policy.max_retry_after).max(backoff))
+                } else {
+                    backoff
+                };
                 if is_rate_limited {
                     // Publish the cooldown even on the last attempt so concurrent
                     // requests pause instead of immediately hitting the same 429.
@@ -376,9 +340,9 @@ where
                 let next_wait = if is_rate_limited { cooldown } else { backoff };
                 let budget_exhausted =
                     started.elapsed().saturating_add(next_wait) >= policy.max_elapsed;
-                if attempt + 1 >= total_attempts || !is_retryable(&error) || budget_exhausted {
-                    final_result = Some(Err(error));
-                    break;
+                if attempt + 1 >= total_attempts || !error.is_retryable() || budget_exhausted {
+                    permit.finish(error.is_outage());
+                    return Err(error);
                 }
                 if is_rate_limited {
                     tracing::debug!(
@@ -403,9 +367,7 @@ where
             }
         }
     }
-    let result = final_result.expect("total_attempts is always at least 1");
-    permit.finish(result.as_ref().map(|_| ()));
-    result
+    unreachable!("total_attempts is always at least 1")
 }
 
 /// Apply `[0.5x, 1.0x]` equal jitter to `delay` to desynchronize concurrent
@@ -447,9 +409,39 @@ async fn sleep(duration: Duration) {
 
 #[cfg(test)]
 mod tests {
-    use reqwest::header::HeaderValue;
-
     use super::*;
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum TestError {
+        Outage,
+        Cancelled,
+    }
+
+    impl RetryableError for TestError {
+        fn is_retryable(&self) -> bool {
+            matches!(self, Self::Outage)
+        }
+
+        fn is_outage(&self) -> bool {
+            matches!(self, Self::Outage)
+        }
+
+        fn is_rate_limited(&self) -> bool {
+            false
+        }
+
+        fn is_cancelled(&self) -> bool {
+            matches!(self, Self::Cancelled)
+        }
+
+        fn retry_after(&self) -> Option<Duration> {
+            None
+        }
+
+        fn unavailable() -> Self {
+            Self::Outage
+        }
+    }
 
     #[test]
     fn equal_jitter_stays_within_half_to_full_bounds() {
@@ -478,21 +470,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_retry_after_handles_valid_clamped_and_invalid_values() {
-        let header = |value: &str| {
-            HeaderMap::from_iter([(RETRY_AFTER, HeaderValue::from_str(value).unwrap())])
-        };
-        let max = Duration::from_secs(10);
-        assert_eq!(parse_retry_after(&HeaderMap::new(), max), None);
-        assert_eq!(parse_retry_after(&header("0"), max), Some(Duration::ZERO));
-        assert_eq!(parse_retry_after(&header(" 4 "), max), Some(Duration::from_secs(4)));
-        assert_eq!(parse_retry_after(&header("60"), max), Some(max));
-        assert_eq!(parse_retry_after(&header("999999999999"), max), Some(max));
-        assert_eq!(parse_retry_after(&header("-1"), max), None);
-        assert_eq!(parse_retry_after(&header("Wed, 21 Oct 2026 07:28:00 GMT"), max), None);
-    }
-
-    #[test]
     fn rate_limit_record_never_shortens_existing_cooldown() {
         let rate_limit = RateLimit::default();
         rate_limit.record(Duration::from_secs(10));
@@ -503,32 +480,18 @@ mod tests {
     }
 
     #[test]
-    fn retryable_status_excludes_non_transient_5xx() {
-        for retryable in [408, 429, 500, 502, 503, 504, 520, 524] {
-            let status = StatusCode::from_u16(retryable).unwrap();
-            assert!(is_retryable_status(status), "{retryable} should be retryable");
-        }
-        for non_retryable in [400, 401, 403, 404, 413, 501, 505, 511] {
-            let status = StatusCode::from_u16(non_retryable).unwrap();
-            assert!(!is_retryable_status(status), "{non_retryable} should not be retryable");
-        }
-    }
-
-    #[test]
     fn outage_breaker_opens_probes_recovers_and_handles_dropped_probes() {
         let breaker = OutageBreaker::new(3, Duration::from_secs(30));
-        let server_error = Error::Status(StatusCode::SERVICE_UNAVAILABLE, None);
-        let rate_limit_error = Error::Status(StatusCode::TOO_MANY_REQUESTS, None);
 
-        // 429 does not count as an outage and resets consecutive failure count.
-        breaker.enter().unwrap().finish(Err(&server_error));
-        breaker.enter().unwrap().finish(Err(&server_error));
-        breaker.enter().unwrap().finish(Err(&rate_limit_error));
+        // Non-outage failure (e.g., 429) resets consecutive failure count.
+        breaker.enter().unwrap().finish(true);
+        breaker.enter().unwrap().finish(true);
+        breaker.enter().unwrap().finish(false);
         assert!(breaker.enter().is_some());
 
         // Three consecutive outage failures open the circuit.
         for _ in 0..3 {
-            breaker.enter().unwrap().finish(Err(&server_error));
+            breaker.enter().unwrap().finish(true);
         }
         assert!(breaker.enter().is_none());
 
@@ -543,13 +506,40 @@ mod tests {
 
         // Failed probe re-opens the circuit.
         breaker.state.lock().unwrap().open_until = Some(Instant::now() - Duration::from_secs(1));
-        breaker.enter().unwrap().finish(Err(&server_error));
+        breaker.enter().unwrap().finish(true);
         assert!(breaker.enter().is_none());
 
         // Successful probe closes the circuit.
         breaker.state.lock().unwrap().open_until = Some(Instant::now() - Duration::from_secs(1));
-        breaker.enter().unwrap().finish(Ok(()));
+        breaker.enter().unwrap().finish(false);
         assert!(breaker.enter().is_some());
         assert!(breaker.enter().is_some());
+    }
+
+    #[tokio::test]
+    async fn cancelled_probe_does_not_close_open_circuit() {
+        let breaker = OutageBreaker::new(1, Duration::from_secs(30));
+        let rate_limit = RateLimit::default();
+        let policy =
+            RetryPolicy { max_retries: 0, base_delay: Duration::ZERO, ..RetryPolicy::READ };
+
+        // Open the circuit with one outage failure.
+        let err = run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, || async {
+            Err(TestError::Outage)
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(err, TestError::Outage);
+        assert!(breaker.enter().is_none());
+
+        // Expire cooldown and cancel the half-open probe: circuit must stay open.
+        breaker.state.lock().unwrap().open_until = Some(Instant::now() - Duration::from_secs(1));
+        let err = run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, || async {
+            Err(TestError::Cancelled)
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(err, TestError::Cancelled);
+        assert!(breaker.enter().is_none());
     }
 }
