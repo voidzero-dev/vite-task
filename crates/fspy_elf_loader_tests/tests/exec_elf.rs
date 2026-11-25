@@ -4,6 +4,7 @@
 
 use std::{
     ffi::OsStr,
+    mem::{offset_of, size_of},
     os::unix::{ffi::OsStrExt as _, process::CommandExt as _},
     process::{Command, Output, Stdio},
 };
@@ -134,11 +135,14 @@ fn rejects_fixed_image_overlapping_launcher() {
         .collect();
     let base = loads[0].1.p_vaddr;
     let entry = parsed.ehdr.e_entry - base + launcher_base;
-    bytes[24..32].copy_from_slice(&entry.to_le_bytes());
+    write_u64(&mut bytes, offset_of!(libc::Elf64_Ehdr, e_entry), entry);
     for (index, ph) in loads {
-        let offset = table + index * 56 + 16;
-        bytes[offset..offset + 8]
-            .copy_from_slice(&(ph.p_vaddr - base + launcher_base).to_le_bytes());
+        let phdr_offset = table + index * size_of::<libc::Elf64_Phdr>();
+        write_u64(
+            &mut bytes,
+            phdr_offset + offset_of!(libc::Elf64_Phdr, p_vaddr),
+            ph.p_vaddr - base + launcher_base,
+        );
     }
     let file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(file.path(), bytes).unwrap();
@@ -179,24 +183,24 @@ fn node_runs_javascript() {
 #[test]
 #[timeout(10_000)]
 fn rejects_malformed_images() {
-    let echo = std::fs::read("/bin/echo").unwrap();
-    let mut overflow = echo.clone();
-    overflow[32..40].copy_from_slice(&u64::MAX.to_le_bytes());
-    let mut wrong_machine = echo.clone();
-    wrong_machine[18..20].copy_from_slice(&0_u16.to_le_bytes());
-    let mut unsupported_type = echo.clone();
-    unsupported_type[16..18].copy_from_slice(&elf::abi::ET_REL.to_le_bytes());
-    let parsed = elf::ElfBytes::<elf::endian::LittleEndian>::minimal_parse(&echo).unwrap();
+    let base = std::fs::read(FIXTURE_DYN_PIE).unwrap();
+    let mut overflow = base.clone();
+    write_u64(&mut overflow, offset_of!(libc::Elf64_Ehdr, e_phoff), u64::MAX);
+    let mut wrong_machine = base.clone();
+    write_u16(&mut wrong_machine, offset_of!(libc::Elf64_Ehdr, e_machine), 0);
+    let mut unsupported_type = base.clone();
+    write_u16(&mut unsupported_type, offset_of!(libc::Elf64_Ehdr, e_type), elf::abi::ET_REL);
+    let parsed = elf::ElfBytes::<elf::endian::LittleEndian>::minimal_parse(&base).unwrap();
     let load =
         parsed.segments().unwrap().iter().position(|ph| ph.p_type == elf::abi::PT_LOAD).unwrap();
-    let header = usize::try_from(parsed.ehdr.e_phoff).unwrap() + load * 56;
-    let mut invalid_size = echo.clone();
-    invalid_size[header + 32..header + 40].copy_from_slice(&u64::MAX.to_le_bytes());
-    let mut invalid_alignment = echo.clone();
-    invalid_alignment[header + 48..header + 56].copy_from_slice(&3_u64.to_le_bytes());
+    let phdr = usize::try_from(parsed.ehdr.e_phoff).unwrap() + load * size_of::<libc::Elf64_Phdr>();
+    let mut invalid_size = base.clone();
+    write_u64(&mut invalid_size, phdr + offset_of!(libc::Elf64_Phdr, p_filesz), u64::MAX);
+    let mut invalid_alignment = base.clone();
+    write_u64(&mut invalid_alignment, phdr + offset_of!(libc::Elf64_Phdr, p_align), 3);
     for (case, bytes) in [
         ("truncated header", b"not ELF".to_vec()),
-        ("truncated program headers", echo[..64].to_vec()),
+        ("truncated program headers", base[..size_of::<libc::Elf64_Ehdr>()].to_vec()),
         ("overflowing program-header offset", overflow),
         ("wrong architecture", wrong_machine),
         ("unsupported type", unsupported_type),
@@ -219,16 +223,24 @@ fn rejects_malformed_images() {
 #[test]
 #[timeout(10_000)]
 fn does_not_require_section_headers() {
-    let mut bytes = std::fs::read("/bin/echo").unwrap();
+    let mut bytes = std::fs::read(FIXTURE_DYN_PIE).unwrap();
     // The ELF loader must not use section metadata, even if it is unusable.
-    bytes[40..48].copy_from_slice(&u64::MAX.to_le_bytes());
+    write_u64(&mut bytes, offset_of!(libc::Elf64_Ehdr, e_shoff), u64::MAX);
     let file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(file.path(), bytes).unwrap();
+    let path = file.path().to_str().unwrap();
     let mut command = launcher();
-    command.arg(file.path()).args(["echo", "without-sections"]);
+    command.args([path, "custom-argv-zero", ""]).arg(OsStr::from_bytes(b"\xff"));
+    command
+        .env_clear()
+        .env("FIXTURE_IMAGE", path)
+        .env("EMPTY", "")
+        .env("BYTES", OsStr::from_bytes(b"\xff"))
+        .env("EXPECT_INTERPRETER", "1");
     let output = output(command);
-    assert_eq!(output.status.code(), Some(0), "{output:?}");
-    assert_eq!(output.stdout, b"without-sections\n");
+    assert_eq!(output.status.code(), Some(37), "{output:?}");
+    assert_eq!(output.stdout, b"runtime-ok\n");
+    assert!(output.stderr.is_empty(), "{output:?}");
 }
 
 #[test]
@@ -255,6 +267,14 @@ fn assert_image(path: &str, image_type: u16, interpreter: bool) {
     assert_eq!(elf.ehdr.e_type, image_type, "unexpected fixture image type: {path}");
     let has_interp = elf.segments().unwrap().iter().any(|ph| ph.p_type == elf::abi::PT_INTERP);
     assert_eq!(has_interp, interpreter, "unexpected PT_INTERP: {path}");
+}
+
+fn write_u16(bytes: &mut [u8], offset: usize, value: u16) {
+    bytes[offset..offset + size_of::<u16>()].copy_from_slice(&value.to_le_bytes());
+}
+
+fn write_u64(bytes: &mut [u8], offset: usize, value: u64) {
+    bytes[offset..offset + size_of::<u64>()].copy_from_slice(&value.to_le_bytes());
 }
 
 fn output(mut command: Command) -> Output {

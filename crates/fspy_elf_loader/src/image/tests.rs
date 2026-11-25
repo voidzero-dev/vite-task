@@ -173,13 +173,16 @@ fn accepts_page_congruent_segment_incongruent_with_large_p_align() {
     write_header(&mut bytes, 2, 0x200);
     load(&mut bytes, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
     // Offset = page, vaddr = 2 * page: congruent mod page, incongruent mod 2 * page.
-    let header = &mut bytes[64 + 56..64 + 2 * 56];
-    header.fill(0);
-    header[..4].copy_from_slice(&abi::PT_LOAD.to_le_bytes());
-    header[4..8].copy_from_slice(&(abi::PF_R | abi::PF_W).to_le_bytes());
-    for (field, value) in [(8, page), (16, 2 * page), (32, 0x40), (40, 0x40), (48, 2 * page)] {
-        header[field..field + 8].copy_from_slice(&u64::try_from(value).unwrap().to_le_bytes());
+    Phdr {
+        p_type: abi::PT_LOAD,
+        p_flags: abi::PF_R | abi::PF_W,
+        p_offset: u64::try_from(page).unwrap(),
+        p_vaddr: u64::try_from(2 * page).unwrap(),
+        p_filesz: 0x40,
+        p_memsz: 0x40,
+        p_align: u64::try_from(2 * page).unwrap(),
     }
+    .write_to(&mut bytes, 1);
     bytes[page] = 0x77;
     let image = map_bytes(&bytes);
     // SAFETY: mapped readable segment.
@@ -233,30 +236,66 @@ fn fixture(page: usize, memory_size: usize, flags: u32) -> std::vec::Vec<u8> {
     bytes
 }
 
+const EHDR_SIZE: usize = 64;
+const PHDR_SIZE: usize = 56;
+
+#[expect(clippy::struct_field_names, reason = "matches ELF64 Elf64_Phdr field names")]
+struct Phdr {
+    p_type: u32,
+    p_flags: u32,
+    p_offset: u64,
+    p_vaddr: u64,
+    p_filesz: u64,
+    p_memsz: u64,
+    p_align: u64,
+}
+
+impl Phdr {
+    fn write_to(&self, bytes: &mut [u8], index: usize) {
+        let start = EHDR_SIZE + index * PHDR_SIZE;
+        let out = &mut bytes[start..start + PHDR_SIZE];
+        out.fill(0);
+        out[0..4].copy_from_slice(&self.p_type.to_le_bytes());
+        out[4..8].copy_from_slice(&self.p_flags.to_le_bytes());
+        out[8..16].copy_from_slice(&self.p_offset.to_le_bytes());
+        out[16..24].copy_from_slice(&self.p_vaddr.to_le_bytes());
+        out[32..40].copy_from_slice(&self.p_filesz.to_le_bytes());
+        out[40..48].copy_from_slice(&self.p_memsz.to_le_bytes());
+        out[48..56].copy_from_slice(&self.p_align.to_le_bytes());
+    }
+}
+
 fn interp_image(path: &[u8]) -> std::vec::Vec<u8> {
-    let start = 64 + 56;
+    let start = EHDR_SIZE + PHDR_SIZE;
     let mut bytes = std::vec![0; start + path.len()];
     write_header(&mut bytes, 1, 0);
-    let header = &mut bytes[64..120];
-    header[..4].copy_from_slice(&abi::PT_INTERP.to_le_bytes());
-    for (field, value) in [(8, start), (32, path.len()), (40, path.len()), (48, 1)] {
-        header[field..field + 8].copy_from_slice(&u64::try_from(value).unwrap().to_le_bytes());
+    let len = u64::try_from(path.len()).unwrap();
+    Phdr {
+        p_type: abi::PT_INTERP,
+        p_flags: 0,
+        p_offset: u64::try_from(start).unwrap(),
+        p_vaddr: 0,
+        p_filesz: len,
+        p_memsz: len,
+        p_align: 1,
     }
+    .write_to(&mut bytes, 0);
     bytes[start..start + path.len()].copy_from_slice(path);
     bytes
 }
 
 fn write_header(bytes: &mut [u8], phnum: u16, entry: u64) {
-    bytes[..64].fill(0);
-    bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
-    bytes[16..18].copy_from_slice(&abi::ET_DYN.to_le_bytes());
-    bytes[18..20].copy_from_slice(&MACHINE.to_le_bytes());
-    bytes[20..24].copy_from_slice(&1_u32.to_le_bytes());
-    bytes[24..32].copy_from_slice(&entry.to_le_bytes());
-    bytes[32..40].copy_from_slice(&64_u64.to_le_bytes());
-    bytes[52..54].copy_from_slice(&64_u16.to_le_bytes());
-    bytes[54..56].copy_from_slice(&56_u16.to_le_bytes());
-    bytes[56..58].copy_from_slice(&phnum.to_le_bytes());
+    let out = &mut bytes[..EHDR_SIZE];
+    out.fill(0);
+    out[0..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    out[16..18].copy_from_slice(&abi::ET_DYN.to_le_bytes());
+    out[18..20].copy_from_slice(&MACHINE.to_le_bytes());
+    out[20..24].copy_from_slice(&1_u32.to_le_bytes());
+    out[24..32].copy_from_slice(&entry.to_le_bytes());
+    out[32..40].copy_from_slice(&u64::try_from(EHDR_SIZE).unwrap().to_le_bytes());
+    out[52..54].copy_from_slice(&u16::try_from(EHDR_SIZE).unwrap().to_le_bytes());
+    out[54..56].copy_from_slice(&u16::try_from(PHDR_SIZE).unwrap().to_le_bytes());
+    out[56..58].copy_from_slice(&phnum.to_le_bytes());
 }
 
 fn load(
@@ -268,15 +307,17 @@ fn load(
     flags: u32,
     page: usize,
 ) {
-    let header = &mut bytes[64 + index * 56..64 + index * 56 + 56];
-    header.fill(0);
-    header[..4].copy_from_slice(&abi::PT_LOAD.to_le_bytes());
-    header[4..8].copy_from_slice(&flags.to_le_bytes());
-    for (field, value) in
-        [(8, start), (16, start), (32, file_size), (40, memory_size), (48, 2 * page)]
-    {
-        header[field..field + 8].copy_from_slice(&u64::try_from(value).unwrap().to_le_bytes());
+    let addr = u64::try_from(start).unwrap();
+    Phdr {
+        p_type: abi::PT_LOAD,
+        p_flags: flags,
+        p_offset: addr,
+        p_vaddr: addr,
+        p_filesz: u64::try_from(file_size).unwrap(),
+        p_memsz: u64::try_from(memory_size).unwrap(),
+        p_align: u64::try_from(2 * page).unwrap(),
     }
+    .write_to(bytes, index);
 }
 
 fn map_bytes(bytes: &[u8]) -> Image {
