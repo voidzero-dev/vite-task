@@ -31,9 +31,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Total timeout for a single `POST /fetch` request. Fetches transfer small
-/// metadata payloads, so bounding them more tightly lets a hung lookup retry
-/// or fall back quickly instead of stalling a task for [`READ_TIMEOUT`].
-const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
+/// metadata payloads, so bounding them to 10s lets a hung lookup retry once
+/// within the caller's read retry budget instead of stalling for `READ_TIMEOUT`.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Idle timeout for pooled HTTP/1.1 keep-alive connections, kept below typical
 /// NAT and edge proxy idle cutoffs to reduce stale-socket resets on reuse.

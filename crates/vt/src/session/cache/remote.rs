@@ -96,6 +96,10 @@ impl RetryableError for UploadError {
     fn unavailable() -> Self {
         Self::Unavailable
     }
+
+    fn cancelled() -> Self {
+        Self::Interrupted
+    }
 }
 
 /// Why no entry could be read from the remote cache. It's a cache miss, and
@@ -151,6 +155,10 @@ impl RetryableError for ReadError {
 
     fn unavailable() -> Self {
         Self::Unavailable
+    }
+
+    fn cancelled() -> Self {
+        Self::Cancelled
     }
 }
 
@@ -302,16 +310,21 @@ impl RemoteEndpoint {
         secondary_key: &[u8],
         cancel_token: &CancellationToken,
     ) -> Result<Option<Fetched>, ReadError> {
-        cancel_token
-            .run_until_cancelled(retry::run(
-                "fetch",
-                self.retry.read,
-                &self.read_rate_limit,
-                &self.read_outage,
-                || async { self.client.fetch(key, secondary_key).await.map_err(ReadError::Fetch) },
-            ))
-            .await
-            .ok_or(ReadError::Cancelled)?
+        retry::run(
+            "fetch",
+            self.retry.read,
+            &self.read_rate_limit,
+            &self.read_outage,
+            cancel_token,
+            || async {
+                cancel_token
+                    .run_until_cancelled(self.client.fetch(key, secondary_key))
+                    .await
+                    .ok_or(ReadError::Cancelled)?
+                    .map_err(ReadError::Fetch)
+            },
+        )
+        .await
     }
 
     async fn download_checked(
@@ -320,16 +333,18 @@ impl RemoteEndpoint {
         path: &AbsolutePath,
         cancel_token: &CancellationToken,
     ) -> Result<(), ReadError> {
-        cancel_token
-            .run_until_cancelled(retry::run(
-                "download",
-                self.retry.read,
-                &self.read_rate_limit,
-                &self.read_outage,
-                || download_once(&self.client, blob_id, path, cancel_token),
-            ))
-            .await
-            .ok_or(ReadError::Cancelled)?
+        // Do not wrap `download_once` in `run_until_cancelled`: `download_once`
+        // handles `cancel_token` itself so it always joins the blocking archive
+        // check task and closes the `.tmp` file handle before returning.
+        retry::run(
+            "download",
+            self.retry.read,
+            &self.read_rate_limit,
+            &self.read_outage,
+            cancel_token,
+            || download_once(&self.client, blob_id, path, cancel_token),
+        )
+        .await
     }
 
     async fn store(
@@ -345,11 +360,13 @@ impl RemoteEndpoint {
         if !queued.is_zero() {
             tracing::debug!(?queued, "acquired remote cache upload slot");
         }
+        let never_cancel = CancellationToken::new();
         let result = retry::run(
             "store",
             self.retry.store,
             &self.store_rate_limit,
             &self.store_outage,
+            &never_cancel,
             || async {
                 self.client
                     .store(key, secondary_key, value, blob)

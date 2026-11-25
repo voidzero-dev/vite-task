@@ -9,6 +9,7 @@ use std::{
 };
 
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 use vt_remote_cache::RetryHint;
 
 /// Maximum `Retry-After` delay honored on a `429 Too Many Requests` response.
@@ -41,6 +42,8 @@ pub(super) trait RetryableError: Debug {
     fn retry_action(&self) -> RetryAction;
     /// Error returned when the outage circuit breaker is open.
     fn unavailable() -> Self;
+    /// Error returned when `cancel_token` cancels a wait between attempts.
+    fn cancelled() -> Self;
 }
 
 /// Retry parameters for one kind of remote cache operation.
@@ -325,12 +328,19 @@ impl Drop for OutagePermit<'_> {
     }
 }
 
-/// Run `attempt_fn` through `outage`, `rate_limit`, and `policy`.
+/// Run `attempt_fn` through `outage`, `rate_limit`, and `policy`, stopping if
+/// `cancel_token` is cancelled before an attempt or during a retry wait.
+///
+/// `attempt_fn` is NOT dropped mid-execution by `cancel_token` here; callers
+/// that need cleanup on cancellation (such as joining a blocking file-writer
+/// task before deleting a temporary file) honor `cancel_token` inside
+/// `attempt_fn` and return an error classified as [`RetryAction::Cancelled`].
 pub(super) async fn run<T, E, F, Fut>(
     operation: &'static str,
     policy: RetryPolicy,
     rate_limit: &RateLimit,
     outage: &OutageBreaker,
+    cancel_token: &CancellationToken,
     mut attempt_fn: F,
 ) -> Result<T, E>
 where
@@ -338,6 +348,9 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
+    if cancel_token.is_cancelled() {
+        return Err(E::cancelled());
+    }
     let Some(permit) = outage.enter() else {
         tracing::debug!(operation, "skipping remote cache request while circuit is open");
         return Err(E::unavailable());
@@ -348,7 +361,9 @@ where
     let started = Instant::now();
     let total_attempts = policy.max_retries.saturating_add(1);
     for attempt in 0..total_attempts {
-        rate_limit.wait().await;
+        if cancel_token.run_until_cancelled(rate_limit.wait()).await.is_none() {
+            return Err(E::cancelled());
+        }
         match attempt_fn().await {
             Ok(value) => {
                 permit.finish(OutageOutcome::Healthy);
@@ -411,7 +426,9 @@ where
                         ?error,
                         "retrying remote cache request"
                     );
-                    sleep(backoff).await;
+                    if cancel_token.run_until_cancelled(sleep(backoff)).await.is_none() {
+                        return Err(E::cancelled());
+                    }
                 }
             },
         }
@@ -476,6 +493,10 @@ mod tests {
 
         fn unavailable() -> Self {
             Self::Outage
+        }
+
+        fn cancelled() -> Self {
+            Self::Cancelled
         }
     }
 
@@ -564,23 +585,54 @@ mod tests {
         let policy =
             RetryPolicy { max_retries: 0, base_delay: Duration::ZERO, ..RetryPolicy::READ };
 
+        let cancel = CancellationToken::new();
+
         // Open the circuit with one outage failure.
-        let err = run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, || async {
-            Err(TestError::Outage)
-        })
-        .await
-        .unwrap_err();
+        let err =
+            run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, &cancel, || async {
+                Err(TestError::Outage)
+            })
+            .await
+            .unwrap_err();
         assert_eq!(err, TestError::Outage);
         assert!(breaker.enter().is_none());
 
         // Expire cooldown and cancel the half-open probe: circuit must stay open.
         expire_open(&breaker);
-        let err = run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, || async {
-            Err(TestError::Cancelled)
-        })
-        .await
-        .unwrap_err();
+        let err =
+            run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, &cancel, || async {
+                Err(TestError::Cancelled)
+            })
+            .await
+            .unwrap_err();
         assert_eq!(err, TestError::Cancelled);
         assert!(breaker.enter().is_none());
+    }
+
+    #[tokio::test]
+    async fn cancel_stops_retry_backoff_promptly() {
+        let breaker = OutageBreaker::new(3, Duration::from_secs(30));
+        let rate_limit = RateLimit::default();
+        let policy = RetryPolicy {
+            max_retries: 2,
+            base_delay: Duration::from_secs(30),
+            max_delay: Duration::from_secs(30),
+            max_elapsed: Duration::from_secs(60),
+            ..RetryPolicy::READ
+        };
+        let cancel = CancellationToken::new();
+        let cancel_on_attempt = cancel.clone();
+        let attempts = std::sync::atomic::AtomicU32::new(0);
+
+        let err =
+            run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, &cancel, || {
+                attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                cancel_on_attempt.cancel();
+                async { Err(TestError::Outage) }
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err, TestError::Cancelled);
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }
