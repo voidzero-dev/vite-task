@@ -10,7 +10,7 @@ use std::{
 use rustc_hash::FxHashSet;
 use tokio_util::sync::CancellationToken;
 use vt_glob::path::PathGlobSet;
-use vt_path::{AbsolutePath, RelativePathBuf};
+use vt_path::{AbsolutePath, RelativePath, RelativePathBuf};
 use vt_plan::cache_metadata::{CacheMetadata, EnvValueHash};
 use vt_server::Reports;
 use vt_str::Str;
@@ -19,6 +19,7 @@ use super::{
     CacheState,
     fingerprint::{PathRead, PostRunFingerprint, TrackedEnvQuery},
     glob,
+    ignored_paths::relative_cache_root,
     rebuildable::Rebuildable,
     spawn::ChildOutcome,
 };
@@ -112,6 +113,9 @@ pub(super) async fn update_cache(
         return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete), None);
     };
 
+    // Every schema version's folder is in the task cache, not only this one.
+    let cache_root = relative_cache_root(cache_dir, workspace_root);
+
     let fspy_outcome = observe_fspy(
         #[cfg(fspy)]
         path_accesses,
@@ -120,7 +124,7 @@ pub(super) async fn update_cache(
         &ignored_input_rels,
         &ignored_output_rels,
         workspace_root,
-        cache_dir,
+        cache_root.as_deref(),
     );
 
     if fspy_outcome.is_none() && fspy.is_some() {
@@ -146,12 +150,11 @@ pub(super) async fn update_cache(
     // Paths already in globbed_inputs are skipped: they are hashed before
     // the run, so one that the task rewrote makes the next run miss instead
     // of hitting a stale entry.
-    let empty_path_reads = HashMap::default();
+    let (empty_path_reads, no_writes, no_globs) =
+        (HashMap::default(), Rebuildable::default(), PathGlobSet::default());
     let path_reads = fspy_outcome.as_ref().map_or(&empty_path_reads, |o| &o.path_reads);
-    let no_writes = Rebuildable::default();
     let rebuildable = fspy_outcome.as_ref().map_or(&no_writes, |o| &o.rebuildable);
     // Listings leave out the entries input exclusions match, as reads do.
-    let no_globs = PathGlobSet::default();
     let input_negative_globs = fspy.map_or(&no_globs, |fspy| &fspy.input_negative_globs);
     let post_run_fingerprint = match PostRunFingerprint::create(
         path_reads,
@@ -159,6 +162,7 @@ pub(super) async fn update_cache(
         input_negative_globs,
         &ignored_input_rels,
         workspace_root,
+        cache_root.as_deref(),
         &globbed_inputs,
         tracked_envs,
         tracked_env_queries,
@@ -229,14 +233,12 @@ fn observe_fspy(
     ignored_input_rels: &FxHashSet<RelativePathBuf>,
     ignored_output_rels: &FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
-    cache_dir: &AbsolutePath,
+    cache_root: Option<&RelativePath>,
 ) -> Option<TrackingOutcome> {
     #[cfg(fspy)]
     {
         use super::tracked_accesses::TrackedPathAccesses;
 
-        // Every schema version's folder is in the task cache, not only this one.
-        let cache_root = cache_dir.parent().unwrap_or(cache_dir);
         path_accesses.map(|raw| {
             let tracked = TrackedPathAccesses::from_raw(raw, workspace_root, cache_root);
             let mut rebuildable = Rebuildable::new(
@@ -301,7 +303,7 @@ fn observe_fspy(
     #[cfg(not(fspy))]
     {
         let _ =
-            (metadata, fspy, ignored_input_rels, ignored_output_rels, workspace_root, cache_dir);
+            (metadata, fspy, ignored_input_rels, ignored_output_rels, workspace_root, cache_root);
         None
     }
 }

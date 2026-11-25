@@ -666,6 +666,7 @@ mod tests {
                 &globbed_inputs,
                 &PathGlobSet::default(),
                 &workspace_root,
+                None,
                 FileCheck::First,
             )
         }
