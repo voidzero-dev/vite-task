@@ -1,8 +1,12 @@
-use std::process::Command;
+use std::{ffi::OsString, process::Command};
 
 #[test]
 fn global_allocator_is_checked_at_link_time() {
-    let source = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/no_global_alloc.rs");
+    // Prefer runtime CARGO_MANIFEST_DIR so cross-compiled nextest archives
+    // remapped onto another host (such as Windows CI) find the fixture file.
+    let mut source = std::env::var_os("CARGO_MANIFEST_DIR")
+        .unwrap_or_else(|| OsString::from(env!("CARGO_MANIFEST_DIR")));
+    source.push("/tests/support/no_global_alloc.rs");
     // Compile and link freestanding fixtures, but never execute them. Both
     // targets are installed by rust-toolchain.toml; no Linux VM is needed.
     for target in ["aarch64-unknown-none-softfloat", "x86_64-unknown-none"] {
@@ -16,7 +20,8 @@ fn global_allocator_is_checked_at_link_time() {
                 // --cfg selects the fixture's operation. Abort avoids an unwind
                 // runtime, and --no-pie matches our fixed-address launcher.
                 let output = Command::new("rustc")
-                    .args([source, "--edition=2024", "--target", target])
+                    .arg(&source)
+                    .args(["--edition=2024", "--target", target])
                     .args(["--cfg", operation, "-C", "panic=abort", "-C"])
                     .arg(["opt-level=", optimization].concat())
                     .args(["-C", "link-arg=--no-pie", "-o"])
