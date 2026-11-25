@@ -1,13 +1,13 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(not(test), no_std)]
 
-#[cfg(unix)]
+#[cfg(any(unix, target_os = "none"))]
 mod unix;
 #[cfg(windows)]
 mod windows;
 
 pub use platform::{Mapping, ShmHandle, create, open, remove};
-#[cfg(unix)]
+#[cfg(any(unix, target_os = "none"))]
 use unix as platform;
 #[cfg(windows)]
 use windows as platform;

@@ -66,6 +66,9 @@ jobs:
 
       # --locked: verify Cargo.lock is up to date (replaces the removed `cargo check --locked`)
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: |
+          cargo clippy --locked -p fspy_elf_loader -p fspy_elf_loader_test_launcher --target x86_64-unknown-none -- -D warnings
+          cargo clippy --locked -p fspy_elf_loader -p fspy_elf_loader_test_launcher --target aarch64-unknown-none-softfloat -- -D warnings
 
   # fspy builds only on Windows, macOS, and Linux, but vp must still build
   # without it on other platforms. Cross-building `vt_bin` for FreeBSD catches
@@ -148,6 +151,10 @@ jobs:
       # and pnpm enter the picture.
       - name: Run tests
         run: $TEST_CARGO_CMD test --target $TEST_BUILD_TARGET
+
+      - name: Run ELF loader tests (release)
+        if: ${{ env.TEST_TARGET == 'x86_64-unknown-linux-gnu' }}
+        run: $TEST_CARGO_CMD test --release -p fspy_elf_loader_tests --target $TEST_BUILD_TARGET
 
       # x86_64-apple-darwin runs on arm64 runner under Rosetta; install x64 Node
       # so fspy's x86_64 preload dylib can be injected into spawned node procs.
@@ -377,6 +384,9 @@ jobs:
       # populates `packages/tools/node_modules`.
       - name: Run tests
         run: cargo test
+
+      - name: Run ELF loader tests (release)
+        run: cargo test --release -p fspy_elf_loader_tests
 
       - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
 

@@ -3,3 +3,4 @@
 # - cargo `Z-bindeps` to build and embed preload shared libraries as dependencies of fspy
 channel = "nightly-2026-08-02"
 profile = "default"
+targets = ["aarch64-unknown-none-softfloat", "x86_64-unknown-none"]

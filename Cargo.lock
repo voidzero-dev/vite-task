@@ -1469,6 +1469,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "fspy_elf_loader"
+version = "0.1.0"
+dependencies = [
+ "elf",
+ "fspy_nostd",
+ "linux-raw-sys 0.12.1",
+ "tempfile",
+]
+
+[[package]]
+name = "fspy_elf_loader_test_launcher"
+version = "0.0.0"
+dependencies = [
+ "fspy_elf_loader",
+ "fspy_nostd",
+]
+
+[[package]]
+name = "fspy_elf_loader_tests"
+version = "0.0.0"
+dependencies = [
+ "elf",
+ "fspy_elf_loader_test_launcher",
+ "libc",
+ "ntest",
+ "tempfile",
+]
+
+[[package]]
 name = "fspy_nostd"
 version = "0.0.0"
 dependencies = [
@@ -1478,6 +1507,7 @@ dependencies = [
  "libc",
  "linux-raw-sys 0.12.1",
  "syscalls",
+ "tempfile",
  "windows-sys 0.61.2",
 ]
 
@@ -5161,6 +5191,7 @@ name = "vt_ipc_str"
 version = "0.0.0"
 dependencies = [
  "allocator-api2",
+ "bstr",
  "bumpalo",
  "bytemuck",
  "fspy_nostd",

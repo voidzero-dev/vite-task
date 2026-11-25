@@ -1,8 +1,4 @@
 //! I/O calls with caller-owned buffers.
-//!
-//! Linux only: these go straight to the kernel with no libc wrapper, so they
-//! are usable from a signal handler, a post-`fork()` child, or freestanding
-//! injected code.
 
 use crate::{BorrowedFd, Error, Result};
 
@@ -12,6 +8,7 @@ use crate::{BorrowedFd, Error, Result};
 /// # Errors
 ///
 /// Returns the error reported by `read`.
+#[cfg(any(target_os = "linux", target_os = "none"))]
 pub fn read(fd: BorrowedFd<'_>, buf: &mut [u8]) -> Result<usize> {
     // SAFETY: `fd` stays borrowed and `buf` is writable for its whole length.
     unsafe {
@@ -30,12 +27,18 @@ pub fn read(fd: BorrowedFd<'_>, buf: &mut [u8]) -> Result<usize> {
 ///
 /// Returns the error reported by `write`.
 pub fn write(fd: BorrowedFd<'_>, buf: &[u8]) -> Result<usize> {
-    // SAFETY: `fd` stays borrowed for the call and `buf` is readable for its
-    // whole length. The kernel receives the descriptor, buffer pointer, and
-    // length explicitly and returns the accepted byte count.
-    let written = unsafe {
-        syscalls::syscall!(syscalls::Sysno::write, fd.as_raw_fd(), buf.as_ptr(), buf.len())
+    #[cfg(any(target_os = "linux", target_os = "none"))]
+    {
+        // SAFETY: `fd` stays borrowed and `buf` is readable for its full length.
+        unsafe {
+            syscalls::syscall!(syscalls::Sysno::write, fd.as_raw_fd(), buf.as_ptr(), buf.len())
+        }
+        .map_err(Error::from)
     }
-    .map_err(Error::from)?;
-    Ok(written)
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: `fd` stays borrowed and `buf` is readable for its full length.
+        let written = unsafe { libc::write(fd.as_raw_fd(), buf.as_ptr().cast(), buf.len()) };
+        if written == -1 { Err(Error::last_os_error()) } else { Ok(written.cast_unsigned()) }
+    }
 }

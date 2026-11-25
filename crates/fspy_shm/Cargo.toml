@@ -7,7 +7,7 @@ license.workspace = true
 publish = false
 rust-version.workspace = true
 
-[target.'cfg(any(unix, windows))'.dependencies]
+[target.'cfg(any(unix, windows, target_os = "none"))'.dependencies]
 fspy_nostd = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]

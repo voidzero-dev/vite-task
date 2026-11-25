@@ -1,6 +1,6 @@
 //! The writer side: claim a frame, fill it, finish it.
 
-use std::{
+use core::{
     num::{NonZeroU32, NonZeroUsize},
     ops::{Deref, DerefMut},
     slice,
