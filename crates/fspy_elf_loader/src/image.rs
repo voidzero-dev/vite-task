@@ -270,40 +270,56 @@ impl File {
                 )
             }
             .expect("cannot map ELF segment");
-            // Zero through the page boundary, not just p_memsz: leftover file
-            // bytes after filesz==memsz, and the BSS tail of filesz<memsz,
-            // must be zero. glibc's early allocator reads spare bytes after
-            // the interpreter's _end (Linux padzero). Stopping at p_memsz
-            // crashed /bin/echo's interpreter in the ARM64 smoke test.
-            if !file_end.is_multiple_of(page) {
+            // Zero through the page boundary (Linux padzero) when the segment
+            // has BSS (memsz > filesz) or is writable (glibc's early allocator
+            // reads spare bytes after the interpreter's _end even when
+            // filesz == memsz). Skip filesz == memsz on read-only/executable
+            // segments so we do not COW-dirty code/rodata pages or trigger
+            // RW -> RX mprotect transitions under W^X policies.
+            //
+            // Clamp the zeroed range to the start of any higher-vaddr LOAD
+            // sharing this page so unordered segments cannot wipe each other.
+            let pad_zero = segment.p_memsz > segment.p_filesz || segment.p_flags & abi::PF_W != 0;
+            if pad_zero && !file_end.is_multiple_of(page) {
                 let tail_page = file_end & !sub(page, 1);
-                // Writable, non-executable pages can be zeroed directly.
-                // Otherwise temporarily make the last file page writable,
-                // without X, and restore its original protection afterwards.
-                let change_protection =
-                    !protection.contains(ProtFlags::WRITE) || protection.contains(ProtFlags::EXEC);
-                // SAFETY: this private page was mapped above; it has no live references.
-                unsafe {
-                    if change_protection {
-                        mm::mprotect(
-                            ptr::with_exposed_provenance_mut(tail_page),
-                            page,
-                            MprotectFlags::READ | MprotectFlags::WRITE,
-                        )
-                        .expect("cannot zero ELF BSS");
+                let mut zero_end = align_up(file_end, page);
+                for other in self.segments().iter() {
+                    if other.p_type == abi::PT_LOAD && other.p_memsz != 0 {
+                        let other_start = add(bias, word(other.p_vaddr));
+                        if other_start >= end && other_start < zero_end {
+                            zero_end = other_start;
+                        }
                     }
-                    ptr::write_bytes(
-                        ptr::with_exposed_provenance_mut::<u8>(file_end),
-                        0,
-                        sub(align_up(file_end, page), file_end),
-                    );
-                    if change_protection {
-                        mm::mprotect(
-                            ptr::with_exposed_provenance_mut(tail_page),
-                            page,
-                            MprotectFlags::from_bits_retain(protection.bits()),
-                        )
-                        .expect("cannot restore ELF protection");
+                }
+                if zero_end > file_end {
+                    // Writable, non-executable pages can be zeroed directly.
+                    // Otherwise temporarily make the last file page writable,
+                    // without X, and restore its original protection afterwards.
+                    let change_protection = !protection.contains(ProtFlags::WRITE)
+                        || protection.contains(ProtFlags::EXEC);
+                    // SAFETY: this private page was mapped above; it has no live references.
+                    unsafe {
+                        if change_protection {
+                            mm::mprotect(
+                                ptr::with_exposed_provenance_mut(tail_page),
+                                page,
+                                MprotectFlags::READ | MprotectFlags::WRITE,
+                            )
+                            .expect("cannot zero ELF BSS");
+                        }
+                        ptr::write_bytes(
+                            ptr::with_exposed_provenance_mut::<u8>(file_end),
+                            0,
+                            sub(zero_end, file_end),
+                        );
+                        if change_protection {
+                            mm::mprotect(
+                                ptr::with_exposed_provenance_mut(tail_page),
+                                page,
+                                MprotectFlags::from_bits_retain(protection.bits()),
+                            )
+                            .expect("cannot restore ELF protection");
+                        }
                     }
                 }
             }

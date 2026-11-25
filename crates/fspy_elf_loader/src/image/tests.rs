@@ -55,24 +55,66 @@ fn check_bss(page: usize, flags: u32, expected_protection: &str) {
 }
 
 #[test]
-fn zeroes_spare_file_bytes_when_filesz_equals_memsz() {
+fn zeroes_spare_file_bytes_on_writable_segment_when_filesz_equals_memsz() {
     let page = fspy_nostd::param::page_size();
-    for flags in [abi::PF_R | abi::PF_W, abi::PF_R, abi::PF_R | abi::PF_X] {
+    let mut bytes = std::vec![0xa5; 2 * page];
+    write_header(&mut bytes, 2, 0x200);
+    load(&mut bytes, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    load(&mut bytes, 1, page + 0x100, 0x200, 0x200, abi::PF_R | abi::PF_W, page);
+    let image = map_bytes(&bytes);
+    // SAFETY: the second LOAD and its padzero tail are mapped readable.
+    unsafe {
+        assert_eq!(ptr::with_exposed_provenance::<u8>(image.bias + page + 0x100).read(), 0xa5);
+        assert_eq!(ptr::with_exposed_provenance::<u8>(image.bias + page + 0x2ff).read(), 0xa5);
+        let tail = core::slice::from_raw_parts(
+            ptr::with_exposed_provenance::<u8>(image.bias + page + 0x300),
+            page - 0x300,
+        );
+        assert!(tail.iter().all(|byte| *byte == 0), "writable filesz==memsz must still padzero");
+    }
+}
+
+#[test]
+fn does_not_dirty_readonly_or_exec_tail_when_filesz_equals_memsz() {
+    let page = fspy_nostd::param::page_size();
+    for flags in [abi::PF_R, abi::PF_R | abi::PF_X] {
         let mut bytes = std::vec![0xa5; 2 * page];
         write_header(&mut bytes, 2, 0x200);
         load(&mut bytes, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
         load(&mut bytes, 1, page + 0x100, 0x200, 0x200, flags, page);
         let image = map_bytes(&bytes);
-        // SAFETY: the second LOAD and its padzero tail are mapped readable.
+        // SAFETY: the second LOAD's page is mapped readable directly from the file.
         unsafe {
-            assert_eq!(ptr::with_exposed_provenance::<u8>(image.bias + page + 0x100).read(), 0xa5);
-            assert_eq!(ptr::with_exposed_provenance::<u8>(image.bias + page + 0x2ff).read(), 0xa5);
-            let tail = core::slice::from_raw_parts(
-                ptr::with_exposed_provenance::<u8>(image.bias + page + 0x300),
-                page - 0x300,
+            assert_eq!(
+                ptr::with_exposed_provenance::<u8>(image.bias + page + 0x300).read(),
+                0xa5,
+                "non-writable filesz==memsz must not COW-zero its tail page"
             );
-            assert!(tail.iter().all(|byte| *byte == 0), "filesz==memsz must still padzero");
         }
+    }
+}
+
+#[test]
+fn unordered_shared_page_does_not_wipe_higher_segment() {
+    let page = fspy_nostd::param::page_size();
+    let mut bytes = std::vec![0xa5; 3 * page];
+    write_header(&mut bytes, 3, 0x200);
+    load(&mut bytes, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    // Higher vaddr first, lower vaddr second on the same page.
+    load(&mut bytes, 1, page + 0x300, 0x100, 0x100, abi::PF_R | abi::PF_W, page);
+    load(&mut bytes, 2, page + 0x100, 0x100, 0x100, abi::PF_R | abi::PF_W, page);
+    bytes[page + 0x300] = 0x11;
+    bytes[page + 0x100] = 0x22;
+    let image = map_bytes(&bytes);
+    // SAFETY: both segments on the shared page are mapped readable.
+    unsafe {
+        assert_eq!(ptr::with_exposed_provenance::<u8>(image.bias + page + 0x100).read(), 0x22);
+        assert_eq!(ptr::with_exposed_provenance::<u8>(image.bias + page + 0x200).read(), 0);
+        assert_eq!(
+            ptr::with_exposed_provenance::<u8>(image.bias + page + 0x300).read(),
+            0x11,
+            "padzero on a lower segment must not wipe a higher segment on the same page"
+        );
     }
 }
 
