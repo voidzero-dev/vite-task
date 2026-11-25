@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, ffi::OsStr, sync::Arc};
 use rustc_hash::{FxHashMap, FxHashSet};
 use vt_casefold::EnvName;
 use vt_glob::path::PathGlobSet;
-use vt_path::{AbsolutePath, RelativePathBuf};
+use vt_path::{AbsolutePath, RelativePath, RelativePathBuf};
 use vt_plan::cache_metadata::SpawnFingerprint;
 
 use super::{
@@ -35,6 +35,7 @@ impl CacheEntryValue {
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         input_negative_globs: &PathGlobSet<'_>,
         workspace_root: &AbsolutePath,
+        cache_root: Option<&RelativePath>,
         file_check: FileCheck,
     ) -> anyhow::Result<Checked> {
         // Without `-v`, the first changed file is enough to know it's a miss.
@@ -45,6 +46,7 @@ impl CacheEntryValue {
             let input_changes = self.post_run_fingerprint.input_changes(
                 workspace_root,
                 input_negative_globs,
+                cache_root,
                 file_check,
             );
             partial |= add_checked(&mut changes, input_changes, "inferred inputs")?;
@@ -232,6 +234,7 @@ mod tests {
                 &inputs,
                 &PathGlobSet::default(),
                 &workspace_root,
+                None,
                 FileCheck::First,
             )
         };
@@ -276,6 +279,7 @@ mod tests {
                 &BTreeMap::new(),
                 &PathGlobSet::default(),
                 &workspace_root,
+                None,
                 FileCheck::First,
             )
             .unwrap();
@@ -310,6 +314,7 @@ mod tests {
                     &current,
                     &PathGlobSet::default(),
                     &workspace_root,
+                    None,
                     file_check,
                 )
                 .unwrap()
@@ -371,6 +376,7 @@ mod tests {
                 &BTreeMap::new(),
                 &PathGlobSet::default(),
                 &workspace_root,
+                None,
                 file_check,
             )
         };

@@ -44,6 +44,7 @@ use super::{
     event::RunKind,
     execute::{
         fingerprint::{PathFingerprint, PostRunFingerprint},
+        ignored_paths::relative_cache_root,
         pipe::StdOutput,
     },
 };
@@ -468,7 +469,7 @@ pub fn split_path(path: &str) -> (Option<&str>, &str) {
 /// its own cache warm across branch switches, and a cache from a different
 /// version is simply ignored (it lives in a directory this build never looks
 /// at) rather than aborting the run. Bumping the version starts a fresh cache.
-const CACHE_SCHEMA_VERSION: u32 = 23;
+const CACHE_SCHEMA_VERSION: u32 = 24;
 
 /// Name of the per-version subdirectory (e.g. `v14`) under the task-cache
 /// directory that holds the database and output archives for the current
@@ -551,6 +552,8 @@ struct Validation {
     globbed_inputs: Arc<BTreeMap<RelativePathBuf, u64>>,
     input_negative_globs: Arc<PathGlobSet<'static>>,
     workspace_root: Arc<AbsolutePath>,
+    /// Workspace-relative task cache root, left out of directory listings.
+    cache_root: Option<RelativePathBuf>,
     /// How many changed files to look for.
     file_check: FileCheck,
 }
@@ -563,6 +566,7 @@ impl Validation {
             &self.globbed_inputs,
             &self.input_negative_globs,
             &self.workspace_root,
+            self.cache_root.as_deref(),
             self.file_check,
         )
     }
@@ -649,6 +653,7 @@ impl ExecutionCache {
                 PathGlobSet::new(&cache_metadata.input_config.negative_globs)?.into_owned(),
             ),
             workspace_root: Arc::clone(workspace_root),
+            cache_root: relative_cache_root(cache_dir, workspace_root),
             file_check,
         };
 

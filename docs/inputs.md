@@ -205,7 +205,7 @@ Files matching `*.generated.ts` are excluded whether they come from the `src/**`
 
 ### Auto-Inference Behavior
 
-The auto-inference (fspy) is intentionally **cautious** - it tracks all files that a command reads, even auxiliary files. This means **negative patterns are expected to be useful** for filtering out files you don't want to trigger cache invalidation.
+The auto-inference (fspy) is intentionally **cautious** - it tracks all files that a command reads, even auxiliary files. A small set of workspace-internal or transient paths are always ignored automatically (for both direct accesses and directory listings): `.git` at the workspace root, `.DS_Store`, `node_modules/.pnpm-workspace-state-*.json`, `node_modules/.vite-temp`, and the task cache directory (`node_modules/.vite/task-cache`, or `VITE_CACHE_PATH` when inside the workspace). For other tool caches or generated files, **negative patterns are expected to be useful** for filtering out files you don't want to trigger cache invalidation.
 
 Common files you might want to exclude:
 

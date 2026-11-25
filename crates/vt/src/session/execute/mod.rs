@@ -2,6 +2,7 @@ mod cache_update;
 pub mod fingerprint;
 pub mod glob;
 mod hash;
+pub mod ignored_paths;
 pub mod pipe;
 mod rebuildable;
 mod redact;

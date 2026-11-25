@@ -22,7 +22,7 @@ use vt_plan::cache_metadata::EnvValueHash;
 use vt_str::Str;
 use wincode::{SchemaRead, SchemaWrite};
 
-use super::rebuildable::Rebuildable;
+use super::{ignored_paths::IgnoredDirEntries, rebuildable::Rebuildable};
 use crate::{
     collections::HashMap,
     session::cache::{Change, EnvMismatch, EnvSource, FileCheck, InputChangeKind},
@@ -96,16 +96,18 @@ pub enum PathFingerprint {
 /// The entries of a listed directory.
 #[derive(SchemaWrite, SchemaRead, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct DirListing {
-    /// The entries sorted by name, without those in `ignored_entries` and
-    /// those the input negative globs exclude.
+    /// The entries sorted by name, without those in `ignored_entries`,
+    /// built-in ignored paths (see [`super::ignored_paths`]), and those the
+    /// input negative globs exclude.
     pub entries: BTreeMap<Str, DirEntryKind>,
     /// Names left out of `entries` that a later run may find missing or
     /// present: the entries the task can rebuild, and those that
     /// tool-reported `ignoreInput` paths name, whether or not they were there
     /// after the run. They're left out of the current listing before
-    /// comparing, and so are the entries the input negative globs exclude,
-    /// which aren't recorded: the globs are part of the cache key, so
-    /// validation has the same ones.
+    /// comparing, along with built-in ignored paths and the entries the input
+    /// negative globs exclude, which aren't recorded: the built-in rules are
+    /// fixed and the globs are part of the cache key, so validation has the
+    /// same ones.
     pub ignored_entries: BTreeSet<Str>,
 }
 
@@ -138,6 +140,7 @@ impl PostRunFingerprint {
     /// * `input_negative_globs` - The input negative globs, which also exclude listing entries
     /// * `ignored_inputs` - Tool-reported `ignoreInput` paths, which also exclude listing entries
     /// * `base_dir` - Workspace root for resolving relative paths
+    /// * `cache_root` - Workspace-relative task cache root, left out of listings
     /// * `globbed_inputs` - Prerun glob fingerprint; paths here are skipped
     /// * `tracked_envs` - Tool-requested env vars (name -> value hash), validated on lookup
     /// * `tracked_env_queries` - Tool-requested bulk env queries (query -> match-set hashes)
@@ -152,6 +155,7 @@ impl PostRunFingerprint {
         input_negative_globs: &PathGlobSet<'_>,
         ignored_inputs: &FxHashSet<RelativePathBuf>,
         base_dir: &AbsolutePath,
+        cache_root: Option<&RelativePath>,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
         tracked_envs: BTreeMap<Str, Option<EnvValueHash>>,
         tracked_env_queries: BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>,
@@ -189,7 +193,12 @@ impl PostRunFingerprint {
                     listing
                         .ignored_entries
                         .extend(ignored_input_names(relative_path, ignored_inputs));
-                    leave_out_excluded_entries(listing, relative_path, input_negative_globs);
+                    leave_out_excluded_entries(
+                        listing,
+                        relative_path,
+                        input_negative_globs,
+                        cache_root,
+                    );
                 }
                 let may_be_missing =
                     rebuildable.may_be_missing(relative_path, &fingerprint, base_dir);
@@ -213,12 +222,15 @@ impl PostRunFingerprint {
     /// from a listed folder. The inputs are checked in parallel, so when
     /// several changed, which one is found first isn't defined. `input_negative_globs` are the
     /// task's input negative globs, part of the cache key and so the same as
-    /// when the fingerprint was created.
+    /// when the fingerprint was created. `cache_root` is the workspace-relative
+    /// task cache root, left out of listings alongside other built-in ignored
+    /// paths.
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn input_changes(
         &self,
         base_dir: &AbsolutePath,
         input_negative_globs: &PathGlobSet<'_>,
+        cache_root: Option<&RelativePath>,
         file_check: FileCheck,
     ) -> Vec<anyhow::Result<Change>> {
         let start = Instant::now();
@@ -238,13 +250,18 @@ impl PostRunFingerprint {
                 Err(err) => return vec![Err(err)],
             };
             // The ignored entries may be missing or present, so the current
-            // listing records and leaves out the same names, and the entries
-            // the input negative globs exclude.
+            // listing records and leaves out the same names, built-in ignored
+            // paths, and the entries the input negative globs exclude.
             if let (PathFingerprint::Folder(Some(stored)), PathFingerprint::Folder(Some(current))) =
                 (path_fingerprint, &mut current_path_fingerprint)
             {
                 current.ignored_entries.clone_from(&stored.ignored_entries);
-                leave_out_excluded_entries(current, input_relative_path, input_negative_globs);
+                leave_out_excluded_entries(
+                    current,
+                    input_relative_path,
+                    input_negative_globs,
+                    cache_root,
+                );
             }
             let unchanged = path_fingerprint == &current_path_fingerprint
                 || (*may_be_missing && current_path_fingerprint == PathFingerprint::NotFound);
@@ -508,23 +525,30 @@ fn ignored_input_names<'a>(
     })
 }
 
-/// Leaves out of `listing`, a listing of the folder `dir`, the entries named
-/// in its `ignored_entries` and those whose path `input_negative_globs`
-/// match. A folder entry is matched by its own path: `build/**` matches the
-/// `build` folder itself, since `**` matches zero or more components, so it
-/// leaves out the entry, while `build/*` or `build/**/*.js` exclude only
-/// what is in the folder and leave the entry in.
+/// Leaves out of `listing`, a listing of the folder `dir`, built-in ignored
+/// paths (see [`super::ignored_paths`]), the entries named in its
+/// `ignored_entries`, and those whose path `input_negative_globs` match. A
+/// folder entry is matched by its own path: `build/**` matches the `build`
+/// folder itself, since `**` matches zero or more components, so it leaves out
+/// the entry, while `build/*` or `build/**/*.js` exclude only what is in the
+/// folder and leave the entry in.
 fn leave_out_excluded_entries(
     listing: &mut DirListing,
     dir: &RelativePath,
     input_negative_globs: &PathGlobSet<'_>,
+    cache_root: Option<&RelativePath>,
 ) {
     let DirListing { entries, ignored_entries } = listing;
-    if ignored_entries.is_empty() && input_negative_globs.is_empty() {
+    let built_in = IgnoredDirEntries::for_dir(dir, cache_root);
+    if !built_in.has_non_ds_store_rules()
+        && ignored_entries.is_empty()
+        && input_negative_globs.is_empty()
+    {
         return;
     }
     entries.retain(|name, _| {
-        !ignored_entries.contains(name)
+        !built_in.is_ignored(name.as_str())
+            && !ignored_entries.contains(name)
             && (input_negative_globs.is_empty()
                 || !RelativePathBuf::new(name.as_str())
                     .is_ok_and(|name| input_negative_globs.is_match(dir.join(name))))
@@ -874,10 +898,12 @@ mod tests {
                     FxHashSet::default(),
                     FxHashSet::default(),
                     &workspace_root,
+                    None,
                 ),
                 &PathGlobSet::default(),
                 &FxHashSet::default(),
                 &workspace_root,
+                None,
                 &BTreeMap::new(),
                 BTreeMap::new(),
                 BTreeMap::new(),
@@ -888,7 +914,7 @@ mod tests {
         let read_only = create(FxHashSet::default());
         let validate = |fingerprint: &PostRunFingerprint| {
             fingerprint
-                .input_changes(&workspace_root, &PathGlobSet::default(), FileCheck::First)
+                .input_changes(&workspace_root, &PathGlobSet::default(), None, FileCheck::First)
                 .pop()
                 .map(Result::unwrap)
         };
@@ -931,11 +957,13 @@ mod tests {
                 FxHashSet::default(),
                 FxHashSet::default(),
                 &workspace_root,
+                None,
             )
-            .with_folders(&workspace_root),
+            .with_folders(&workspace_root, None),
             &PathGlobSet::default(),
             &FxHashSet::default(),
             &workspace_root,
+            None,
             &BTreeMap::new(),
             BTreeMap::new(),
             BTreeMap::new(),
@@ -963,8 +991,9 @@ mod tests {
             FxHashSet::default(),
             FxHashSet::default(),
             &workspace_root,
+            None,
         )
-        .with_folders(&workspace_root);
+        .with_folders(&workspace_root, None);
         assert!(rebuildable.is_rebuildable_folder(&rel("out")));
         assert!(!rebuildable.is_rebuildable_folder(&rel("out/tmp")));
     }
@@ -992,13 +1021,14 @@ mod tests {
                     .map(rel)
                     .collect(),
                 &workspace_root,
+                None,
             )
         };
         let empty_folders = FxHashSet::from_iter([rel("out/empty"), rel("out/drained")]);
-        let rebuildable = new().with_folders(&workspace_root);
+        let rebuildable = new().with_folders(&workspace_root, None);
         assert_eq!(rebuildable.empty_folders(), &empty_folders);
         // Without climbing, the archive gets the same empty folders.
-        assert_eq!(new().with_empty_folders(&workspace_root).empty_folders(), &empty_folders);
+        assert_eq!(new().with_empty_folders(&workspace_root, None).empty_folders(), &empty_folders);
 
         let path_reads = ["out", "out/empty", "mixed", "mixed/made"]
             .into_iter()
@@ -1010,6 +1040,7 @@ mod tests {
             &PathGlobSet::default(),
             &FxHashSet::default(),
             &workspace_root,
+            None,
             &BTreeMap::new(),
             BTreeMap::new(),
             BTreeMap::new(),
@@ -1038,8 +1069,9 @@ mod tests {
             FxHashSet::from_iter([rel("deps")]),
             FxHashSet::default(),
             &workspace_root,
+            None,
         )
-        .with_folders(&workspace_root);
+        .with_folders(&workspace_root, None);
         let mut written: Vec<&str> =
             rebuildable.written().iter().map(|path| path.as_str()).collect();
         written.sort_unstable();
@@ -1055,6 +1087,7 @@ mod tests {
             &PathGlobSet::default(),
             &FxHashSet::default(),
             &workspace_root,
+            None,
             &BTreeMap::new(),
             BTreeMap::new(),
             BTreeMap::new(),
@@ -1095,11 +1128,13 @@ mod tests {
                 FxHashSet::from_iter([rel(".vite/deps")]),
                 FxHashSet::from_iter([rel(".vite/deps_temp_1a2b")]),
                 &workspace_root,
+                None,
             )
-            .with_folders(&workspace_root),
+            .with_folders(&workspace_root, None),
             &PathGlobSet::default(),
             &FxHashSet::default(),
             &workspace_root,
+            None,
             &BTreeMap::new(),
             BTreeMap::new(),
             BTreeMap::new(),
@@ -1129,8 +1164,9 @@ mod tests {
             FxHashSet::default(),
             FxHashSet::default(),
             &workspace_root,
+            None,
         )
-        .with_folders(&workspace_root);
+        .with_folders(&workspace_root, None);
         let file = PathFingerprint::FileContentHash(0);
         assert!(!rebuildable.may_be_missing(&rel("deps/a.js"), &file, &workspace_root));
         assert!(!rebuildable.may_be_missing(
@@ -1146,6 +1182,7 @@ mod tests {
             &PathGlobSet::default(),
             &FxHashSet::default(),
             &workspace_root,
+            None,
             &BTreeMap::new(),
             BTreeMap::new(),
             BTreeMap::new(),
@@ -1175,11 +1212,13 @@ mod tests {
                 FxHashSet::default(),
                 FxHashSet::default(),
                 &workspace_root,
+                None,
             )
-            .with_folders(&workspace_root),
+            .with_folders(&workspace_root, None),
             &PathGlobSet::default(),
             &FxHashSet::default(),
             &workspace_root,
+            None,
             &BTreeMap::new(),
             BTreeMap::new(),
             BTreeMap::new(),
@@ -1195,7 +1234,7 @@ mod tests {
 
         let validate = || {
             fingerprint
-                .input_changes(&workspace_root, &PathGlobSet::default(), FileCheck::First)
+                .input_changes(&workspace_root, &PathGlobSet::default(), None, FileCheck::First)
                 .pop()
                 .map(Result::unwrap)
         };
@@ -1236,6 +1275,7 @@ mod tests {
             &input_negative_globs,
             &ignored_inputs,
             &workspace_root,
+            None,
             &BTreeMap::new(),
             BTreeMap::new(),
             BTreeMap::new(),
@@ -1254,7 +1294,7 @@ mod tests {
 
         let validate = || {
             fingerprint
-                .input_changes(&workspace_root, &input_negative_globs, FileCheck::First)
+                .input_changes(&workspace_root, &input_negative_globs, None, FileCheck::First)
                 .pop()
                 .map(Result::unwrap)
         };
@@ -1270,5 +1310,149 @@ mod tests {
             }
             other => panic!("expected `pkg/notes.txt` added, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn listings_leave_out_built_in_ignored_entries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        for dir in [
+            ".git",
+            "node_modules/.vite/task-cache",
+            "node_modules/.vite-temp",
+            "node_modules/pkg",
+            "packages/app/node_modules/dep",
+        ] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        std::fs::write(
+            workspace_root.join("node_modules/.pnpm-workspace-state-v1.json").as_path(),
+            "{}",
+        )
+        .unwrap();
+
+        let cache_root = rel("node_modules/.vite/task-cache");
+        let path_reads = HashMap::from([
+            (rel(""), PathRead { read_dir_entries: true }),
+            (rel("node_modules"), PathRead { read_dir_entries: true }),
+            (rel("node_modules/.vite"), PathRead { read_dir_entries: true }),
+            (rel("packages/app/node_modules"), PathRead { read_dir_entries: true }),
+        ]);
+        let fingerprint = PostRunFingerprint::create(
+            &path_reads,
+            &Rebuildable::default(),
+            &PathGlobSet::default(),
+            &FxHashSet::default(),
+            &workspace_root,
+            Some(&cache_root),
+            &BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .unwrap();
+
+        let entries_of = |dir: &str| match &fingerprint.inferred_inputs[&rel(dir)].fingerprint {
+            PathFingerprint::Folder(Some(listing)) => {
+                listing.entries.keys().map(Str::as_str).collect::<Vec<_>>()
+            }
+            other => panic!("expected folder listing for `{dir}`, got {other:?}"),
+        };
+        assert_eq!(entries_of(""), ["node_modules", "packages"]);
+        assert_eq!(entries_of("node_modules"), [".vite", "pkg"]);
+        assert!(entries_of("node_modules/.vite").is_empty());
+        assert_eq!(entries_of("packages/app/node_modules"), ["dep"]);
+
+        let validate = || {
+            fingerprint
+                .input_changes(
+                    &workspace_root,
+                    &PathGlobSet::default(),
+                    Some(&cache_root),
+                    FileCheck::First,
+                )
+                .pop()
+                .map(Result::unwrap)
+        };
+
+        // Removing existing ignored entries and adding new ones still hits.
+        std::fs::remove_dir(workspace_root.join(".git").as_path()).unwrap();
+        std::fs::write(workspace_root.join(".git").as_path(), "gitdir: ../main/.git").unwrap();
+        std::fs::remove_file(
+            workspace_root.join("node_modules/.pnpm-workspace-state-v1.json").as_path(),
+        )
+        .unwrap();
+        std::fs::remove_dir(workspace_root.join("node_modules/.vite-temp").as_path()).unwrap();
+        std::fs::remove_dir(workspace_root.join("node_modules/.vite/task-cache").as_path())
+            .unwrap();
+        std::fs::write(
+            workspace_root
+                .join("packages/app/node_modules/.pnpm-workspace-state-v2.json")
+                .as_path(),
+            "{}",
+        )
+        .unwrap();
+        std::fs::create_dir(workspace_root.join("packages/app/node_modules/.vite-temp").as_path())
+            .unwrap();
+        assert!(validate().is_none());
+
+        // A real entry added to a listed `node_modules` folder still misses.
+        std::fs::create_dir(workspace_root.join("packages/app/node_modules/extra").as_path())
+            .unwrap();
+        match validate() {
+            Some(Change::File { kind: InputChangeKind::Added, path }) => {
+                assert_eq!(path.as_str(), "packages/app/node_modules/extra");
+            }
+            other => panic!("expected `packages/app/node_modules/extra` added, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rebuildable_skips_built_in_ignored_entries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace_root = AbsolutePathBuf::new(tmp.path().to_path_buf()).unwrap();
+        let rel = |path: &str| RelativePathBuf::new(path).unwrap();
+        let cache_root = rel("node_modules/.vite/task-cache");
+
+        // `node_modules` holds a task-written file under `.vite/deps`, plus
+        // built-in ignored entries (`.vite-temp`, `.pnpm-workspace-state-*`,
+        // and the task cache). Those ignored entries don't block rebuildability.
+        for dir in [
+            "node_modules/.vite/deps",
+            "node_modules/.vite/task-cache/v24",
+            "node_modules/.vite-temp",
+            "renamed/node_modules/.vite-temp",
+        ] {
+            std::fs::create_dir_all(workspace_root.join(dir).as_path()).unwrap();
+        }
+        for file in [
+            "node_modules/.vite/deps/a.js",
+            "node_modules/.vite/task-cache/v24/cache.db",
+            "node_modules/.pnpm-workspace-state-v1.json",
+            "renamed/node_modules/out.js",
+            "renamed/node_modules/.pnpm-workspace-state-v1.json",
+            "renamed/node_modules/.vite-temp/config.timestamp.mjs",
+        ] {
+            std::fs::write(workspace_root.join(file).as_path(), "x").unwrap();
+        }
+
+        let rebuildable = Rebuildable::new(
+            FxHashSet::from_iter([rel("node_modules/.vite/deps/a.js")]),
+            FxHashSet::from_iter([rel("renamed")]),
+            FxHashSet::from_iter([rel("node_modules/.vite")]),
+            &workspace_root,
+            Some(&cache_root),
+        )
+        .with_folders(&workspace_root, Some(&cache_root));
+
+        assert!(rebuildable.is_rebuildable_folder(&rel("node_modules/.vite/deps")));
+        assert!(rebuildable.is_rebuildable_folder(&rel("node_modules/.vite")));
+        assert!(rebuildable.is_rebuildable_folder(&rel("node_modules")));
+
+        // Renamed folders don't pull built-in ignored files into the archive.
+        let mut written: Vec<&str> =
+            rebuildable.written().iter().map(|path| path.as_str()).collect();
+        written.sort_unstable();
+        assert_eq!(written, ["node_modules/.vite/deps/a.js", "renamed/node_modules/out.js"]);
     }
 }

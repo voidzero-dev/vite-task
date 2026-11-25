@@ -6,18 +6,18 @@
 //! would write them again, so a later run may find them missing. A file that
 //! is there must still be as the task left it.
 //!
-//! The same goes for an empty folder the task made (`.DS_Store` aside), and
-//! for a folder that holds only what the task can rebuild: every file (or
-//! symlink) in it is one the task wrote, and every folder in it is rebuildable
-//! too. None of these is fingerprinted at all. A hit restores the files and
-//! the empty folders, which are archived as folders, if they're among the
-//! task's outputs, and the files recreate the folders holding them; explicit
-//! output config can leave them out. Such folders are found after the run by
-//! climbing from the written paths and the empty folders through their parent
-//! folders inside the workspace, listing each one once in the real file
-//! system. A written path or folder that is gone by then plays no part. A
-//! listing of any other folder leaves out its entries that the task can
-//! rebuild, which a later run may find missing too.
+//! The same goes for an empty folder the task made (built-in ignored paths
+//! such as `.DS_Store` aside), and for a folder that holds only what the task
+//! can rebuild: every file (or symlink) in it is one the task wrote, and every
+//! folder in it is rebuildable too. None of these is fingerprinted at all. A hit
+//! restores the files and the empty folders, which are archived as folders, if
+//! they're among the task's outputs, and the files recreate the folders holding
+//! them; explicit output config can leave them out. Such folders are found after
+//! the run by climbing from the written paths and the empty folders through
+//! their parent folders inside the workspace, listing each one once in the real
+//! file system. A written path or folder that is gone by then plays no part. A
+//! listing of any other folder leaves out its entries that the task can rebuild,
+//! which a later run may find missing too.
 //!
 //! The written paths are fspy's records before output exclusions and
 //! tool-reported `ignoreOutput` paths are applied: those decide what is
@@ -43,7 +43,7 @@ use std::{cmp::Reverse, fs, io};
 use rustc_hash::FxHashSet;
 use vt_path::{AbsolutePath, RelativePath, RelativePathBuf};
 
-use super::fingerprint::PathFingerprint;
+use super::{fingerprint::PathFingerprint, ignored_paths::IgnoredDirEntries};
 
 /// The paths a task wrote, the empty folders it made, and the folders
 /// holding only what it can rebuild, relative to the workspace root.
@@ -71,8 +71,9 @@ impl Rebuildable {
         rename_targets: FxHashSet<RelativePathBuf>,
         mkdirs: FxHashSet<RelativePathBuf>,
         workspace_root: &AbsolutePath,
+        cache_root: Option<&RelativePath>,
     ) -> Self {
-        let written = files_written(written, rename_targets, workspace_root);
+        let written = files_written(written, rename_targets, workspace_root, cache_root);
         let mut written_in = FxHashSet::default();
         for path in &written {
             let mut dir = path.parent();
@@ -100,9 +101,13 @@ impl Rebuildable {
     /// Only fingerprints of the paths the task read ask about folders, so a
     /// run without such reads takes [`Self::with_empty_folders`] instead.
     #[must_use]
-    pub fn with_folders(mut self, workspace_root: &AbsolutePath) -> Self {
+    pub fn with_folders(
+        mut self,
+        workspace_root: &AbsolutePath,
+        cache_root: Option<&RelativePath>,
+    ) -> Self {
         (self.folders, self.empty_folders) =
-            find_folders(&self.written, &self.mkdirs, workspace_root);
+            find_folders(&self.written, &self.mkdirs, workspace_root, cache_root);
         self
     }
 
@@ -110,11 +115,15 @@ impl Rebuildable {
     /// listing the folders it made under `workspace_root`, which must be done
     /// after the run, without climbing to the folders above them.
     #[must_use]
-    pub fn with_empty_folders(mut self, workspace_root: &AbsolutePath) -> Self {
+    pub fn with_empty_folders(
+        mut self,
+        workspace_root: &AbsolutePath,
+        cache_root: Option<&RelativePath>,
+    ) -> Self {
         self.empty_folders = self
             .mkdirs
             .iter()
-            .filter(|dir| is_empty_folder(dir, workspace_root))
+            .filter(|dir| is_empty_folder(dir, workspace_root, cache_root))
             .cloned()
             .collect();
         self
@@ -190,10 +199,11 @@ fn files_written(
     mut written: FxHashSet<RelativePathBuf>,
     rename_targets: FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
+    cache_root: Option<&RelativePath>,
 ) -> FxHashSet<RelativePathBuf> {
     for path in rename_targets {
         if fs::symlink_metadata(workspace_root.join(&path)).is_ok_and(|meta| meta.is_dir()) {
-            add_files_under(&path, workspace_root, &mut written);
+            add_files_under(&path, workspace_root, cache_root, &mut written);
         } else {
             written.insert(path);
         }
@@ -201,22 +211,28 @@ fn files_written(
     written
 }
 
-/// Adds every file (or symlink) under the folder `dir` to `files`. `.DS_Store`
-/// doesn't count, as in directory listing fingerprints.
+/// Adds every file (or symlink) under the folder `dir` to `files`. Built-in
+/// ignored paths (see [`super::ignored_paths`]) don't count, as in directory
+/// listing fingerprints.
 fn add_files_under(
     dir: &RelativePath,
     workspace_root: &AbsolutePath,
+    cache_root: Option<&RelativePath>,
     files: &mut FxHashSet<RelativePathBuf>,
 ) {
     let Ok(entries) = fs::read_dir(workspace_root.join(dir)) else {
         return;
     };
+    let ignored = IgnoredDirEntries::for_dir(dir, cache_root);
     for entry in entries.flatten() {
         let name = entry.file_name();
-        if name == ".DS_Store" {
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if ignored.is_ignored(name) {
             continue;
         }
-        let (Some(name), Ok(file_type)) = (name.to_str(), entry.file_type()) else {
+        let Ok(file_type) = entry.file_type() else {
             continue;
         };
         let Ok(name) = RelativePathBuf::new(name) else {
@@ -224,7 +240,7 @@ fn add_files_under(
         };
         let path = dir.join(name);
         if file_type.is_dir() {
-            add_files_under(&path, workspace_root, files);
+            add_files_under(&path, workspace_root, cache_root, files);
         } else {
             files.insert(path);
         }
@@ -232,12 +248,22 @@ fn add_files_under(
 }
 
 /// Whether `dir` is a folder under `workspace_root` holding nothing but
-/// `.DS_Store`, which doesn't count, as in directory listing fingerprints.
-fn is_empty_folder(dir: &RelativePath, workspace_root: &AbsolutePath) -> bool {
+/// built-in ignored paths (see [`super::ignored_paths`]), which don't count,
+/// as in directory listing fingerprints.
+fn is_empty_folder(
+    dir: &RelativePath,
+    workspace_root: &AbsolutePath,
+    cache_root: Option<&RelativePath>,
+) -> bool {
     let path = workspace_root.join(dir);
+    let ignored = IgnoredDirEntries::for_dir(dir, cache_root);
     fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir())
         && fs::read_dir(path).is_ok_and(|mut entries| {
-            entries.all(|entry| entry.is_ok_and(|entry| entry.file_name() == ".DS_Store"))
+            entries.all(|entry| {
+                entry.is_ok_and(|entry| {
+                    entry.file_name().to_str().is_some_and(|name| ignored.is_ignored(name))
+                })
+            })
         })
 }
 
@@ -254,6 +280,7 @@ fn find_folders(
     written: &FxHashSet<RelativePathBuf>,
     mkdirs: &FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
+    cache_root: Option<&RelativePath>,
 ) -> (FxHashSet<RelativePathBuf>, FxHashSet<RelativePathBuf>) {
     let mut candidates = FxHashSet::default();
     for path in written {
@@ -268,7 +295,7 @@ fn find_folders(
     sort_deepest_first(&mut made);
     for dir in made {
         // A folder holding an empty folder found here is a candidate by now.
-        if !candidates.contains(dir) && is_empty_folder(dir, workspace_root) {
+        if !candidates.contains(dir) && is_empty_folder(dir, workspace_root, cache_root) {
             add_parents(dir, &mut candidates);
             empty_folders.insert(dir.to_relative_path_buf());
         }
@@ -282,7 +309,7 @@ fn find_folders(
         let contents = if above_unrebuildable.contains(dir) {
             Some(Holds::Other)
         } else {
-            holds(dir, workspace_root, written, &folders)
+            holds(dir, workspace_root, cache_root, written, &folders)
         };
         match contents {
             Some(Holds::OnlyRebuildable) => {
@@ -320,8 +347,8 @@ fn sort_deepest_first(dirs: &mut [&RelativePath]) {
     dirs.sort_unstable_by_key(|dir| Reverse(dir.as_str().matches('/').count()));
 }
 
-/// What a folder holds, `.DS_Store` aside, which doesn't count, as in
-/// directory listing fingerprints.
+/// What a folder holds, built-in ignored paths (see [`super::ignored_paths`])
+/// aside, which don't count, as in directory listing fingerprints.
 enum Holds {
     Nothing,
     /// At least one entry, each a file (or symlink) the task wrote or a
@@ -337,6 +364,7 @@ enum Holds {
 fn holds(
     dir: &RelativePath,
     workspace_root: &AbsolutePath,
+    cache_root: Option<&RelativePath>,
     written: &FxHashSet<RelativePathBuf>,
     folders: &FxHashSet<RelativePathBuf>,
 ) -> Option<Holds> {
@@ -350,16 +378,20 @@ fn holds(
         }
         Err(_) => return Some(Holds::Other),
     };
+    let ignored = IgnoredDirEntries::for_dir(dir, cache_root);
     let mut holds = Holds::Nothing;
     for entry in entries {
         let Ok(entry) = entry else {
             return Some(Holds::Other);
         };
         let name = entry.file_name();
-        if name == ".DS_Store" {
+        let Some(name) = name.to_str() else {
+            return Some(Holds::Other);
+        };
+        if ignored.is_ignored(name) {
             continue;
         }
-        let (Some(name), Ok(file_type)) = (name.to_str(), entry.file_type()) else {
+        let Ok(file_type) = entry.file_type() else {
             return Some(Holds::Other);
         };
         let Ok(name) = RelativePathBuf::new(name) else {
