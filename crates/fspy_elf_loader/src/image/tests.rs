@@ -17,7 +17,7 @@ fn check_bss(page: usize, flags: u32, expected_protection: &str) {
         let bytes = fixture(page, memory_size, flags);
         let image = map_bytes(&bytes);
         assert_eq!(image.bias % (2 * page), 0);
-        assert_eq!(image.phdr, Some(image.bias + 64));
+        assert_eq!(image.phdr, Some(image.bias + EHDR_SIZE));
         let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
         let protection = |address| {
             maps.lines()
@@ -235,9 +235,6 @@ fn fixture(page: usize, memory_size: usize, flags: u32) -> std::vec::Vec<u8> {
     load(&mut bytes, 1, page + 0x200, 0x100, memory_size, flags, page);
     bytes
 }
-
-const EHDR_SIZE: usize = 64;
-const PHDR_SIZE: usize = 56;
 
 #[expect(clippy::struct_field_names, reason = "matches ELF64 Elf64_Phdr field names")]
 struct Phdr {

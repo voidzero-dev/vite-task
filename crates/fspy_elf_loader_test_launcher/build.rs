@@ -12,7 +12,7 @@ fn main() {
         };
         // Fixed linking resolves pointers without a startup self-relocator.
         for argument in ["--no-pie", image_base] {
-            println!("cargo::rustc-link-arg-bin=fspy_elf_loader_test_launcher={argument}");
+            println!("cargo::rustc-link-arg={argument}");
         }
     }
 }

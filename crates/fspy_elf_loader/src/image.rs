@@ -26,6 +26,9 @@ use crate::mapping::{Mapping, add, align_up, sub, word};
 #[cfg(test)]
 mod tests;
 
+pub const EHDR_SIZE: usize = 64;
+pub const PHDR_SIZE: usize = 56;
+
 #[cfg(target_arch = "aarch64")]
 const MACHINE: u16 = abi::EM_AARCH64;
 #[cfg(target_arch = "x86_64")]
@@ -65,7 +68,7 @@ impl File {
     pub fn new(fd: OwnedFd) -> Self {
         let len = usize::try_from(fs::fstat(fd.as_fd()).expect("cannot stat ELF").st_size)
             .expect("invalid ELF file size");
-        assert!(len >= 64, "truncated ELF header");
+        assert!(len >= EHDR_SIZE, "truncated ELF header");
         let view = Mapping::file(fd.as_fd(), len);
         // SAFETY: this is the unchanged, read-only file view.
         let bytes = unsafe { view.bytes() };
@@ -74,7 +77,8 @@ impl File {
         // loading these images needs only the separate program-header table.
         let ident = file::parse_ident::<LittleEndian>(&bytes[..16]).expect("invalid ELF identity");
         assert_eq!(ident.1, Class::ELF64, "only ELF64 is supported");
-        let header = FileHeader::parse_tail(ident, &bytes[16..64]).expect("invalid ELF header");
+        let header =
+            FileHeader::parse_tail(ident, &bytes[16..EHDR_SIZE]).expect("invalid ELF header");
         assert_eq!(header.e_machine, MACHINE, "ELF architecture mismatch");
         // ET_DYN permits a load bias chosen for the available address space.
         // Position-independent executables (PIE) and their interpreters use it.
@@ -84,7 +88,7 @@ impl File {
             "only ET_DYN and ET_EXEC images are supported"
         );
         assert_eq!(header.version, u32::from(abi::EV_CURRENT), "invalid ELF version");
-        assert_eq!(header.e_phentsize, 56, "invalid program-header size");
+        assert_eq!(usize::from(header.e_phentsize), PHDR_SIZE, "invalid program-header size");
         // 0xffff is an escape to a count stored in section metadata. This MVP
         // accepts only counts carried in the ELF header itself.
         assert!(
@@ -92,7 +96,7 @@ impl File {
             "unsupported program-header count"
         );
         let start = word(header.e_phoff);
-        let end = add(start, usize::from(header.e_phnum) * 56);
+        let end = add(start, usize::from(header.e_phnum) * PHDR_SIZE);
         assert!(bytes.get(start..end).is_some(), "truncated program headers");
         Self { fd, view, header, headers: start..end }
     }

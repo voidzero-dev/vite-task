@@ -56,18 +56,16 @@ static unsigned long load_bias(unsigned long at_phdr, unsigned long phnum, const
         }
     }
     /* GNU ld omits PT_PHDR on some static images. ELF64 headers start at 0. */
-    unsigned char *ehdr = (unsigned char *)(at_phdr - 64);
-    if (ehdr[0] != 0x7f || ehdr[1] != 'E' || ehdr[2] != 'L' || ehdr[3] != 'F') {
+    const Elf64_Ehdr *ehdr = (const Elf64_Ehdr *)(at_phdr - sizeof *ehdr);
+    if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0) {
         fail("elf header");
     }
-    unsigned long e_phoff;
-    memcpy(&e_phoff, ehdr + 32, sizeof e_phoff);
-    if (e_phoff != 64) {
+    if (ehdr->e_phoff != sizeof *ehdr) {
         fail("e_phoff");
     }
     for (i = 0; i < phnum; i++) {
         if (ph[i].p_type == PT_LOAD && ph[i].p_offset == 0) {
-            return at_phdr - e_phoff - (unsigned long)ph[i].p_vaddr;
+            return at_phdr - (unsigned long)ehdr->e_phoff - (unsigned long)ph[i].p_vaddr;
         }
     }
     fail("no load at file start");

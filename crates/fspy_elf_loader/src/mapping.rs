@@ -105,12 +105,10 @@ impl Mapping {
         unsafe { slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
     }
 
-    pub const fn retain(self) -> *mut u8 {
+    pub const fn retain(self) {
         // Switching SP or jumping does not transfer Rust ownership. Suppress
         // Drop here so it cannot release memory needed after the handoff.
-        let ptr = self.ptr.as_ptr();
         core::mem::forget(self);
-        ptr
     }
 }
 
