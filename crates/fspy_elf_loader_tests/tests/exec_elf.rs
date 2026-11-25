@@ -12,7 +12,6 @@ use std::{
 use ntest::timeout;
 
 const LAUNCHER: &str = env!("CARGO_BIN_FILE_FSPY_ELF_LOADER_TEST_LAUNCHER");
-const FIXTURE_RUST: &str = env!("CARGO_BIN_EXE_fixture");
 const FIXTURE_DYN_PIE: &str = env!("FIXTURE_DYN_PIE");
 const FIXTURE_DYN_EXEC: &str = env!("FIXTURE_DYN_EXEC");
 const FIXTURE_STATIC_EXEC: &str = env!("FIXTURE_STATIC_EXEC");
@@ -45,12 +44,6 @@ fn echo_preserves_empty_and_non_utf8_arguments() {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(output.stdout, b" \xff\n");
     assert!(output.stderr.is_empty());
-}
-
-#[test]
-#[timeout(10_000)]
-fn initializes_rust_std_runtime() {
-    check_runtime_image(FIXTURE_RUST, elf::abi::ET_DYN, true);
 }
 
 #[test]

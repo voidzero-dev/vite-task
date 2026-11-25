@@ -14,11 +14,9 @@ cc = { workspace = true }
 elf = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = { workspace = true }
 ntest = { workspace = true }
 tempfile = { workspace = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = { workspace = true }
 
 [target.'cfg(target_arch = "aarch64")'.dev-dependencies]
 fspy_elf_loader_test_launcher = { path = "../fspy_elf_loader_test_launcher", artifact = "bin", target = "aarch64-unknown-none-softfloat" }
