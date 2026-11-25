@@ -10,7 +10,7 @@ use std::{ffi::OsStr, fmt::Debug, io::IsTerminal, rc::Rc, sync::Arc};
 
 use anyhow::Context as _;
 pub use cache::{CacheMiss, Change, Comparison};
-use cache::{ExecutionCache, FileCheck};
+use cache::{ExecutionCache, FileCheck, REMOTE_CACHE_NO_BACKOFF_ENV};
 use event::RunKind;
 use once_cell::sync::OnceCell;
 pub use reporter::ExitStatus;
@@ -655,7 +655,11 @@ impl<'a> Session<'a> {
     ///
     /// Returns an error if the cache database cannot be loaded or created.
     pub fn cache(&self) -> anyhow::Result<&ExecutionCache> {
-        self.cache.get_or_try_init(|| ExecutionCache::load_from_path(&self.cache_path))
+        let no_backoff =
+            self.envs.contains_key(EnvName::from_ref(OsStr::new(REMOTE_CACHE_NO_BACKOFF_ENV)));
+        self.cache.get_or_try_init(|| {
+            ExecutionCache::load_from_path_with_no_backoff(&self.cache_path, no_backoff)
+        })
     }
 
     pub fn workspace_path(&self) -> Arc<AbsolutePath> {

@@ -16,6 +16,7 @@ mod grep_file;
 mod hold_reads;
 mod list_dir;
 mod mkdir;
+mod mock_remote_cache;
 mod pipe_stdin;
 mod pipe_stdout;
 mod print;
@@ -41,7 +42,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: vtt <subcommand> [args...]");
         eprintln!(
-            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, fs, grep-file, hold-reads, list-dir, mkdir, pipe-stdin, pipe-stdout, print, print-color, print-cwd, print-env, print-file, read-link, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, symlink, touch-file, write-file"
+            "Subcommands: barrier, check-tty, cp, exit, exit-on-ctrlc, fs, grep-file, hold-reads, list-dir, mkdir, mock-remote-cache, pipe-stdin, pipe-stdout, print, print-color, print-cwd, print-env, print-file, read-link, read-stdin, replace-file-content, rm, small_dev_shm, stalled-remote-cache, stat-file, stat-many, symlink, touch-file, write-file"
         );
         std::process::exit(1);
     }
@@ -63,6 +64,7 @@ fn main() {
         "hold-reads" => hold_reads::run(&args[2..]),
         "list-dir" => list_dir::run(&args[2..]),
         "mkdir" => mkdir::run(&args[2..]),
+        "mock-remote-cache" => mock_remote_cache::run(&args[2..]),
         "pipe-stdin" => pipe_stdin::run(&args[2..]),
         "pipe-stdout" => pipe_stdout::run(&args[2..]),
         "print" => {

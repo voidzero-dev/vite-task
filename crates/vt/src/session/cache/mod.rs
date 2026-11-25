@@ -39,6 +39,7 @@ use wincode::{
     error::{ReadResult, WriteResult},
 };
 
+pub use self::remote::NO_BACKOFF_ENV as REMOTE_CACHE_NO_BACKOFF_ENV;
 use self::remote::{ReadError, RemoteClients, RemoteUploads, Restore, UploadError};
 use super::{
     event::RunKind,
@@ -575,6 +576,14 @@ impl Validation {
 impl ExecutionCache {
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
+        Self::load_from_path_with_no_backoff(path, false)
+    }
+
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn load_from_path_with_no_backoff(
+        path: &AbsolutePath,
+        no_backoff: bool,
+    ) -> anyhow::Result<Self> {
         tracing::info!("Creating task cache directory at {}", path.as_path().display());
         std::fs::create_dir_all(path)?;
 
@@ -601,7 +610,7 @@ impl ExecutionCache {
         Ok(Self {
             conn: Mutex::new(conn),
             dir: path.to_absolute_path_buf(),
-            remote_clients: RemoteClients::default(),
+            remote_clients: RemoteClients::from_no_backoff(no_backoff),
             uploads: RemoteUploads::default(),
         })
     }

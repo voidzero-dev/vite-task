@@ -48,6 +48,12 @@ use super::{
     Comparison, TaskCacheConfig, archive, deserialize_cache, serialize_cache,
 };
 
+/// If set, remote cache retries use zero backoff delay while keeping
+/// production attempt counts and circuit-breaker thresholds. Internal: tests
+/// set this so retry and circuit-breaker scenarios run deterministically
+/// without sleeping.
+pub const NO_BACKOFF_ENV: &str = "VP_RUN_INTERNAL_REMOTE_CACHE_NO_BACKOFF";
+
 /// Maximum number of concurrent remote cache uploads in flight per endpoint.
 ///
 /// Bounding uploads per endpoint shapes bursts against backends with
@@ -372,6 +378,10 @@ impl Default for RemoteClients {
 }
 
 impl RemoteClients {
+    pub(super) fn from_no_backoff(no_backoff: bool) -> Self {
+        Self::with_retry(if no_backoff { RetryConfig::NO_BACKOFF } else { RetryConfig::DEFAULT })
+    }
+
     fn with_retry(retry: RetryConfig) -> Self {
         Self { clients: Mutex::new(FxHashMap::default()), retry }
     }
@@ -759,19 +769,7 @@ mod tests {
 
     /// Zero-delay retry config with production attempt counts so tests
     /// exercise the full retry loop without sleeping.
-    const FAST_RETRY: RetryConfig = RetryConfig {
-        read: RetryPolicy {
-            base_delay: Duration::ZERO,
-            max_delay: Duration::ZERO,
-            ..RetryPolicy::READ
-        },
-        store: RetryPolicy {
-            base_delay: Duration::ZERO,
-            max_delay: Duration::ZERO,
-            ..RetryPolicy::STORE
-        },
-        ..RetryConfig::DEFAULT
-    };
+    const FAST_RETRY: RetryConfig = RetryConfig::NO_BACKOFF;
 
     /// Single-attempt retry config for tests that expect immediate failure.
     const NO_RETRY: RetryConfig = RetryConfig {

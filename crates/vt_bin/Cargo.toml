@@ -17,9 +17,12 @@ path = "src/vtt/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+ciborium = { workspace = true }
 ctrlc = { workspace = true }
 libc = { workspace = true }
 notify = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_bytes = { workspace = true }
 vt_pty_terminal_test_client = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }

@@ -113,6 +113,24 @@ impl RetryConfig {
         outage_threshold: OUTAGE_FAILURE_THRESHOLD,
         outage_cooldown: OUTAGE_COOLDOWN,
     };
+    /// Zero-delay retry configuration with production attempt counts and
+    /// circuit-breaker thresholds, for deterministic tests without backoff
+    /// sleeps.
+    pub const NO_BACKOFF: Self = Self {
+        read: RetryPolicy {
+            base_delay: Duration::ZERO,
+            max_delay: Duration::ZERO,
+            max_retry_after: Duration::ZERO,
+            ..RetryPolicy::READ
+        },
+        store: RetryPolicy {
+            base_delay: Duration::ZERO,
+            max_delay: Duration::ZERO,
+            max_retry_after: Duration::ZERO,
+            ..RetryPolicy::STORE
+        },
+        ..Self::DEFAULT
+    };
 }
 
 /// Shared cooldown gate for `429 Too Many Requests` responses.
