@@ -64,6 +64,10 @@
                       "positive_globs": [],
                       "negative_globs": []
                     },
+                    "platform": {
+                      "os": true,
+                      "arch": true
+                    },
                     "remote_cache": null
                   },
                   "spawn_command": {
@@ -134,6 +138,10 @@
                       "positive_globs": [],
                       "negative_globs": []
                     },
+                    "platform": {
+                      "os": true,
+                      "arch": true
+                    },
                     "remote_cache": null
                   },
                   "spawn_command": {
@@ -203,6 +211,10 @@
                       "includes_auto": true,
                       "positive_globs": [],
                       "negative_globs": []
+                    },
+                    "platform": {
+                      "os": true,
+                      "arch": true
                     },
                     "remote_cache": null
                   },
@@ -294,6 +306,10 @@
                       "includes_auto": true,
                       "positive_globs": [],
                       "negative_globs": []
+                    },
+                    "platform": {
+                      "os": true,
+                      "arch": true
                     },
                     "remote_cache": null
                   },

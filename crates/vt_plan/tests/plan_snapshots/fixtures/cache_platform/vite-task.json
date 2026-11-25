@@ -1,0 +1,21 @@
+{
+  // Tasks and cached scripts that don't set `cache.platform` use this one.
+  "cache": { "scripts": true, "platform": ["arch"] },
+  "tasks": {
+    "inherit": {
+      "command": "vtt print-file package.json"
+    },
+    "shared": {
+      "command": "vtt print-file package.json",
+      "cache": { "platform": [] }
+    },
+    "os-only": {
+      "command": "vtt print-file package.json",
+      "cache": { "platform": ["os"] }
+    },
+    "tool": {
+      "command": "vt tool print-file package.json",
+      "cache": { "platform": [] }
+    }
+  }
+}

@@ -26,6 +26,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -66,6 +67,7 @@ flowchart TD
       "cwd": "<workspace>/",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -106,6 +108,7 @@ flowchart TD
       "cwd": "<workspace>/packages/a",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
@@ -146,6 +149,7 @@ flowchart TD
       "cwd": "<workspace>/packages/a",
       "cache_config": {
         "remote_cache_allowed": true,
+        "platform": null,
         "env_config": {
           "fingerprinted_envs": [],
           "untracked_env": [
