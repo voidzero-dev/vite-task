@@ -142,10 +142,11 @@ impl RetryableError for ReadError {
         match self {
             Self::Fetch(err) | Self::Download(err) => RetryAction::Failed(err.retry_hint()),
             Self::Cancelled => RetryAction::Cancelled,
-            Self::WriteArchive(_) | Self::Encode(_) | Self::Unavailable => {
-                RetryAction::Failed(RetryHint::Local)
-            }
-            Self::CorruptValue(_)
+            Self::Encode(_) | Self::Unavailable => RetryAction::Failed(RetryHint::Local),
+            // `WriteArchive` happens only after `GET /blob` returned `200 OK`,
+            // so the endpoint is healthy and should close a half-open probe.
+            Self::WriteArchive(_)
+            | Self::CorruptValue(_)
             | Self::CorruptKey(_)
             | Self::MismatchedBlob
             | Self::CorruptArchive(_)
