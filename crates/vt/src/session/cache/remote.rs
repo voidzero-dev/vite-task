@@ -400,34 +400,66 @@ const CHECK_BUFFER_CHUNKS: usize = 16;
 /// Download the blob `blob_id` to the file at `path`, until `cancel_token` is
 /// cancelled. The chunks flow one way: from the network to the archive check
 /// on a blocking thread, which writes each one to the file as it takes it.
+/// If the stream drops mid-transfer with a network error, the download is
+/// retried once from the start (with a single header attempt), overwriting the
+/// partial `.tmp` file.
 async fn download_checked(
     client: &Client,
     blob_id: &str,
     path: &AbsolutePath,
     cancel_token: &CancellationToken,
 ) -> Result<(), ReadError> {
-    let download = cancel_token
-        .run_until_cancelled(client.download(blob_id))
-        .await
-        .ok_or(ReadError::Cancelled)?
-        .map_err(ReadError::Download)?;
-    let file = File::create(path.as_path()).map_err(ReadError::WriteArchive)?;
-    let (sender, receiver) = mpsc::channel(CHECK_BUFFER_CHUNKS);
-    let check = tokio::task::spawn_blocking(move || {
-        let mut reader = DownloadReader { receiver, chunk: Bytes::new(), file, write_error: None };
-        let checked = archive::read_output_archive(&mut reader, |_| {});
-        if let Some(err) = reader.write_error {
-            return Err(ReadError::WriteArchive(err));
+    const MAX_STREAM_ATTEMPTS: usize = 2;
+
+    for attempt in 0..MAX_STREAM_ATTEMPTS {
+        let download_fut = async {
+            if attempt == 0 {
+                client.download(blob_id).await
+            } else {
+                client.download_once(blob_id).await
+            }
+        };
+        let download = cancel_token
+            .run_until_cancelled(download_fut)
+            .await
+            .ok_or(ReadError::Cancelled)?
+            .map_err(ReadError::Download)?;
+        let file = File::create(path.as_path()).map_err(ReadError::WriteArchive)?;
+        let (sender, receiver) = mpsc::channel(CHECK_BUFFER_CHUNKS);
+        let check = tokio::task::spawn_blocking(move || {
+            let mut reader =
+                DownloadReader { receiver, chunk: Bytes::new(), file, write_error: None };
+            let checked = archive::read_output_archive(&mut reader, |_| {});
+            if let Some(err) = reader.write_error {
+                return Err(ReadError::WriteArchive(err));
+            }
+            checked.map_err(ReadError::CorruptArchive)
+        });
+        // Cancelling drops the sender, which ends the check.
+        let sent = cancel_token.run_until_cancelled(send_chunks(download, sender)).await;
+        // Wait for the check even after a network error or cancellation, so the
+        // file is closed before the caller removes it or retries.
+        let checked = check.await.unwrap_or_else(|err| Err(ReadError::CorruptArchive(err.into())));
+        if cancel_token.is_cancelled() {
+            return Err(ReadError::Cancelled);
         }
-        checked.map_err(ReadError::CorruptArchive)
-    });
-    // Cancelling drops the sender, which ends the check.
-    let sent = cancel_token.run_until_cancelled(send_chunks(download, sender)).await;
-    // Wait for the check even after a network error or cancellation, so the
-    // file is closed before the caller removes it.
-    let checked = check.await.unwrap_or_else(|err| Err(ReadError::CorruptArchive(err.into())));
-    sent.ok_or(ReadError::Cancelled)?.map_err(ReadError::Download)?;
-    checked
+        match sent.ok_or(ReadError::Cancelled)? {
+            Ok(()) => return checked,
+            Err(err @ vt_remote_cache::Error::Network(_)) if attempt + 1 < MAX_STREAM_ATTEMPTS => {
+                // Local disk write failures are not transient network drops.
+                if let Err(err @ ReadError::WriteArchive(_)) = checked {
+                    return Err(err);
+                }
+                tracing::debug!(
+                    ?err,
+                    attempt = attempt + 1,
+                    "retrying remote cache archive download after mid-stream network error"
+                );
+            }
+            Err(err) => return Err(ReadError::Download(err)),
+        }
+    }
+    unreachable!("MAX_STREAM_ATTEMPTS is always at least 1")
 }
 
 /// Send the blob's chunks through `sender` until the blob ends or the receiver
@@ -1081,7 +1113,7 @@ mod tests {
     #[tokio::test]
     async fn failed_upload_sets_its_error() {
         let (error_status, _) =
-            serve_stalled(b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\n\r\n");
+            serve_stalled(b"HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n");
         // Nothing can listen on port 0.
         let unreachable = anonymous("http://127.0.0.1:0/projects/test");
         let github_oidc_unavailable = ResolvedRemoteCacheConfig {
@@ -1096,7 +1128,7 @@ mod tests {
         let uploads = RemoteUploads::default();
 
         for (remote_config, message) in [
-            (error_status, "HTTP status 500"),
+            (error_status, "HTTP status 403"),
             (unreachable, "network error"),
             (github_oidc_unavailable, "failed to authenticate"),
         ] {
@@ -1109,18 +1141,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mid_stream_download_network_error_is_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_dir = AbsolutePathBuf::new(dir.path().to_path_buf()).unwrap();
+        // Build a valid `.tar.zst` archive with a real entry so a strict prefix
+        // is valid zstd up to EOF (preventing the archive check from failing
+        // ahead of the network truncation error).
+        let payload = vec![b'x'; 4096];
+        let mut encoder = zstd::Encoder::new(Vec::new(), zstd::DEFAULT_COMPRESSION_LEVEL).unwrap();
+        {
+            let mut tar = tar::Builder::new(&mut encoder);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(u64::try_from(payload.len()).unwrap());
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar.append_data(&mut header, "dist/out.txt", payload.as_slice()).unwrap();
+            tar.finish().unwrap();
+        }
+        let archive_bytes = encoder.finish().unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote_config =
+            anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
+        let server = std::thread::spawn(move || {
+            let truncated_prefix = &archive_bytes[..archive_bytes.len() / 2];
+            for response in [
+                // Attempt 1: valid prefix truncated before announced Content-Length -> mid-stream network error.
+                [
+                    vt_str::format!(
+                        "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: {}\r\n\r\n",
+                        archive_bytes.len()
+                    )
+                    .as_bytes(),
+                    truncated_prefix,
+                ]
+                .concat(),
+                // Attempt 2: complete valid archive.
+                [
+                    vt_str::format!(
+                        "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: {}\r\n\r\n",
+                        archive_bytes.len()
+                    )
+                    .as_bytes(),
+                    &archive_bytes,
+                ]
+                .concat(),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0; 1024];
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let n = stream.read(&mut buf).unwrap();
+                    assert_ne!(n, 0);
+                    request.extend_from_slice(&buf[..n]);
+                }
+                stream.write_all(&response).unwrap();
+            }
+        });
+
+        let archive_name = RemoteClients::default()
+            .download_archive(&remote_config, "1", &cache_dir, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(cache_dir.join(archive_name.as_str()).as_path().is_file());
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
     async fn interrupting_the_wait_cancels_the_uploads() {
-        let (remote_config, requested) = serve_stalled(b"");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let remote_config =
+            anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
+        let total = vt_remote_cache::MAX_CONCURRENT_STORES + 2;
+        let (all_slots_filled_tx, all_slots_filled_rx) = oneshot::channel();
+        std::thread::spawn(move || {
+            // Hold open `MAX_CONCURRENT_STORES` requests while more uploads are
+            // pending so cancelling interrupts both active and queued uploads.
+            let mut streams = Vec::new();
+            for _ in 0..vt_remote_cache::MAX_CONCURRENT_STORES {
+                let Ok((mut stream, _)) = listener.accept() else { break };
+                let mut request = Vec::new();
+                let mut buf = [0; 1024];
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => request.extend_from_slice(&buf[..n]),
+                    }
+                }
+                streams.push(stream);
+            }
+            let _ = all_slots_filled_tx.send(());
+            // Wait until the client drops the connections on cancel.
+            for mut stream in streams {
+                let mut buf = [0; 64];
+                while stream.read(&mut buf).is_ok_and(|n| n > 0) {}
+            }
+        });
+
         let clients = RemoteClients::default();
         let uploads = RemoteUploads::default();
-        let error = Arc::new(OnceLock::new());
-        uploads.spawn(prepare_upload(&clients, &remote_config).unwrap(), Arc::clone(&error));
-        requested.await.unwrap();
-        assert_eq!(uploads.pending(), 1);
+        let mut errors = Vec::with_capacity(total);
+        for _ in 0..total {
+            let error = Arc::new(OnceLock::new());
+            uploads.spawn(prepare_upload(&clients, &remote_config).unwrap(), Arc::clone(&error));
+            errors.push(error);
+        }
+        all_slots_filled_rx.await.unwrap();
+        assert_eq!(uploads.pending(), total);
 
         let interrupt_token = CancellationToken::new();
         tokio::join!(uploads.wait(&interrupt_token), async { interrupt_token.cancel() });
         assert_eq!(uploads.pending(), 0);
-        assert!(matches!(error.get(), Some(UploadError::Interrupted)), "{error:?}");
+        for error in errors {
+            assert!(matches!(error.get(), Some(UploadError::Interrupted)), "{error:?}");
+        }
     }
 }
