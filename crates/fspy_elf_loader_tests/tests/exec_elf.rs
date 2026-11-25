@@ -11,9 +11,10 @@ use std::{
 use ntest::timeout;
 
 const LAUNCHER: &str = env!("CARGO_BIN_FILE_FSPY_ELF_LOADER_TEST_LAUNCHER");
-const FIXTURE: &str = env!("CARGO_BIN_EXE_fixture");
-const FIXTURE_EXEC: &str = env!("CARGO_BIN_EXE_fixture_exec");
-const FIXTURE_STATIC: &str = env!("FIXTURE_STATIC");
+const FIXTURE_RUST: &str = env!("CARGO_BIN_EXE_fixture");
+const FIXTURE_DYN_PIE: &str = env!("FIXTURE_DYN_PIE");
+const FIXTURE_DYN_EXEC: &str = env!("FIXTURE_DYN_EXEC");
+const FIXTURE_STATIC_EXEC: &str = env!("FIXTURE_STATIC_EXEC");
 const FIXTURE_STATIC_PIE: &str = env!("FIXTURE_STATIC_PIE");
 
 #[test]
@@ -47,18 +48,20 @@ fn echo_preserves_empty_and_non_utf8_arguments() {
 
 #[test]
 #[timeout(10_000)]
-fn initializes_runtime_bss_tls_and_auxiliary_vector() {
-    check_runtime(FIXTURE, elf::abi::ET_DYN);
+fn initializes_rust_std_runtime() {
+    check_runtime_image(FIXTURE_RUST, elf::abi::ET_DYN, true);
+}
+
+#[test]
+#[timeout(10_000)]
+fn initializes_dynamic_pie_runtime() {
+    check_runtime_image(FIXTURE_DYN_PIE, elf::abi::ET_DYN, true);
 }
 
 #[test]
 #[timeout(10_000)]
 fn initializes_fixed_runtime() {
-    check_runtime(FIXTURE_EXEC, elf::abi::ET_EXEC);
-}
-
-fn check_runtime(fixture: &str, image_type: u16) {
-    check_runtime_image(fixture, image_type, true);
+    check_runtime_image(FIXTURE_DYN_EXEC, elf::abi::ET_EXEC, true);
 }
 
 fn check_runtime_image(fixture: &str, image_type: u16, interpreter: bool) {
@@ -68,6 +71,9 @@ fn check_runtime_image(fixture: &str, image_type: u16, interpreter: bool) {
     command.arg(OsStr::from_bytes(b"\xff"));
     command.env_clear().env("FIXTURE_IMAGE", fixture).env("EMPTY", "");
     command.env("BYTES", OsStr::from_bytes(b"\xff"));
+    if interpreter {
+        command.env("EXPECT_INTERPRETER", "1");
+    }
     if image_type == elf::abi::ET_EXEC {
         command.env("EXPECT_FIXED_ADDRESS", "1");
     }
@@ -80,7 +86,7 @@ fn check_runtime_image(fixture: &str, image_type: u16, interpreter: bool) {
 #[test]
 #[timeout(10_000)]
 fn initializes_static_runtime() {
-    check_runtime_image(FIXTURE_STATIC, elf::abi::ET_EXEC, false);
+    check_runtime_image(FIXTURE_STATIC_EXEC, elf::abi::ET_EXEC, false);
 }
 
 #[test]
@@ -102,7 +108,7 @@ fn rejects_fixed_image_overlapping_launcher() {
         .find(|ph| ph.p_type == elf::abi::PT_LOAD)
         .unwrap()
         .p_vaddr;
-    let mut bytes = std::fs::read(FIXTURE_EXEC).unwrap();
+    let mut bytes = std::fs::read(FIXTURE_DYN_EXEC).unwrap();
     let parsed = elf::ElfBytes::<elf::endian::LittleEndian>::minimal_parse(&bytes).unwrap();
     let table = usize::try_from(parsed.ehdr.e_phoff).unwrap();
     let loads: Vec<_> = parsed

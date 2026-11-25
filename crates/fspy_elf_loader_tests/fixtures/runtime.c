@@ -1,8 +1,10 @@
-/* Runtime checks for static and static-PIE images loaded by exec_elf.
+/* Runtime checks for all four Linux ELF64 cells loaded by exec_elf:
+ * dynamic PIE, dynamic ET_EXEC, traditional static, and static-PIE.
  *
- * Protocol matches src/bin/fixture.rs: argv[0]="custom-argv-zero", argv[1]="",
- * argv[2]=0xff, EMPTY="", BYTES=0xff, FIXTURE_IMAGE=AT_EXECFN, stdout
- * "runtime-ok\n", exit 37. AT_BASE must be 0 (no interpreter).
+ * Protocol: argv[0]="custom-argv-zero", argv[1]="", argv[2]=0xff,
+ * EMPTY="", BYTES=0xff, FIXTURE_IMAGE=AT_EXECFN, stdout "runtime-ok\n",
+ * exit 37. Set EXPECT_INTERPRETER=1 when PT_INTERP is present (AT_BASE != 0)
+ * and EXPECT_FIXED_ADDRESS=1 for ET_EXEC images (load bias == 0).
  */
 
 #define _GNU_SOURCE
@@ -21,9 +23,20 @@ static char bss[128 * 1024];
 static int data = 42;
 static __thread int tls = 17;
 
+static void write_all(int fd, const char *buf, size_t len) {
+    while (len > 0) {
+        ssize_t written = write(fd, buf, len);
+        if (written <= 0) {
+            return;
+        }
+        buf += written;
+        len -= (size_t)written;
+    }
+}
+
 static void fail(const char *message) {
-    write(STDERR_FILENO, message, strlen(message));
-    write(STDERR_FILENO, "\n", 1);
+    write_all(STDERR_FILENO, message, strlen(message));
+    write_all(STDERR_FILENO, "\n", 1);
     _exit(2);
 }
 
@@ -66,6 +79,7 @@ int main(int argc, char **argv) {
     pthread_t thread;
     int started = 0;
     char *heap;
+    unsigned long at_base;
     unsigned long at_phdr;
     unsigned long phnum;
     unsigned long phent;
@@ -131,9 +145,16 @@ int main(int argc, char **argv) {
     }
     free(heap);
 
-    if (getauxval(AT_BASE) != 0) {
+    at_base = getauxval(AT_BASE);
+    if (getenv("EXPECT_INTERPRETER") != NULL) {
+        const unsigned char *interp = (const unsigned char *)at_base;
+        if (at_base == 0 || memcmp(interp, "\x7f" "ELF", 4) != 0) {
+            fail("AT_BASE interpreter");
+        }
+    } else if (at_base != 0) {
         fail("AT_BASE");
     }
+
     at_phdr = getauxval(AT_PHDR);
     phnum = getauxval(AT_PHNUM);
     phent = getauxval(AT_PHENT);
@@ -209,6 +230,6 @@ int main(int argc, char **argv) {
         closedir(dir);
     }
 
-    write(STDOUT_FILENO, "runtime-ok\n", 11);
+    write_all(STDOUT_FILENO, "runtime-ok\n", 11);
     _exit(37);
 }

@@ -7,6 +7,9 @@ license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+[build-dependencies]
+cc = { workspace = true }
+
 [dev-dependencies]
 elf = { workspace = true }
 
