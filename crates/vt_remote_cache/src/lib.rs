@@ -83,63 +83,50 @@ pub enum Error {
     MalformedResponse(#[source] ciborium::de::Error<std::io::Error>),
 }
 
-impl Error {
-    /// Whether this failure is transient and safe to retry for an idempotent
-    /// remote cache operation (`Network`, `408`, `429`, and retryable `5xx`).
-    #[must_use]
-    pub const fn is_retryable(&self) -> bool {
-        match self {
-            Self::Network(_) => true,
-            Self::Status { status, .. } => {
-                matches!(status.as_u16(), 408 | 429) || is_retryable_server_error(*status)
-            }
-            Self::InvalidEndpoint(_)
-            | Self::HttpClient(_)
-            | Self::ReadBlob(_)
-            | Self::Auth(_)
-            | Self::MalformedResponse(_) => false,
-        }
-    }
-
-    /// Whether this failure indicates a backend outage (`Network` or retryable
-    /// `5xx`, excluding `429` rate limits and client errors).
-    #[must_use]
-    pub const fn is_outage(&self) -> bool {
-        match self {
-            Self::Network(_) => true,
-            Self::Status { status, .. } => is_retryable_server_error(*status),
-            Self::InvalidEndpoint(_)
-            | Self::HttpClient(_)
-            | Self::ReadBlob(_)
-            | Self::Auth(_)
-            | Self::MalformedResponse(_) => false,
-        }
-    }
-
-    /// Whether the server responded with `429 Too Many Requests`.
-    #[must_use]
-    pub const fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::Status { status, .. } if status.as_u16() == 429)
-    }
-
-    /// The parsed delta-seconds `Retry-After` header from an error response,
-    /// if any.
-    #[must_use]
-    pub const fn retry_after(&self) -> Option<Duration> {
-        match self {
-            Self::Status { retry_after, .. } => *retry_after,
-            Self::InvalidEndpoint(_)
-            | Self::HttpClient(_)
-            | Self::ReadBlob(_)
-            | Self::Auth(_)
-            | Self::Network(_)
-            | Self::MalformedResponse(_) => None,
-        }
-    }
+/// How a caller's retry, rate-limit, and circuit-breaker policy should treat a
+/// failed remote cache request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryHint {
+    /// Permanent or local failure that should not be retried (such as `4xx`
+    /// other than `408`/`429`, `501`/`505`/`511`, auth, blob I/O, or malformed
+    /// responses).
+    Permanent,
+    /// Transient failure (`408 Request Timeout`) that can be retried with
+    /// per-request backoff without counting toward a backend outage breaker.
+    Transient,
+    /// `429 Too Many Requests`: retryable, and callers may coordinate a shared
+    /// cooldown across sibling requests using `retry_after` if present.
+    RateLimited {
+        /// Parsed delta-seconds `Retry-After` header, if present and valid.
+        retry_after: Option<Duration>,
+    },
+    /// Transport or server outage (`Network` or retryable `5xx`): retryable
+    /// with per-request backoff, and counts toward a backend outage breaker.
+    /// Intentionally omits `Retry-After` so coarse server headers on `503` do
+    /// not stall sibling requests.
+    Outage,
 }
 
-const fn is_retryable_server_error(status: StatusCode) -> bool {
-    matches!(status.as_u16(), 500 | 502..=504 | 506..=510 | 512..=599)
+impl Error {
+    /// Classify this failure for a caller's retry, rate-limit, and
+    /// circuit-breaker policy.
+    #[must_use]
+    pub const fn retry_hint(&self) -> RetryHint {
+        match self {
+            Self::Network(_) => RetryHint::Outage,
+            Self::Status { status, retry_after, .. } => match status.as_u16() {
+                408 => RetryHint::Transient,
+                429 => RetryHint::RateLimited { retry_after: *retry_after },
+                500 | 502..=504 | 506..=510 | 512..=599 => RetryHint::Outage,
+                _ => RetryHint::Permanent,
+            },
+            Self::InvalidEndpoint(_)
+            | Self::HttpClient(_)
+            | Self::ReadBlob(_)
+            | Self::Auth(_)
+            | Self::MalformedResponse(_) => RetryHint::Permanent,
+        }
+    }
 }
 
 /// The message in the body of an error response.
@@ -597,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn error_retry_classification_handles_statuses_correctly() {
+    fn error_retry_hint_handles_statuses_correctly() {
         let status_err = |code: u16, retry_after: Option<Duration>| Error::Status {
             status: StatusCode::from_u16(code).unwrap(),
             message: None,
@@ -605,27 +592,20 @@ mod tests {
         };
         for code in [500, 502, 503, 504, 520, 524] {
             let err = status_err(code, Some(Duration::from_secs(60)));
-            assert!(err.is_retryable(), "{code} should be retryable");
-            assert!(err.is_outage(), "{code} should be an outage");
-            assert!(!err.is_rate_limited(), "{code} is not 429");
-            assert_eq!(err.retry_after(), Some(Duration::from_secs(60)));
+            assert_eq!(err.retry_hint(), RetryHint::Outage, "{code} should be an outage");
         }
-        let err_408 = status_err(408, None);
-        assert!(err_408.is_retryable());
-        assert!(!err_408.is_outage());
-        assert!(!err_408.is_rate_limited());
-
-        let err_429 = status_err(429, Some(Duration::from_secs(5)));
-        assert!(err_429.is_retryable());
-        assert!(!err_429.is_outage());
-        assert!(err_429.is_rate_limited());
-        assert_eq!(err_429.retry_after(), Some(Duration::from_secs(5)));
-
+        assert_eq!(status_err(408, None).retry_hint(), RetryHint::Transient);
+        assert_eq!(
+            status_err(429, Some(Duration::from_secs(5))).retry_hint(),
+            RetryHint::RateLimited { retry_after: Some(Duration::from_secs(5)) }
+        );
+        assert_eq!(
+            status_err(429, None).retry_hint(),
+            RetryHint::RateLimited { retry_after: None }
+        );
         for code in [400, 401, 403, 404, 413, 501, 505, 511] {
             let err = status_err(code, None);
-            assert!(!err.is_retryable(), "{code} should not be retryable");
-            assert!(!err.is_outage(), "{code} should not be an outage");
-            assert!(!err.is_rate_limited());
+            assert_eq!(err.retry_hint(), RetryHint::Permanent, "{code} should be permanent");
         }
     }
 

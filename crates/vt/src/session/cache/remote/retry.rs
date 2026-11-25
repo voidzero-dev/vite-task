@@ -9,6 +9,7 @@ use std::{
 };
 
 use tokio::time::Instant;
+use vt_remote_cache::RetryHint;
 
 /// Maximum `Retry-After` delay honored on a `429 Too Many Requests` response.
 pub(super) const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
@@ -23,21 +24,21 @@ const OUTAGE_FAILURE_THRESHOLD: u32 = 3;
 /// How long the circuit breaker stays open before permitting one probe request.
 const OUTAGE_COOLDOWN: Duration = Duration::from_secs(30);
 
-/// Classification of an attempt's error for retry, `429` cooldown, and
-/// circuit-breaker handling.
+/// Mutually exclusive disposition of an attempt's error for retry, `429`
+/// cooldown, and circuit-breaker handling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RetryAction {
+    /// Locally cancelled: stop immediately without updating circuit-breaker
+    /// success/failure counts (an unfinished probe still re-opens on drop).
+    Cancelled,
+    /// Protocol-level retry classification from [`RetryHint`].
+    Failed(RetryHint),
+}
+
+/// Error types that can participate in [`run`].
 pub(super) trait RetryableError: Debug {
-    /// Whether this error is transient and safe to retry.
-    fn is_retryable(&self) -> bool;
-    /// Whether this error indicates a backend outage (network errors and
-    /// retryable `5xx`, excluding `429`, client errors, and local failures).
-    fn is_outage(&self) -> bool;
-    /// Whether this error is a `429 Too Many Requests` response.
-    fn is_rate_limited(&self) -> bool;
-    /// Whether the operation was cancelled locally and must neither retry nor
-    /// update outage circuit-breaker success/failure counts.
-    fn is_cancelled(&self) -> bool;
-    /// Parsed `Retry-After` delay from the server response, if any.
-    fn retry_after(&self) -> Option<Duration>;
+    /// Classify this error into its mutually exclusive [`RetryAction`].
+    fn retry_action(&self) -> RetryAction;
     /// Error returned when the outage circuit breaker is open.
     fn unavailable() -> Self;
 }
@@ -176,12 +177,23 @@ pub(super) struct OutageBreaker {
     state: Mutex<OutageState>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct OutageState {
-    failures: u32,
-    open_until: Option<Instant>,
-    probing: bool,
+    phase: OutagePhase,
     generation: u64,
+}
+
+#[derive(Debug)]
+enum OutagePhase {
+    Closed { failures: u32 },
+    Open { until: Instant },
+    HalfOpen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum OutageOutcome {
+    Healthy,
+    Outage,
 }
 
 impl OutageBreaker {
@@ -190,9 +202,7 @@ impl OutageBreaker {
             threshold,
             cooldown,
             state: Mutex::new(OutageState {
-                failures: 0,
-                open_until: None,
-                probing: false,
+                phase: OutagePhase::Closed { failures: 0 },
                 generation: 0,
             }),
         }
@@ -210,14 +220,13 @@ impl OutageBreaker {
             });
         }
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        let probe = if let Some(until) = state.open_until {
-            if Instant::now() < until || state.probing {
-                return None;
+        let probe = match state.phase {
+            OutagePhase::Closed { .. } => false,
+            OutagePhase::Open { until } if Instant::now() >= until => {
+                state.phase = OutagePhase::HalfOpen;
+                true
             }
-            state.probing = true;
-            true
-        } else {
-            false
+            OutagePhase::Open { .. } | OutagePhase::HalfOpen => return None,
         };
         let generation = state.generation;
         drop(state);
@@ -240,32 +249,45 @@ impl OutagePermit<'_> {
         self.probe
     }
 
-    pub fn finish(mut self, outage: bool) {
+    pub fn finish(mut self, outcome: OutageOutcome) {
         if self.completed {
             return;
         }
         let mut state = self.breaker.state.lock().unwrap_or_else(PoisonError::into_inner);
         if state.generation == self.generation {
-            if outage {
-                state.failures = state.failures.saturating_add(1);
-                if self.probe || state.failures >= self.breaker.threshold {
-                    state.open_until = Some(Instant::now() + self.breaker.cooldown);
-                    state.probing = false;
+            match (&mut state.phase, outcome) {
+                (OutagePhase::Closed { failures }, OutageOutcome::Outage) => {
+                    *failures = failures.saturating_add(1);
+                    if *failures >= self.breaker.threshold {
+                        let count = *failures;
+                        state.phase =
+                            OutagePhase::Open { until: Instant::now() + self.breaker.cooldown };
+                        state.generation = state.generation.wrapping_add(1);
+                        tracing::debug!(
+                            failures = count,
+                            cooldown = ?self.breaker.cooldown,
+                            "remote cache circuit opened after repeated failures"
+                        );
+                    }
+                }
+                (OutagePhase::Closed { failures }, OutageOutcome::Healthy) => {
+                    *failures = 0;
+                }
+                (OutagePhase::HalfOpen, OutageOutcome::Outage) => {
+                    state.phase =
+                        OutagePhase::Open { until: Instant::now() + self.breaker.cooldown };
                     state.generation = state.generation.wrapping_add(1);
                     tracing::debug!(
-                        failures = state.failures,
                         cooldown = ?self.breaker.cooldown,
-                        "remote cache circuit opened after repeated failures"
+                        "remote cache circuit re-opened after probe failed"
                     );
                 }
-            } else {
-                state.failures = 0;
-                if self.probe {
-                    state.open_until = None;
-                    state.probing = false;
+                (OutagePhase::HalfOpen, OutageOutcome::Healthy) => {
+                    state.phase = OutagePhase::Closed { failures: 0 };
                     state.generation = state.generation.wrapping_add(1);
                     tracing::debug!("remote cache circuit closed after probe succeeded");
                 }
+                (OutagePhase::Open { .. }, _) => {}
             }
         }
         drop(state);
@@ -277,9 +299,9 @@ impl Drop for OutagePermit<'_> {
     fn drop(&mut self) {
         if self.probe && !self.completed {
             let mut state = self.breaker.state.lock().unwrap_or_else(PoisonError::into_inner);
-            if state.generation == self.generation {
-                state.probing = false;
-                state.open_until = Some(Instant::now() + self.breaker.cooldown);
+            if state.generation == self.generation && matches!(state.phase, OutagePhase::HalfOpen) {
+                state.phase = OutagePhase::Open { until: Instant::now() + self.breaker.cooldown };
+                state.generation = state.generation.wrapping_add(1);
             }
         }
     }
@@ -311,40 +333,35 @@ where
         rate_limit.wait().await;
         match attempt_fn().await {
             Ok(value) => {
-                permit.finish(false);
+                permit.finish(OutageOutcome::Healthy);
                 return Ok(value);
             }
-            Err(error) => {
-                if error.is_cancelled() {
+            Err(error) => match error.retry_action() {
+                RetryAction::Cancelled => {
                     // Drop `permit` without finishing so cancelling a probe
                     // re-opens the cooldown and cancelling a normal request
                     // does not reset consecutive failures.
                     return Err(error);
                 }
-                let is_rate_limited = error.is_rate_limited();
-                let backoff = policy.delay(attempt);
-                // Floor 429 cooldowns at `backoff` so `Retry-After: 0` cannot
-                // trigger an immediate tight retry loop.
-                let cooldown = if is_rate_limited {
-                    error
-                        .retry_after()
-                        .map_or(backoff, |delay| delay.min(policy.max_retry_after).max(backoff))
-                } else {
-                    backoff
-                };
-                if is_rate_limited {
+                RetryAction::Failed(RetryHint::Permanent) => {
+                    permit.finish(OutageOutcome::Healthy);
+                    return Err(error);
+                }
+                RetryAction::Failed(RetryHint::RateLimited { retry_after }) => {
+                    let backoff = policy.delay(attempt);
+                    // Floor 429 cooldowns at `backoff` so `Retry-After: 0` cannot
+                    // trigger an immediate tight retry loop.
+                    let cooldown = retry_after
+                        .map_or(backoff, |delay| delay.min(policy.max_retry_after).max(backoff));
                     // Publish the cooldown even on the last attempt so concurrent
                     // requests pause instead of immediately hitting the same 429.
                     rate_limit.record(cooldown);
-                }
-                let next_wait = if is_rate_limited { cooldown } else { backoff };
-                let budget_exhausted =
-                    started.elapsed().saturating_add(next_wait) >= policy.max_elapsed;
-                if attempt + 1 >= total_attempts || !error.is_retryable() || budget_exhausted {
-                    permit.finish(error.is_outage());
-                    return Err(error);
-                }
-                if is_rate_limited {
+                    if attempt + 1 >= total_attempts
+                        || started.elapsed().saturating_add(cooldown) >= policy.max_elapsed
+                    {
+                        permit.finish(OutageOutcome::Healthy);
+                        return Err(error);
+                    }
                     tracing::debug!(
                         operation,
                         attempt = attempt + 1,
@@ -353,7 +370,21 @@ where
                         ?error,
                         "retrying remote cache request after 429 cooldown"
                     );
-                } else {
+                }
+                RetryAction::Failed(hint @ (RetryHint::Transient | RetryHint::Outage)) => {
+                    let backoff = policy.delay(attempt);
+                    if attempt + 1 >= total_attempts
+                        || started.elapsed().saturating_add(backoff) >= policy.max_elapsed
+                    {
+                        let outcome = match hint {
+                            RetryHint::Outage => OutageOutcome::Outage,
+                            RetryHint::Transient
+                            | RetryHint::Permanent
+                            | RetryHint::RateLimited { .. } => OutageOutcome::Healthy,
+                        };
+                        permit.finish(outcome);
+                        return Err(error);
+                    }
                     tracing::debug!(
                         operation,
                         attempt = attempt + 1,
@@ -364,7 +395,7 @@ where
                     );
                     sleep(backoff).await;
                 }
-            }
+            },
         }
     }
     unreachable!("total_attempts is always at least 1")
@@ -418,29 +449,21 @@ mod tests {
     }
 
     impl RetryableError for TestError {
-        fn is_retryable(&self) -> bool {
-            matches!(self, Self::Outage)
-        }
-
-        fn is_outage(&self) -> bool {
-            matches!(self, Self::Outage)
-        }
-
-        fn is_rate_limited(&self) -> bool {
-            false
-        }
-
-        fn is_cancelled(&self) -> bool {
-            matches!(self, Self::Cancelled)
-        }
-
-        fn retry_after(&self) -> Option<Duration> {
-            None
+        fn retry_action(&self) -> RetryAction {
+            match self {
+                Self::Outage => RetryAction::Failed(RetryHint::Outage),
+                Self::Cancelled => RetryAction::Cancelled,
+            }
         }
 
         fn unavailable() -> Self {
             Self::Outage
         }
+    }
+
+    fn expire_open(breaker: &OutageBreaker) {
+        breaker.state.lock().unwrap().phase =
+            OutagePhase::Open { until: Instant::now() - Duration::from_secs(1) };
     }
 
     #[test]
@@ -484,19 +507,19 @@ mod tests {
         let breaker = OutageBreaker::new(3, Duration::from_secs(30));
 
         // Non-outage failure (e.g., 429) resets consecutive failure count.
-        breaker.enter().unwrap().finish(true);
-        breaker.enter().unwrap().finish(true);
-        breaker.enter().unwrap().finish(false);
+        breaker.enter().unwrap().finish(OutageOutcome::Outage);
+        breaker.enter().unwrap().finish(OutageOutcome::Outage);
+        breaker.enter().unwrap().finish(OutageOutcome::Healthy);
         assert!(breaker.enter().is_some());
 
         // Three consecutive outage failures open the circuit.
         for _ in 0..3 {
-            breaker.enter().unwrap().finish(true);
+            breaker.enter().unwrap().finish(OutageOutcome::Outage);
         }
         assert!(breaker.enter().is_none());
 
         // Expire cooldown: exactly one half-open probe is admitted.
-        breaker.state.lock().unwrap().open_until = Some(Instant::now() - Duration::from_secs(1));
+        expire_open(&breaker);
         let dropped_probe = breaker.enter().unwrap();
         assert!(dropped_probe.is_probe());
         assert!(breaker.enter().is_none());
@@ -505,13 +528,13 @@ mod tests {
         assert!(breaker.enter().is_none());
 
         // Failed probe re-opens the circuit.
-        breaker.state.lock().unwrap().open_until = Some(Instant::now() - Duration::from_secs(1));
-        breaker.enter().unwrap().finish(true);
+        expire_open(&breaker);
+        breaker.enter().unwrap().finish(OutageOutcome::Outage);
         assert!(breaker.enter().is_none());
 
         // Successful probe closes the circuit.
-        breaker.state.lock().unwrap().open_until = Some(Instant::now() - Duration::from_secs(1));
-        breaker.enter().unwrap().finish(false);
+        expire_open(&breaker);
+        breaker.enter().unwrap().finish(OutageOutcome::Healthy);
         assert!(breaker.enter().is_some());
         assert!(breaker.enter().is_some());
     }
@@ -533,7 +556,7 @@ mod tests {
         assert!(breaker.enter().is_none());
 
         // Expire cooldown and cancel the half-open probe: circuit must stay open.
-        breaker.state.lock().unwrap().open_until = Some(Instant::now() - Duration::from_secs(1));
+        expire_open(&breaker);
         let err = run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, || async {
             Err(TestError::Cancelled)
         })

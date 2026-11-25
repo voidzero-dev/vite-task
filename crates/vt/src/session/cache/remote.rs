@@ -19,7 +19,7 @@ use std::{
     fs::File,
     io::{self, Read as _, Write as _},
     sync::{Arc, Mutex, OnceLock, PoisonError},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use bytes::Bytes;
@@ -33,7 +33,7 @@ use vt_plan::{
     remote_cache::{RemoteCacheAuth, ResolvedRemoteCacheConfig},
 };
 use vt_remote_cache::{
-    Client, Download, Entry, Fetched,
+    Client, Download, Entry, Fetched, RetryHint,
     auth::{Anonymous, Auth, GithubOidc},
 };
 use vt_str::Str;
@@ -42,7 +42,7 @@ use wincode::{
     error::{WriteError, WriteResult},
 };
 
-use self::retry::{OutageBreaker, RateLimit, RetryConfig, RetryableError};
+use self::retry::{OutageBreaker, RateLimit, RetryAction, RetryConfig, RetryableError};
 use super::{
     BaselineDetails, CACHE_SCHEMA_VERSION, CacheEntryKey, CacheEntryValue, CacheMiss, Checked,
     Comparison, TaskCacheConfig, archive, deserialize_cache, serialize_cache,
@@ -77,30 +77,13 @@ pub enum UploadError {
 }
 
 impl RetryableError for UploadError {
-    fn is_retryable(&self) -> bool {
-        matches!(self, Self::Remote(err) if err.is_retryable())
-    }
-
-    fn is_outage(&self) -> bool {
-        matches!(self, Self::Remote(err) if err.is_outage())
-    }
-
-    fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::Remote(err) if err.is_rate_limited())
-    }
-
-    fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Interrupted)
-    }
-
-    fn retry_after(&self) -> Option<Duration> {
+    fn retry_action(&self) -> RetryAction {
         match self {
-            Self::Remote(err) => err.retry_after(),
-            Self::Encode(_)
-            | Self::Compress(_)
-            | Self::TooLarge
-            | Self::Interrupted
-            | Self::Unavailable => None,
+            Self::Remote(err) => RetryAction::Failed(err.retry_hint()),
+            Self::Interrupted => RetryAction::Cancelled,
+            Self::Encode(_) | Self::Compress(_) | Self::TooLarge | Self::Unavailable => {
+                RetryAction::Failed(RetryHint::Permanent)
+            }
         }
     }
 
@@ -145,25 +128,10 @@ pub enum ReadError {
 }
 
 impl RetryableError for ReadError {
-    fn is_retryable(&self) -> bool {
-        matches!(self, Self::Fetch(err) | Self::Download(err) if err.is_retryable())
-    }
-
-    fn is_outage(&self) -> bool {
-        matches!(self, Self::Fetch(err) | Self::Download(err) if err.is_outage())
-    }
-
-    fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::Fetch(err) | Self::Download(err) if err.is_rate_limited())
-    }
-
-    fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Cancelled)
-    }
-
-    fn retry_after(&self) -> Option<Duration> {
+    fn retry_action(&self) -> RetryAction {
         match self {
-            Self::Fetch(err) | Self::Download(err) => err.retry_after(),
+            Self::Fetch(err) | Self::Download(err) => RetryAction::Failed(err.retry_hint()),
+            Self::Cancelled => RetryAction::Cancelled,
             Self::CorruptValue(_)
             | Self::CorruptKey(_)
             | Self::MismatchedBlob
@@ -171,8 +139,7 @@ impl RetryableError for ReadError {
             | Self::WriteArchive(_)
             | Self::Validate(_)
             | Self::Encode(_)
-            | Self::Cancelled
-            | Self::Unavailable => None,
+            | Self::Unavailable => RetryAction::Failed(RetryHint::Permanent),
         }
     }
 
@@ -1608,7 +1575,10 @@ mod tests {
 
         let clients = RemoteClients::with_retry(retry);
         let err = prepare_upload(&clients, &remote_config).unwrap().await.unwrap_err();
-        assert!(matches!(err, UploadError::Remote(ref r) if r.is_rate_limited()), "{err:?}");
+        assert!(
+            matches!(err, UploadError::Remote(ref r) if matches!(r.retry_hint(), RetryHint::RateLimited { .. })),
+            "{err:?}"
+        );
 
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
@@ -1666,7 +1636,10 @@ mod tests {
         let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
 
         let err = prepare_upload(&clients, &remote_config).unwrap().await.unwrap_err();
-        assert!(matches!(err, UploadError::Remote(ref r) if r.is_outage()), "{err:?}");
+        assert!(
+            matches!(err, UploadError::Remote(ref r) if r.retry_hint() == RetryHint::Outage),
+            "{err:?}"
+        );
         // A successful fetch must not reset consecutive store failures.
         assert_eq!(
             clients
@@ -1676,7 +1649,10 @@ mod tests {
             None
         );
         let err = prepare_upload(&clients, &remote_config).unwrap().await.unwrap_err();
-        assert!(matches!(err, UploadError::Remote(ref r) if r.is_outage()), "{err:?}");
+        assert!(
+            matches!(err, UploadError::Remote(ref r) if r.retry_hint() == RetryHint::Outage),
+            "{err:?}"
+        );
 
         // Store breaker is now open, but reads still reach the server.
         assert_eq!(
@@ -1696,7 +1672,10 @@ mod tests {
                 .fetch(&remote_config, &key, &execution_key, &CancellationToken::new())
                 .await
                 .unwrap_err();
-            assert!(matches!(err, ReadError::Fetch(ref r) if r.is_outage()), "{err:?}");
+            assert!(
+                matches!(err, ReadError::Fetch(ref r) if r.retry_hint() == RetryHint::Outage),
+                "{err:?}"
+            );
         }
         server.join().unwrap();
 
