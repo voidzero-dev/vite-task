@@ -4,7 +4,7 @@
 
 use std::{
     ffi::OsStr,
-    os::unix::ffi::OsStrExt as _,
+    os::unix::{ffi::OsStrExt as _, process::CommandExt as _},
     process::{Command, Output, Stdio},
 };
 
@@ -66,21 +66,35 @@ fn initializes_fixed_runtime() {
 
 fn check_runtime_image(fixture: &str, image_type: u16, interpreter: bool) {
     assert_image(fixture, image_type, interpreter);
-    let mut command = launcher();
-    command.args([fixture, "custom-argv-zero", ""]);
-    command.arg(OsStr::from_bytes(b"\xff"));
-    command.env_clear().env("FIXTURE_IMAGE", fixture).env("EMPTY", "");
-    command.env("BYTES", OsStr::from_bytes(b"\xff"));
-    if interpreter {
-        command.env("EXPECT_INTERPRETER", "1");
-    }
-    if image_type == elf::abi::ET_EXEC {
-        command.env("EXPECT_FIXED_ADDRESS", "1");
-    }
-    let output = output(command);
-    assert_eq!(output.status.code(), Some(37), "{output:?}");
-    assert_eq!(output.stdout, b"runtime-ok\n");
-    assert!(output.stderr.is_empty(), "{output:?}");
+    let configure = |command: &mut Command| {
+        command.arg("").arg(OsStr::from_bytes(b"\xff"));
+        command.env_clear().env("FIXTURE_IMAGE", fixture).env("EMPTY", "");
+        command.env("BYTES", OsStr::from_bytes(b"\xff"));
+        if interpreter {
+            command.env("EXPECT_INTERPRETER", "1");
+        }
+        if image_type == elf::abi::ET_EXEC {
+            command.env("EXPECT_FIXED_ADDRESS", "1");
+        }
+    };
+
+    // Run each fixture through kernel execve first so fixture/toolchain issues
+    // are distinguished from loader regressions.
+    let mut direct = Command::new(fixture);
+    direct.arg0("custom-argv-zero").stderr(Stdio::piped());
+    configure(&mut direct);
+    let direct = output(direct);
+    assert_eq!(direct.status.code(), Some(37), "kernel exec: {direct:?}");
+    assert_eq!(direct.stdout, b"runtime-ok\n");
+    assert!(direct.stderr.is_empty(), "kernel exec: {direct:?}");
+
+    let mut loaded = launcher();
+    loaded.args([fixture, "custom-argv-zero"]);
+    configure(&mut loaded);
+    let loaded = output(loaded);
+    assert_eq!(loaded.status.code(), Some(37), "loader exec: {loaded:?}");
+    assert_eq!(loaded.stdout, direct.stdout);
+    assert_eq!(loaded.stderr, direct.stderr);
 }
 
 #[test]
