@@ -2,7 +2,12 @@
 
 Three consecutive exhausted read failures open the read circuit breaker without blocking uploads, and successful uploads do not reset read failures.
 
-## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 VP_RUN_INTERNAL_REMOTE_CACHE_NO_BACKOFF=1 vtt mock-remote-cache --always-fail /fetch=503 --summary vt run step4`
+## `remote-cache-server start`
+
+```
+```
+
+## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 VP_RUN_INTERNAL_REMOTE_CACHE_NO_BACKOFF=1 remote-cache-server run --github-actions --always-fail /fetch=503 --summary vt run step4`
 
 step1..step3 exhaust 3 fetch attempts each (9 total) and open the read breaker. step4 skips the fetch request, while all 4 stores succeed.
 
@@ -58,4 +63,9 @@ Task Details:
   [4] remote-cache-resilience#step4: $ vtt print step4 ✓
       → Cache miss: remote cache temporarily unavailable
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+## `remote-cache-server stop`
+
+```
 ```

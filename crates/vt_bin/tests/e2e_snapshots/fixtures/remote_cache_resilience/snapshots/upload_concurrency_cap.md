@@ -2,9 +2,14 @@
 
 At most 4 concurrent remote cache uploads are in flight at once, and full upload slots do not block fetches.
 
-## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 VP_RUN_INTERNAL_REMOTE_CACHE_NO_BACKOFF=1 vtt mock-remote-cache --hold-stores 4 --release-after-fetches 7 --summary vt run t7`
+## `remote-cache-server start`
 
-The mock server holds stores on a Condvar until 4 are concurrently in flight and all 7 fetches have arrived, proving reads are unblocked and max_concurrent_stores stays capped at 4.
+```
+```
+
+## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 VP_RUN_INTERNAL_REMOTE_CACHE_NO_BACKOFF=1 remote-cache-server run --github-actions --hold-stores 4 --release-after-fetches 7 --summary vt run t7`
+
+The tap holds stores until 4 are concurrently in flight and all 7 fetches have arrived, proving reads are unblocked and max_concurrent_stores stays capped at 4.
 
 ```
 $ vtt print t1
@@ -33,4 +38,9 @@ vt run: 0/7 cache hit (0%), 7/7 successful. (Run `vt run --last-details` for ful
 [remote-cache] POST /fetch 404 x7
 [remote-cache] POST /store 200 x7
 [remote-cache] max_concurrent_stores=4
+```
+
+## `remote-cache-server stop`
+
+```
 ```

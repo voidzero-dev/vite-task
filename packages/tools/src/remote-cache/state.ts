@@ -16,6 +16,24 @@ export interface ServerInfo {
   tokenRequestUrl: string;
 }
 
+export type FaultRoute = '/fetch' | '/store' | '/blob';
+
+export type FaultKind = '503' | '429' | 'drop' | 'truncate';
+
+export interface FaultRule {
+  route: FaultRoute;
+  kind: FaultKind;
+}
+
+/** Per-`run` tap overrides configured before spawning a command and cleared on `/take`. */
+export interface RunConfig {
+  faults: FaultRule[];
+  alwaysFail: FaultRule[];
+  holdStores: number;
+  releaseAfterFetches: number;
+  summary: boolean;
+}
+
 export function serverFile(directory: string): string {
   return join(directory, 'server.json');
 }
