@@ -6,26 +6,28 @@
 //! The auxiliary vector lets the interpreter and libc
 //! discover image addresses and process properties before runtime startup.
 //!
-//! We copy strings and known auxiliary payloads into the same mapping. Build
-//! the pointer table in a temporary vector and payloads downward, then copy
-//! the table next to the payloads. Argument and environment pointers are
-//! collected first so their strings can be copied in reverse order, preserving
-//! Linux's ascending, contiguous string layout. This consumes iterators once.
+//! We copy strings and known auxiliary payloads into the same mapping. Stage
+//! the pointer table upward from the bottom of the writable region and payloads
+//! downward from the top, then shift the table up next to the payloads.
+//! Argument and environment pointers are collected first so their strings can
+//! be copied in reverse order, preserving Linux's ascending, contiguous string
+//! layout. This consumes iterators once without any heap allocator.
 
-use core::{mem::size_of, ptr};
+use core::{
+    mem::{align_of, size_of},
+    ptr,
+};
 
-use allocator_api2::vec::Vec;
 use fspy_nostd::{
     CStr, Thin,
     env::AuxEntry,
     mm::{self, MprotectFlags},
 };
-use fspy_nostd_alloc::{PageBump, page_bump};
 use linux_raw_sys::auxvec as abi;
 
 use crate::{
-    image::Image,
-    mapping::{Mapping, add},
+    image::{Image, PHDR_SIZE},
+    mapping::{Mapping, add, sub},
 };
 
 // Includes startup data and room for the target's downward-growing call stack.
@@ -38,14 +40,15 @@ const MIN_STACK_HEADROOM: usize = 64 * 1024;
 
 struct Builder {
     mapping: Mapping,
-    // Offsets from mapping.ptr: first usable byte and payload start.
+    // Offsets from mapping.ptr: first usable byte, staged word count, and payload start.
     start: usize,
-    words: Vec<usize, PageBump>,
+    word_count: usize,
     strings: usize,
 }
 
 impl Builder {
     fn new(page: usize) -> Self {
+        assert!(page.is_multiple_of(align_of::<usize>()), "invalid page size");
         let mapping = Mapping::reserve(add(CAPACITY, page));
         // Keep the low page inaccessible so an overflow reaching it faults
         // instead of writing into a neighboring mapping.
@@ -59,17 +62,37 @@ impl Builder {
             )
         }
         .expect("cannot map target stack");
-        Self { strings: mapping.len, mapping, start: page, words: Vec::new_in(page_bump()) }
+        Self { strings: mapping.len, mapping, start: page, word_count: 0 }
+    }
+
+    const fn table_len(&self) -> usize {
+        self.word_count.checked_mul(size_of::<usize>()).expect("initial stack exceeds capacity")
+    }
+
+    const fn table_end(&self) -> usize {
+        add(self.start, self.table_len())
+    }
+
+    #[expect(clippy::cast_ptr_alignment, reason = "mapping base and start offset are page-aligned")]
+    const unsafe fn words_ptr(&self) -> *mut usize {
+        // SAFETY: `self.start` is a page boundary inside `self.mapping`,
+        // which is strictly aligned for `usize`.
+        unsafe { self.mapping.ptr.as_ptr().add(self.start).cast::<usize>() }
+    }
+
+    const fn words_mut(&mut self) -> &mut [usize] {
+        // SAFETY: `self.words_ptr()` is `usize`-aligned, and the staged words
+        // were exclusively written by `push`, disjoint from `[self.strings, mapping.len)`.
+        unsafe { core::slice::from_raw_parts_mut(self.words_ptr(), self.word_count) }
     }
 
     fn push(&mut self, value: usize) {
         let end = add(self.table_end(), size_of::<usize>());
         assert!(end <= self.strings, "initial stack exceeds capacity");
-        self.words.push(value);
-    }
-
-    fn table_end(&self) -> usize {
-        add(self.start, size_of_val(self.words.as_slice()))
+        // SAFETY: `self.word_count` lies inside the writable staged region
+        // below `self.strings` and is unaliased.
+        unsafe { self.words_ptr().add(self.word_count).write(value) };
+        self.word_count = add(self.word_count, 1);
     }
 
     fn copy(&mut self, bytes: &[u8]) -> usize {
@@ -99,15 +122,15 @@ impl Builder {
         argv: impl Iterator<Item = CStr<'a, Thin>>,
         envp: impl Iterator<Item = CStr<'a, Thin>>,
     ) {
-        let argc_slot = self.words.len();
+        let argc_slot = self.word_count;
         self.push(0);
-        let pointers_start = self.words.len();
+        let pointers_start = self.word_count;
         let mut argument_count = 0_usize;
         for arg in argv {
             self.push(arg.as_ptr().expose_provenance());
             argument_count = add(argument_count, 1);
         }
-        self.words[argc_slot] = argument_count;
+        self.words_mut()[argc_slot] = argument_count;
         self.push(0);
         for env in envp {
             self.push(env.as_ptr().expose_provenance());
@@ -118,15 +141,15 @@ impl Builder {
         // the last environment entry back to argv[0], because allocation grows
         // downward. The result is contiguous argv strings followed by envp.
         // libuv relies on this layout when updating the process title.
-        for index in (pointers_start..self.words.len()).rev() {
-            let source = self.words[index];
+        for index in (pointers_start..self.word_count).rev() {
+            let source = self.words_mut()[index];
             if source == 0 {
                 continue;
             }
             // SAFETY: nonzero slots came from the CStr values above, whose
             // original storage remains valid for 'a while we copy it.
             let string = unsafe { CStr::from_ptr(ptr::with_exposed_provenance(source)) };
-            self.words[index] = self.string(string);
+            self.words_mut()[index] = self.string(string);
         }
     }
 
@@ -141,17 +164,18 @@ impl Builder {
         //                           ^ new SP, aligned to 16 bytes
         // Keeping the table near the top leaves room below SP for calls. Only
         // table bytes move: its pointers already name the final payloads.
-        let len = size_of_val(self.words.as_slice());
+        let len = self.table_len();
         let start = self.strings.checked_sub(len).expect("initial stack exceeds capacity") & !15;
         assert!(start >= add(self.start, MIN_STACK_HEADROOM), "initial stack exceeds capacity");
-        // The temporary vector and its owned bump are dropped before handoff.
-        // SAFETY: the initialized vector and writable destination are disjoint.
-        // The checked destination fits below the strings. The result is
-        // aligned to the process-entry ABI and retains the complete mapping.
+        // SAFETY: both staged source and final destination lie inside the
+        // writable region of `self.mapping` below `self.strings`; `ptr::copy`
+        // handles any overlap. Zero the vacated staging prefix below SP.
         unsafe {
             let base = self.mapping.ptr.as_ptr();
+            let source = base.add(self.start);
             let target = base.add(start);
-            ptr::copy_nonoverlapping(self.words.as_ptr().cast::<u8>(), target, len);
+            ptr::copy(source, target, len);
+            ptr::write_bytes(source, 0, len.min(sub(start, self.start)));
             self.mapping.retain();
             target.cast()
         }
@@ -215,7 +239,7 @@ pub unsafe fn build<'a>(
     // is its startup address. With PT_INTERP we enter the interpreter first
     // and BASE is that image's load bias. Without one, BASE is 0 as on Linux.
     stack.aux(abi::AT_PHDR, image.phdr.expect("program headers are not mapped by PT_LOAD"));
-    stack.aux(abi::AT_PHENT, 56);
+    stack.aux(abi::AT_PHENT, PHDR_SIZE);
     stack.aux(abi::AT_PHNUM, image.phnum);
     stack.aux(abi::AT_ENTRY, image.entry);
     stack.aux(abi::AT_BASE, interpreter.map_or(0, |image| image.bias));

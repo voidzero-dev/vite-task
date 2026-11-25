@@ -87,9 +87,6 @@ pub unsafe fn exec_elf<'a>(
         .expect("missing AT_PAGESZ")
         .value;
     assert!(page_size.is_power_of_two(), "invalid AT_PAGESZ");
-    // Seed fspy_nostd's page-size cache from AT_PAGESZ so temporary stack
-    // allocations via PageBump do not trigger a redundant 2 MiB probe mapping.
-    fspy_nostd::param::seed_page_size(page_size);
     let executable = image::File::new(elf_file);
     // PT_INTERP names a second ELF file. Loading it here lets us delegate
     // dynamic linking and libc startup to the program's own interpreter.

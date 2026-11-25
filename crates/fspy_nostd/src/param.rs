@@ -13,7 +13,7 @@
 //! anyway, it calls `sysconf` directly.
 
 #[cfg(any(target_os = "linux", target_os = "none"))]
-pub use linux::{page_size, seed_page_size};
+pub use linux::page_size;
 #[cfg(target_os = "macos")]
 pub use mac::page_size;
 
@@ -34,18 +34,6 @@ mod linux {
     const MAX_PROBE_PAGE: usize = 1 << 20;
 
     static CACHE: AtomicUsize = AtomicUsize::new(0);
-
-    /// Seeds the cached page size when the caller already knows it (for
-    /// example, from `AT_PAGESZ` in the Linux auxiliary vector).
-    ///
-    /// Ignores zero or non-power-of-two values, and never overwrites an
-    /// already-cached page size. Once seeded, [`page_size`] returns the cached
-    /// value without running the `mmap`/`mprotect` probe.
-    pub fn seed_page_size(page: usize) {
-        if page.is_power_of_two() {
-            let _ = CACHE.compare_exchange(0, page, Ordering::Relaxed, Ordering::Relaxed);
-        }
-    }
 
     /// Returns the size of a memory page, or 0 if it cannot be determined.
     ///
@@ -140,10 +128,6 @@ mod linux {
         #[test]
         fn probe_is_stable_and_cached() {
             let probed = probe_page_size();
-            seed_page_size(0);
-            seed_page_size(3);
-            seed_page_size(probed);
-            seed_page_size(probed * 2);
             assert_eq!(probed, page_size());
             assert_eq!(page_size(), page_size());
             #[cfg(target_arch = "x86_64")]
