@@ -1,6 +1,6 @@
 use std::{
     env,
-    ffi::{OsStr, OsString},
+    ffi::OsString,
     process::{Command, Stdio},
 };
 
@@ -10,24 +10,11 @@ fn main() {
     }
     println!("cargo::rerun-if-changed=fixtures/runtime.c");
     println!("cargo::rerun-if-env-changed=CC");
-    if let Ok(mut target) = env::var("TARGET") {
-        // SAFETY: replacing ASCII '-' with ASCII '_' preserves UTF-8 validity.
-        for byte in unsafe { target.as_bytes_mut() } {
-            if *byte == b'-' {
-                *byte = b'_';
-            }
-        }
-        println!("cargo::rerun-if-env-changed=CC_{target}");
-    }
 
-    // Use cc's target-aware compiler discovery (respects CC_<target>, CC, and
-    // cross toolchains) without inheriting its library-oriented default flags.
-    let compiler = cc::Build::new().cargo_metadata(false).get_compiler();
+    let compiler = resolve_compiler();
     let is_zigcc = compiler
-        .path()
-        .file_name()
-        .and_then(OsStr::to_str)
-        .is_some_and(|name| name.starts_with("zigcc-"));
+        .to_str()
+        .is_some_and(|path| path.rsplit('/').next().is_some_and(|name| name.starts_with("zigcc-")));
 
     let out = env::var_os("OUT_DIR").unwrap();
     let mut source = env::var_os("CARGO_MANIFEST_DIR").unwrap();
@@ -62,10 +49,28 @@ fn main() {
         if is_static && let Some(musl_target) = musl_target {
             compile_zig_musl(musl_target, &source, &dest, flags);
         } else {
-            compile(&compiler, &source, &dest, flags);
+            run_compile(Command::new(&compiler), &source, &dest, flags);
         }
         println!("cargo::rustc-env={env_name}={}", dest.to_str().unwrap());
     }
+}
+
+fn resolve_compiler() -> OsString {
+    if let Ok(mut target) = env::var("TARGET") {
+        // SAFETY: replacing ASCII '-' with ASCII '_' preserves UTF-8 validity.
+        for byte in unsafe { target.as_bytes_mut() } {
+            if *byte == b'-' {
+                *byte = b'_';
+            }
+        }
+        let mut key = OsString::from("CC_");
+        key.push(&target);
+        println!("cargo::rerun-if-env-changed=CC_{target}");
+        if let Some(cc) = env::var_os(&key).filter(|value| !value.is_empty()) {
+            return cc;
+        }
+    }
+    env::var_os("CC").filter(|value| !value.is_empty()).unwrap_or_else(|| OsString::from("cc"))
 }
 
 fn join_out(out: &OsString, name: &str) -> OsString {
@@ -77,14 +82,6 @@ fn join_out(out: &OsString, name: &str) -> OsString {
 fn compile_zig_musl(musl_target: &str, source: &OsString, dest: &OsString, extra: &[&str]) {
     let mut command = Command::new("cargo-zigbuild");
     command.args(["zig", "cc", "--", "-target", musl_target]);
-    run_compile(command, source, dest, extra);
-}
-
-fn compile(compiler: &cc::Tool, source: &OsString, dest: &OsString, extra: &[&str]) {
-    let mut command = Command::new(compiler.path());
-    for (key, value) in compiler.env() {
-        command.env(key, value);
-    }
     run_compile(command, source, dest, extra);
 }
 
