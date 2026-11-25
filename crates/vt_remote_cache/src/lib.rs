@@ -182,8 +182,14 @@ pub struct Client {
     read_rate_limit: RateLimit,
     /// Shared cooldown for `429 Too Many Requests` on store operations.
     store_rate_limit: RateLimit,
-    /// Circuit breaker that short-circuits requests during sustained outages.
-    outage: OutageBreaker,
+    /// Circuit breaker that short-circuits read requests (fetch and download)
+    /// during sustained outages. Kept separate from stores so store failures
+    /// do not block the task-critical read path.
+    read_outage: OutageBreaker,
+    /// Circuit breaker that short-circuits store requests during sustained
+    /// outages. Kept separate from reads so successful reads cannot reset
+    /// consecutive store failures.
+    store_outage: OutageBreaker,
     retry: RetryConfig,
 }
 
@@ -232,7 +238,8 @@ impl Client {
             store_permits: Semaphore::new(MAX_CONCURRENT_STORES),
             read_rate_limit: RateLimit::default(),
             store_rate_limit: RateLimit::default(),
-            outage: OutageBreaker::new(retry.outage_threshold, retry.outage_cooldown),
+            read_outage: OutageBreaker::new(retry.outage_threshold, retry.outage_cooldown),
+            store_outage: OutageBreaker::new(retry.outage_threshold, retry.outage_cooldown),
             retry,
         })
     }
@@ -256,7 +263,7 @@ impl Client {
     pub async fn fetch(&self, key: &[u8], secondary_key: &[u8]) -> Result<Option<Fetched>, Error> {
         let body = Bytes::from(encode_cbor(&FetchRequest { key, secondary_key }));
         let policy = self.retry.read;
-        let result = retry::run("fetch", policy, &self.read_rate_limit, &self.outage, || {
+        let result = retry::run("fetch", policy, &self.read_rate_limit, &self.read_outage, || {
             let body = body.clone();
             async move {
                 let start = Instant::now();
@@ -331,7 +338,7 @@ impl Client {
     ) -> Result<Download, Error> {
         let mut url = self.blob_url.clone();
         url.path_segments_mut().map_err(|()| Error::InvalidEndpoint(None))?.push(blob_id);
-        retry::run("download", policy, &self.read_rate_limit, &self.outage, || {
+        retry::run("download", policy, &self.read_rate_limit, &self.read_outage, || {
             let url = url.clone();
             async move {
                 let start = Instant::now();
@@ -372,47 +379,48 @@ impl Client {
         let metadata_bytes = Bytes::from(encode_cbor(&StoreMetadata { key, secondary_key, value }));
         let value_bytes = value.len();
         let policy = self.retry.store;
-        let result = retry::run("store", policy, &self.store_rate_limit, &self.outage, || {
-            let metadata_bytes = metadata_bytes.clone();
-            async move {
-                let start = Instant::now();
-                let headers = self.auth_headers(Operation::Store).await?;
-                let auth = start.elapsed();
-                let mut form = Form::new().part("metadata", metadata_part(metadata_bytes));
-                let blob_bytes = if let Some(blob) = blob {
-                    let (part, length) = blob_part(blob).await?;
-                    form = form.part("blob", part);
-                    Some(length)
-                } else {
-                    None
-                };
-                tracing::debug!(
-                    value_bytes,
-                    blob_bytes,
-                    ?queued,
-                    ?auth,
-                    "sending a remote cache store"
-                );
-                let response = self
-                    .http
-                    .post(self.store_url.clone())
-                    .headers(headers)
-                    .multipart(form)
-                    .send()
-                    .await
-                    .map_err(network_error)?;
-                log_response(&response, start);
-                // The response's blob ID isn't needed. Read the body anyway, so the
-                // connection can be reused.
-                check_status(response, policy.max_retry_after)
-                    .await?
-                    .bytes()
-                    .await
-                    .map_err(network_error)?;
-                Ok(())
-            }
-        })
-        .await;
+        let result =
+            retry::run("store", policy, &self.store_rate_limit, &self.store_outage, || {
+                let metadata_bytes = metadata_bytes.clone();
+                async move {
+                    let start = Instant::now();
+                    let headers = self.auth_headers(Operation::Store).await?;
+                    let auth = start.elapsed();
+                    let mut form = Form::new().part("metadata", metadata_part(metadata_bytes));
+                    let blob_bytes = if let Some(blob) = blob {
+                        let (part, length) = blob_part(blob).await?;
+                        form = form.part("blob", part);
+                        Some(length)
+                    } else {
+                        None
+                    };
+                    tracing::debug!(
+                        value_bytes,
+                        blob_bytes,
+                        ?queued,
+                        ?auth,
+                        "sending a remote cache store"
+                    );
+                    let response = self
+                        .http
+                        .post(self.store_url.clone())
+                        .headers(headers)
+                        .multipart(form)
+                        .send()
+                        .await
+                        .map_err(network_error)?;
+                    log_response(&response, start);
+                    // The response's blob ID isn't needed. Read the body anyway, so the
+                    // connection can be reused.
+                    check_status(response, policy.max_retry_after)
+                        .await?
+                        .bytes()
+                        .await
+                        .map_err(network_error)?;
+                    Ok(())
+                }
+            })
+            .await;
         drop(permit);
         result
     }
@@ -1167,7 +1175,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn outage_breaker_short_circuits_after_repeated_failures() {
+    async fn outage_breaker_short_circuits_per_kind_independently() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let retry = RetryConfig {
             outage_threshold: 2,
@@ -1178,21 +1186,40 @@ mod tests {
         let server = {
             let listener = listener.try_clone().unwrap();
             std::thread::spawn(move || {
+                // Store #1 fails, interleaved fetch succeeds (must not reset store failures),
+                // store #2 fails (opens store breaker), fetch still works,
+                // then two fetch failures open read breaker.
+                serve_once(&listener, "HTTP/1.1 503 Service Unavailable", b"down");
+                serve_once(&listener, "HTTP/1.1 404 Not Found", b"");
+                serve_once(&listener, "HTTP/1.1 503 Service Unavailable", b"down");
+                serve_once(&listener, "HTTP/1.1 404 Not Found", b"");
                 serve_once(&listener, "HTTP/1.1 503 Service Unavailable", b"down");
                 serve_once(&listener, "HTTP/1.1 503 Service Unavailable", b"down");
             })
         };
 
+        let err = client.store(b"k", b"s", b"v", None).await.unwrap_err();
+        assert!(matches!(err, Error::Status(StatusCode::SERVICE_UNAVAILABLE, _)), "{err:?}");
+        // A successful fetch must not reset consecutive store failures.
+        assert_eq!(client.fetch(b"k", b"s").await.unwrap(), None);
+        let err = client.store(b"k", b"s", b"v", None).await.unwrap_err();
+        assert!(matches!(err, Error::Status(StatusCode::SERVICE_UNAVAILABLE, _)), "{err:?}");
+
+        // Store breaker is now open, but reads still reach the server.
+        assert_eq!(client.fetch(b"k", b"s").await.unwrap(), None);
+        let err = client.store(b"k", b"s", b"v", None).await.unwrap_err();
+        assert!(matches!(err, Error::Unavailable), "{err:?}");
+        assert_eq!(err.to_string(), "remote cache temporarily unavailable");
+
+        // Two consecutive fetch failures open the read breaker as well.
         for _ in 0..2 {
             let err = client.fetch(b"k", b"s").await.unwrap_err();
             assert!(matches!(err, Error::Status(StatusCode::SERVICE_UNAVAILABLE, _)), "{err:?}");
         }
         server.join().unwrap();
 
-        // Third request short-circuits locally without hitting the server.
-        let err = client.store(b"k", b"s", b"v", None).await.unwrap_err();
+        let err = client.fetch(b"k", b"s").await.unwrap_err();
         assert!(matches!(err, Error::Unavailable), "{err:?}");
-        assert_eq!(err.to_string(), "remote cache temporarily unavailable");
         assert!(no_request_waiting(&listener));
     }
 
