@@ -2304,6 +2304,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "js-semver"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b45bf431971205e414201e87a76bdd4c75316dc44c890e9df4d9006ee5d2896c"
+
+[[package]]
 name = "js-sys"
 version = "0.3.85"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5461,6 +5467,7 @@ name = "vt_workspace"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "js-semver",
  "petgraph",
  "rustc-hash",
  "serde",

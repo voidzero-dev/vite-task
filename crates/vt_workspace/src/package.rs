@@ -1,3 +1,4 @@
+use js_semver::{Range, Version};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use vt_str::Str;
@@ -15,6 +16,8 @@ pub enum DependencyType {
 pub struct PackageJson {
     #[serde(default)]
     pub name: Str,
+    #[serde(default)]
+    pub version: Str,
     #[serde(default)]
     pub scripts: FxHashMap<Str, Str>,
     #[serde(default)]
@@ -44,18 +47,23 @@ impl std::fmt::Debug for PackageJson {
 }
 
 impl PackageJson {
+    /// Returns the dependencies that can resolve to a workspace package, each with the version range that package must
+    /// satisfy, `*` for a `workspace:` dependency.
+    ///
+    /// `link_workspace_packages` also returns dependencies that aren't `workspace:`, for package managers that link a
+    /// workspace package whenever its version satisfies the range, as npm, Yarn and Bun do.
     pub fn get_workspace_dependencies(
         &self,
-    ) -> impl Iterator<Item = (Str, DependencyType)> + use<'_> {
+        link_workspace_packages: bool,
+    ) -> impl Iterator<Item = (Str, DependencyType, Str)> + use<'_> {
         self.dependencies
             .iter()
             .map(|entry| (entry, DependencyType::Normal))
             .chain(self.dev_dependencies.iter().map(|entry| (entry, DependencyType::Dev)))
             .chain(self.peer_dependencies.iter().map(|entry| (entry, DependencyType::Peer)))
-            .filter_map(|((key, value), dep_type)| {
+            .filter_map(move |((key, value), dep_type)| {
                 let Some(workspace_version) = value.strip_prefix("workspace:") else {
-                    // TODO: support link-workspace-packages: https://pnpm.io/workspaces#workspace-protocol-workspace)
-                    return None;
+                    return link_workspace_packages.then(|| (key.clone(), dep_type, value.clone()));
                 };
                 // TODO: support paths: https://github.com/pnpm/pnpm/pull/2972
                 Some((
@@ -65,7 +73,19 @@ impl PackageJson {
                         key.clone()
                     },
                     dep_type,
+                    "*".into(),
                 ))
             })
     }
+}
+
+/// `*` and an empty range match any version, prereleases included, as npm does.
+///
+/// <https://github.com/npm/cli/blob/latest/workspaces/arborist/lib/dep-valid.js>
+pub(crate) fn version_satisfies(version: &str, range: &str) -> bool {
+    let range = range.trim();
+    range.is_empty()
+        || range == "*"
+        || Version::parse(version)
+            .is_ok_and(|version| Range::parse(range).is_ok_and(|range| range.satisfies(&version)))
 }
