@@ -169,6 +169,9 @@ async function run(argv: string[]): Promise<void> {
   }
   const [command, ...args] = argv.slice(index);
   if (command === undefined) fail(usage);
+  if (releaseAfterFetches > 0 && holdStores === 0) {
+    fail('--release-after-fetches requires --hold-stores');
+  }
   const info = readInfo();
   const hasRunConfig = faults.length > 0 || alwaysFail.length > 0 || holdStores > 0 || summary;
   if (hasRunConfig) {

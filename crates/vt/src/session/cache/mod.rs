@@ -574,7 +574,6 @@ impl Validation {
 }
 
 impl ExecutionCache {
-    #[tracing::instrument(level = "debug", skip_all)]
     pub fn load_from_path(path: &AbsolutePath) -> anyhow::Result<Self> {
         Self::load_from_path_with_no_backoff(path, false)
     }

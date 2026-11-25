@@ -12,8 +12,13 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use vt_remote_cache::RetryHint;
 
-/// Maximum `Retry-After` delay honored on a `429 Too Many Requests` response.
-pub(super) const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
+/// Maximum `Retry-After` delay honored on a `429 Too Many Requests` response
+/// for read operations on the task critical path.
+pub(super) const MAX_READ_RETRY_AFTER: Duration = Duration::from_secs(2);
+
+/// Maximum `Retry-After` delay honored on a `429 Too Many Requests` response
+/// for background store operations.
+pub(super) const MAX_STORE_RETRY_AFTER: Duration = Duration::from_secs(10);
 
 /// Maximum extra jitter added when waking from a shared `429` cooldown so
 /// concurrent waiters do not fire in lockstep.
@@ -72,7 +77,7 @@ impl RetryPolicy {
         max_retries: 2,
         base_delay: Duration::from_millis(250),
         max_delay: Duration::from_secs(5),
-        max_retry_after: MAX_RETRY_AFTER,
+        max_retry_after: MAX_READ_RETRY_AFTER,
         max_elapsed: Duration::from_secs(15),
     };
     /// Retry policy for `POST /store` uploads: up to 3 retries (4 attempts
@@ -82,7 +87,7 @@ impl RetryPolicy {
         max_retries: 3,
         base_delay: Duration::from_millis(500),
         max_delay: Duration::from_secs(10),
-        max_retry_after: MAX_RETRY_AFTER,
+        max_retry_after: MAX_STORE_RETRY_AFTER,
         max_elapsed: Duration::from_secs(60),
     };
 
@@ -370,10 +375,10 @@ where
                 return Ok(value);
             }
             Err(error) => match error.retry_action() {
-                RetryAction::Cancelled => {
-                    // Drop `permit` without finishing so cancelling a probe
-                    // re-opens the cooldown and cancelling a normal request
-                    // does not reset consecutive failures.
+                RetryAction::Cancelled | RetryAction::Failed(RetryHint::Local) => {
+                    // Drop `permit` without finishing so cancelling or failing
+                    // locally before contacting the endpoint re-opens a probe
+                    // cooldown and does not reset consecutive outage failures.
                     return Err(error);
                 }
                 RetryAction::Failed(RetryHint::Permanent) => {
@@ -412,6 +417,7 @@ where
                         let outcome = match hint {
                             RetryHint::Outage => OutageOutcome::Outage,
                             RetryHint::Transient
+                            | RetryHint::Local
                             | RetryHint::Permanent
                             | RetryHint::RateLimited { .. } => OutageOutcome::Healthy,
                         };
@@ -480,6 +486,7 @@ mod tests {
     #[derive(Debug, PartialEq, Eq)]
     enum TestError {
         Outage,
+        Local,
         Cancelled,
     }
 
@@ -487,6 +494,7 @@ mod tests {
         fn retry_action(&self) -> RetryAction {
             match self {
                 Self::Outage => RetryAction::Failed(RetryHint::Outage),
+                Self::Local => RetryAction::Failed(RetryHint::Local),
                 Self::Cancelled => RetryAction::Cancelled,
             }
         }
@@ -634,5 +642,52 @@ mod tests {
             .unwrap_err();
         assert_eq!(err, TestError::Cancelled);
         assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn local_failure_does_not_reset_failures_or_close_probe() {
+        let breaker = OutageBreaker::new(2, Duration::from_secs(30));
+        let rate_limit = RateLimit::default();
+        let policy =
+            RetryPolicy { max_retries: 0, base_delay: Duration::ZERO, ..RetryPolicy::READ };
+        let cancel = CancellationToken::new();
+
+        // One outage failure followed by a pre-request local failure must not reset count.
+        let err =
+            run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, &cancel, || async {
+                Err(TestError::Outage)
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err, TestError::Outage);
+
+        let err =
+            run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, &cancel, || async {
+                Err(TestError::Local)
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err, TestError::Local);
+
+        // Second outage failure opens the circuit immediately.
+        let err =
+            run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, &cancel, || async {
+                Err(TestError::Outage)
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err, TestError::Outage);
+        assert!(breaker.enter().is_none());
+
+        // Expire cooldown: a local failure during the half-open probe must re-open the circuit.
+        expire_open(&breaker);
+        let err =
+            run::<(), TestError, _, _>("test", policy, &rate_limit, &breaker, &cancel, || async {
+                Err(TestError::Local)
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err, TestError::Local);
+        assert!(breaker.enter().is_none());
     }
 }

@@ -88,7 +88,7 @@ impl RetryableError for UploadError {
             Self::Remote(err) => RetryAction::Failed(err.retry_hint()),
             Self::Interrupted => RetryAction::Cancelled,
             Self::Encode(_) | Self::Compress(_) | Self::TooLarge | Self::Unavailable => {
-                RetryAction::Failed(RetryHint::Permanent)
+                RetryAction::Failed(RetryHint::Local)
             }
         }
     }
@@ -142,14 +142,14 @@ impl RetryableError for ReadError {
         match self {
             Self::Fetch(err) | Self::Download(err) => RetryAction::Failed(err.retry_hint()),
             Self::Cancelled => RetryAction::Cancelled,
+            Self::WriteArchive(_) | Self::Encode(_) | Self::Unavailable => {
+                RetryAction::Failed(RetryHint::Local)
+            }
             Self::CorruptValue(_)
             | Self::CorruptKey(_)
             | Self::MismatchedBlob
             | Self::CorruptArchive(_)
-            | Self::WriteArchive(_)
-            | Self::Validate(_)
-            | Self::Encode(_)
-            | Self::Unavailable => RetryAction::Failed(RetryHint::Permanent),
+            | Self::Validate(_) => RetryAction::Failed(RetryHint::Permanent),
         }
     }
 
@@ -1573,7 +1573,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let remote_config =
             anonymous(&vt_str::format!("http://{}/projects/test", listener.local_addr().unwrap()));
-        let cooldown = Duration::from_millis(80);
+        let cooldown = Duration::from_millis(200);
         let retry = RetryConfig {
             read: RetryPolicy { max_retries: 0, max_retry_after: cooldown, ..FAST_RETRY.read },
             store: RetryPolicy { max_retries: 0, max_retry_after: cooldown, ..FAST_RETRY.store },
@@ -1589,6 +1589,7 @@ mod tests {
         });
 
         let clients = RemoteClients::with_retry(retry);
+        let rate_limited_at = Instant::now();
         let err = prepare_upload(&clients, &remote_config).unwrap().await.unwrap_err();
         assert!(
             matches!(err, UploadError::Remote(ref r) if matches!(r.retry_hint(), RetryHint::RateLimited { .. })),
@@ -1597,7 +1598,6 @@ mod tests {
 
         let key = cache_key(ResolvedGlobConfig::default_auto());
         let execution_key = ExecutionCacheKey::ExecAPI(Arc::from([]));
-        let fetch_start = Instant::now();
         assert_eq!(
             clients
                 .fetch(&remote_config, &key, &execution_key, &CancellationToken::new())
@@ -1605,18 +1605,19 @@ mod tests {
                 .unwrap(),
             None
         );
+        // Fetch must complete well before the store's 200 ms cooldown elapses.
         assert!(
-            fetch_start.elapsed() < Duration::from_millis(50),
+            rate_limited_at.elapsed() < Duration::from_millis(150),
             "store 429 should not stall fetch: {:?}",
-            fetch_start.elapsed()
+            rate_limited_at.elapsed()
         );
 
-        let store_start = Instant::now();
+        // Peer store must wait until the full 200 ms cooldown measured from the 429.
         prepare_upload(&clients, &remote_config).unwrap().await.unwrap();
         assert!(
-            store_start.elapsed() >= Duration::from_millis(40),
+            rate_limited_at.elapsed() >= Duration::from_millis(180),
             "peer store did not wait for shared 429 cooldown: {:?}",
-            store_start.elapsed()
+            rate_limited_at.elapsed()
         );
         server.join().unwrap();
     }

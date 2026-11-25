@@ -434,6 +434,9 @@ async function stop(): Promise<void> {
   process.exit(0);
 }
 
+// Keep pooled connections alive past the client's 30 s pool idle timeout so a
+// slow gap between requests never races Node's 5 s default keep-alive cutoff.
+tap.keepAliveTimeout = 60_000;
 const controlOrigin = `http://127.0.0.1:${await listen(control)}`;
 const info: ServerInfo = {
   url: `http://127.0.0.1:${await listen(tap)}${basePath}`,

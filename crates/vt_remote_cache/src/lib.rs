@@ -87,9 +87,13 @@ pub enum Error {
 /// failed remote cache request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetryHint {
-    /// Permanent or local failure that should not be retried (such as `4xx`
-    /// other than `408`/`429`, `501`/`505`/`511`, auth, blob I/O, or malformed
-    /// responses).
+    /// Failed locally before a request reached the endpoint (invalid endpoint,
+    /// HTTP client construction, local blob read, or auth failure). Should not
+    /// be retried and carries no signal about endpoint health.
+    Local,
+    /// Permanent response from the endpoint (such as `4xx` other than
+    /// `408`/`429`, `501`/`505`/`511`, or a malformed response). Should not be
+    /// retried, and indicates the endpoint is reachable.
     Permanent,
     /// Transient failure (`408 Request Timeout`) that can be retried with
     /// per-request backoff without counting toward a backend outage breaker.
@@ -120,11 +124,10 @@ impl Error {
                 500 | 502..=504 | 506..=510 | 512..=599 => RetryHint::Outage,
                 _ => RetryHint::Permanent,
             },
-            Self::InvalidEndpoint(_)
-            | Self::HttpClient(_)
-            | Self::ReadBlob(_)
-            | Self::Auth(_)
-            | Self::MalformedResponse(_) => RetryHint::Permanent,
+            Self::MalformedResponse(_) => RetryHint::Permanent,
+            Self::InvalidEndpoint(_) | Self::HttpClient(_) | Self::ReadBlob(_) | Self::Auth(_) => {
+                RetryHint::Local
+            }
         }
     }
 }
@@ -607,6 +610,11 @@ mod tests {
             let err = status_err(code, None);
             assert_eq!(err.retry_hint(), RetryHint::Permanent, "{code} should be permanent");
         }
+        assert_eq!(Error::InvalidEndpoint(None).retry_hint(), RetryHint::Local);
+        assert_eq!(
+            Error::ReadBlob(std::io::Error::from(std::io::ErrorKind::NotFound)).retry_hint(),
+            RetryHint::Local
+        );
     }
 
     fn client_for(listener: &TcpListener) -> Client {
