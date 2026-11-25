@@ -16,6 +16,7 @@ mod win_job;
 use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
+    num::NonZeroI32,
     sync::Arc,
     time::Instant,
 };
@@ -36,8 +37,8 @@ use self::{
 use super::{
     cache::{CacheHit, CacheHitSource, CacheMiss, ExecutionCache, FileCheck, run_off_thread},
     event::{
-        CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
-        ExecutionError, RunKind,
+        CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus,
+        CacheUpdateOutcome, ExecutionError, LeafOutcome, RunKind, non_zero_exit_code,
     },
     reporter::{LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion},
 };
@@ -54,8 +55,10 @@ pub enum SpawnOutcome {
     /// In a dry run, the cache missed or is disabled, so a real run would
     /// spawn the process. Nothing was spawned.
     WouldSpawn,
-    /// Process was spawned and exited with this status.
-    Spawned(std::process::ExitStatus),
+    /// Process was spawned and exited with status 0.
+    SpawnedSuccess,
+    /// Process was spawned and exited with a non-zero exit code.
+    SpawnedFailed(NonZeroI32),
     /// An infrastructure error prevented the process from running
     /// (cache lookup failure or spawn failure).
     /// Already reported through the leaf reporter.
@@ -263,82 +266,17 @@ impl<'a> ExecutionMode<'a> {
     }
 }
 
-/// Everything the pipeline reports through the single
-/// `LeafExecutionReporter::finish()` call at the end of [`execute_spawn`].
-///
-/// Phases construct a `Report` instead of reporting in place, so finishing —
-/// which consumes the boxed reporter — happens in exactly one spot. Each
-/// variant carries exactly the data its outcome can be accompanied by:
-/// a failure always has an error and never an exit status, a cache hit has
-/// neither, and a spawned process always has its exit status. Nonsense
-/// pairings are unrepresentable.
-enum Report {
-    /// An infrastructure error prevented the process from running (or from
-    /// being observed to completion).
-    Failed { cache_update: CacheUpdateStatus, error: ExecutionError },
-    /// Cache hit: no process ran. Captured outputs were replayed, except in a
-    /// dry run.
-    CacheHit,
-    /// In a dry run, a miss or a task without caching: nothing ran.
-    WouldSpawn,
-    /// The process ran to completion; its exit status is reported regardless
-    /// of how the cache update went.
-    Spawned {
-        exit_status: std::process::ExitStatus,
-        cache_update: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    },
-    /// The run was cancelled before the process started.
-    Cancelled,
-}
-
-impl Report {
-    /// An infrastructure failure outside any cache-specific context.
-    const fn failed(error: ExecutionError) -> Self {
-        Self::Failed {
-            cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-            error,
-        }
-    }
-
-    /// Perform the pipeline's single `finish()` call and yield the outcome
-    /// [`execute_spawn`] returns to its caller.
-    fn finish(self, reporter: Box<dyn LeafExecutionReporter>) -> SpawnOutcome {
-        match self {
-            Self::Failed { cache_update, error } => {
-                reporter.finish(None, cache_update, Some(error));
-                SpawnOutcome::Failed
-            }
-            Self::CacheHit => {
-                reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
-                    None,
-                );
-                SpawnOutcome::CacheHit
-            }
-            Self::WouldSpawn => {
-                reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::DryRun),
-                    None,
-                );
-                SpawnOutcome::WouldSpawn
-            }
-            Self::Spawned { exit_status, cache_update, error } => {
-                reporter.finish(Some(exit_status), cache_update, error);
-                SpawnOutcome::Spawned(exit_status)
-            }
-            // `start()` wasn't called, so the reporter shows and saves nothing.
-            Self::Cancelled => {
-                reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled),
-                    None,
-                );
-                SpawnOutcome::Cancelled
-            }
-        }
+/// Map a spawn pipeline's [`LeafOutcome`] to the [`SpawnOutcome`] returned by
+/// [`execute_spawn`].
+fn spawn_outcome_of(outcome: &LeafOutcome) -> SpawnOutcome {
+    match outcome {
+        LeafOutcome::Failed(_) => SpawnOutcome::Failed,
+        LeafOutcome::CacheHit => SpawnOutcome::CacheHit,
+        LeafOutcome::WouldSpawn => SpawnOutcome::WouldSpawn,
+        LeafOutcome::SpawnedSuccess { .. } => SpawnOutcome::SpawnedSuccess,
+        LeafOutcome::SpawnedFailed { exit_code } => SpawnOutcome::SpawnedFailed(*exit_code),
+        LeafOutcome::Cancelled => SpawnOutcome::Cancelled,
+        LeafOutcome::InProcess => unreachable!("execute_spawn only runs spawned processes"),
     }
 }
 
@@ -399,19 +337,21 @@ pub async fn execute_spawn(
         fast_fail_token,
         cancel_token,
     );
-    let report = match pipeline.await {
-        Ok(report) | Err(report) => report,
+    let outcome = match pipeline.await {
+        Ok(outcome) | Err(outcome) => outcome,
     };
-    report.finish(leaf_reporter)
+    let spawn_outcome = spawn_outcome_of(&outcome);
+    leaf_reporter.finish(outcome);
+    spawn_outcome
 }
 
 /// The spawn pipeline.
 ///
-/// Both sides of the `Result` carry the same [`Report`] on purpose: `Err` is
-/// the `?`-short-circuit channel for phases that already determined the final
-/// report, `Ok` is the report of a pipeline that ran to the end. The caller
-/// unwraps both into the same single `finish()`, so the distinction is pure
-/// control flow and a value on either side is equally valid.
+/// Both sides of the `Result` carry the same [`LeafOutcome`] on purpose: `Err`
+/// is the `?`-short-circuit channel for phases that already determined the
+/// final outcome, `Ok` is the outcome of a pipeline that ran to the end. The
+/// caller unwraps both into the same single `finish()`, so the distinction is
+/// pure control flow and a value on either side is equally valid.
 #[expect(clippy::too_many_arguments, reason = "forwarded verbatim from `execute_spawn`")]
 #[expect(clippy::too_many_lines, reason = "the phases of one spawn, in order")]
 async fn run(
@@ -425,7 +365,7 @@ async fn run(
     file_check: FileCheck,
     fast_fail_token: CancellationToken,
     cancel_token: CancellationToken,
-) -> Result<Report, Report> {
+) -> Result<LeafOutcome, LeafOutcome> {
     let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
     // 1. Determine cache status FIRST by trying cache hit, so the reporter can
@@ -444,7 +384,7 @@ async fn run(
     )
     .await?;
     if cancel_token.is_cancelled() {
-        return Err(Report::Cancelled);
+        return Err(LeafOutcome::Cancelled);
     }
 
     // 2. Report execution start with the looked-up cache status (`start()`
@@ -459,7 +399,7 @@ async fn run(
                 baseline: hit.baseline.clone(),
             });
             if run_kind == RunKind::Dry {
-                return Ok(Report::CacheHit);
+                return Ok(LeafOutcome::CacheHit);
             }
             return Ok(replay_cache_hit(
                 &mut stdio_config,
@@ -481,12 +421,12 @@ async fn run(
         ),
     };
     if run_kind == RunKind::Dry {
-        return Ok(Report::WouldSpawn);
+        return Ok(LeafOutcome::WouldSpawn);
     }
 
     // 4. Fold the cache/fspy/stdio decisions into the typed mode.
     let mut mode = ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs)
-        .map_err(Report::failed)?;
+        .map_err(LeafOutcome::Failed)?;
 
     // Measure end-to-end duration here — spawn() doesn't track time.
     let start = Instant::now();
@@ -502,7 +442,7 @@ async fn run(
         mode.injected_envs(),
     )
     .await
-    .map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
+    .map_err(|err| LeafOutcome::Failed(ExecutionError::Spawn(err)))?;
     tracing::debug!(fspy = fspy_enabled, elapsed = ?start.elapsed(), "spawned the task process");
 
     // 6. Drain the pipes and wait for exit, concurrently with the IPC driver.
@@ -527,8 +467,15 @@ async fn run(
         let child_work = Box::pin(run_child(child, sinks, None, fast_fail_token.clone()));
         (child_work.await, None)
     };
-    let outcome = wait_result.map_err(Report::failed)?;
+    let outcome = wait_result.map_err(LeafOutcome::Failed)?;
     let duration = start.elapsed();
+
+    // Non-zero exit: cache is never updated.
+    if !outcome.exit_status.success() {
+        return Ok(LeafOutcome::SpawnedFailed {
+            exit_code: non_zero_exit_code(outcome.exit_status),
+        });
+    }
 
     // Extract reports, or short-circuit when the IPC server failed. An Err
     // here means reports may be incomplete: caching this run would risk
@@ -540,27 +487,26 @@ async fn run(
         }
         None => None,
         Some(Err(err)) => {
-            return Err(Report::Spawned {
-                exit_status: outcome.exit_status,
-                cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::IpcServerError(
-                    err,
-                )),
-                error: None,
+            return Ok(LeafOutcome::SpawnedSuccess {
+                cache_update: CacheUpdateOutcome::NotUpdated(
+                    CacheNotUpdatedReason::IpcServerError(err),
+                ),
             });
         }
     };
 
     // 7. Decide the cache update (only when we were in `Cached` mode). Cache
     //    update errors are reported but do not affect the exit status we
-    //    return — the process ran, so we return its actual status.
-    let (cache_update, error) = match mode {
+    //    return — the process exited 0, so we still report `SpawnedSuccess`.
+    let cache_update = match mode {
         ExecutionMode::Cached { state, .. } => {
             cache_update::update_cache(
                 cache,
                 workspace_root,
                 cache_dir,
                 state,
-                &outcome,
+                #[cfg(fspy)]
+                outcome.path_accesses.as_ref(),
                 reports.as_ref(),
                 duration,
                 &cancel_token,
@@ -569,11 +515,11 @@ async fn run(
         }
         ExecutionMode::Uncached { .. } => {
             // Caching was disabled for this task.
-            (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled), None)
+            CacheUpdateOutcome::NotUpdated(CacheNotUpdatedReason::CacheDisabled)
         }
     };
 
-    Ok(Report::Spawned { exit_status: outcome.exit_status, cache_update, error })
+    Ok(LeafOutcome::SpawnedSuccess { cache_update })
 }
 
 /// Outcome of the cache-lookup phase. Each variant carries exactly what that
@@ -595,7 +541,7 @@ enum CacheLookup<'a> {
 /// downloads its output archive into `cache_dir`, except in a dry run. The
 /// inputs are hashed, and entries checked, off the scheduler's thread (see
 /// [`run_off_thread`]). The lookup stops when `cancel_token` is cancelled, and
-/// is then [`Report::Cancelled`] or a miss that isn't reported.
+/// is then [`LeafOutcome::Cancelled`] or a miss that isn't reported.
 async fn lookup_cache<'a>(
     cache_metadata: Option<&'a CacheMetadata>,
     cache: &ExecutionCache,
@@ -604,7 +550,7 @@ async fn lookup_cache<'a>(
     run_kind: RunKind,
     file_check: FileCheck,
     cancel_token: &CancellationToken,
-) -> Result<CacheLookup<'a>, Report> {
+) -> Result<CacheLookup<'a>, LeafOutcome> {
     let Some(cache_metadata) = cache_metadata else {
         return Ok(CacheLookup::Disabled);
     };
@@ -627,9 +573,9 @@ async fn lookup_cache<'a>(
         anyhow::Ok(globbed_inputs)
     })
     .await
-    .ok_or(Report::Cancelled)?;
+    .ok_or(LeafOutcome::Cancelled)?;
     let globbed_inputs = Arc::new(hashed.map_err(|err| {
-        Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err })
+        LeafOutcome::Failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err })
     })?);
 
     match cache
@@ -650,10 +596,11 @@ async fn lookup_cache<'a>(
         Ok(Some(Err(miss))) => {
             Ok(CacheLookup::Miss { miss, globbed_inputs: Arc::unwrap_or_clone(globbed_inputs) })
         }
-        Ok(None) => Err(Report::Cancelled),
-        Err(err) => {
-            Err(Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }))
-        }
+        Ok(None) => Err(LeafOutcome::Cancelled),
+        Err(err) => Err(LeafOutcome::Failed(ExecutionError::Cache {
+            kind: CacheErrorKind::Lookup,
+            source: err,
+        })),
     }
 }
 
@@ -667,7 +614,7 @@ async fn replay_cache_hit(
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     program_name: &str,
-) -> Report {
+) -> LeafOutcome {
     for output in hit.value.std_outputs.iter() {
         let writer: &mut dyn std::io::Write = match output.kind {
             pipe::OutputKind::StdOut => &mut stdio_config.writers.stdout_writer,
@@ -690,13 +637,10 @@ async fn replay_cache_hit(
                 ExecutionError::Cache { kind: CacheErrorKind::Restore, source: err }
             }
         };
-        return Report::Failed {
-            cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
-            error,
-        };
+        return LeafOutcome::Failed(error);
     }
 
-    Report::CacheHit
+    LeafOutcome::CacheHit
 }
 
 /// Phase 6: drain the child's pipes (if piped) and wait for exit. A pipe

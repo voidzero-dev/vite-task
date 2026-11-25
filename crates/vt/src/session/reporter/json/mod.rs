@@ -6,10 +6,7 @@
 
 mod document;
 
-use std::{
-    cell::RefCell, collections::BTreeMap, io::Write, process::ExitStatus as StdExitStatus, rc::Rc,
-    sync::Arc, time::Duration,
-};
+use std::{cell::RefCell, collections::BTreeMap, io::Write, rc::Rc, sync::Arc, time::Duration};
 
 use document::{
     Baseline, Cache, Change, Changed, CommandStep, Fingerprint, Hit, HowChanged, NestedStep,
@@ -33,7 +30,7 @@ use crate::session::{
         self, BaselineDetails, BaselineOutputs, BaselinePath, CacheMiss, Comparison,
         InputChangeKind,
     },
-    event::{CacheDisabledReason, CacheStatus, CacheUpdateStatus, ExecutionError},
+    event::{CacheDisabledReason, CacheStatus, CacheUpdateOutcome, LeafOutcome},
     json::{self, Version, path_key, task_id},
 };
 
@@ -280,19 +277,25 @@ impl LeafExecutionReporter for JsonLeafReporter {
     ///
     /// A lookup cancelled by Ctrl-C has neither, and also leaves its step
     /// unreported.
-    fn finish(
-        self: Box<Self>,
-        _status: Option<StdExitStatus>,
-        _cache_update_status: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    ) {
-        if let Some(error) = error {
-            let message = vt_str::format!("{:#}", anyhow::Error::from(error));
-            let message = match self.location.as_ref().and_then(|location| location.last()) {
-                Some((id, _)) => vt_str::format!("{id}: {message}"),
-                None => message,
-            };
-            self.state.borrow_mut().errors.push(message);
+    fn finish(self: Box<Self>, outcome: LeafOutcome) {
+        match outcome {
+            LeafOutcome::Failed(error)
+            | LeafOutcome::SpawnedSuccess { cache_update: CacheUpdateOutcome::Failed(error) } => {
+                let message = vt_str::format!("{:#}", anyhow::Error::from(error));
+                let message = match self.location.as_ref().and_then(|location| location.last()) {
+                    Some((id, _)) => vt_str::format!("{id}: {message}"),
+                    None => message,
+                };
+                self.state.borrow_mut().errors.push(message);
+            }
+            LeafOutcome::CacheHit
+            | LeafOutcome::WouldSpawn
+            | LeafOutcome::InProcess
+            | LeafOutcome::SpawnedSuccess {
+                cache_update: CacheUpdateOutcome::Updated { .. } | CacheUpdateOutcome::NotUpdated(_),
+            }
+            | LeafOutcome::SpawnedFailed { .. }
+            | LeafOutcome::Cancelled => {}
         }
     }
 }
@@ -502,7 +505,7 @@ fn change_of(change: &cache::Change) -> Change {
 mod tests {
     use super::*;
     use crate::session::{
-        event::{CacheErrorKind, CacheNotUpdatedReason},
+        event::{CacheErrorKind, ExecutionError},
         json,
         reporter::test_fixtures::{spawn_task, test_path},
     };
@@ -532,11 +535,7 @@ mod tests {
             kind: CacheErrorKind::Lookup,
             source: anyhow::anyhow!("database is locked"),
         };
-        leaf.finish(
-            None,
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::DryRun),
-            Some(error),
-        );
+        leaf.finish(LeafOutcome::Failed(error));
         assert!(reporter.finish().is_err());
     }
 

@@ -21,13 +21,12 @@ use super::{
     glob,
     ignored_paths::relative_cache_root,
     rebuildable::Rebuildable,
-    spawn::ChildOutcome,
 };
 use crate::{
     collections::HashMap,
     session::{
         cache::{CacheEntryValue, ExecutionCache, archive},
-        event::{CacheErrorKind, CacheNotUpdatedReason, CacheUpdateStatus, ExecutionError},
+        event::{CacheErrorKind, CacheNotUpdatedReason, CacheUpdateOutcome, ExecutionError},
     },
 };
 
@@ -53,27 +52,30 @@ struct TrackingOutcome {
 type TrackedEnvValues = BTreeMap<Str, Option<EnvValueHash>>;
 type TrackedEnvQueryValues = BTreeMap<TrackedEnvQuery, BTreeMap<Str, EnvValueHash>>;
 
-/// Decide whether the finished run may be cached, and store it if so.
+/// Decide whether a finished, exit-0 spawn may be cached, and store it if so.
 ///
-/// Every outcome returns a `(status, error)` pair for the caller's single
-/// `finish()` call; this function never reports by itself. The guard clauses
-/// run in priority order — each names the reason the run is *not* cached, and
-/// only a run that passes them all is stored. A run cancelled by Ctrl-C or
-/// fast-fail (`cancel_token`) isn't cached.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the run's full context is genuinely needed to decide and store the cache entry"
+/// Returns a single [`CacheUpdateOutcome`] for the caller's `finish()` call;
+/// this function never reports by itself. The guard clauses run in priority
+/// order — each names the reason the run is *not* cached, and only a run that
+/// passes them all is stored. A run cancelled by Ctrl-C or fast-fail
+/// (`cancel_token`) isn't cached.
+#[cfg_attr(
+    fspy,
+    expect(
+        clippy::too_many_arguments,
+        reason = "the run's full context is genuinely needed to decide and store the cache entry"
+    )
 )]
 pub(super) async fn update_cache(
     cache: &ExecutionCache,
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     state: CacheState<'_>,
-    outcome: &ChildOutcome,
+    #[cfg(fspy)] path_accesses: Option<&Result<fspy::PathAccessIterable, fspy::TrackingIncomplete>>,
     reports: Option<&Reports>,
     duration: Duration,
     cancel_token: &CancellationToken,
-) -> (CacheUpdateStatus, Option<ExecutionError>) {
+) -> CacheUpdateOutcome {
     let CacheState { metadata, globbed_inputs, std_outputs, tracking } = state;
     let fspy = tracking.fspy.as_ref();
 
@@ -82,7 +84,7 @@ pub(super) async fn update_cache(
     {
         // A runner-aware tool short-circuited caching via `disableCache()`
         // (e.g. a dev server with no deterministic output).
-        return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ToolRequested), None);
+        return CacheUpdateOutcome::NotUpdated(CacheNotUpdatedReason::ToolRequested);
     }
 
     // Tool-reported paths to exclude from auto input tracking. Absolute paths
@@ -96,12 +98,7 @@ pub(super) async fn update_cache(
 
     if cancel_token.is_cancelled() {
         // Cancelled (Ctrl-C or sibling failure) — result is untrustworthy.
-        return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled), None);
-    }
-
-    if !outcome.exit_status.success() {
-        // Execution failed with non-zero exit status — don't update cache.
-        return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::NonZeroExitStatus), None);
+        return CacheUpdateOutcome::NotUpdated(CacheNotUpdatedReason::Cancelled);
     }
 
     // The accesses, or `None` when the task was not tracked at all. An
@@ -109,8 +106,8 @@ pub(super) async fn update_cache(
     // arrived is a subset of what it touched, and an entry
     // built from a subset would replay with inputs and outputs missing.
     #[cfg(fspy)]
-    let Ok(path_accesses) = outcome.path_accesses.as_ref().map(Result::as_ref).transpose() else {
-        return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete), None);
+    let Ok(path_accesses) = path_accesses.map(Result::as_ref).transpose() else {
+        return CacheUpdateOutcome::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete);
     };
 
     // Every schema version's folder is in the task cache, not only this one.
@@ -131,7 +128,7 @@ pub(super) async fn update_cache(
         // Task requested fspy auto-inference but this binary was built without
         // `cfg(fspy)`. Task ran, but we can't compute a valid cache entry
         // without tracked path accesses.
-        return (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported), None);
+        return CacheUpdateOutcome::NotUpdated(CacheNotUpdatedReason::FspyUnsupported);
     }
 
     // Collect tool-reported tracked envs for the post-run fingerprint. Env
@@ -139,12 +136,7 @@ pub(super) async fn update_cache(
     // are already part of the spawn fingerprint.
     let (tracked_envs, tracked_env_queries) = match collect_tracked_reports(reports, metadata) {
         Ok(tracked_reports) => tracked_reports,
-        Err(err) => {
-            return (
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::PostRunFingerprint(err)),
-            );
-        }
+        Err(err) => return CacheUpdateOutcome::Failed(ExecutionError::PostRunFingerprint(err)),
     };
 
     // Paths already in globbed_inputs are skipped: they are hashed before
@@ -168,12 +160,7 @@ pub(super) async fn update_cache(
         tracked_env_queries,
     ) {
         Ok(fingerprint) => fingerprint,
-        Err(err) => {
-            return (
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::PostRunFingerprint(err)),
-            );
-        }
+        Err(err) => return CacheUpdateOutcome::Failed(ExecutionError::PostRunFingerprint(err)),
     };
 
     let output_archive = match collect_and_archive_outputs(
@@ -184,10 +171,10 @@ pub(super) async fn update_cache(
     ) {
         Ok(archive) => archive,
         Err(err) => {
-            return (
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::Cache { kind: CacheErrorKind::Update, source: err }),
-            );
+            return CacheUpdateOutcome::Failed(ExecutionError::Cache {
+                kind: CacheErrorKind::Update,
+                source: err,
+            });
         }
     };
 
@@ -199,11 +186,11 @@ pub(super) async fn update_cache(
         output_archive,
     };
     match cache.update(metadata, new_cache_value, cache_dir).await {
-        Ok(upload_error) => (CacheUpdateStatus::Updated { upload_error }, None),
-        Err(err) => (
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-            Some(ExecutionError::Cache { kind: CacheErrorKind::Update, source: err }),
-        ),
+        Ok(upload_error) => CacheUpdateOutcome::Updated { upload_error },
+        Err(err) => CacheUpdateOutcome::Failed(ExecutionError::Cache {
+            kind: CacheErrorKind::Update,
+            source: err,
+        }),
     }
 }
 

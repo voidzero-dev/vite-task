@@ -791,21 +791,19 @@ impl<'a> Session<'a> {
         // summary, so it isn't told about the upload or its result.
         cache.wait_for_uploads(&tokio_util::sync::CancellationToken::new()).await;
         match outcome {
-            // Cache hit — no process was spawned, success. This is a real run,
+            // Cache hit or process exited 0 — success. This is a real run,
             // so nothing is `WouldSpawn`.
-            execute::SpawnOutcome::CacheHit | execute::SpawnOutcome::WouldSpawn => {
-                Ok(ExitStatus::SUCCESS)
-            }
-            // Process ran successfully
-            execute::SpawnOutcome::Spawned(status) if status.success() => Ok(ExitStatus::SUCCESS),
+            execute::SpawnOutcome::CacheHit
+            | execute::SpawnOutcome::WouldSpawn
+            | execute::SpawnOutcome::SpawnedSuccess => Ok(ExitStatus::SUCCESS),
             // Process ran but exited with non-zero status
-            execute::SpawnOutcome::Spawned(status) => {
-                let code = event::exit_status_to_code(status);
+            execute::SpawnOutcome::SpawnedFailed(code) =>
+            {
                 #[expect(
                     clippy::cast_sign_loss,
                     reason = "value is clamped to 1..=255, always positive"
                 )]
-                Ok(ExitStatus(code.clamp(1, 255) as u8))
+                Ok(ExitStatus(code.get().clamp(1, 255) as u8))
             }
             // Infrastructure error — already reported through the reporter's finish().
             // Nothing cancels the tokens above, and a cancelled command wouldn't have run.

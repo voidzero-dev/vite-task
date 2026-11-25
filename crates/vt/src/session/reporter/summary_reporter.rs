@@ -8,7 +8,6 @@ use std::{
     cell::{Cell, RefCell},
     io::Write,
     num::NonZeroUsize,
-    process::ExitStatus as StdExitStatus,
     rc::Rc,
     sync::{Arc, OnceLock},
 };
@@ -23,7 +22,7 @@ use super::{
 };
 use crate::session::{
     cache::remote::UploadError,
-    event::{CacheStatus, CacheUpdateStatus, ExecutionError, RunKind},
+    event::{CacheStatus, CacheUpdateOutcome, LeafOutcome, RunKind},
     reporter::summary::{
         LastRunSummary, SavedError, SpawnOutcome, TaskResult, TaskSummary, format_compact_summary,
         format_full_summary, format_uploads_pending,
@@ -220,15 +219,8 @@ impl LeafExecutionReporter for SummaryLeafReporter {
         self.inner.start(cache_status)
     }
 
-    fn finish(
-        self: Box<Self>,
-        status: Option<StdExitStatus>,
-        cache_update_status: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    ) {
+    fn finish(self: Box<Self>, outcome: LeafOutcome) {
         // Record task summary before forwarding to inner.
-        let saved_error = error.as_ref().map(|error| SavedError::new(error));
-
         if let Some(ref cache_status) = self.cache_status {
             let cwd_relative =
                 if let Ok(Some(rel)) = self.display.cwd.strip_prefix(&self.workspace_path) {
@@ -242,24 +234,43 @@ impl LeafExecutionReporter for SummaryLeafReporter {
                 task_name: self.display.task_display.task_name.clone(),
                 command: self.display.command.clone(),
                 cwd: cwd_relative,
-                result: TaskResult::from_execution(
-                    cache_status,
-                    status,
-                    saved_error.as_ref(),
-                    &cache_update_status,
-                ),
+                result: TaskResult::from_execution(cache_status, &outcome),
             };
-            let upload_error = match &cache_update_status {
-                CacheUpdateStatus::Updated { upload_error } => Some(Arc::clone(upload_error)),
-                CacheUpdateStatus::NotUpdated(_) => None,
+            let upload_error = match &outcome {
+                LeafOutcome::SpawnedSuccess {
+                    cache_update: CacheUpdateOutcome::Updated { upload_error },
+                } => Some(Arc::clone(upload_error)),
+                LeafOutcome::Failed(_)
+                | LeafOutcome::CacheHit
+                | LeafOutcome::WouldSpawn
+                | LeafOutcome::InProcess
+                | LeafOutcome::SpawnedSuccess {
+                    cache_update: CacheUpdateOutcome::NotUpdated(_) | CacheUpdateOutcome::Failed(_),
+                }
+                | LeafOutcome::SpawnedFailed { .. }
+                | LeafOutcome::Cancelled => None,
             };
 
             self.tasks.borrow_mut().push(RecordedTask { summary, upload_error });
-        } else if error.is_some() {
-            self.failed_before_start.set(true);
+        } else {
+            match &outcome {
+                LeafOutcome::Failed(_)
+                | LeafOutcome::SpawnedSuccess { cache_update: CacheUpdateOutcome::Failed(_) } => {
+                    self.failed_before_start.set(true);
+                }
+                LeafOutcome::CacheHit
+                | LeafOutcome::WouldSpawn
+                | LeafOutcome::InProcess
+                | LeafOutcome::SpawnedSuccess {
+                    cache_update:
+                        CacheUpdateOutcome::Updated { .. } | CacheUpdateOutcome::NotUpdated(_),
+                }
+                | LeafOutcome::SpawnedFailed { .. }
+                | LeafOutcome::Cancelled => {}
+            }
         }
 
-        self.inner.finish(status, cache_update_status, error);
+        self.inner.finish(outcome);
     }
 }
 
@@ -270,7 +281,7 @@ mod tests {
     use super::*;
     use crate::session::{
         cache::CacheMiss,
-        event::{CacheErrorKind, CacheNotUpdatedReason},
+        event::{CacheErrorKind, ExecutionError},
         reporter::{
             ColorSupport, InterleavedReporterBuilder,
             test_fixtures::{SharedBuffer, spawn_task, test_path},
@@ -311,11 +322,9 @@ mod tests {
         let upload_error = Arc::new(OnceLock::new());
         let mut leaf = reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind);
         leaf.start(CacheStatus::Miss(CacheMiss::NotFound));
-        leaf.finish(
-            Some(StdExitStatus::default()),
-            CacheUpdateStatus::Updated { upload_error: Arc::clone(&upload_error) },
-            None,
-        );
+        leaf.finish(LeafOutcome::SpawnedSuccess {
+            cache_update: CacheUpdateOutcome::Updated { upload_error: Arc::clone(&upload_error) },
+        });
         reporter.uploads_pending(NonZeroUsize::MIN);
         upload_error.set(UploadError::Interrupted).unwrap();
         reporter.finish().unwrap();
@@ -355,14 +364,10 @@ mod tests {
             ))
             .build();
             let leaf = reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind);
-            leaf.finish(
-                None,
-                CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                Some(ExecutionError::Cache {
-                    kind: CacheErrorKind::Lookup,
-                    source: anyhow::anyhow!("the cache database can't be read"),
-                }),
-            );
+            leaf.finish(LeafOutcome::Failed(ExecutionError::Cache {
+                kind: CacheErrorKind::Lookup,
+                source: anyhow::anyhow!("the cache database can't be read"),
+            }));
             assert_eq!(reporter.finish(), Err(ExitStatus::FAILURE), "{run_kind:?}");
         }
     }

@@ -27,7 +27,10 @@ use crate::session::{
         BaselineDetails, BaselineOutputs, BaselinePath, CacheHitSource, CacheMiss, Change,
         InputChangeKind, format_change,
     },
-    event::{CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, RunKind},
+    event::{
+        CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateOutcome, LeafOutcome,
+        RunKind,
+    },
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -106,42 +109,63 @@ pub enum SpawnedCacheStatus {
     Disabled,
 }
 
-/// Outcome of a spawned process.
+/// Outcome of a spawned process (or a dry-run task that would spawn).
 #[derive(Serialize, Deserialize)]
 pub enum SpawnOutcome {
-    /// Process exited successfully (exit code 0).
-    /// May have a post-execution infrastructure error (cache update or fingerprint failed).
-    /// These only run after exit 0, so this field only exists on the success path.
-    Success {
-        infra_error: Option<SavedError>,
-        /// `true` when the task required fspy auto-inference but the binary was
-        /// built without `cfg(fspy)` (e.g., cross-compiled to an unsupported OS).
-        /// Task ran successfully but cache was not updated.
-        #[serde(default)]
-        fspy_unsupported: bool,
-        /// The IPC server error that caused the cache to be skipped, if any.
-        ipc_server_error: Option<SavedError>,
-        /// `true` when automatic file tracking could not record everything
-        /// the task did, so the inferred inputs and outputs were a subset of
-        /// what it touched. Task ran successfully but cache was not
-        /// updated.
-        #[serde(default)]
-        tracking_incomplete: bool,
-        /// Set when a runner-aware tool called `disableCache()`, skipping
-        /// cache update.
-        tool_disabled_cache: bool,
-        /// Why uploading the entry to the remote cache failed, if it did.
-        /// The local cache was still updated.
-        upload_error: Option<SavedError>,
-    },
+    /// Process exited successfully (exit code 0), with its post-run cache
+    /// outcome.
+    Success(SavedCacheOutcome),
 
     /// Process exited with non-zero status.
     /// [`NonZeroI32`] enforces that exit code 0 is unrepresentable here.
-    /// No `infra_error` field: cache operations are skipped on non-zero exit.
+    /// Cache operations are skipped on non-zero exit.
     Failed { exit_code: NonZeroI32 },
 
     /// Execution failed without a usable process exit status.
     SpawnError(SavedError),
+
+    /// Dry run (`vp run --dry-run`): the cache was checked and a real run
+    /// would spawn the process, so nothing ran.
+    WouldSpawn,
+}
+
+/// Post-run cache outcome for a spawned process that exited with status 0.
+///
+/// Mutually exclusive outcomes cannot coexist, and `upload_error` only exists
+/// when the local cache was updated.
+#[derive(Serialize, Deserialize)]
+pub enum SavedCacheOutcome {
+    /// Local cache was updated. May have a remote-cache upload error recorded
+    /// after background uploads finish.
+    Updated {
+        /// Why uploading the entry to the remote cache failed, if it did.
+        /// The local cache was still updated.
+        upload_error: Option<SavedError>,
+    },
+    /// Cache was not updated for a non-error reason.
+    NotCached(SavedNotCachedReason),
+    /// Updating the cache failed with a post-run infrastructure error
+    /// (fingerprint creation, output archiving, or cache write).
+    Failed(SavedError),
+}
+
+/// Why the cache was not updated after a successful spawned execution.
+#[derive(Serialize, Deserialize)]
+pub enum SavedNotCachedReason {
+    /// Caching was disabled for this task.
+    CacheDisabled,
+    /// Execution was cancelled before the result could be cached.
+    Cancelled,
+    /// The task required fspy auto-inference but the binary was built without
+    /// `cfg(fspy)` (e.g., cross-compiled to an unsupported OS).
+    FspyUnsupported,
+    /// The runner's IPC server failed during execution.
+    IpcServerError(SavedError),
+    /// Automatic file tracking could not record everything the task did, so
+    /// the inferred inputs and outputs were a subset of what it touched.
+    TrackingIncomplete,
+    /// A runner-aware tool called `disableCache()`, skipping cache update.
+    ToolRequested,
 }
 
 /// Why a cache miss occurred.
@@ -228,16 +252,19 @@ impl SummaryStats {
                         SpawnedCacheStatus::Disabled => stats.cache_disabled += 1,
                     }
                     match outcome {
-                        SpawnOutcome::Success { infra_error: Some(_), .. }
+                        SpawnOutcome::Success(SavedCacheOutcome::Failed(_))
                         | SpawnOutcome::Failed { .. }
                         | SpawnOutcome::SpawnError(_) => stats.failed += 1,
-                        SpawnOutcome::Success { .. } => {}
-                    }
-                    if let SpawnOutcome::Success { upload_error: Some(error), .. } = outcome {
-                        stats.upload_failures.push(UploadFailure {
-                            task_name: task.format_task_display(),
-                            reason: error.message.clone(),
-                        });
+                        SpawnOutcome::Success(SavedCacheOutcome::Updated { upload_error }) => {
+                            if let Some(error) = upload_error {
+                                stats.upload_failures.push(UploadFailure {
+                                    task_name: task.format_task_display(),
+                                    reason: error.message.clone(),
+                                });
+                            }
+                        }
+                        SpawnOutcome::Success(SavedCacheOutcome::NotCached(_))
+                        | SpawnOutcome::WouldSpawn => {}
                     }
                 }
             }
@@ -284,131 +311,110 @@ impl SavedCacheMissReason {
     }
 }
 
+impl SavedCacheOutcome {
+    fn from_cache_update(cache_update: &CacheUpdateOutcome) -> Self {
+        match cache_update {
+            CacheUpdateOutcome::Updated { .. } => Self::Updated { upload_error: None },
+            CacheUpdateOutcome::NotUpdated(reason) => {
+                Self::NotCached(SavedNotCachedReason::from_reason(reason))
+            }
+            CacheUpdateOutcome::Failed(error) => Self::Failed(SavedError::new(error)),
+        }
+    }
+}
+
+impl SavedNotCachedReason {
+    fn from_reason(reason: &CacheNotUpdatedReason) -> Self {
+        match reason {
+            CacheNotUpdatedReason::CacheDisabled => Self::CacheDisabled,
+            CacheNotUpdatedReason::Cancelled => Self::Cancelled,
+            CacheNotUpdatedReason::FspyUnsupported => Self::FspyUnsupported,
+            CacheNotUpdatedReason::IpcServerError(err) => {
+                Self::IpcServerError(SavedError::new(err))
+            }
+            CacheNotUpdatedReason::ToolRequested => Self::ToolRequested,
+            CacheNotUpdatedReason::TrackingIncomplete => Self::TrackingIncomplete,
+        }
+    }
+}
+
 impl TaskResult {
     /// Build a [`TaskResult`] from live execution data.
     ///
     /// `cache_status`: the cache status determined at `start()` time.
-    /// `exit_status`: the process exit status, or `None` for cache hit / in-process.
-    /// `saved_error`: an optional pre-converted execution error.
-    /// `cache_update_status`: the post-execution cache update result.
-    pub fn from_execution(
-        cache_status: &CacheStatus,
-        exit_status: Option<std::process::ExitStatus>,
-        saved_error: Option<&SavedError>,
-        cache_update_status: &CacheUpdateStatus,
-    ) -> Self {
-        let fspy_unsupported = matches!(
-            cache_update_status,
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::FspyUnsupported)
-        );
-        let ipc_server_error = match cache_update_status {
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::IpcServerError(err)) => {
-                Some(SavedError::new(err))
-            }
-            _ => None,
-        };
-        let tool_disabled_cache = matches!(
-            cache_update_status,
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::ToolRequested)
-        );
-        let tracking_incomplete = matches!(
-            cache_update_status,
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete)
-        );
-
+    /// `outcome`: the leaf outcome reported to `finish()`.
+    pub fn from_execution(cache_status: &CacheStatus, outcome: &LeafOutcome) -> Self {
         match cache_status {
             // The only error a cache hit can have is a failed restore.
-            CacheStatus::Hit { replayed_duration, source, baseline, .. } => saved_error
-                .map_or_else(
-                    || Self::CacheHit {
-                        saved_duration_ms: duration_to_ms(*replayed_duration),
-                        source: *source,
-                        baseline: baseline.as_deref().cloned(),
-                    },
-                    |error| Self::RestoreFailed { source: *source, error: error.clone() },
-                ),
-            CacheStatus::Disabled(CacheDisabledReason::InProcessExecution) => Self::InProcess,
+            CacheStatus::Hit { replayed_duration, source, baseline, .. } => match outcome {
+                LeafOutcome::CacheHit => Self::CacheHit {
+                    saved_duration_ms: duration_to_ms(*replayed_duration),
+                    source: *source,
+                    baseline: baseline.as_deref().cloned(),
+                },
+                LeafOutcome::Failed(error) => {
+                    Self::RestoreFailed { source: *source, error: SavedError::new(error) }
+                }
+                LeafOutcome::WouldSpawn
+                | LeafOutcome::InProcess
+                | LeafOutcome::SpawnedSuccess { .. }
+                | LeafOutcome::SpawnedFailed { .. }
+                | LeafOutcome::Cancelled => {
+                    unreachable!("cache hit leaf cannot finish with {outcome:?}")
+                }
+            },
+            CacheStatus::Disabled(CacheDisabledReason::InProcessExecution) => match outcome {
+                LeafOutcome::InProcess => Self::InProcess,
+                LeafOutcome::Failed(_)
+                | LeafOutcome::CacheHit
+                | LeafOutcome::WouldSpawn
+                | LeafOutcome::SpawnedSuccess { .. }
+                | LeafOutcome::SpawnedFailed { .. }
+                | LeafOutcome::Cancelled => {
+                    unreachable!("in-process leaf cannot finish with {outcome:?}")
+                }
+            },
             CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Disabled,
-                outcome: spawn_outcome_from_execution(
-                    exit_status,
-                    saved_error,
-                    fspy_unsupported,
-                    ipc_server_error,
-                    tool_disabled_cache,
-                    tracking_incomplete,
-                ),
+                outcome: spawn_outcome_from_leaf(outcome),
             },
             CacheStatus::Miss(cache_miss) => Self::Spawned {
                 cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::from_cache_miss(
                     cache_miss,
                 )),
-                outcome: spawn_outcome_from_execution(
-                    exit_status,
-                    saved_error,
-                    fspy_unsupported,
-                    ipc_server_error,
-                    tool_disabled_cache,
-                    tracking_incomplete,
-                ),
+                outcome: spawn_outcome_from_leaf(outcome),
             },
         }
     }
 
     /// Record why uploading the entry to the remote cache failed. The upload
     /// can fail after the task finishes, so this is set after
-    /// [`Self::from_execution`]. Only a successful spawned task uploads an
-    /// entry, so other results are left as they are.
+    /// [`Self::from_execution`]. Only a successful spawned task whose local
+    /// cache was updated uploads an entry, so other results are left as they are.
     pub fn set_upload_error(&mut self, error: SavedError) {
-        if let Self::Spawned { outcome: SpawnOutcome::Success { upload_error, .. }, .. } = self {
+        if let Self::Spawned {
+            outcome: SpawnOutcome::Success(SavedCacheOutcome::Updated { upload_error }),
+            ..
+        } = self
+        {
             *upload_error = Some(error);
         }
     }
 }
 
-/// Build a [`SpawnOutcome`] from process exit status and optional pre-converted error.
+/// Build a [`SpawnOutcome`] from a spawned leaf's [`LeafOutcome`].
 /// A failed upload is set later, with [`TaskResult::set_upload_error`].
-fn spawn_outcome_from_execution(
-    exit_status: Option<std::process::ExitStatus>,
-    saved_error: Option<&SavedError>,
-    fspy_unsupported: bool,
-    ipc_server_error: Option<SavedError>,
-    tool_disabled_cache: bool,
-    tracking_incomplete: bool,
-) -> SpawnOutcome {
-    match (exit_status, saved_error) {
-        // Spawn error — process never ran
-        (None, Some(err)) => SpawnOutcome::SpawnError(err.clone()),
-        // Process exited successfully, possible infra error
-        (Some(status), _) if status.success() => SpawnOutcome::Success {
-            infra_error: saved_error.cloned(),
-            fspy_unsupported,
-            ipc_server_error,
-            tool_disabled_cache,
-            tracking_incomplete,
-            upload_error: None,
-        },
-        // Process exited with non-zero code
-        (Some(status), _) => {
-            let code = crate::session::event::exit_status_to_code(status);
-            SpawnOutcome::Failed {
-                // exit_status_to_code returns 1..=255 for failed processes (see its
-                // implementation: always positive, non-zero for non-success status).
-                // NonZeroI32::new returns None only for 0, which cannot happen here.
-                exit_code: NonZeroI32::new(code).unwrap_or(NonZeroI32::MIN),
-            }
+fn spawn_outcome_from_leaf(outcome: &LeafOutcome) -> SpawnOutcome {
+    match outcome {
+        LeafOutcome::Failed(err) => SpawnOutcome::SpawnError(SavedError::new(err)),
+        LeafOutcome::SpawnedSuccess { cache_update } => {
+            SpawnOutcome::Success(SavedCacheOutcome::from_cache_update(cache_update))
         }
-        // No exit status, no error — this is the cache hit / in-process path,
-        // handled by TaskResult::CacheHit / InProcess before reaching here.
-        // If we somehow get here, treat as success.
-        (None, None) => SpawnOutcome::Success {
-            infra_error: None,
-            fspy_unsupported: false,
-            ipc_server_error: None,
-            tool_disabled_cache: false,
-            tracking_incomplete: false,
-            upload_error: None,
-        },
+        LeafOutcome::SpawnedFailed { exit_code } => SpawnOutcome::Failed { exit_code: *exit_code },
+        LeafOutcome::WouldSpawn => SpawnOutcome::WouldSpawn,
+        LeafOutcome::CacheHit | LeafOutcome::InProcess | LeafOutcome::Cancelled => {
+            unreachable!("spawned leaf cannot finish with {outcome:?}")
+        }
     }
 }
 
@@ -509,14 +515,16 @@ impl TaskResult {
         match self {
             Self::CacheHit { .. } | Self::InProcess => true,
             Self::RestoreFailed { .. } => false,
-            Self::Spawned { outcome, .. } => matches!(outcome, SpawnOutcome::Success { .. }),
+            Self::Spawned { outcome, .. } => match outcome {
+                SpawnOutcome::Success(_) | SpawnOutcome::WouldSpawn => true,
+                SpawnOutcome::Failed { .. } | SpawnOutcome::SpawnError(_) => false,
+            },
         }
     }
 
     /// Format the cache status detail line for the full summary, with the
     /// lines below it: the other changes of a miss, each aligned under the
-    /// first, and the causes. Only a remote read failure has causes. The
-    /// caller shows [`Self::ipc_server_error`] instead, if there is one.
+    /// first, and the causes (for remote read failures and IPC server errors).
     ///
     /// Examples:
     /// - "→ Cache hit - output replayed - 102.96ms saved"
@@ -526,83 +534,68 @@ impl TaskResult {
     /// - "→ Cache miss: no previous cache entry found"
     /// - "→ Cache disabled in task configuration"
     fn format_cache_detail(&self, run_kind: RunKind) -> (Str, Vec<Str>, &[Str]) {
-        // Tool-reported cache disable — the tool said it shouldn't be cached.
-        if let Self::Spawned {
-            outcome: SpawnOutcome::Success { tool_disabled_cache: true, .. },
-            ..
-        } = self
-        {
-            return (Str::from("→ Not cached: the task opted out of caching"), Vec::new(), &[]);
-        }
-
-        // Tracking came up short, so the inferred inputs and outputs would
-        // have been a subset of what the task touched.
-        if let Self::Spawned {
-            outcome: SpawnOutcome::Success { tracking_incomplete: true, .. },
-            ..
-        } = self
-        {
-            return (
-                Str::from(
-                    "→ Not cached: automatic file tracking couldn't record everything this task did. Configure `input` and `output` manually to enable caching.",
-                ),
-                Vec::new(),
-                &[],
-            );
-        }
-        // fspy-unsupported-on-this-OS message — same overrides precedence as above
-        if let Self::Spawned {
-            outcome: SpawnOutcome::Success { fspy_unsupported: true, .. }, ..
-        } = self
-        {
-            return (
-                Str::from(
-                    "→ Not cached: `input` auto-inference isn't supported on this OS. Configure `input` manually to enable caching.",
-                ),
-                Vec::new(),
-                &[],
-            );
-        }
-
-        let detail = match self {
+        match self {
             Self::CacheHit { saved_duration_ms, source, .. } => {
                 let hit = format_hit(*source);
-                match run_kind {
+                let detail = match run_kind {
                     RunKind::Real => {
                         let d = Duration::from_millis(*saved_duration_ms);
                         let formatted_duration = format_summary_duration(d);
                         vt_str::format!("→ {hit} - output replayed - {formatted_duration} saved")
                     }
                     RunKind::Dry => vt_str::format!("→ {hit}"),
+                };
+                (detail, Vec::new(), &[])
+            }
+            Self::RestoreFailed { source, .. } => (
+                vt_str::format!("→ {}, but the outputs couldn't be restored", format_hit(*source)),
+                Vec::new(),
+                &[],
+            ),
+            Self::InProcess => {
+                (Str::from("→ Cache disabled for built-in command"), Vec::new(), &[])
+            }
+            Self::Spawned {
+                cache_status,
+                outcome: SpawnOutcome::Success(SavedCacheOutcome::NotCached(reason)),
+            } => match reason {
+                SavedNotCachedReason::ToolRequested => {
+                    (Str::from("→ Not cached: the task opted out of caching"), Vec::new(), &[])
                 }
-            }
-            Self::RestoreFailed { source, .. } => {
-                vt_str::format!("→ {}, but the outputs couldn't be restored", format_hit(*source))
-            }
-            Self::InProcess => Str::from("→ Cache disabled for built-in command"),
-            Self::Spawned { cache_status, .. } => match cache_status {
-                SpawnedCacheStatus::Disabled => Str::from("→ Cache disabled in task configuration"),
-                SpawnedCacheStatus::Miss(reason) => match reason {
-                    SavedCacheMissReason::NotFound => {
-                        Str::from("→ Cache miss: no previous cache entry found")
-                    }
-                    SavedCacheMissReason::Changed { changes, .. } => {
-                        let mut lines = changes.iter().map(format_change);
-                        let first =
-                            lines.next().unwrap_or_else(|| Str::from("configuration changed"));
-                        return (vt_str::format!("→ Cache miss: {first}"), lines.collect(), &[]);
-                    }
-                    SavedCacheMissReason::RemoteReadFailed(error) => {
-                        return (
-                            vt_str::format!("→ Cache miss: {}", error.message),
-                            Vec::new(),
-                            &error.causes,
-                        );
-                    }
-                },
+                SavedNotCachedReason::TrackingIncomplete => (
+                    Str::from(
+                        "→ Not cached: automatic file tracking couldn't record everything this task did. Configure `input` and `output` manually to enable caching.",
+                    ),
+                    Vec::new(),
+                    &[],
+                ),
+                SavedNotCachedReason::FspyUnsupported => (
+                    Str::from(
+                        "→ Not cached: `input` auto-inference isn't supported on this OS. Configure `input` manually to enable caching.",
+                    ),
+                    Vec::new(),
+                    &[],
+                ),
+                SavedNotCachedReason::IpcServerError(error) => (
+                    vt_str::format!("→ Not cached: task communication failed: {}", error.message),
+                    Vec::new(),
+                    &error.causes,
+                ),
+                SavedNotCachedReason::CacheDisabled | SavedNotCachedReason::Cancelled => {
+                    format_spawned_cache_status(cache_status)
+                }
             },
-        };
-        (detail, Vec::new(), &[])
+            Self::Spawned {
+                cache_status,
+                outcome:
+                    SpawnOutcome::Success(
+                        SavedCacheOutcome::Updated { .. } | SavedCacheOutcome::Failed(_),
+                    )
+                    | SpawnOutcome::Failed { .. }
+                    | SpawnOutcome::SpawnError(_)
+                    | SpawnOutcome::WouldSpawn,
+            } => format_spawned_cache_status(cache_status),
+        }
     }
 
     /// With `vp run -vv`, the cached run the task was compared with, and the
@@ -637,22 +630,13 @@ impl TaskResult {
         }
     }
 
-    /// The IPC server error that caused the cache to be skipped, if any.
-    const fn ipc_server_error(&self) -> Option<&SavedError> {
-        match self {
-            Self::Spawned { outcome: SpawnOutcome::Success { ipc_server_error, .. }, .. } => {
-                ipc_server_error.as_ref()
-            }
-            _ => None,
-        }
-    }
-
     /// Why uploading the entry to the remote cache failed, if it did.
     const fn upload_error(&self) -> Option<&SavedError> {
         match self {
-            Self::Spawned { outcome: SpawnOutcome::Success { upload_error, .. }, .. } => {
-                upload_error.as_ref()
-            }
+            Self::Spawned {
+                outcome: SpawnOutcome::Success(SavedCacheOutcome::Updated { upload_error }),
+                ..
+            } => upload_error.as_ref(),
             _ => None,
         }
     }
@@ -663,11 +647,36 @@ impl TaskResult {
             Self::CacheHit { .. } | Self::InProcess => None,
             Self::RestoreFailed { error, .. } => Some(error),
             Self::Spawned { outcome, .. } => match outcome {
-                SpawnOutcome::Success { infra_error, .. } => infra_error.as_ref(),
-                SpawnOutcome::Failed { .. } => None,
-                SpawnOutcome::SpawnError(err) => Some(err),
+                SpawnOutcome::Success(SavedCacheOutcome::Failed(err))
+                | SpawnOutcome::SpawnError(err) => Some(err),
+                SpawnOutcome::Success(
+                    SavedCacheOutcome::Updated { .. } | SavedCacheOutcome::NotCached(_),
+                )
+                | SpawnOutcome::Failed { .. }
+                | SpawnOutcome::WouldSpawn => None,
             },
         }
+    }
+}
+
+fn format_spawned_cache_status(cache_status: &SpawnedCacheStatus) -> (Str, Vec<Str>, &[Str]) {
+    match cache_status {
+        SpawnedCacheStatus::Disabled => {
+            (Str::from("→ Cache disabled in task configuration"), Vec::new(), &[])
+        }
+        SpawnedCacheStatus::Miss(reason) => match reason {
+            SavedCacheMissReason::NotFound => {
+                (Str::from("→ Cache miss: no previous cache entry found"), Vec::new(), &[])
+            }
+            SavedCacheMissReason::Changed { changes, .. } => {
+                let mut lines = changes.iter().map(format_change);
+                let first = lines.next().unwrap_or_else(|| Str::from("configuration changed"));
+                (vt_str::format!("→ Cache miss: {first}"), lines.collect(), &[])
+            }
+            SavedCacheMissReason::RemoteReadFailed(error) => {
+                (vt_str::format!("→ Cache miss: {}", error.message), Vec::new(), &error.causes)
+            }
+        },
     }
 }
 
@@ -836,27 +845,17 @@ pub fn format_full_summary(summary: &LastRunSummary, run_kind: RunKind) -> Vec<u
         }
         let _ = writeln!(buf);
 
-        // Cache status detail. An IPC server error short-circuits before any
-        // cache computation in `execute_spawn`, so it takes priority.
+        // Cache status detail.
         let detail_style = task.result.cache_detail_style();
-        if let Some(error) = task.result.ipc_server_error() {
-            write_error_lines(
-                &mut buf,
-                "→ Not cached: task communication failed:".style(detail_style),
-                error,
-                detail_style,
-            );
-        } else {
-            let (cache_detail, more_changes, causes) = task.result.format_cache_detail(run_kind);
-            let _ = writeln!(buf, "      {}", cache_detail.style(detail_style));
-            for change in more_changes {
-                // Aligned under the first change, after "→ Cache miss: ".
-                let _ = writeln!(buf, "                    {}", change.style(detail_style));
-            }
-            write_causes(&mut buf, causes, detail_style);
-            if let Some((baseline, changes)) = task.result.baseline() {
-                write_baseline(&mut buf, baseline, changes);
-            }
+        let (cache_detail, more_changes, causes) = task.result.format_cache_detail(run_kind);
+        let _ = writeln!(buf, "      {}", cache_detail.style(detail_style));
+        for change in more_changes {
+            // Aligned under the first change, after "→ Cache miss: ".
+            let _ = writeln!(buf, "                    {}", change.style(detail_style));
+        }
+        write_causes(&mut buf, causes, detail_style);
+        if let Some((baseline, changes)) = task.result.baseline() {
+            write_baseline(&mut buf, baseline, changes);
         }
 
         if let Some(error) = task.result.upload_error() {
@@ -1212,14 +1211,9 @@ mod tests {
             cwd: Str::default(),
             result: TaskResult::Spawned {
                 cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::NotFound),
-                outcome: SpawnOutcome::Success {
-                    infra_error: None,
-                    fspy_unsupported: false,
-                    ipc_server_error: None,
-                    tracking_incomplete: false,
-                    tool_disabled_cache: false,
+                outcome: SpawnOutcome::Success(SavedCacheOutcome::Updated {
                     upload_error: Some(error),
-                },
+                }),
             },
         }
     }
@@ -1246,24 +1240,24 @@ mod tests {
             cwd: Str::default(),
             result: TaskResult::Spawned {
                 cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::NotFound),
-                outcome: SpawnOutcome::Success {
-                    infra_error: None,
-                    fspy_unsupported: false,
-                    ipc_server_error: None,
-                    tracking_incomplete: false,
-                    tool_disabled_cache: false,
-                    upload_error: None,
-                },
+                outcome: SpawnOutcome::Success(SavedCacheOutcome::Updated { upload_error: None }),
             },
         }
     }
 
     fn cache_disabled_task(task_name: &str) -> TaskSummary {
-        let mut task = cache_miss_task(task_name);
-        if let TaskResult::Spawned { cache_status, .. } = &mut task.result {
-            *cache_status = SpawnedCacheStatus::Disabled;
+        TaskSummary {
+            package_name: Str::from("pkg"),
+            task_name: Str::from(task_name),
+            command: Str::from("build"),
+            cwd: Str::default(),
+            result: TaskResult::Spawned {
+                cache_status: SpawnedCacheStatus::Disabled,
+                outcome: SpawnOutcome::Success(SavedCacheOutcome::NotCached(
+                    SavedNotCachedReason::CacheDisabled,
+                )),
+            },
         }
-        task
     }
 
     fn compact_summary(tasks: Vec<TaskSummary>) -> Str {
@@ -1568,5 +1562,200 @@ mod tests {
             saved.causes.iter().map(Str::as_str).collect::<Vec<_>>(),
             ["failed to read stdout", "Resource temporarily unavailable (os error 11)"]
         );
+    }
+
+    /// Older `last-summary.json` files that used the flat `SpawnOutcome::Success`
+    /// fields fail cleanly with `ReadSummaryError::IncompatibleVersion`.
+    #[test]
+    fn legacy_spawn_outcome_success_reads_as_incompatible_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = vt_path::AbsolutePathBuf::new(dir.path().join("last-summary.json")).unwrap();
+        let legacy_json = r#"{
+            "tasks": [{
+                "package_name": "pkg",
+                "task_name": "build",
+                "command": "build",
+                "cwd": "",
+                "result": {
+                    "Spawned": {
+                        "cache_status": "Disabled",
+                        "outcome": {
+                            "Success": {
+                                "infra_error": null,
+                                "fspy_unsupported": false,
+                                "ipc_server_error": null,
+                                "tracking_incomplete": false,
+                                "tool_disabled_cache": false,
+                                "upload_error": null
+                            }
+                        }
+                    }
+                }
+            }],
+            "exit_code": 0
+        }"#;
+        std::fs::write(&path, legacy_json).unwrap();
+        assert!(matches!(
+            LastRunSummary::read_from_path(&path),
+            Err(ReadSummaryError::IncompatibleVersion)
+        ));
+    }
+
+    #[test]
+    fn from_execution_maps_leaf_outcomes_without_flag_unpacking() {
+        let miss = CacheStatus::Miss(CacheMiss::NotFound);
+        let disabled = CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata);
+
+        let updated = TaskResult::from_execution(
+            &miss,
+            &LeafOutcome::SpawnedSuccess {
+                cache_update: CacheUpdateOutcome::Updated {
+                    upload_error: std::sync::Arc::new(std::sync::OnceLock::new()),
+                },
+            },
+        );
+        assert!(matches!(
+            updated,
+            TaskResult::Spawned {
+                cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::NotFound),
+                outcome: SpawnOutcome::Success(SavedCacheOutcome::Updated { upload_error: None }),
+            }
+        ));
+
+        let cache_disabled = TaskResult::from_execution(
+            &disabled,
+            &LeafOutcome::SpawnedSuccess {
+                cache_update: CacheUpdateOutcome::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
+            },
+        );
+        assert!(matches!(
+            cache_disabled,
+            TaskResult::Spawned {
+                cache_status: SpawnedCacheStatus::Disabled,
+                outcome: SpawnOutcome::Success(SavedCacheOutcome::NotCached(
+                    SavedNotCachedReason::CacheDisabled
+                )),
+            }
+        ));
+
+        let update_failed = TaskResult::from_execution(
+            &miss,
+            &LeafOutcome::SpawnedSuccess {
+                cache_update: CacheUpdateOutcome::Failed(ExecutionError::PostRunFingerprint(
+                    anyhow::anyhow!("hash failed"),
+                )),
+            },
+        );
+        assert!(matches!(
+            update_failed,
+            TaskResult::Spawned {
+                outcome: SpawnOutcome::Success(SavedCacheOutcome::Failed(_)),
+                ..
+            }
+        ));
+        assert!(update_failed.error().is_some());
+
+        let exited_non_zero = TaskResult::from_execution(
+            &miss,
+            &LeafOutcome::SpawnedFailed { exit_code: NonZeroI32::new(2).unwrap() },
+        );
+        assert!(matches!(
+            exited_non_zero,
+            TaskResult::Spawned { outcome: SpawnOutcome::Failed { exit_code }, .. }
+                if exit_code.get() == 2
+        ));
+
+        let dry_run = TaskResult::from_execution(&miss, &LeafOutcome::WouldSpawn);
+        assert!(matches!(dry_run, TaskResult::Spawned { outcome: SpawnOutcome::WouldSpawn, .. }));
+    }
+
+    #[test]
+    fn set_upload_error_only_applies_to_updated_cache_outcome() {
+        let err = saved_error("network error", &[]);
+
+        let mut updated = cache_miss_task("a").result;
+        updated.set_upload_error(err.clone());
+        assert!(updated.upload_error().is_some());
+
+        let mut disabled = cache_disabled_task("b").result;
+        disabled.set_upload_error(err.clone());
+        assert!(disabled.upload_error().is_none());
+
+        let mut failed_update = TaskResult::Spawned {
+            cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::NotFound),
+            outcome: SpawnOutcome::Success(SavedCacheOutcome::Failed(saved_error(
+                "Cache update failed",
+                &[],
+            ))),
+        };
+        failed_update.set_upload_error(err.clone());
+        assert!(failed_update.upload_error().is_none());
+
+        let mut dry_run = TaskResult::Spawned {
+            cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::NotFound),
+            outcome: SpawnOutcome::WouldSpawn,
+        };
+        dry_run.set_upload_error(err);
+        assert!(dry_run.upload_error().is_none());
+    }
+
+    #[test]
+    fn full_summary_formats_not_cached_reasons_and_update_error() {
+        let not_cached = |task_name: &str, reason: SavedNotCachedReason| TaskSummary {
+            package_name: Str::from("pkg"),
+            task_name: Str::from(task_name),
+            command: Str::from("build"),
+            cwd: Str::default(),
+            result: TaskResult::Spawned {
+                cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::NotFound),
+                outcome: SpawnOutcome::Success(SavedCacheOutcome::NotCached(reason)),
+            },
+        };
+
+        let summary = full_summary(vec![
+            not_cached("opt-out", SavedNotCachedReason::ToolRequested),
+            not_cached("incomplete", SavedNotCachedReason::TrackingIncomplete),
+            not_cached("no-fspy", SavedNotCachedReason::FspyUnsupported),
+            not_cached(
+                "ipc",
+                SavedNotCachedReason::IpcServerError(saved_error("broken pipe", &["os error 32"])),
+            ),
+            TaskSummary {
+                package_name: Str::from("pkg"),
+                task_name: Str::from("update-fail"),
+                command: Str::from("build"),
+                cwd: Str::default(),
+                result: TaskResult::Spawned {
+                    cache_status: SpawnedCacheStatus::Miss(SavedCacheMissReason::NotFound),
+                    outcome: SpawnOutcome::Success(SavedCacheOutcome::Failed(saved_error(
+                        "Cache update failed",
+                        &["disk full"],
+                    ))),
+                },
+            },
+        ]);
+
+        assert!(summary.as_str().contains("→ Not cached: the task opted out of caching"));
+        assert!(
+            summary
+                .as_str()
+                .contains("→ Not cached: automatic file tracking couldn't record everything")
+        );
+        assert!(
+            summary
+                .as_str()
+                .contains("→ Not cached: `input` auto-inference isn't supported on this OS.")
+        );
+        assert!(
+            summary.as_str().contains(
+                "→ Not cached: task communication failed: broken pipe\n        ↳ os error 32\n"
+            ),
+            "{summary}"
+        );
+        assert!(
+            summary.as_str().contains("✗ Error: Cache update failed\n        ↳ disk full\n"),
+            "{summary}"
+        );
+        assert!(summary.as_str().contains("• 1 failed"), "{summary}");
     }
 }

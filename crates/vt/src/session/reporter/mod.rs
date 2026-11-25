@@ -38,7 +38,7 @@ mod retrying_writer;
 pub mod summary;
 mod summary_reporter;
 
-use std::{io::Write, num::NonZeroUsize, process::ExitStatus as StdExitStatus};
+use std::{io::Write, num::NonZeroUsize};
 
 pub use grouped::GroupedReporterBuilder;
 pub use interleaved::InterleavedReporterBuilder;
@@ -54,7 +54,7 @@ use vt_str::Str;
 
 use super::{
     cache::format_cache_status_inline,
-    event::{CacheStatus, CacheUpdateStatus, ExecutionError, RunKind},
+    event::{CacheStatus, ExecutionError, LeafOutcome, RunKind},
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -216,20 +216,10 @@ pub trait LeafExecutionReporter {
     /// metadata (caching disabled).
     fn start(&mut self, cache_status: CacheStatus) -> StdioConfig;
 
-    /// Finalize this leaf execution.
-    ///
-    /// - `status`: The process exit status, or `None` for cache hits and in-process commands.
-    /// - `cache_update_status`: Whether the cache was updated after execution.
-    /// - `error`: If `Some`, an error occurred during this leaf's execution (cache lookup
-    ///   failure, spawn failure, fingerprint creation failure, cache update failure).
+    /// Finalize this leaf execution with its typed [`LeafOutcome`].
     ///
     /// This method consumes the reporter — no further calls are possible after `finish()`.
-    fn finish(
-        self: Box<Self>,
-        status: Option<StdExitStatus>,
-        cache_update_status: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    );
+    fn finish(self: Box<Self>, outcome: LeafOutcome);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

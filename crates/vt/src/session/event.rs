@@ -1,4 +1,5 @@
 use std::{
+    num::NonZeroI32,
     process::ExitStatus,
     sync::{Arc, OnceLock},
     time::Duration,
@@ -84,17 +85,11 @@ pub enum CacheDisabledReason {
     NoCacheMetadata,
 }
 
+/// Why the cache was not updated after a spawned process exited with status 0.
 #[derive(Debug)]
 pub enum CacheNotUpdatedReason {
-    /// Cache was hit - task was replayed from cache, no update needed
-    CacheHit,
-    /// A dry run (`vp run --dry-run`) checked the cache without running the
-    /// command.
-    DryRun,
-    /// Caching was disabled for this task
+    /// Caching was disabled for this task.
     CacheDisabled,
-    /// Execution exited with non-zero status
-    NonZeroExitStatus,
     /// Execution was cancelled before the result could be trusted.
     /// Two possible causes:
     /// - Ctrl-C: the user interrupted execution; the task may have
@@ -103,8 +98,8 @@ pub enum CacheNotUpdatedReason {
     ///   while this task was still running.
     Cancelled,
     /// fspy isn't compiled in on this build and the task requires fspy
-    /// (its `input` config includes auto-inference). Task ran but cannot
-    /// be cached without tracked path accesses.
+    /// (its `input` or `output` config includes auto-inference). Task ran but
+    /// cannot be cached without tracked path accesses.
     FspyUnsupported,
     /// The runner's IPC server failed during execution, so the collected
     /// reports may be incomplete. Caching such a run would risk stale
@@ -124,9 +119,11 @@ pub enum CacheNotUpdatedReason {
     TrackingIncomplete,
 }
 
+/// Outcome of the post-run cache update after a spawned process exited with
+/// status 0.
 #[derive(Debug)]
-pub enum CacheUpdateStatus {
-    /// Cache was successfully updated with new fingerprint and outputs
+pub enum CacheUpdateOutcome {
+    /// Cache was successfully updated with new fingerprint and outputs.
     Updated {
         /// Why uploading the entry to the remote cache failed. It's set only
         /// if the upload fails, which can happen in the background after the
@@ -136,10 +133,38 @@ pub enum CacheUpdateStatus {
         /// returns.
         upload_error: Arc<OnceLock<UploadError>>,
     },
-    /// Cache was not updated (with reason).
-    /// The reason is part of the `LeafExecutionReporter` trait contract — reporters
-    /// can use it for detailed logging, even if current implementations don't.
+    /// Cache was not updated for a non-error reason.
     NotUpdated(CacheNotUpdatedReason),
+    /// Updating the cache failed with an infrastructure error (post-run
+    /// fingerprint creation, output archiving, or writing the cache entry).
+    Failed(ExecutionError),
+}
+
+/// Final outcome of a single leaf execution, passed to
+/// [`LeafExecutionReporter::finish`](super::reporter::LeafExecutionReporter::finish).
+///
+/// Each variant carries only the data valid for that outcome, so invalid
+/// combinations (such as an execution error paired with a cache update, or a
+/// cache update on a non-zero exit) are unrepresentable.
+#[derive(Debug)]
+pub enum LeafOutcome {
+    /// An infrastructure error prevented the process from running, prevented
+    /// observing it to completion, or prevented restoring a cache hit's outputs.
+    Failed(ExecutionError),
+    /// Cache hit: no process ran. Captured outputs were replayed, except in a
+    /// dry run.
+    CacheHit,
+    /// In a dry run, a miss or a task without caching: nothing ran.
+    WouldSpawn,
+    /// An in-process (built-in) command completed (or was skipped in a dry run).
+    InProcess,
+    /// The spawned process exited with status 0.
+    SpawnedSuccess { cache_update: CacheUpdateOutcome },
+    /// The spawned process exited with a non-zero status; the cache is never
+    /// updated.
+    SpawnedFailed { exit_code: NonZeroI32 },
+    /// The run was cancelled before the process started.
+    Cancelled,
 }
 
 /// Whether a run runs its commands, or is a dry run (`vp run --dry-run`),
@@ -164,20 +189,22 @@ pub enum CacheStatus {
     },
 }
 
-/// Convert `ExitStatus` to an i32 exit code.
-/// On Unix, if terminated by signal, returns 128 + `signal_number`.
-pub fn exit_status_to_code(status: ExitStatus) -> i32 {
+/// Convert a non-success `ExitStatus` to a non-zero exit code.
+/// On Unix, if terminated by signal, returns `128 + signal_number`.
+/// Falls back to `1` if the OS reports neither a non-zero code nor a signal.
+pub fn non_zero_exit_code(status: ExitStatus) -> NonZeroI32 {
     #[cfg(unix)]
-    {
+    let code = {
         use std::os::unix::process::ExitStatusExt;
         status.code().unwrap_or_else(|| {
             // Process was terminated by signal, use Unix convention: 128 + signal
             status.signal().map_or(1, |sig| 128 + sig)
         })
-    }
+    };
     #[cfg(not(unix))]
-    {
+    let code = {
         // Windows always has an exit code
         status.code().unwrap_or(1)
-    }
+    };
+    NonZeroI32::new(code).unwrap_or(const { NonZeroI32::new(1).unwrap() })
 }

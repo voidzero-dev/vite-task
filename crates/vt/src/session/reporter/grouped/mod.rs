@@ -1,6 +1,6 @@
 //! Grouped reporter — buffers output per task, prints as a block on completion.
 
-use std::{cell::RefCell, io::Write, process::ExitStatus as StdExitStatus, rc::Rc, sync::Arc};
+use std::{cell::RefCell, io::Write, rc::Rc, sync::Arc};
 
 use owo_colors::Style;
 use vt_path::AbsolutePath;
@@ -12,7 +12,7 @@ use super::{
     format_command_with_cache_status, format_task_label, maybe_strip_writer,
     write_leaf_trailing_output,
 };
-use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError, RunKind};
+use crate::session::event::{CacheStatus, CacheUpdateOutcome, LeafOutcome, RunKind};
 
 mod writer;
 
@@ -127,12 +127,22 @@ impl LeafExecutionReporter for GroupedLeafReporter {
         }
     }
 
-    fn finish(
-        self: Box<Self>,
-        _status: Option<StdExitStatus>,
-        _cache_update_status: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    ) {
+    fn finish(self: Box<Self>, outcome: LeafOutcome) {
+        let error = match outcome {
+            LeafOutcome::Failed(error)
+            | LeafOutcome::SpawnedSuccess { cache_update: CacheUpdateOutcome::Failed(error) } => {
+                Some(error)
+            }
+            LeafOutcome::CacheHit
+            | LeafOutcome::WouldSpawn
+            | LeafOutcome::InProcess
+            | LeafOutcome::SpawnedSuccess {
+                cache_update: CacheUpdateOutcome::Updated { .. } | CacheUpdateOutcome::NotUpdated(_),
+            }
+            | LeafOutcome::SpawnedFailed { .. }
+            | LeafOutcome::Cancelled => None,
+        };
+
         // Build grouped block: header + buffered output.
         let mut extra = Vec::new();
         if let Some(ref grouped_buffer) = self.grouped_buffer {
