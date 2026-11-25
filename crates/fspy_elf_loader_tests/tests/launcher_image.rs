@@ -1,6 +1,6 @@
 use elf::{ElfBytes, abi, endian::LittleEndian, file::Class};
 
-const LAUNCHER: &str = env!("CARGO_BIN_FILE_FSPY_ELF_LOADER_fspy_elf_loader_test_launcher");
+const LAUNCHER: &str = env!("CARGO_BIN_FILE_FSPY_ELF_LOADER_TEST_LAUNCHER");
 
 // Inspect the real artifact on every host, including macOS and Windows.
 // Linux execution tests separately check startup and fixed-address collisions.

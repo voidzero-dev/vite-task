@@ -19,12 +19,6 @@ linux-raw-sys = { workspace = true, features = ["auxvec", "no_std"] }
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 tempfile = { workspace = true }
 
-[[bin]]
-name = "fspy_elf_loader_test_launcher"
-path = "tests/support/launcher.rs"
-test = false
-bench = false
-
 [lib]
 doctest = false
 

@@ -10,7 +10,7 @@ use std::{
 
 use ntest::timeout;
 
-const LAUNCHER: &str = env!("CARGO_BIN_FILE_FSPY_ELF_LOADER_fspy_elf_loader_test_launcher");
+const LAUNCHER: &str = env!("CARGO_BIN_FILE_FSPY_ELF_LOADER_TEST_LAUNCHER");
 const FIXTURE: &str = env!("CARGO_BIN_EXE_fixture");
 const FIXTURE_EXEC: &str = env!("CARGO_BIN_EXE_fixture_exec");
 const FIXTURE_STATIC: &str = env!("FIXTURE_STATIC");

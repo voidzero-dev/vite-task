@@ -18,13 +18,13 @@ tempfile = { workspace = true }
 libc = { workspace = true }
 
 [target.'cfg(target_arch = "aarch64")'.dev-dependencies]
-fspy_elf_loader = { path = "../fspy_elf_loader", artifact = "bin:fspy_elf_loader_test_launcher", target = "aarch64-unknown-none-softfloat" }
+fspy_elf_loader_test_launcher = { path = "../fspy_elf_loader_test_launcher", artifact = "bin", target = "aarch64-unknown-none-softfloat" }
 
 [target.'cfg(target_arch = "x86_64")'.dev-dependencies]
-fspy_elf_loader = { path = "../fspy_elf_loader", artifact = "bin:fspy_elf_loader_test_launcher", target = "x86_64-unknown-none" }
+fspy_elf_loader_test_launcher = { path = "../fspy_elf_loader_test_launcher", artifact = "bin", target = "x86_64-unknown-none" }
 
 [lints]
 workspace = true
 
 [package.metadata.cargo-shear]
-ignored = ["fspy_elf_loader"]
+ignored = ["fspy_elf_loader_test_launcher"]

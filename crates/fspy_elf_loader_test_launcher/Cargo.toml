@@ -1,0 +1,21 @@
+[package]
+name = "fspy_elf_loader_test_launcher"
+version = "0.0.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[target.'cfg(target_os = "none")'.dependencies]
+fspy_elf_loader = { path = "../fspy_elf_loader" }
+fspy_nostd = { workspace = true }
+
+[[bin]]
+name = "fspy_elf_loader_test_launcher"
+path = "src/main.rs"
+test = false
+bench = false
+
+[lints]
+workspace = true
