@@ -36,18 +36,6 @@ fn echo_matches_kernel_exec() {
 
 #[test]
 #[timeout(10_000)]
-fn echo_preserves_empty_and_non_utf8_arguments() {
-    let mut command = launcher();
-    command.args(["/bin/echo", "echo", ""]);
-    command.arg(OsStr::from_bytes(b"\xff"));
-    let output = output(command);
-    assert_eq!(output.status.code(), Some(0), "{output:?}");
-    assert_eq!(output.stdout, b" \xff\n");
-    assert!(output.stderr.is_empty());
-}
-
-#[test]
-#[timeout(10_000)]
 fn initializes_dynamic_pie_runtime() {
     check_runtime_image(FIXTURE_DYN_PIE, elf::abi::ET_DYN, true);
 }
@@ -58,34 +46,45 @@ fn initializes_fixed_runtime() {
     check_runtime_image(FIXTURE_DYN_EXEC, elf::abi::ET_EXEC, true);
 }
 
+fn configure_runtime_fixture(
+    command: &mut Command,
+    fixture: &str,
+    interpreter: bool,
+    fixed_address: bool,
+) {
+    command.arg("").arg(OsStr::from_bytes(b"\xff"));
+    command.env_clear().env("FIXTURE_IMAGE", fixture).env("EMPTY", "");
+    command.env("BYTES", OsStr::from_bytes(b"\xff"));
+    if interpreter {
+        command.env("EXPECT_INTERPRETER", "1");
+    }
+    if fixed_address {
+        command.env("EXPECT_FIXED_ADDRESS", "1");
+    }
+}
+
+fn run_loaded_fixture(fixture: &str, interpreter: bool, fixed_address: bool) -> Output {
+    let mut command = launcher();
+    command.args([fixture, "custom-argv-zero"]);
+    configure_runtime_fixture(&mut command, fixture, interpreter, fixed_address);
+    output(command)
+}
+
 fn check_runtime_image(fixture: &str, image_type: u16, interpreter: bool) {
     assert_image(fixture, image_type, interpreter);
-    let configure = |command: &mut Command| {
-        command.arg("").arg(OsStr::from_bytes(b"\xff"));
-        command.env_clear().env("FIXTURE_IMAGE", fixture).env("EMPTY", "");
-        command.env("BYTES", OsStr::from_bytes(b"\xff"));
-        if interpreter {
-            command.env("EXPECT_INTERPRETER", "1");
-        }
-        if image_type == elf::abi::ET_EXEC {
-            command.env("EXPECT_FIXED_ADDRESS", "1");
-        }
-    };
+    let fixed_address = image_type == elf::abi::ET_EXEC;
 
     // Run each fixture through kernel execve first so fixture/toolchain issues
     // are distinguished from loader regressions.
     let mut direct = Command::new(fixture);
     direct.arg0("custom-argv-zero").stderr(Stdio::piped());
-    configure(&mut direct);
+    configure_runtime_fixture(&mut direct, fixture, interpreter, fixed_address);
     let direct = output(direct);
     assert_eq!(direct.status.code(), Some(37), "kernel exec: {direct:?}");
     assert_eq!(direct.stdout, b"runtime-ok\n");
     assert!(direct.stderr.is_empty(), "kernel exec: {direct:?}");
 
-    let mut loaded = launcher();
-    loaded.args([fixture, "custom-argv-zero"]);
-    configure(&mut loaded);
-    let loaded = output(loaded);
+    let loaded = run_loaded_fixture(fixture, interpreter, fixed_address);
     assert_eq!(loaded.status.code(), Some(37), "loader exec: {loaded:?}");
     assert_eq!(loaded.stdout, direct.stdout);
     assert_eq!(loaded.stderr, direct.stderr);
@@ -221,16 +220,7 @@ fn does_not_require_section_headers() {
     write_u64(&mut bytes, offset_of!(libc::Elf64_Ehdr, e_shoff), u64::MAX);
     let file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(file.path(), bytes).unwrap();
-    let path = file.path().to_str().unwrap();
-    let mut command = launcher();
-    command.args([path, "custom-argv-zero", ""]).arg(OsStr::from_bytes(b"\xff"));
-    command
-        .env_clear()
-        .env("FIXTURE_IMAGE", path)
-        .env("EMPTY", "")
-        .env("BYTES", OsStr::from_bytes(b"\xff"))
-        .env("EXPECT_INTERPRETER", "1");
-    let output = output(command);
+    let output = run_loaded_fixture(file.path().to_str().unwrap(), true, false);
     assert_eq!(output.status.code(), Some(37), "{output:?}");
     assert_eq!(output.stdout, b"runtime-ok\n");
     assert!(output.stderr.is_empty(), "{output:?}");
