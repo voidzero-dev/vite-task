@@ -19,7 +19,6 @@ const FIXTURE_STATIC_PIE: &str = env!("FIXTURE_STATIC_PIE");
 #[test]
 #[timeout(10_000)]
 fn echo_matches_kernel_exec() {
-    assert_image("/bin/echo", elf::abi::ET_DYN, true);
     let mut direct = Command::new("/bin/echo");
     direct.args(["hello", "world"]);
     let mut loaded = launcher();

@@ -7,8 +7,11 @@
 
 #define _GNU_SOURCE
 
+#include <dirent.h>
 #include <elf.h>
+#include <limits.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/auxv.h>
@@ -179,6 +182,31 @@ int main(int argc, char **argv) {
         if (!nonzero) {
             fail("AT_RANDOM zero");
         }
+    }
+
+    {
+        DIR *dir = opendir("/proc/self/fd");
+        struct dirent *entry;
+        if (dir == NULL) {
+            fail("opendir /proc/self/fd");
+        }
+        while ((entry = readdir(dir)) != NULL) {
+            char link_path[PATH_MAX];
+            char target[PATH_MAX];
+            ssize_t len;
+            if (entry->d_name[0] == '.') {
+                continue;
+            }
+            snprintf(link_path, sizeof link_path, "/proc/self/fd/%s", entry->d_name);
+            len = readlink(link_path, target, sizeof target - 1);
+            if (len >= 0) {
+                target[len] = '\0';
+                if (strcmp(target, image) == 0) {
+                    fail("executable fd leaked");
+                }
+            }
+        }
+        closedir(dir);
     }
 
     write(STDOUT_FILENO, "runtime-ok\n", 11);
