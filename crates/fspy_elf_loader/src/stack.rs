@@ -31,6 +31,10 @@ use crate::{
 // Includes startup data and room for the target's downward-growing call stack.
 // This MVP uses a fixed mapping rather than Linux's growable initial stack.
 const CAPACITY: usize = 8 * 1024 * 1024;
+// Reserve at least 64 KiB below the initial SP above the guard page so a huge
+// argv/envp fails loudly during loading instead of immediately SIGSEGVing at
+// process entry.
+const MIN_STACK_HEADROOM: usize = 64 * 1024;
 
 struct Builder {
     mapping: Mapping,
@@ -69,7 +73,13 @@ impl Builder {
     }
 
     fn copy(&mut self, bytes: &[u8]) -> usize {
-        let start = self.strings.checked_sub(bytes.len()).expect("initial stack exceeds capacity");
+        self.copy_aligned(bytes, 1)
+    }
+
+    fn copy_aligned(&mut self, bytes: &[u8], align: usize) -> usize {
+        assert!(align.is_power_of_two(), "invalid stack payload alignment");
+        let start = self.strings.checked_sub(bytes.len()).expect("initial stack exceeds capacity")
+            & !(align - 1);
         assert!(start >= self.table_end(), "initial stack exceeds capacity");
         // SAFETY: bytes come from the old process image, not this fresh
         // mapping. The destination is writable and outside the pointer table.
@@ -133,7 +143,7 @@ impl Builder {
         // table bytes move: its pointers already name the final payloads.
         let len = size_of_val(self.words.as_slice());
         let start = self.strings.checked_sub(len).expect("initial stack exceeds capacity") & !15;
-        assert!(start >= self.start, "initial stack exceeds capacity");
+        assert!(start >= add(self.start, MIN_STACK_HEADROOM), "initial stack exceeds capacity");
         // The temporary vector and its owned bump are dropped before handoff.
         // SAFETY: the initialized vector and writable destination are disjoint.
         // The checked destination fits below the strings. The result is
@@ -166,10 +176,10 @@ pub unsafe fn build<'a>(
             continue;
         };
         match key {
+            abi::AT_NULL => break,
             // Replace loader-image addresses below. AT_EXECFD would refer to
             // an old execution descriptor; omit it. Emit our own end marker.
-            abi::AT_NULL
-            | abi::AT_PHDR
+            abi::AT_PHDR
             | abi::AT_PHENT
             | abi::AT_PHNUM
             | abi::AT_ENTRY
@@ -178,6 +188,7 @@ pub unsafe fn build<'a>(
             | abi::AT_EXECFD
             | abi::AT_FLAGS => continue,
             abi::AT_RANDOM => {
+                assert!(entry.value != 0, "null AT_RANDOM");
                 // The value is a pointer, not the random number itself. Copy
                 // the kernel-provided bytes used by libc for stack canaries.
                 // SAFETY: the exec_elf caller supplies the kernel's readable
@@ -185,9 +196,10 @@ pub unsafe fn build<'a>(
                 let bytes = unsafe {
                     core::slice::from_raw_parts(ptr::with_exposed_provenance(entry.value), 16)
                 };
-                entry.value = stack.copy(bytes);
+                entry.value = stack.copy_aligned(bytes, 16);
             }
             abi::AT_PLATFORM | abi::AT_BASE_PLATFORM => {
+                assert!(entry.value != 0, "null auxiliary string");
                 // SAFETY: the caller supplies a live NUL-terminated auxiliary string.
                 let string = unsafe { CStr::from_ptr(ptr::with_exposed_provenance(entry.value)) };
                 entry.value = stack.string(string);
@@ -266,5 +278,60 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn stops_at_at_null_and_aligns_at_random() {
+        let page = fspy_nostd::param::page_size();
+        let random = [0x5a_u8; 16];
+        let image = Image::test_stub(page);
+        let thin = |value: &'static core::ffi::CStr| {
+            CStr::from_units_with_nul(value.to_bytes_with_nul()).unwrap().as_thin()
+        };
+        let inherited = [
+            AuxEntry { key: usize::try_from(abi::AT_PAGESZ).unwrap(), value: page },
+            AuxEntry {
+                key: usize::try_from(abi::AT_RANDOM).unwrap(),
+                value: random.as_ptr().expose_provenance(),
+            },
+            AuxEntry { key: usize::try_from(abi::AT_NULL).unwrap(), value: 0 },
+            // Trailing entry past AT_NULL must not be emitted.
+            AuxEntry { key: 0x1234, value: 0xdead },
+        ];
+        // SAFETY: synthetic image/auxv pointers stay valid throughout build.
+        let sp = unsafe {
+            build(
+                thin(c"prog"),
+                [thin(c"a")].into_iter(),
+                core::iter::empty(),
+                inherited.into_iter(),
+                &image,
+                None,
+                page,
+            )
+        };
+        // SAFETY: build returned a complete initial stack.
+        let stack = unsafe { InitialStack::from_ptr(sp) };
+        let aux_random = stack
+            .auxv()
+            .iter()
+            .find(|entry| entry.key == usize::try_from(abi::AT_RANDOM).unwrap())
+            .unwrap()
+            .value;
+        assert_eq!(aux_random % 16, 0, "AT_RANDOM should be 16-byte aligned");
+        assert!(
+            !stack.auxv().iter().any(|entry| entry.key == 0x1234),
+            "entries after AT_NULL must not be emitted"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "initial stack exceeds capacity")]
+    fn rejects_stack_without_call_headroom() {
+        let page = fspy_nostd::param::page_size();
+        let mut builder = Builder::new(page);
+        let huge = std::vec![b'x'; CAPACITY - MIN_STACK_HEADROOM / 2];
+        let _ = builder.copy(&huge);
+        let _ = builder.finish();
     }
 }

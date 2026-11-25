@@ -54,6 +54,11 @@ impl Image {
     pub fn retain(self) {
         self.mapping.retain();
     }
+
+    #[cfg(test)]
+    pub fn test_stub(page: usize) -> Self {
+        Self { mapping: Mapping::reserve(page), bias: 0, entry: 0x1000, phdr: Some(0x40), phnum: 1 }
+    }
 }
 
 impl File {
@@ -99,6 +104,10 @@ impl File {
             Class::ELF64,
             &unsafe { self.view.bytes() }[self.headers.clone()],
         )
+    }
+
+    pub const fn is_dynamic(&self) -> bool {
+        self.header.e_type == abi::ET_DYN
     }
 
     pub fn interpreter(&self) -> Option<CStr<'_, Fat>> {
@@ -159,14 +168,11 @@ impl File {
                     high = high.max(align_up(end, page));
                 }
                 // ELF treats alignment 0 and 1 as no extra constraint. File
-                // and memory offsets must agree within a page for mmap.
+                // and memory offsets must agree within a page for mmap; like
+                // Linux binfmt_elf, do not reject binaries (e.g. patchelf
+                // output) that are page-congruent but incongruent mod p_align.
                 let align = word(segment.p_align).max(1);
                 assert!(align.is_power_of_two(), "invalid segment alignment");
-                assert_eq!(
-                    start % align,
-                    word(segment.p_offset) % align,
-                    "incongruent ELF alignment"
-                );
                 assert_eq!(
                     start % page,
                     word(segment.p_offset) % page,

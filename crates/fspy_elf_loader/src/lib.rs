@@ -103,6 +103,7 @@ pub unsafe fn exec_elf<'a>(
         )
         .expect("cannot open ELF interpreter");
         let file = image::File::new(fd);
+        assert!(file.is_dynamic(), "fixed-address PT_INTERP is unsupported");
         assert!(file.interpreter().is_none(), "nested PT_INTERP is unsupported");
         file
     });
@@ -146,13 +147,39 @@ pub unsafe fn exec_elf<'a>(
 #[cfg(target_arch = "aarch64")]
 #[unsafe(naked)]
 unsafe extern "C" fn enter(_entry: usize, _stack: *mut usize) -> ! {
-    // X0 holds entry and X1 holds the new SP. Linux start_thread zeros GPRs;
-    // clear the ones this stub dirties. X16 must keep the entry for BR.
+    // X0 holds entry and X1 holds the new SP. Match Linux start_thread by
+    // zeroing GPRs before entry. X16 keeps the entry for BTI-compatible BR.
     core::arch::naked_asm!(
         "mov x16, x0",
         "mov sp, x1",
         "mov x0, xzr",
         "mov x1, xzr",
+        "mov x2, xzr",
+        "mov x3, xzr",
+        "mov x4, xzr",
+        "mov x5, xzr",
+        "mov x6, xzr",
+        "mov x7, xzr",
+        "mov x8, xzr",
+        "mov x9, xzr",
+        "mov x10, xzr",
+        "mov x11, xzr",
+        "mov x12, xzr",
+        "mov x13, xzr",
+        "mov x14, xzr",
+        "mov x15, xzr",
+        "mov x17, xzr",
+        "mov x18, xzr",
+        "mov x19, xzr",
+        "mov x20, xzr",
+        "mov x21, xzr",
+        "mov x22, xzr",
+        "mov x23, xzr",
+        "mov x24, xzr",
+        "mov x25, xzr",
+        "mov x26, xzr",
+        "mov x27, xzr",
+        "mov x28, xzr",
         "mov x29, xzr",
         "mov x30, xzr",
         "br x16",
@@ -164,13 +191,23 @@ unsafe extern "C" fn enter(_entry: usize, _stack: *mut usize) -> ! {
 unsafe extern "C" fn enter(_entry: usize, _stack: *mut usize) -> ! {
     // RDI holds entry and RSI holds the new RSP. RDX is the optional
     // dynamic-linker finalizer (an exit callback); there is none yet.
-    // Clear RBP to mark the end of the frame-pointer chain. RSI held SP.
-    // RDI must keep the entry for JMP.
+    // Match Linux ELF_PLAT_INIT by zeroing GPRs; RDI keeps the entry for JMP.
     core::arch::naked_asm!(
         "mov rsp, rsi",
-        "xor esi, esi",
+        "xor eax, eax",
+        "xor ebx, ebx",
+        "xor ecx, ecx",
         "xor edx, edx",
+        "xor esi, esi",
         "xor ebp, ebp",
+        "xor r8d, r8d",
+        "xor r9d, r9d",
+        "xor r10d, r10d",
+        "xor r11d, r11d",
+        "xor r12d, r12d",
+        "xor r13d, r13d",
+        "xor r14d, r14d",
+        "xor r15d, r15d",
         "jmp rdi"
     );
 }

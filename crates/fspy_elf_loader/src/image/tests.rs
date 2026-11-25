@@ -167,6 +167,28 @@ fn maps_unordered_non_overlapping_loads() {
 }
 
 #[test]
+fn accepts_page_congruent_segment_incongruent_with_large_p_align() {
+    let page = fspy_nostd::param::page_size();
+    let mut bytes = std::vec![0; 3 * page];
+    write_header(&mut bytes, 2, 0x200);
+    load(&mut bytes, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    // Offset = page, vaddr = 2 * page: congruent mod page, incongruent mod 2 * page.
+    let header = &mut bytes[64 + 56..64 + 2 * 56];
+    header.fill(0);
+    header[..4].copy_from_slice(&abi::PT_LOAD.to_le_bytes());
+    header[4..8].copy_from_slice(&(abi::PF_R | abi::PF_W).to_le_bytes());
+    for (field, value) in [(8, page), (16, 2 * page), (32, 0x40), (40, 0x40), (48, 2 * page)] {
+        header[field..field + 8].copy_from_slice(&u64::try_from(value).unwrap().to_le_bytes());
+    }
+    bytes[page] = 0x77;
+    let image = map_bytes(&bytes);
+    // SAFETY: mapped readable segment.
+    unsafe {
+        assert_eq!(ptr::with_exposed_provenance::<u8>(image.bias + 2 * page).read(), 0x77);
+    }
+}
+
+#[test]
 #[should_panic(expected = "overlapping ELF segments")]
 fn rejects_overlapping_load_segments() {
     let page = fspy_nostd::param::page_size();
