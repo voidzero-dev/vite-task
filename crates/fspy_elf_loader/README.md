@@ -21,10 +21,10 @@ the kernel will not, once it never sees the target.
 Native little-endian ELF64 on x86-64 and AArch64. `PT_GNU_STACK` must be
 non-executable. `ET_EXEC` that overlaps any retained mapping is rejected.
 
-| | `PT_INTERP` | no `PT_INTERP` |
-| --- | --- | --- |
-| `ET_DYN` | dynamic PIE: enter ld.so, `AT_BASE` = interp bias | static-PIE / ld.so: enter `e_entry`, `AT_BASE` = 0 |
-| `ET_EXEC` | dynamic non-PIE: same as dynamic PIE | traditional static: enter `e_entry`, `AT_BASE` = 0 |
+|           | `PT_INTERP`                                       | no `PT_INTERP`                                     |
+| --------- | ------------------------------------------------- | -------------------------------------------------- |
+| `ET_DYN`  | dynamic PIE: enter ld.so, `AT_BASE` = interp bias | static-PIE / ld.so: enter `e_entry`, `AT_BASE` = 0 |
+| `ET_EXEC` | dynamic non-PIE: same as dynamic PIE              | traditional static: enter `e_entry`, `AT_BASE` = 0 |
 
 All four cells load. With an interpreter, map both images and enter the
 interpreter even though `AT_ENTRY` names the executable. Without one, map only
@@ -33,10 +33,10 @@ the executable.
 The launcher is itself a static `ET_EXEC` at a high fixed address so the low
 4 GiB stays free for non-PIE targets:
 
-| Arch | Base |
-| --- | --- |
-| x86-64 | `0x5500_0000_0000` (85 TiB) |
-| AArch64 | `0x0002_0000_0000` (8 GiB) |
+| Arch    | Base                        |
+| ------- | --------------------------- |
+| x86-64  | `0x5500_0000_0000` (85 TiB) |
+| AArch64 | `0x0002_0000_0000` (8 GiB)  |
 
 These sit in current LLVM Linux ASan/TSan application regions; GCC 12's AArch64
 TSan still rejects the 8 GiB mapping. The addresses are conventions, not

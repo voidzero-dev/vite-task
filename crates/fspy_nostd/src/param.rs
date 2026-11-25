@@ -33,8 +33,6 @@ mod linux {
     /// larger pages.
     const MAX_PROBE_PAGE: usize = 1 << 20;
 
-    static CACHE: AtomicUsize = AtomicUsize::new(0);
-
     /// Returns the size of a memory page, or 0 if it cannot be determined.
     ///
     /// Discovered from the kernel with a handful of raw syscalls, once per
@@ -48,6 +46,7 @@ mod linux {
     /// this operation" (an allocator refuses the allocation).
     #[must_use]
     pub fn page_size() -> usize {
+        static CACHE: AtomicUsize = AtomicUsize::new(0);
         let cached = CACHE.load(Ordering::Relaxed);
         if cached != 0 {
             return cached;
@@ -127,8 +126,7 @@ mod linux {
 
         #[test]
         fn probe_is_stable_and_cached() {
-            let probed = probe_page_size();
-            assert_eq!(probed, page_size());
+            assert_eq!(probe_page_size(), page_size());
             assert_eq!(page_size(), page_size());
             #[cfg(target_arch = "x86_64")]
             assert_eq!(page_size(), 4096);
