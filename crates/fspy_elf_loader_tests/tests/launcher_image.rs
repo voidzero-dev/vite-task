@@ -1,13 +1,15 @@
 use elf::{ElfBytes, abi, endian::LittleEndian, file::Class};
 
-const LAUNCHER: &str = env!("CARGO_BIN_FILE_FSPY_ELF_LOADER_TEST_LAUNCHER");
+// Embed the artifact bytes at compile time so cross-compiled test archives
+// (such as Windows nextest archives built on Linux) do not depend on the
+// build host's path at runtime.
+const LAUNCHER: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_FSPY_ELF_LOADER_TEST_LAUNCHER"));
 
 // Inspect the real artifact on every host, including macOS and Windows.
 // Linux execution tests separately check startup and fixed-address collisions.
 #[test]
 fn launcher_uses_high_fixed_addresses_without_runtime_relocations() {
-    let bytes = std::fs::read(LAUNCHER).unwrap();
-    let image = ElfBytes::<LittleEndian>::minimal_parse(&bytes).unwrap();
+    let image = ElfBytes::<LittleEndian>::minimal_parse(LAUNCHER).unwrap();
     assert_eq!(image.ehdr.class, Class::ELF64);
     assert_eq!(image.ehdr.e_type, abi::ET_EXEC);
     // Keep the entire image inside a sanitizer application region: x86-64
