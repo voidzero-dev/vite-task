@@ -11,7 +11,7 @@ use super::{
     format_command_with_cache_status, format_task_label, maybe_strip_writer,
     write_leaf_trailing_output,
 };
-use crate::session::event::{CacheStatus, CacheUpdateOutcome, LeafOutcome, RunKind};
+use crate::session::event::{CacheStatus, LeafOutcome, RunKind};
 
 mod writer;
 
@@ -84,12 +84,12 @@ struct LabeledLeafReporter {
 }
 
 impl LeafExecutionReporter for LabeledLeafReporter {
-    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
+    fn start(&mut self, cache_status: &CacheStatus) -> StdioConfig {
         let label = format_task_label(&self.display);
         let line = format_command_with_cache_status(
             &self.display,
             &self.workspace_path,
-            &cache_status,
+            cache_status,
             RunKind::Real,
         );
 
@@ -124,20 +124,7 @@ impl LeafExecutionReporter for LabeledLeafReporter {
     }
 
     fn finish(self: Box<Self>, outcome: LeafOutcome) {
-        let error = match outcome {
-            LeafOutcome::Failed(error)
-            | LeafOutcome::SpawnedSuccess { cache_update: CacheUpdateOutcome::Failed(error) } => {
-                Some(error)
-            }
-            LeafOutcome::CacheHit
-            | LeafOutcome::WouldSpawn
-            | LeafOutcome::InProcess
-            | LeafOutcome::SpawnedSuccess {
-                cache_update: CacheUpdateOutcome::Updated { .. } | CacheUpdateOutcome::NotUpdated(_),
-            }
-            | LeafOutcome::SpawnedFailed { .. }
-            | LeafOutcome::Cancelled => None,
-        };
+        let error = outcome.into_error();
         write_leaf_trailing_output(&self.writer, error, self.started, &[]);
     }
 }
@@ -175,7 +162,7 @@ mod tests {
         let mut reporter = builder.build();
         let mut leaf =
             reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind(item));
-        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+        let stdio_config = leaf.start(&CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
         assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
     }
 }

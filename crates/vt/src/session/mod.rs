@@ -807,7 +807,7 @@ impl<'a> Session<'a> {
             }
             // Infrastructure error — already reported through the reporter's finish().
             // Nothing cancels the tokens above, and a cancelled command wouldn't have run.
-            execute::SpawnOutcome::Failed | execute::SpawnOutcome::Cancelled => {
+            execute::SpawnOutcome::InfraError | execute::SpawnOutcome::Cancelled => {
                 Ok(ExitStatus::FAILURE)
             }
         }

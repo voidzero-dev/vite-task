@@ -140,31 +140,87 @@ pub enum CacheUpdateOutcome {
     Failed(ExecutionError),
 }
 
+/// Cache status for a leaf execution that proceeds to spawn a process (or would
+/// spawn one in a dry run).
+#[derive(Debug)]
+pub enum LiveSpawnCacheStatus {
+    /// Cache lookup missed.
+    Miss(CacheMiss),
+    /// Caching was disabled for this task (no cache metadata).
+    Disabled,
+}
+
+/// Outcome of a spawned process (or a dry-run leaf that would spawn).
+#[derive(Debug)]
+pub enum SpawnLeafOutcome {
+    /// The spawned process exited with status 0.
+    Success { cache_update: CacheUpdateOutcome },
+    /// The spawned process exited with a non-zero status; the cache is never
+    /// updated.
+    Failed { exit_code: NonZeroI32 },
+    /// An infrastructure error prevented spawning the process or observing it
+    /// to completion (e.g., IPC bind, spawn, output forwarding, or wait error).
+    SpawnError(ExecutionError),
+    /// In a dry run, a miss or a task without caching: nothing ran.
+    WouldSpawn,
+}
+
 /// Final outcome of a single leaf execution, passed to
 /// [`LeafExecutionReporter::finish`](super::reporter::LeafExecutionReporter::finish).
 ///
-/// Each variant carries only the data valid for that outcome, so invalid
-/// combinations (such as an execution error paired with a cache update, or a
-/// cache update on a non-zero exit) are unrepresentable.
+/// Self-contained: each variant carries both the cache-status context and the
+/// outcome data valid for that path, so reporters never have to pair `start()`'s
+/// [`CacheStatus`] with `finish()`'s outcome or guard against impossible
+/// combinations.
 #[derive(Debug)]
 pub enum LeafOutcome {
-    /// An infrastructure error prevented the process from running, prevented
-    /// observing it to completion, or prevented restoring a cache hit's outputs.
-    Failed(ExecutionError),
     /// Cache hit: no process ran. Captured outputs were replayed, except in a
     /// dry run.
-    CacheHit,
-    /// In a dry run, a miss or a task without caching: nothing ran.
-    WouldSpawn,
+    CacheHit {
+        replayed_duration: Duration,
+        source: CacheHitSource,
+        baseline: Option<Arc<BaselineDetails>>,
+    },
+    /// Cache hit whose output files couldn't be restored.
+    RestoreFailed { source: CacheHitSource, error: ExecutionError },
     /// An in-process (built-in) command completed (or was skipped in a dry run).
     InProcess,
-    /// The spawned process exited with status 0.
-    SpawnedSuccess { cache_update: CacheUpdateOutcome },
-    /// The spawned process exited with a non-zero status; the cache is never
-    /// updated.
-    SpawnedFailed { exit_code: NonZeroI32 },
-    /// The run was cancelled before the process started.
+    /// A process was spawned (or would spawn in a dry run).
+    Spawned { cache_status: LiveSpawnCacheStatus, outcome: SpawnLeafOutcome },
+    /// An infrastructure error occurred before `start()` (e.g., cache lookup
+    /// failed).
+    FailedBeforeStart(ExecutionError),
+    /// The run was cancelled before `start()`.
     Cancelled,
+}
+
+impl LeafOutcome {
+    /// Extract the infrastructure error carried by this outcome, if any.
+    pub fn into_error(self) -> Option<ExecutionError> {
+        match self {
+            Self::RestoreFailed { error, .. }
+            | Self::FailedBeforeStart(error)
+            | Self::Spawned {
+                outcome:
+                    SpawnLeafOutcome::SpawnError(error)
+                    | SpawnLeafOutcome::Success { cache_update: CacheUpdateOutcome::Failed(error) },
+                ..
+            } => Some(error),
+            Self::CacheHit { .. }
+            | Self::InProcess
+            | Self::Cancelled
+            | Self::Spawned {
+                outcome:
+                    SpawnLeafOutcome::Success {
+                        cache_update:
+                            CacheUpdateOutcome::Updated { .. } | CacheUpdateOutcome::NotUpdated(_),
+                    }
+                    | SpawnLeafOutcome::Failed { .. }
+                    | SpawnLeafOutcome::WouldSpawn,
+                ..
+            } => None,
+        }
+    }
 }
 
 /// Whether a run runs its commands, or is a dry run (`vp run --dry-run`),

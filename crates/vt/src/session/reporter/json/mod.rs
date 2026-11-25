@@ -30,7 +30,7 @@ use crate::session::{
         self, BaselineDetails, BaselineOutputs, BaselinePath, CacheMiss, Comparison,
         InputChangeKind,
     },
-    event::{CacheDisabledReason, CacheStatus, CacheUpdateOutcome, LeafOutcome},
+    event::{CacheDisabledReason, CacheStatus, LeafOutcome},
     json::{self, Version, path_key, task_id},
 };
 
@@ -260,8 +260,8 @@ fn find_step<'a>(
 }
 
 impl LeafExecutionReporter for JsonLeafReporter {
-    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
-        self.report(cache_of(&cache_status));
+    fn start(&mut self, cache_status: &CacheStatus) -> StdioConfig {
+        self.report(cache_of(cache_status));
         // Nothing runs or is replayed, so nothing is written to these.
         StdioConfig {
             suggestion: StdioSuggestion::Piped,
@@ -278,24 +278,13 @@ impl LeafExecutionReporter for JsonLeafReporter {
     /// A lookup cancelled by Ctrl-C has neither, and also leaves its step
     /// unreported.
     fn finish(self: Box<Self>, outcome: LeafOutcome) {
-        match outcome {
-            LeafOutcome::Failed(error)
-            | LeafOutcome::SpawnedSuccess { cache_update: CacheUpdateOutcome::Failed(error) } => {
-                let message = vt_str::format!("{:#}", anyhow::Error::from(error));
-                let message = match self.location.as_ref().and_then(|location| location.last()) {
-                    Some((id, _)) => vt_str::format!("{id}: {message}"),
-                    None => message,
-                };
-                self.state.borrow_mut().errors.push(message);
-            }
-            LeafOutcome::CacheHit
-            | LeafOutcome::WouldSpawn
-            | LeafOutcome::InProcess
-            | LeafOutcome::SpawnedSuccess {
-                cache_update: CacheUpdateOutcome::Updated { .. } | CacheUpdateOutcome::NotUpdated(_),
-            }
-            | LeafOutcome::SpawnedFailed { .. }
-            | LeafOutcome::Cancelled => {}
+        if let Some(error) = outcome.into_error() {
+            let message = vt_str::format!("{:#}", anyhow::Error::from(error));
+            let message = match self.location.as_ref().and_then(|location| location.last()) {
+                Some((id, _)) => vt_str::format!("{id}: {message}"),
+                None => message,
+            };
+            self.state.borrow_mut().errors.push(message);
         }
     }
 }
@@ -535,7 +524,7 @@ mod tests {
             kind: CacheErrorKind::Lookup,
             source: anyhow::anyhow!("database is locked"),
         };
-        leaf.finish(LeafOutcome::Failed(error));
+        leaf.finish(LeafOutcome::FailedBeforeStart(error));
         assert!(reporter.finish().is_err());
     }
 

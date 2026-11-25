@@ -12,7 +12,7 @@ use super::{
 // `maybe_strip_writer` is used for the child-process pipe writers; reporter
 // output decides colour-vs-plain at format time via the `ColorizeExt` helpers
 // in [`super`].
-use crate::session::event::{CacheStatus, CacheUpdateOutcome, LeafOutcome};
+use crate::session::event::{CacheStatus, LeafOutcome};
 
 /// A self-contained [`LeafExecutionReporter`] for single-leaf executions
 /// (e.g., `execute_synthetic`).
@@ -54,7 +54,7 @@ impl PlainReporter {
 }
 
 impl LeafExecutionReporter for PlainReporter {
-    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
+    fn start(&mut self, cache_status: &CacheStatus) -> StdioConfig {
         let is_cache_hit = matches!(cache_status, CacheStatus::Hit { .. });
         // PlainReporter is used for single-leaf synthetic executions (e.g., auto-install).
         // Always suggest inherited stdio so the spawned process can be interactive.
@@ -91,30 +91,19 @@ impl LeafExecutionReporter for PlainReporter {
     }
 
     fn finish(mut self: Box<Self>, outcome: LeafOutcome) {
-        match outcome {
-            // Handle errors — format the full error chain and print inline.
-            LeafOutcome::Failed(error)
-            | LeafOutcome::SpawnedSuccess { cache_update: CacheUpdateOutcome::Failed(error) } => {
-                let message = vt_str::format!("{:#}", anyhow::Error::from(error));
-                let line = format_error_message(&message);
+        if matches!(outcome, LeafOutcome::CacheHit { .. }) {
+            // For cache hits, print the "cache hit" message (unless silent).
+            if !self.silent_if_cache_hit {
+                let line = format_cache_hit_message();
                 let _ = self.writer.write_all(line.as_bytes());
                 let _ = self.writer.flush();
             }
-            // For cache hits, print the "cache hit" message (unless silent).
-            LeafOutcome::CacheHit => {
-                if !self.silent_if_cache_hit {
-                    let line = format_cache_hit_message();
-                    let _ = self.writer.write_all(line.as_bytes());
-                    let _ = self.writer.flush();
-                }
-            }
-            LeafOutcome::WouldSpawn
-            | LeafOutcome::InProcess
-            | LeafOutcome::SpawnedSuccess {
-                cache_update: CacheUpdateOutcome::Updated { .. } | CacheUpdateOutcome::NotUpdated(_),
-            }
-            | LeafOutcome::SpawnedFailed { .. }
-            | LeafOutcome::Cancelled => {}
+        } else if let Some(error) = outcome.into_error() {
+            // Handle errors — format the full error chain and print inline.
+            let message = vt_str::format!("{:#}", anyhow::Error::from(error));
+            let line = format_error_message(&message);
+            let _ = self.writer.write_all(line.as_bytes());
+            let _ = self.writer.flush();
         }
     }
 }
@@ -129,7 +118,7 @@ mod tests {
         let mut reporter =
             PlainReporter::new(false, Box::new(std::io::sink()), ColorSupport::uniform(false));
         let stdio_config =
-            reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+            reporter.start(&CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
         assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
     }
 
@@ -138,7 +127,7 @@ mod tests {
         let mut reporter =
             PlainReporter::new(true, Box::new(std::io::sink()), ColorSupport::uniform(false));
         let stdio_config =
-            reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+            reporter.start(&CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
         assert_eq!(stdio_config.suggestion, StdioSuggestion::Inherited);
     }
 }

@@ -22,10 +22,10 @@ use super::{
 };
 use crate::session::{
     cache::remote::UploadError,
-    event::{CacheStatus, CacheUpdateOutcome, LeafOutcome, RunKind},
+    event::{CacheStatus, LeafOutcome, RunKind},
     reporter::summary::{
-        LastRunSummary, SavedError, SpawnOutcome, TaskResult, TaskSummary, format_compact_summary,
-        format_full_summary, format_uploads_pending,
+        LastRunSummary, LeafSummaryOutcome, SavedError, SpawnOutcome, TaskResult, TaskSummary,
+        format_compact_summary, format_full_summary, format_uploads_pending,
     },
 };
 
@@ -118,7 +118,6 @@ impl GraphExecutionReporter for SummaryGraphReporter {
             failed_before_start: Rc::clone(&self.failed_before_start),
             display: display.clone(),
             workspace_path: Arc::clone(&self.workspace_path),
-            cache_status: None,
         })
     }
 
@@ -210,64 +209,37 @@ struct SummaryLeafReporter {
     failed_before_start: Rc<Cell<bool>>,
     display: ExecutionItemDisplay,
     workspace_path: Arc<AbsolutePath>,
-    cache_status: Option<CacheStatus>,
 }
 
 impl LeafExecutionReporter for SummaryLeafReporter {
-    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
-        self.cache_status = Some(cache_status.clone());
+    fn start(&mut self, cache_status: &CacheStatus) -> StdioConfig {
         self.inner.start(cache_status)
     }
 
     fn finish(self: Box<Self>, outcome: LeafOutcome) {
         // Record task summary before forwarding to inner.
-        if let Some(ref cache_status) = self.cache_status {
-            let cwd_relative =
-                if let Ok(Some(rel)) = self.display.cwd.strip_prefix(&self.workspace_path) {
-                    Str::from(rel.as_str())
-                } else {
-                    Str::default()
+        match LeafSummaryOutcome::from_leaf_outcome(&outcome) {
+            LeafSummaryOutcome::Recorded { result, upload_error } => {
+                let cwd_relative =
+                    if let Ok(Some(rel)) = self.display.cwd.strip_prefix(&self.workspace_path) {
+                        Str::from(rel.as_str())
+                    } else {
+                        Str::default()
+                    };
+
+                let summary = TaskSummary {
+                    package_name: self.display.task_display.package_name.clone(),
+                    task_name: self.display.task_display.task_name.clone(),
+                    command: self.display.command.clone(),
+                    cwd: cwd_relative,
+                    result,
                 };
-
-            let summary = TaskSummary {
-                package_name: self.display.task_display.package_name.clone(),
-                task_name: self.display.task_display.task_name.clone(),
-                command: self.display.command.clone(),
-                cwd: cwd_relative,
-                result: TaskResult::from_execution(cache_status, &outcome),
-            };
-            let upload_error = match &outcome {
-                LeafOutcome::SpawnedSuccess {
-                    cache_update: CacheUpdateOutcome::Updated { upload_error },
-                } => Some(Arc::clone(upload_error)),
-                LeafOutcome::Failed(_)
-                | LeafOutcome::CacheHit
-                | LeafOutcome::WouldSpawn
-                | LeafOutcome::InProcess
-                | LeafOutcome::SpawnedSuccess {
-                    cache_update: CacheUpdateOutcome::NotUpdated(_) | CacheUpdateOutcome::Failed(_),
-                }
-                | LeafOutcome::SpawnedFailed { .. }
-                | LeafOutcome::Cancelled => None,
-            };
-
-            self.tasks.borrow_mut().push(RecordedTask { summary, upload_error });
-        } else {
-            match &outcome {
-                LeafOutcome::Failed(_)
-                | LeafOutcome::SpawnedSuccess { cache_update: CacheUpdateOutcome::Failed(_) } => {
-                    self.failed_before_start.set(true);
-                }
-                LeafOutcome::CacheHit
-                | LeafOutcome::WouldSpawn
-                | LeafOutcome::InProcess
-                | LeafOutcome::SpawnedSuccess {
-                    cache_update:
-                        CacheUpdateOutcome::Updated { .. } | CacheUpdateOutcome::NotUpdated(_),
-                }
-                | LeafOutcome::SpawnedFailed { .. }
-                | LeafOutcome::Cancelled => {}
+                self.tasks.borrow_mut().push(RecordedTask { summary, upload_error });
             }
+            LeafSummaryOutcome::FailedBeforeStart => {
+                self.failed_before_start.set(true);
+            }
+            LeafSummaryOutcome::Cancelled => {}
         }
 
         self.inner.finish(outcome);
@@ -281,7 +253,10 @@ mod tests {
     use super::*;
     use crate::session::{
         cache::CacheMiss,
-        event::{CacheErrorKind, ExecutionError},
+        event::{
+            CacheErrorKind, CacheUpdateOutcome, ExecutionError, LiveSpawnCacheStatus,
+            SpawnLeafOutcome,
+        },
         reporter::{
             ColorSupport, InterleavedReporterBuilder,
             test_fixtures::{SharedBuffer, spawn_task, test_path},
@@ -321,9 +296,14 @@ mod tests {
 
         let upload_error = Arc::new(OnceLock::new());
         let mut leaf = reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind);
-        leaf.start(CacheStatus::Miss(CacheMiss::NotFound));
-        leaf.finish(LeafOutcome::SpawnedSuccess {
-            cache_update: CacheUpdateOutcome::Updated { upload_error: Arc::clone(&upload_error) },
+        leaf.start(&CacheStatus::Miss(CacheMiss::NotFound));
+        leaf.finish(LeafOutcome::Spawned {
+            cache_status: LiveSpawnCacheStatus::Miss(CacheMiss::NotFound),
+            outcome: SpawnLeafOutcome::Success {
+                cache_update: CacheUpdateOutcome::Updated {
+                    upload_error: Arc::clone(&upload_error),
+                },
+            },
         });
         reporter.uploads_pending(NonZeroUsize::MIN);
         upload_error.set(UploadError::Interrupted).unwrap();
@@ -364,7 +344,7 @@ mod tests {
             ))
             .build();
             let leaf = reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind);
-            leaf.finish(LeafOutcome::Failed(ExecutionError::Cache {
+            leaf.finish(LeafOutcome::FailedBeforeStart(ExecutionError::Cache {
                 kind: CacheErrorKind::Lookup,
                 source: anyhow::anyhow!("the cache database can't be read"),
             }));

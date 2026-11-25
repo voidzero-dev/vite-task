@@ -234,7 +234,7 @@ impl ExecutionContext<'_> {
             LeafExecutionKind::InProcess(in_process_execution) => {
                 // In-process (built-in) commands: caching is disabled, execute synchronously
                 let mut stdio_config = leaf_reporter
-                    .start(CacheStatus::Disabled(CacheDisabledReason::InProcessExecution));
+                    .start(&CacheStatus::Disabled(CacheDisabledReason::InProcessExecution));
 
                 // A dry run doesn't run it.
                 if self.run_kind == RunKind::Real {
@@ -266,7 +266,7 @@ impl ExecutionContext<'_> {
                     | SpawnOutcome::WouldSpawn
                     | SpawnOutcome::SpawnedSuccess
                     | SpawnOutcome::Cancelled => false,
-                    SpawnOutcome::SpawnedFailed(_) | SpawnOutcome::Failed => true,
+                    SpawnOutcome::SpawnedFailed(_) | SpawnOutcome::InfraError => true,
                 }
             }
         };

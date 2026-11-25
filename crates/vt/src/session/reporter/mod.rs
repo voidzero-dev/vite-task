@@ -214,7 +214,7 @@ pub trait LeafExecutionReporter {
     /// AND whether caching is enabled — inherited stdio is only used when the
     /// suggestion is [`StdioSuggestion::Inherited`] AND the task has no cache
     /// metadata (caching disabled).
-    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig;
+    fn start(&mut self, cache_status: &CacheStatus) -> StdioConfig;
 
     /// Finalize this leaf execution with its typed [`LeafOutcome`].
     ///
