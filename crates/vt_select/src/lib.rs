@@ -4,7 +4,7 @@ mod interactive;
 use std::io::Write;
 
 pub use fuzzy::fuzzy_match;
-use interactive::{RenderParams, build_display_rows, render_items};
+use interactive::{RenderMode, RenderParams, build_display_rows, render_items};
 use vt_str::Str;
 
 /// An item in the selection list.
@@ -20,17 +20,6 @@ pub struct SelectItem {
     pub group: Option<Str>,
 }
 
-/// Selection mode.
-pub enum Mode<'a> {
-    /// Interactive terminal UI with fuzzy search, keyboard navigation, and selection.
-    ///
-    /// On Enter, `*selected_index` is set to the index of the chosen item
-    /// in the original `items` slice.
-    Interactive { selected_index: &'a mut usize },
-    /// Non-interactive: renders the list once and returns.
-    NonInteractive,
-}
-
 /// Snapshot of the selector's visible state, passed to `after_render`.
 pub struct RenderState<'a> {
     /// Current search text (empty if no filter typed yet).
@@ -39,101 +28,73 @@ pub struct RenderState<'a> {
     pub selected_index: usize,
 }
 
-/// Parameters for [`select_list`].
+/// Parameters for [`select_interactive`].
 pub struct SelectParams<'a> {
     pub items: &'a [SelectItem],
-    /// Initial search query (pre-filled in interactive, used as filter in non-interactive).
+    /// Initial search query pre-filled in the interactive filter.
     pub query: Option<&'a str>,
     /// Header line rendered above the list (e.g. an error message).
     pub header: Option<&'a str>,
-    /// Prompt line rendered above the list in interactive mode.
+    /// Prompt line rendered above the list.
     pub prompt: &'a str,
-    /// Max visible rows (interactive only).
+    /// Max visible rows in the viewport.
     pub page_size: usize,
 }
 
-/// Result of an interactive selection.
-pub enum SelectResult {
-    /// The user selected an item.
-    Selected,
+/// Parameters for [`print_list`].
+pub struct PrintListParams<'a> {
+    pub items: &'a [SelectItem],
+    /// Optional search query used to filter items before printing.
+    pub query: Option<&'a str>,
+    /// Header line rendered above the list (e.g. an error message).
+    pub header: Option<&'a str>,
+}
+
+/// Outcome of an interactive selection.
+pub enum SelectOutcome {
+    /// The user selected the item at this index in the original `items` slice.
+    Selected(usize),
     /// The user cancelled the selection (e.g. Ctrl+C).
     Cancelled,
 }
 
-/// Show a task selection list.
+/// Show an interactive task selection list in the terminal.
 ///
-/// In [`Mode::Interactive`], enters a terminal UI with fuzzy search and
-/// keyboard navigation. `after_render` is called after every render with the
-/// current visible state (useful for emitting test milestones). On Enter,
-/// `*selected_index` is set to the chosen item's index in the original
-/// `items` slice. Returns [`SelectResult::Cancelled`] if the user presses
-/// Ctrl+C.
-///
-/// In [`Mode::NonInteractive`], renders the list once to `writer` and
-/// returns [`SelectResult::Selected`]. `page_size` and `after_render` are
-/// ignored.
+/// Enters raw mode with fuzzy search and keyboard navigation. `after_render` is
+/// called after every render with the current visible state (useful for emitting
+/// test milestones). On Enter, returns [`SelectOutcome::Selected`] with the
+/// chosen item's index in the original `items` slice. Returns
+/// [`SelectOutcome::Cancelled`] if the user presses Ctrl+C.
 ///
 /// # Errors
 ///
-/// Returns an error if terminal I/O fails.
-pub fn select_list(
-    writer: &mut impl Write,
+/// Returns an error if `items` is empty or terminal I/O fails.
+pub fn select_interactive(
     params: &SelectParams<'_>,
-    mode: Mode<'_>,
     after_render: impl FnMut(&RenderState<'_>),
-) -> anyhow::Result<SelectResult> {
-    match mode {
-        Mode::Interactive { selected_index } => interactive::run(
-            params.items,
-            params.query,
-            selected_index,
-            params.header,
-            params.prompt,
-            params.page_size,
-            after_render,
-        ),
-        Mode::NonInteractive => {
-            non_interactive(writer, params.items, params.query, params.header)?;
-            Ok(SelectResult::Selected)
-        }
-    }
+) -> anyhow::Result<SelectOutcome> {
+    interactive::run(params, after_render)
 }
 
-fn non_interactive(
-    writer: &mut impl Write,
-    items: &[SelectItem],
-    query: Option<&str>,
-    header: Option<&str>,
-) -> anyhow::Result<()> {
-    let display_rows = build_display_rows(items, query.unwrap_or_default());
-
-    // When there are no matching items, just print the header (if any) and
-    // return early — avoids showing a redundant "No matching tasks." line
-    // after a "not found" header.
-    let has_items = display_rows.iter().any(interactive::DisplayRow::is_item);
-    if !has_items {
-        if let Some(h) = header {
-            writeln!(writer, "{h}")?;
-        }
-        return Ok(());
-    }
-
-    let row_count = display_rows.len();
+/// Print a non-interactive task list once to `writer`.
+///
+/// Items are filtered by `params.query` (if any) and grouped so current-package
+/// tasks appear first, rendered flat without group headers or truncation. When
+/// no items match, only `params.header` (if any) is written.
+///
+/// # Errors
+///
+/// Returns an error if writing to `writer` fails.
+pub fn print_list(writer: &mut impl Write, params: &PrintListParams<'_>) -> anyhow::Result<()> {
+    let display_rows = build_display_rows(params.items, params.query.unwrap_or_default());
 
     render_items(
         writer,
         &RenderParams {
-            items,
+            items: params.items,
             display_rows: &display_rows,
-            selected: None,
-            visible_row_range: 0..row_count,
-            hidden_count: 0,
-            header,
-            prompt: "",
-            query: None,
-            show_group_headers: false,
-            line_ending: "\n",
-            max_line_width: usize::MAX,
+            header: params.header,
+            mode: RenderMode::NonInteractive,
         },
     )?;
 
