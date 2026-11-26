@@ -80,9 +80,11 @@ pub(crate) enum PackageNamePattern {
     /// but exactly one `@*/bar` package exists, that package is matched.
     /// pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L303-L306>
     ///
-    /// When `unique` is true, resolution errors if multiple packages share the
-    /// name. Set for `pkg#task` CLI specifiers; false for `--filter`.
-    Exact { name: Str, unique: bool },
+    /// When `exactly_one` is true, resolution errors unless the name picks
+    /// exactly one package: none found, several sharing the name, or several
+    /// scoped candidates. Set for `pkg#task` CLI specifiers; false for
+    /// `--filter`, where an unmatched name only warns.
+    Exact { name: Str, exactly_one: bool },
 
     /// Glob pattern (e.g. `@scope/*`, `*-utils`). Iterates all packages.
     ///
@@ -404,7 +406,7 @@ impl PackageQueryArgs {
                         exclude: false,
                         selector: PackageSelector::Name(PackageNamePattern::Exact {
                             name,
-                            unique: true,
+                            exactly_one: true,
                         }),
                         traversal,
                         source: None,
@@ -613,7 +615,7 @@ fn build_name_pattern(name: &str) -> Result<PackageNamePattern, PackageFilterPar
     if glob.clone().partition().1.is_some() {
         Ok(PackageNamePattern::Glob(Box::new(GlobPattern::new(glob, name.into()))))
     } else {
-        Ok(PackageNamePattern::Exact { name: name.into(), unique: false })
+        Ok(PackageNamePattern::Exact { name: name.into(), exactly_one: false })
     }
 }
 

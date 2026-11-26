@@ -1,0 +1,29 @@
+[[e2e]]
+name = "next_build_moved_pages"
+comment = """
+`next build` (Next.js 15) on a one-page site renders each static page, `index.html`, `404.html` and `500.html`, into `.next/export`, renames it into `.next/server/pages`, and removes `.next/export`.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "the build log's progress lines, sizes and chunk hashes vary, so it's redacted", redact = { '(?s)   ▲ Next\.js.*prerendered as static content' = '<next build output: build steps, page progress, route sizes and chunk hashes>' } },
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    ".next",
+  ], comment = "remove the build output, as on a clean checkout" },
+  { argv = [
+    "vt",
+    "run",
+    "build",
+  ], comment = "a cache hit restores the pages Next.js renamed into `.next/server/pages`", redact = { '(?s)   ▲ Next\.js.*prerendered as static content' = '<next build output: build steps, page progress, route sizes and chunk hashes>' } },
+  [
+    "vtt",
+    "stat-file",
+    ".next/server/pages/index.html",
+  ],
+]

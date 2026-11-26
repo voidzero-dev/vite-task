@@ -214,31 +214,21 @@ impl<'a> State<'a> {
     }
 }
 
-/// Parameters for rendering a task list.
-pub struct RenderParams<'a> {
-    pub items: &'a [SelectItem],
-    pub display_rows: &'a [DisplayRow],
-    /// Which selectable item is highlighted (0-based among Item rows),
-    /// or `None` for non-interactive.
-    pub selected: Option<usize>,
+/// Interactive-only rendering parameters.
+struct InteractiveRender<'a> {
+    /// Which selectable item is highlighted (0-based among `Item` rows).
+    selected: usize,
+    /// Prompt line text rendered above the list.
+    prompt: &'a str,
+    /// Current search text rendered after the prompt.
+    query: &'a str,
     /// Which slice of `display_rows` to show.
-    pub visible_row_range: std::ops::Range<usize>,
+    visible_row_range: std::ops::Range<usize>,
     /// Number of selectable items beyond the visible range.
-    pub hidden_count: usize,
-    pub header: Option<&'a str>,
-    /// Prompt line text, rendered when `query` is `Some` (interactive only).
-    pub prompt: &'a str,
-    /// Current search text. `Some` enables the prompt line (interactive only).
-    pub query: Option<&'a str>,
-    /// Whether to render group header lines. When `false`, items are still
-    /// grouped/sorted by `SelectItem::group` but headers are hidden.
-    pub show_group_headers: bool,
-    /// `"\r\n"` for raw mode, `"\n"` for normal.
-    pub line_ending: &'a str,
+    hidden_count: usize,
     /// Maximum visible width per line. Descriptions are truncated to prevent
-    /// line wrapping, which would break cursor-based clearing in interactive mode.
-    /// Use `usize::MAX` to disable truncation (non-interactive / piped output).
-    pub max_line_width: usize,
+    /// line wrapping, which would break cursor-based clearing in raw mode.
+    max_line_width: usize,
 }
 
 /// Truncate a description string to fit within `max_chars`, appending ellipsis if needed.
@@ -254,48 +244,37 @@ fn truncate_desc<'a>(desc: &'a str, max_chars: usize, buf: &'a mut Str) -> &'a s
     buf.as_str()
 }
 
-/// Render the item list. Shared rendering logic used by both interactive
-/// and non-interactive modes (via [`crate::non_interactive`]).
+/// Render the interactive terminal UI (`\r\n` line endings, prompt + query,
+/// aligned descriptions truncated to `max_line_width`, group headers,
+/// highlight marker, pagination footer, and empty-search hint).
 ///
 /// Returns the number of lines written.
-#[expect(clippy::too_many_lines, reason = "single rendering function with sequential layout logic")]
-pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyhow::Result<usize> {
-    let RenderParams {
-        items,
-        display_rows,
-        selected,
-        visible_row_range,
-        hidden_count,
-        header,
-        prompt,
-        query,
-        show_group_headers,
-        line_ending,
-        max_line_width: _,
-    } = params;
+fn render_interactive_items(
+    writer: &mut impl Write,
+    items: &[SelectItem],
+    display_rows: &[DisplayRow],
+    header: Option<&str>,
+    interactive: &InteractiveRender<'_>,
+) -> anyhow::Result<usize> {
+    const LINE_ENDING: &str = "\r\n";
 
     let mut lines = 0usize;
 
     // Header (e.g. error message)
     if let Some(header) = header {
-        write!(writer, "{header}{line_ending}")?;
+        write!(writer, "{header}{LINE_ENDING}")?;
         lines += 1;
     }
 
-    let is_interactive = query.is_some();
-
-    // Prompt line (interactive only)
-    if let Some(q) = query {
-        // Print ": " separator before query only when query is non-empty,
-        // to avoid a trailing space that Windows ConPTY would strip.
-        if q.is_empty() {
-            write!(writer, "{prompt}{line_ending}")?;
-        } else {
-            write!(writer, "{prompt} {q}{line_ending}")?;
-        }
-        write!(writer, "{line_ending}")?;
-        lines += 2;
+    // Print " " separator before query only when query is non-empty,
+    // to avoid a trailing space that Windows ConPTY would strip.
+    if interactive.query.is_empty() {
+        write!(writer, "{}{LINE_ENDING}", interactive.prompt)?;
+    } else {
+        write!(writer, "{} {}{LINE_ENDING}", interactive.prompt, interactive.query)?;
     }
+    write!(writer, "{LINE_ENDING}")?;
+    lines += 2;
 
     // Single pre-pass: compute has_groups, max_name_width, has_items, and
     // item_ordinal (count of Item rows before the visible range) together.
@@ -303,120 +282,85 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
     let mut max_name_width = 0usize;
     let mut has_items = false;
     let mut item_ordinal = 0usize;
-    if is_interactive {
-        for (i, row) in display_rows.iter().enumerate() {
-            match row {
-                DisplayRow::Header(_) => has_groups = *show_group_headers,
-                DisplayRow::Item { item_index } => {
-                    has_items = true;
-                    let w = items[*item_index].display_name.chars().count();
-                    if w > max_name_width {
-                        max_name_width = w;
-                    }
-                    if i < visible_row_range.start {
-                        item_ordinal += 1;
-                    }
+    for (i, row) in display_rows.iter().enumerate() {
+        match row {
+            DisplayRow::Header(_) => has_groups = true,
+            DisplayRow::Item { item_index } => {
+                has_items = true;
+                let w = items[*item_index].display_name.chars().count();
+                if w > max_name_width {
+                    max_name_width = w;
+                }
+                if i < interactive.visible_row_range.start {
+                    item_ordinal += 1;
                 }
             }
         }
-    } else {
-        has_items = display_rows.iter().any(DisplayRow::is_item);
     }
 
-    // Compute the absolute column where commands start (interactive only).
+    // Compute the absolute column where commands start.
     // All items — root and grouped — align their descriptions to the same column.
     let max_prefix = if has_groups { GROUP_PREFIX_WIDTH } else { ROOT_PREFIX_WIDTH };
     // command_col = max_prefix + max_name_width + " "
-    let command_col = if is_interactive { max_prefix + max_name_width + 1 } else { 0 };
+    let command_col = max_prefix + max_name_width + 1;
 
     // Render visible display rows
-    for ri in visible_row_range.clone() {
-        let row = &display_rows[ri];
+    for row in display_rows.get(interactive.visible_row_range.clone()).unwrap_or_default() {
         match row {
             DisplayRow::Header(group_name) => {
-                if !show_group_headers {
-                    continue;
-                }
-                if is_interactive {
-                    write!(
-                        writer,
-                        "    {dim}{name}{reset}{line_ending}",
-                        dim = SetAttribute(Attribute::Dim),
-                        name = group_name,
-                        reset = SetAttribute(Attribute::Reset),
-                    )?;
-                } else {
-                    write!(writer, "  {group_name}{line_ending}")?;
-                }
+                write!(
+                    writer,
+                    "    {dim}{name}{reset}{LINE_ENDING}",
+                    dim = SetAttribute(Attribute::Dim),
+                    name = group_name,
+                    reset = SetAttribute(Attribute::Reset),
+                )?;
                 lines += 1;
             }
             DisplayRow::Item { item_index } => {
                 let item = &items[*item_index];
-                let is_selected = *selected == Some(item_ordinal);
+                let is_selected = interactive.selected == item_ordinal;
                 item_ordinal += 1;
                 let is_in_group = item.group.is_some();
 
                 let name = item.display_name.as_str();
                 let name_width = name.chars().count();
-
-                let prefix_width = if is_interactive {
-                    if is_in_group { GROUP_PREFIX_WIDTH } else { ROOT_PREFIX_WIDTH }
-                } else {
-                    2
-                };
+                let prefix_width = if is_in_group { GROUP_PREFIX_WIDTH } else { ROOT_PREFIX_WIDTH };
 
                 // Padding after name to align all commands at `command_col`.
-                let name_padding =
-                    if is_interactive { command_col - prefix_width - name_width - 1 } else { 0 };
-                let max_desc_chars = params.max_line_width.saturating_sub(if is_interactive {
-                    command_col
-                } else {
-                    prefix_width + name_width + 2
-                });
+                let name_padding = command_col - prefix_width - name_width - 1;
+                let max_desc_chars = interactive.max_line_width.saturating_sub(command_col);
 
                 let mut truncated = Str::default();
                 let display_desc =
                     truncate_desc(item.description.as_str(), max_desc_chars, &mut truncated);
 
-                if is_interactive {
-                    let prefix = match (is_selected, is_in_group) {
-                        (true, true) => "  \u{203a}   ",
-                        (true, false) => "  \u{203a} ",
-                        (false, true) => "      ",
-                        (false, false) => "    ",
-                    };
-                    let reset = SetAttribute(Attribute::Reset);
-                    let dark_grey = SetForegroundColor(Color::DarkGrey);
-                    if is_selected {
-                        let blue = SetForegroundColor(Color::Blue);
-                        let bold = SetAttribute(Attribute::Bold);
-                        write!(
-                            writer,
-                            "{dark_grey}{prefix}{reset}{blue}{bold}{name}{reset}{dark_grey}{:>pad$} {desc}{reset}{line_ending}",
-                            "",
-                            pad = name_padding,
-                            desc = display_desc,
-                        )?;
-                    } else {
-                        write!(
-                            writer,
-                            "{prefix}{name}{dark_grey}{:>pad$} {desc}{reset}{line_ending}",
-                            "",
-                            pad = name_padding,
-                            desc = display_desc,
-                        )?;
-                    }
-                } else if is_selected {
+                let prefix = match (is_selected, is_in_group) {
+                    (true, true) => "  \u{203a}   ",
+                    (true, false) => "  \u{203a} ",
+                    (false, true) => "      ",
+                    (false, false) => "    ",
+                };
+                let reset = SetAttribute(Attribute::Reset);
+                let dark_grey = SetForegroundColor(Color::DarkGrey);
+                if is_selected {
+                    let blue = SetForegroundColor(Color::Blue);
                     let bold = SetAttribute(Attribute::Bold);
-                    let reset = SetAttribute(Attribute::Reset);
                     write!(
                         writer,
-                        "{bold}> {name}: {desc}{reset}{line_ending}",
-                        name = item.display_name,
+                        "{dark_grey}{prefix}{reset}{blue}{bold}{name}{reset}{dark_grey}{:>pad$} {desc}{reset}{LINE_ENDING}",
+                        "",
+                        pad = name_padding,
                         desc = display_desc,
                     )?;
                 } else {
-                    write!(writer, "  {}: {display_desc}{line_ending}", item.display_name)?;
+                    write!(
+                        writer,
+                        "{prefix}{name}{dark_grey}{:>pad$} {desc}{reset}{LINE_ENDING}",
+                        "",
+                        pad = name_padding,
+                        desc = display_desc,
+                    )?;
                 }
                 lines += 1;
             }
@@ -424,19 +368,46 @@ pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyho
     }
 
     // Footer: hidden items count
-    if *hidden_count > 0 {
-        write!(writer, "  (\u{2026}{hidden_count} more){line_ending}")?;
+    if interactive.hidden_count > 0 {
+        write!(writer, "  (\u{2026}{} more){LINE_ENDING}", interactive.hidden_count)?;
         lines += 1;
     }
 
     // Empty state
     if !has_items {
-        write!(writer, "  No matching tasks. Press Escape to clear search.{line_ending}")?;
+        write!(writer, "  No matching tasks. Press Escape to clear search.{LINE_ENDING}")?;
         lines += 1;
     }
 
     writer.flush()?;
     Ok(lines)
+}
+
+/// Render flat non-interactive output (`\n` line endings, no prompt, no cursor,
+/// no group headers, no truncation).
+pub fn render_non_interactive_items(
+    writer: &mut impl Write,
+    items: &[SelectItem],
+    display_rows: &[DisplayRow],
+    header: Option<&str>,
+) -> anyhow::Result<()> {
+    // Header (e.g. error message)
+    if let Some(header) = header {
+        writeln!(writer, "{header}")?;
+    }
+
+    // When there are no matching items, this loop writes nothing so only the
+    // header is printed — avoids showing a redundant "No matching tasks." line
+    // after a "not found" header.
+    for row in display_rows {
+        if let DisplayRow::Item { item_index } = row {
+            let item = &items[*item_index];
+            writeln!(writer, "  {}: {}", item.display_name, item.description)?;
+        }
+    }
+
+    writer.flush()?;
+    Ok(())
 }
 
 fn render(
@@ -460,19 +431,17 @@ fn render(
     // Query terminal width on each render to handle resize
     let max_line_width = terminal::size().map_or(80, |(w, _)| w as usize);
 
-    let lines = render_items(
+    let lines = render_interactive_items(
         stdout,
-        &RenderParams {
-            items: state.items,
-            display_rows: &state.display_rows,
-            selected: Some(state.selected),
+        state.items,
+        &state.display_rows,
+        header,
+        &InteractiveRender {
+            selected: state.selected,
+            prompt,
+            query: &state.query,
             visible_row_range: state.visible_display_rows(),
             hidden_count: state.hidden_item_count(),
-            header,
-            prompt,
-            query: Some(&state.query),
-            show_group_headers: true,
-            line_ending: "\r\n",
             max_line_width,
         },
     )?;
@@ -482,15 +451,10 @@ fn render(
 }
 
 pub fn run(
-    items: &[SelectItem],
-    initial_query: Option<&str>,
-    selected_index: &mut usize,
-    header: Option<&str>,
-    prompt: &str,
-    page_size: usize,
+    params: &super::SelectParams<'_>,
     mut after_render: impl FnMut(&RenderState<'_>),
-) -> anyhow::Result<super::SelectResult> {
-    if items.is_empty() {
+) -> anyhow::Result<super::SelectOutcome> {
+    if params.items.is_empty() {
         anyhow::bail!("No tasks available");
     }
 
@@ -499,10 +463,10 @@ pub fn run(
     let mut out = stdout();
     crossterm::execute!(out, cursor::Hide)?;
 
-    let mut state = State::new(items, initial_query, page_size);
+    let mut state = State::new(params.items, params.query, params.page_size);
 
     // Initial render
-    render(&mut out, &mut state, header, prompt)?;
+    render(&mut out, &mut state, params.header, params.prompt)?;
     after_render(&RenderState { query: &state.query, selected_index: state.selected });
 
     loop {
@@ -516,15 +480,14 @@ pub fn run(
                 }
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                     cleanup(&mut out, &state)?;
-                    return Ok(super::SelectResult::Cancelled);
+                    return Ok(super::SelectOutcome::Cancelled);
                 }
                 KeyCode::Enter => {
                     let Some(idx) = state.selected_item_index() else {
                         continue;
                     };
-                    *selected_index = idx;
                     cleanup(&mut out, &state)?;
-                    return Ok(super::SelectResult::Selected);
+                    return Ok(super::SelectOutcome::Selected(idx));
                 }
                 KeyCode::Up => {
                     state.move_up();
@@ -545,7 +508,7 @@ pub fn run(
             _ => continue,
         }
 
-        render(&mut out, &mut state, header, prompt)?;
+        render(&mut out, &mut state, params.header, params.prompt)?;
         after_render(&RenderState { query: &state.query, selected_index: state.selected });
     }
 }
@@ -619,28 +582,14 @@ mod tests {
     }
 
     #[expect(clippy::disallowed_types, reason = "test helper building arbitrary output string")]
-    fn render_to_string(items: &[SelectItem], max_line_width: usize) -> String {
-        let display_rows = build_display_rows(items, "");
-        let len = display_rows.len();
+    fn render_non_interactive_to_string(
+        items: &[SelectItem],
+        query: Option<&str>,
+        header: Option<&str>,
+    ) -> String {
         let mut buf = Vec::new();
-        render_items(
-            &mut buf,
-            &RenderParams {
-                items,
-                display_rows: &display_rows,
-                selected: Some(0),
-                visible_row_range: 0..len,
-                hidden_count: 0,
-                header: None,
-                prompt: TASK_PROMPT,
-                query: None,
-                show_group_headers: false,
-                line_ending: "\n",
-                max_line_width,
-            },
-        )
-        .unwrap();
-        strip_ansi(&String::from_utf8(buf).unwrap())
+        crate::print_list(&mut buf, &crate::PrintListParams { items, query, header }).unwrap();
+        String::from_utf8(buf).unwrap()
     }
 
     #[expect(clippy::disallowed_types, reason = "test helper building arbitrary output string")]
@@ -652,19 +601,17 @@ mod tests {
         let display_rows = build_display_rows(items, query);
         let len = display_rows.len();
         let mut buf = Vec::new();
-        render_items(
+        render_interactive_items(
             &mut buf,
-            &RenderParams {
-                items,
-                display_rows: &display_rows,
-                selected: Some(0),
+            items,
+            &display_rows,
+            None,
+            &InteractiveRender {
+                selected: 0,
+                prompt: TASK_PROMPT,
+                query,
                 visible_row_range: 0..len,
                 hidden_count: 0,
-                header: None,
-                prompt: TASK_PROMPT,
-                query: Some(query),
-                show_group_headers: true,
-                line_ending: "\n",
                 max_line_width,
             },
         )
@@ -675,11 +622,9 @@ mod tests {
     #[test]
     fn truncates_long_description() {
         let items = make_items(&[("build", "a really long command that exceeds the width limit")]);
-        //                        "  build: a really long..." = 2 + 5 + 2 + desc
-        // max_line_width = 30 => max_desc = 30 - 9 = 21 chars
-        let output = render_to_string(&items, 30);
-        let line = output.lines().next().unwrap();
-        // "> " (2) + "build" (5) + ": " (2) + desc (21) = 30
+        // "  › build " (4 + 5 + 1 = 10) + desc (20) = 30
+        let output = render_interactive_to_string(&items, "", 30);
+        let line = output.lines().nth(2).unwrap();
         assert!(
             line.chars().count() <= 30,
             "line should be at most 30 chars, got {}: {line:?}",
@@ -691,20 +636,61 @@ mod tests {
     #[test]
     fn does_not_truncate_short_description() {
         let items = make_items(&[("build", "echo ok")]);
-        let output = render_to_string(&items, 80);
-        let line = output.lines().next().unwrap();
+        let output = render_interactive_to_string(&items, "", 80);
+        let line = output.lines().nth(2).unwrap();
         assert!(!line.contains('\u{2026}'), "short line should not be truncated: {line:?}");
         assert!(line.contains("echo ok"), "full description should appear: {line:?}");
     }
 
     #[test]
-    fn max_line_width_max_disables_truncation() {
+    fn non_interactive_does_not_truncate_long_description() {
         let long_desc = "x".repeat(500);
         let items = make_items(&[("build", &long_desc)]);
-        let output = render_to_string(&items, usize::MAX);
+        let output = render_non_interactive_to_string(&items, None, None);
         let line = output.lines().next().unwrap();
-        assert!(!line.contains('\u{2026}'), "usize::MAX should disable truncation: {line:?}");
-        assert!(line.contains(&long_desc), "full 500-char description should appear");
+        assert_eq!(line, vt_str::format!("  build: {long_desc}").as_str());
+    }
+
+    #[test]
+    fn non_interactive_renders_flat_list_without_group_headers() {
+        let items = make_grouped_items(&[
+            ("app#build", "app#build", "echo build app", Some("app (packages/app)")),
+            ("build", "build", "echo build lib", None),
+        ]);
+        let output = render_non_interactive_to_string(&items, None, None);
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines, vec!["  build: echo build lib", "  app#build: echo build app"]);
+    }
+
+    #[test]
+    fn non_interactive_empty_match_prints_only_header() {
+        let items = make_items(&[("build", "echo build")]);
+        let output =
+            render_non_interactive_to_string(&items, Some("zzz"), Some("Task \"zzz\" not found."));
+        assert_eq!(output, "Task \"zzz\" not found.\n");
+    }
+
+    #[test]
+    fn non_interactive_filtered_query_prints_header_and_matching_items() {
+        let items = make_items(&[
+            ("build", "echo build"),
+            ("build:watch", "echo watch"),
+            ("lint", "echo lint"),
+        ]);
+        let output = render_non_interactive_to_string(
+            &items,
+            Some("bld"),
+            Some("Task \"bld\" not found. Did you mean:"),
+        );
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(
+            lines,
+            vec![
+                "Task \"bld\" not found. Did you mean:",
+                "  build: echo build",
+                "  build:watch: echo watch",
+            ]
+        );
     }
 
     #[test]
@@ -715,8 +701,8 @@ mod tests {
             ("test", "vitest run --reporter=verbose --coverage"),
         ]);
         let max_width = 40;
-        let output = render_to_string(&items, max_width);
-        for line in output.lines() {
+        let output = render_interactive_to_string(&items, "", max_width);
+        for line in output.lines().skip(2) {
             assert!(
                 line.chars().count() <= max_width,
                 "line exceeds max width {max_width}: ({}) {line:?}",
@@ -728,10 +714,9 @@ mod tests {
     #[test]
     fn truncation_preserves_label() {
         let items = make_items(&[("my-task", "very long description here")]);
-        // "  my-task: very..." => prefix(2) + label(7) + sep(2) + desc
-        // max_line_width = 20 => max_desc = 20 - 11 = 9 chars
-        let output = render_to_string(&items, 20);
-        let line = output.lines().next().unwrap();
+        // prefix(4) + label(7) + sep(1) = 12 => max_desc = 20 - 12 = 8 chars
+        let output = render_interactive_to_string(&items, "", 20);
+        let line = output.lines().nth(2).unwrap();
         assert!(line.contains("my-task"), "label should always be preserved: {line:?}");
     }
 

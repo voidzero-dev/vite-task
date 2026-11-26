@@ -1,9 +1,13 @@
 //! Unified spawn abstraction over fspy and plain tokio processes.
 //!
-//! [`spawn`] does one thing: hand back the child's stdio pipes plus a
-//! cancellation-aware `wait` future. Draining the pipes is [`super::pipe`]'s
-//! job; normalizing fspy path accesses is [`super::tracked_accesses`]'s (only
-//! compiled when `cfg(fspy)` is on).
+//! Two entry points enforce valid stdio/tracking combinations at compile time:
+//! - [`spawn_piped`] pipes stdout/stderr (optionally under fspy tracing) and
+//!   returns [`PipedChild`] with coupled [`ChildPipes`].
+//! - [`spawn_inherited`] inherits stdio directly (never fspy-tracked) and
+//!   returns [`InheritedChild`] with no pipes.
+//!
+//! Draining pipes is [`super::pipe`]'s job; normalizing fspy path accesses is
+//! [`super::tracked_accesses`]'s (only compiled when `cfg(fspy)` is on).
 
 use std::{ffi::OsStr, io, process::Stdio};
 
@@ -14,87 +18,126 @@ use tokio::process::{ChildStderr, ChildStdout};
 use tokio_util::sync::CancellationToken;
 use vt_plan::SpawnCommand;
 
-/// How the child's stdin/stdout/stderr are configured.
+/// Whether a piped child runs under fspy filesystem tracing.
+///
+/// Inherited stdio cannot be combined with fspy tracing, so tracking is only
+/// accepted by [`spawn_piped`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SpawnStdio {
-    /// All three fds inherited from the parent. On Unix, [`spawn`] also clears
-    /// `FD_CLOEXEC` on fds 0-2 (libuv workaround —
-    /// <https://github.com/libuv/libuv/issues/2062>).
-    Inherited,
-    /// stdin is `/dev/null`; stdout and stderr are piped. Drain the pipes with
-    /// [`super::pipe::pipe_stdio`].
-    Piped,
+pub enum PipedMode {
+    /// Plain tokio process without filesystem tracing.
+    Plain,
+    /// Tracked with fspy when `cfg(fspy)` is enabled; falls back to a plain
+    /// tokio process on targets without `cfg(fspy)`.
+    Tracked,
 }
 
-/// Handle to a spawned child.
+/// Coupled stdout/stderr pipes from a piped child process.
 ///
-/// `stdout` and `stderr` are `Some` iff [`SpawnStdio::Piped`] was requested.
-/// `wait` resolves when the child exits and handles cancellation internally:
-/// when the token fires, the child (and on Windows its descendants via the Job
-/// Object) is killed before the future resolves.
-pub struct ChildHandle {
-    pub stdout: Option<ChildStdout>,
-    pub stderr: Option<ChildStderr>,
-    pub wait: LocalBoxFuture<'static, io::Result<ChildOutcome>>,
+/// Both pipes are always created together, so half-piped states are
+/// unrepresentable.
+pub struct ChildPipes {
+    pub stdout: ChildStdout,
+    pub stderr: ChildStderr,
+}
+
+/// Cancellation-aware future resolving when the child exits.
+///
+/// When the cancellation token fires, the child (and on Windows its
+/// descendants via the Job Object) is killed before the future resolves.
+pub type ChildWait = LocalBoxFuture<'static, io::Result<ChildOutcome>>;
+
+/// Handle to a child spawned with piped stdout/stderr.
+pub struct PipedChild {
+    pub pipes: ChildPipes,
+    pub wait: ChildWait,
+}
+
+/// Handle to a child spawned with inherited stdio.
+pub struct InheritedChild {
+    pub wait: ChildWait,
 }
 
 /// Result of waiting for a child to exit.
 pub struct ChildOutcome {
     pub exit_status: std::process::ExitStatus,
-    /// Raw fspy accesses. `Some` iff `fspy` was `true` at spawn time, and
+    /// Raw fspy accesses. `Some` iff spawned with [`PipedMode::Tracked`], and
     /// `Err` when a tracked process could not record everything it did.
     #[cfg(fspy)]
     pub path_accesses: Option<Result<PathAccessIterable, fspy::TrackingIncomplete>>,
 }
 
-/// Spawn a command with the requested fspy and stdio configuration.
+/// Spawn a command with piped stdout/stderr (`stdin` set to `/dev/null`) and
+/// optional fspy filesystem tracking.
 ///
 /// `extra_envs` are applied **after** `cmd.spawn_envs`, so runtime-injected
 /// entries (e.g. the runner's IPC name + napi addon path) override any
 /// same-named key from the plan.
 ///
-/// Cancellation is unified: whether fspy is enabled or not, the returned `wait`
-/// future observes `cancellation_token` and kills the child before resolving.
+/// Cancellation is unified: whether fspy is enabled or not, the returned
+/// [`PipedChild::wait`] future observes `cancellation_token` and kills the
+/// child before resolving.
 ///
-/// On builds without `cfg(fspy)`, the `fspy` argument is ignored and the tokio
-/// path is always taken.
+/// On builds without `cfg(fspy)`, [`PipedMode::Tracked`] falls back to the
+/// plain tokio path.
 #[tracing::instrument(level = "debug", skip_all)]
-pub async fn spawn<E, K, V>(
+pub async fn spawn_piped<E, K, V>(
     cmd: &SpawnCommand,
-    fspy: bool,
-    stdio: SpawnStdio,
+    mode: PipedMode,
     cancellation_token: CancellationToken,
     extra_envs: E,
-) -> anyhow::Result<ChildHandle>
+) -> anyhow::Result<PipedChild>
 where
     E: IntoIterator<Item = (K, V)>,
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
     #[cfg(fspy)]
-    if fspy {
-        return spawn_fspy(cmd, stdio, cancellation_token, extra_envs).await;
+    if mode == PipedMode::Tracked {
+        return spawn_fspy(cmd, cancellation_token, extra_envs).await;
     }
     #[cfg(not(fspy))]
-    let _ = fspy;
+    let _ = mode;
 
-    let mut tokio_cmd = tokio::process::Command::new(cmd.program_path.as_path());
-    tokio_cmd.args(cmd.args.iter().map(vt_str::Str::as_str));
-    tokio_cmd.env_clear();
-    tokio_cmd.envs(cmd.spawn_envs.iter());
-    tokio_cmd.envs(extra_envs);
-    tokio_cmd.current_dir(&*cmd.cwd);
-    apply_stdio(&mut tokio_cmd, stdio);
-    spawn_tokio(tokio_cmd, cancellation_token)
+    let mut tokio_cmd = build_tokio_command(cmd, extra_envs);
+    tokio_cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = tokio_cmd.spawn()?;
+    let pipes = take_pipes(&mut child.stdout, &mut child.stderr);
+    let wait = spawn_tokio_wait(child, cancellation_token)?;
+    Ok(PipedChild { pipes, wait })
+}
+
+/// Spawn a command with stdin/stdout/stderr inherited from the parent.
+///
+/// Inherited spawns never run under fspy tracking. On Unix, this also clears
+/// `FD_CLOEXEC` on fds 0-2 (libuv workaround —
+/// <https://github.com/libuv/libuv/issues/2062>).
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn spawn_inherited(
+    cmd: &SpawnCommand,
+    cancellation_token: CancellationToken,
+) -> anyhow::Result<InheritedChild> {
+    let mut tokio_cmd = build_tokio_command(cmd, std::iter::empty::<(&OsStr, &OsStr)>());
+    tokio_cmd.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    // libuv (used by Node.js) marks stdin/stdout/stderr as close-on-exec;
+    // without this fix the child reopens fds 0-2 as /dev/null after exec.
+    // See: https://github.com/libuv/libuv/issues/2062
+    // SAFETY: the pre_exec closure only performs fcntl operations on
+    // stdio fds, which is safe in a post-fork context.
+    #[cfg(unix)]
+    unsafe {
+        tokio_cmd.pre_exec(clear_stdio_cloexec);
+    }
+    let child = tokio_cmd.spawn()?;
+    let wait = spawn_tokio_wait(child, cancellation_token)?;
+    Ok(InheritedChild { wait })
 }
 
 #[cfg(fspy)]
 async fn spawn_fspy<E, K, V>(
     cmd: &SpawnCommand,
-    stdio: SpawnStdio,
     cancellation_token: CancellationToken,
     extra_envs: E,
-) -> anyhow::Result<ChildHandle>
+) -> anyhow::Result<PipedChild>
 where
     E: IntoIterator<Item = (K, V)>,
     K: AsRef<OsStr>,
@@ -105,24 +148,7 @@ where
     fspy_cmd.envs(cmd.spawn_envs.iter());
     fspy_cmd.envs(extra_envs);
     fspy_cmd.current_dir(&*cmd.cwd);
-
-    match stdio {
-        SpawnStdio::Inherited => {
-            fspy_cmd.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
-            // libuv (used by Node.js) marks stdin/stdout/stderr as close-on-exec;
-            // without this fix the child reopens fds 0-2 as /dev/null after exec.
-            // See: https://github.com/libuv/libuv/issues/2062
-            // SAFETY: the pre_exec closure only performs fcntl operations on
-            // stdio fds, which is safe in a post-fork context.
-            #[cfg(unix)]
-            unsafe {
-                fspy_cmd.pre_exec(clear_stdio_cloexec);
-            }
-        }
-        SpawnStdio::Piped => {
-            fspy_cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        }
-    }
+    fspy_cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut tracked = fspy_cmd.spawn(cancellation_token).await?;
 
@@ -134,8 +160,7 @@ where
         super::win_job::assign_to_kill_on_close_job(tracked.process_handle.as_raw_handle())?
     };
 
-    let stdout = tracked.stdout.take();
-    let stderr = tracked.stderr.take();
+    let pipes = take_pipes(&mut tracked.stdout, &mut tracked.stderr);
     let wait_handle = tracked.wait_handle;
 
     let wait = async move {
@@ -152,15 +177,42 @@ where
     }
     .boxed_local();
 
-    Ok(ChildHandle { stdout, stderr, wait })
+    Ok(PipedChild { pipes, wait })
 }
 
-fn spawn_tokio(
-    mut cmd: tokio::process::Command,
-    cancellation_token: CancellationToken,
-) -> anyhow::Result<ChildHandle> {
-    let mut child = cmd.spawn()?;
+const fn take_pipes(
+    stdout: &mut Option<ChildStdout>,
+    stderr: &mut Option<ChildStderr>,
+) -> ChildPipes {
+    ChildPipes {
+        stdout: stdout.take().expect("stdout was configured as Stdio::piped()"),
+        stderr: stderr.take().expect("stderr was configured as Stdio::piped()"),
+    }
+}
 
+fn build_tokio_command<E, K, V>(cmd: &SpawnCommand, extra_envs: E) -> tokio::process::Command
+where
+    E: IntoIterator<Item = (K, V)>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    let mut tokio_cmd = tokio::process::Command::new(cmd.program_path.as_path());
+    tokio_cmd.args(cmd.args.iter().map(vt_str::Str::as_str));
+    tokio_cmd.env_clear();
+    tokio_cmd.envs(cmd.spawn_envs.iter());
+    tokio_cmd.envs(extra_envs);
+    tokio_cmd.current_dir(&*cmd.cwd);
+    tokio_cmd
+}
+
+#[cfg_attr(
+    not(windows),
+    expect(clippy::unnecessary_wraps, reason = "Windows job object assignment is fallible")
+)]
+fn spawn_tokio_wait(
+    mut child: tokio::process::Child,
+    cancellation_token: CancellationToken,
+) -> anyhow::Result<ChildWait> {
     #[cfg(windows)]
     let job = {
         use std::os::windows::io::{AsRawHandle, BorrowedHandle};
@@ -170,9 +222,6 @@ fn spawn_tokio(
         let owned = borrowed.try_clone_to_owned()?;
         super::win_job::assign_to_kill_on_close_job(owned.as_raw_handle())?
     };
-
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
 
     let wait = async move {
         let exit_status = tokio::select! {
@@ -196,27 +245,7 @@ fn spawn_tokio(
     }
     .boxed_local();
 
-    Ok(ChildHandle { stdout, stderr, wait })
-}
-
-fn apply_stdio(cmd: &mut tokio::process::Command, stdio: SpawnStdio) {
-    match stdio {
-        SpawnStdio::Inherited => {
-            cmd.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
-            // libuv (used by Node.js) marks stdin/stdout/stderr as close-on-exec;
-            // without this fix the child reopens fds 0-2 as /dev/null after exec.
-            // See: https://github.com/libuv/libuv/issues/2062
-            // SAFETY: the pre_exec closure only performs fcntl operations on
-            // stdio fds, which is safe in a post-fork context.
-            #[cfg(unix)]
-            unsafe {
-                cmd.pre_exec(clear_stdio_cloexec);
-            }
-        }
-        SpawnStdio::Piped => {
-            cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        }
-    }
+    Ok(wait)
 }
 
 #[cfg(unix)]

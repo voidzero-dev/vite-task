@@ -19,12 +19,14 @@
 //! number.
 
 mod layout;
+#[cfg(not(target_os = "none"))]
 mod reader;
 mod writer;
 
-use std::ptr::slice_from_raw_parts_mut;
+use core::ptr::slice_from_raw_parts_mut;
 
 use fspy_shm::Mapping;
+#[cfg(not(target_os = "none"))]
 pub use reader::{SealError, ShmReader};
 // Only tests name a claim's failure; a sender skips the record either
 // way, so production matches on `Ok`/`Err` alone.

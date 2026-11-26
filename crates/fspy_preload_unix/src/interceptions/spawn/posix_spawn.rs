@@ -83,7 +83,15 @@ unsafe fn handle_posix_spawn(
         .join()
         .unwrap()
     })
-    .unwrap_or_else(|errno| errno as _)
+    .unwrap_or_else(|_| {
+        // The seccomp filter cannot be installed, so the spawn never
+        // happened. Mark the run's trace incomplete so it is not cached,
+        // then spawn untracked with the caller's own arguments.
+        client.report_loss();
+        // SAFETY: all arguments are the interposed posix_spawn(p) function's
+        // own valid arguments.
+        unsafe { original(pid, file, file_actions, attrp, argv, envp) }
+    })
 }
 
 intercept!(posix_spawnp(64): PosixSpawnFn);

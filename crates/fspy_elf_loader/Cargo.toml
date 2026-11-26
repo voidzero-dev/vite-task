@@ -1,0 +1,22 @@
+[package]
+name = "fspy_elf_loader"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "none"))'.dependencies]
+elf = { workspace = true }
+fspy_nostd = { workspace = true }
+linux-raw-sys = { workspace = true, features = ["auxvec", "no_std"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+tempfile = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

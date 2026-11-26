@@ -7,17 +7,27 @@
 
 mod shm_io;
 
-use std::{env::temp_dir, ffi::OsStr, io, num::NonZeroUsize, path::PathBuf};
+use core::num::NonZeroUsize;
+#[cfg(not(target_os = "none"))]
+use std::{env::temp_dir, ffi::OsStr, io, path::PathBuf};
 
 use allocator_api2::alloc::Allocator;
+#[cfg(not(target_os = "none"))]
 use fspy_nostd::Fat;
+#[cfg(not(target_os = "none"))]
 use fspy_nostd_alloc::OsCString;
-use fspy_shm::{Mapping, ShmHandle};
-use shm_io::{SealError, ShmReader, ShmWriter};
+use fspy_shm::Mapping;
+#[cfg(not(target_os = "none"))]
+use fspy_shm::ShmHandle;
+use shm_io::ShmWriter;
+#[cfg(not(target_os = "none"))]
+use shm_io::{SealError, ShmReader};
 
 /// Reads the committed frames of a sealed channel; borrows the shared
 /// mapping, which stays alive (and mapped) until this value drops.
+#[cfg(not(target_os = "none"))]
 pub type FrameReader = shm_io::ShmReader<Mapping>;
+#[cfg(not(target_os = "none"))]
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite, Serialize as _, config::DefaultConfig};
 
@@ -29,6 +39,7 @@ use super::IpcStr;
 /// The files sit directly in the temporary directory. A shared subdirectory
 /// would belong to whichever user created it first and block everyone else;
 /// uniquely named `0o600` files in the sticky-bit temp directory avoid that.
+#[cfg(not(target_os = "none"))]
 const SHM_BACKING_PREFIX: &str = "vite-task-fspy-";
 
 /// Descriptor slots in every channel, one per record.
@@ -54,6 +65,7 @@ pub struct ChannelConf<'a> {
 /// derives the serializable configuration that other processes use to create
 /// senders.
 #[expect(clippy::missing_errors_doc, reason = "non-vt crate: cannot use vt_str/vt_path types")]
+#[cfg(not(target_os = "none"))]
 pub fn channel<A: Allocator>(capacity: usize, allocator: A) -> io::Result<Receiver<A>> {
     let shm_c_path = os_c_string(shm_backing_path()?.as_os_str(), allocator)?;
     let handle =
@@ -78,6 +90,7 @@ pub fn channel<A: Allocator>(capacity: usize, allocator: A) -> io::Result<Receiv
 }
 
 /// Encodes `path` as an owned NUL-terminated platform C string.
+#[cfg(not(target_os = "none"))]
 fn os_c_string<A: Allocator>(path: &OsStr, allocator: A) -> io::Result<OsCString<Fat, A>> {
     let mut units = os_units(path, allocator);
     units.push(0);
@@ -116,6 +129,7 @@ fn shm_error_to_io(error: fspy_nostd::Error) -> io::Error {
 }
 
 /// Returns a fresh absolute path for a shared-memory backing file.
+#[cfg(not(target_os = "none"))]
 fn shm_backing_path() -> io::Result<PathBuf> {
     // `temp_dir` reflects `TMPDIR` verbatim, which may be relative. The path
     // travels to processes with other working directories, so resolve it
@@ -152,10 +166,12 @@ fn to_verbatim_if_long(path: PathBuf) -> io::Result<PathBuf> {
 ///
 /// Removal is cleanup, not a stop signal: later opens fail, but existing
 /// handles and mappings keep reading and writing; see [`fspy_shm::remove`].
+#[cfg(not(target_os = "none"))]
 struct ShmKeeper<A: Allocator> {
     path: OsCString<Fat, A>,
 }
 
+#[cfg(not(target_os = "none"))]
 impl<A: Allocator> Drop for ShmKeeper<A> {
     fn drop(&mut self) {
         let _ = fspy_shm::remove(self.path.as_c_str().as_thin());
@@ -189,13 +205,12 @@ impl ChannelConf<'_> {
         let mapping = match fspy_shm::open(shm_path.as_c_str().as_thin()) {
             Ok(handle) => handle.map().expect("cannot map the shared-memory channel"),
             Err(error) => {
-                let error = shm_error_to_io(error);
                 // The receiver removed the backing file, so it has already
                 // stopped collecting.
-                if error.kind() == io::ErrorKind::NotFound {
+                if error == fspy_nostd::Error::NOENT {
                     return None;
                 }
-                panic!("cannot open the shared-memory channel: {error}");
+                panic!("cannot open the shared-memory channel: {error:?}");
             }
         };
         // SAFETY: `mapping` is a freshly mapped shared memory region created
@@ -216,6 +231,18 @@ pub struct Sender {
 }
 
 impl Sender {
+    /// Reports that this process went on to perform an operation it could
+    /// not record, sealing the channel as incomplete.
+    ///
+    /// Used when a traced process escapes tracing — e.g. a preload that
+    /// could not install its injection machinery and forwards the operation
+    /// to the OS untracked. The receiver's close then reports
+    /// [`RecordsLost`], so the run is treated as untracked rather than
+    /// cached from a partial trace.
+    pub fn report_loss(&self) {
+        self.writer.report_loss();
+    }
+
     /// Serializes one record into a committed frame.
     ///
     /// A claim the channel refuses is skipped, because that is all a sender
@@ -259,6 +286,7 @@ unsafe impl Sync for Sender {}
 ///
 /// Holds the shared memory and its backing file alive for as long as senders
 /// may attach; [`Receiver::close`] (or dropping) removes the backing file.
+#[cfg(not(target_os = "none"))]
 pub struct Receiver<A: Allocator> {
     /// Keeps the shared memory's backing file alive for as long as senders
     /// may attach.
@@ -272,11 +300,14 @@ pub struct Receiver<A: Allocator> {
 // accesses the mapping exclusively through the `shm_io` protocol in `close`,
 // which synchronizes with senders via atomic operations. The mapping's
 // address is stable and independently owned.
+#[cfg(not(target_os = "none"))]
 unsafe impl<A: Allocator + Send> Send for Receiver<A> {}
 
 // SAFETY: see the `Send` impl.
+#[cfg(not(target_os = "none"))]
 unsafe impl<A: Allocator + Sync> Sync for Receiver<A> {}
 
+#[cfg(not(target_os = "none"))]
 impl<A: Allocator> Receiver<A> {
     /// Returns the serializable configuration other processes pass to
     /// [`ChannelConf::sender`], borrowing this receiver's storage.
@@ -364,6 +395,7 @@ impl<A: Allocator> Receiver<A> {
 /// senders did wrong, and both leave the run untracked.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
 #[error("a sender ran out of room in the shared-memory channel")]
+#[cfg(not(target_os = "none"))]
 pub struct RecordsLost;
 
 #[cfg(test)]

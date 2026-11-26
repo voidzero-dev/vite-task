@@ -7,6 +7,11 @@ allowBuilds:
   '@playwright/browser-chromium': true
   bun: true
   deno: true
+  # Astro's dependencies. Their prebuilt binaries come as optional dependencies,
+  # so their build scripts aren't needed.
+  esbuild: false
+  sharp: false
+  workerd: true
 
 minimumReleaseAgeExclude:
   - vite-plus
@@ -14,21 +19,21 @@ minimumReleaseAgeExclude:
 
 catalog:
   '@anthropic-ai/sandbox-runtime': 0.0.78
-  '@fastify/busboy': 3.2.2
   '@openai/codex': 0.160.0
   '@tsconfig/strictest': ^2.0.8
   '@types/cross-spawn': 6.0.6
   '@types/node': 25.0.3
   '@playwright/browser-chromium': 1.63.0
   '@vitest/browser-playwright': 5.0.3
+  astro: 7.3.8
   bun: 1.4.2
-  cbor-edn: 0.2.2
   cbor2: 1.12.0
   cross-env: ^10.1.0
   cross-spawn: 7.0.6
   deno: 2.9.6
   husky: ^9.1.7
   lint-staged: ^17.0.0
+  next: 15.5.29
   nitro: 3.0.260903-beta
   oxfmt: 0.73.0
   oxlint: ^1.55.0
@@ -38,6 +43,9 @@ catalog:
   # The e2e tests run this pnpm; keep it in sync with `packageManager`.
   pnpm: 11.24.0
   postject: 1.0.0-alpha.6
+  react: 19.3.1
+  react-dom: 19.3.1
+  tsdown: 0.23.3
   typescript: ^6.0.3
   vite: npm:@voidzero-dev/vite-plus-core@1.1.0
   vite-plus: 1.1.0
@@ -52,6 +60,9 @@ overrides:
   # override above routes vite to the Vite+ toolchain fork, which does not carry
   # the integration — so scope vite-task-tools' `vite` to a real upstream build.
   vite-task-tools>vite: 8.3.2
+  # Astro 7 needs upstream Vite 8, which the global override above would
+  # replace with the Vite+ fork.
+  astro>vite: 8.3.2
 peerDependencyRules:
   allowAny:
     - vite

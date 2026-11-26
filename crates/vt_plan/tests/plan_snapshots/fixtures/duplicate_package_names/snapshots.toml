@@ -15,3 +15,10 @@ args = ["run", "-t", "@test/duplicate#build"]
 compact = true
 name = "filter_matches_both_duplicates"
 args = ["run", "--filter", "@test/duplicate", "build"]
+
+# The short name `duplicate` auto-completes to `@test/duplicate`, which two
+# packages share. A `pkg#task` specifier errors instead of matching neither.
+[[plan]]
+compact = true
+name = "ambiguous_short_package_name"
+args = ["run", "duplicate#build"]

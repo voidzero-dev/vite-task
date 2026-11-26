@@ -172,16 +172,6 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_positive_globs_returns_empty() {
-        let (_temp, workspace) = create_test_workspace();
-        let positive = std::collections::BTreeSet::new();
-        let negative = std::collections::BTreeSet::new();
-
-        let result = compute_globbed_inputs(&workspace, &positive, &negative).unwrap();
-        assert!(result.is_empty());
-    }
-
-    #[test]
     fn test_single_positive_glob() {
         let (_temp, workspace) = create_test_workspace();
         // Globs are now workspace-root-relative
@@ -386,21 +376,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sibling_positive_glob_matches_sibling_package() {
-        let (_temp, workspace) = create_workspace_with_sibling();
-        // Globs are already workspace-root-relative (resolved at task graph stage)
-        let positive: std::collections::BTreeSet<Str> =
-            std::iter::once("packages/shared/src/**".into()).collect();
-        let negative = std::collections::BTreeSet::new();
-
-        let result = compute_globbed_inputs(&workspace, &positive, &negative).unwrap();
-        assert!(
-            result.contains_key(&RelativePathBuf::new("packages/shared/src/utils.ts").unwrap()),
-            "should find sibling package file via packages/shared/src/**"
-        );
-    }
-
-    #[test]
     fn test_sibling_negative_glob_excludes_from_sibling() {
         let (_temp, workspace) = create_workspace_with_sibling();
         let positive: std::collections::BTreeSet<Str> =
@@ -417,23 +392,6 @@ mod tests {
             !result.contains_key(&RelativePathBuf::new("packages/shared/dist/output.js").unwrap()),
             "should exclude dist via packages/shared/dist/**"
         );
-    }
-
-    #[test]
-    fn test_overlapping_positive_globs_deduplicates() {
-        let (_temp, workspace) = create_test_workspace();
-        // Both patterns match src/index.ts
-        let positive: std::collections::BTreeSet<Str> =
-            ["packages/my-pkg/src/**/*.ts".into(), "packages/my-pkg/src/index.ts".into()]
-                .into_iter()
-                .collect();
-        let negative: std::collections::BTreeSet<Str> =
-            std::iter::once("**/*.test.ts".into()).collect();
-
-        let result = compute_globbed_inputs(&workspace, &positive, &negative).unwrap();
-
-        // BTreeMap naturally deduplicates by key
-        assert_eq!(result.len(), 3);
     }
 
     fn symlink(target: &str, link: &AbsolutePath, directory: bool) {

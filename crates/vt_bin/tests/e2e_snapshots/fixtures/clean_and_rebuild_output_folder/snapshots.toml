@@ -1,0 +1,75 @@
+[[e2e]]
+name = "clean_and_rebuild_output_folder"
+comment = """
+The task reads `src/a.txt`, lists `out`, removes it, makes it again, writes `out/a.txt` and stats `out`, like a build tool cleaning its output folder before writing a new one.
+"""
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "replace-file-content",
+    "src/a.txt",
+    "v1",
+    "v2",
+  ], comment = "change an input, so the next run cleans and rebuilds the existing `out`" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    "out",
+  ], comment = "remove the output folder, as on a clean checkout" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "stat-file",
+    "out/a.txt",
+  ],
+]
+
+[[e2e]]
+name = "output_changed_after_clean_and_rebuild"
+comment = """
+The task removes `out` with `out/a.txt` in it and writes `out/a.txt` again, then a later step changes `out/a.txt`. Removing the file doesn't read it, so the change doesn't make the next run miss.
+"""
+steps = [
+  { argv = [
+    "vtt",
+    "write-file",
+    "out/a.txt",
+    "stale",
+  ], comment = "an earlier build left `out/a.txt`" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "write-file",
+    "out/a.txt",
+    "stamped",
+  ], comment = "an uncached step changes the output, like a step stamping a version into it" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "print-file",
+    "out/a.txt",
+  ],
+]

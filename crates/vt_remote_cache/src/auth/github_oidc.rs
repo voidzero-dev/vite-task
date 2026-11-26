@@ -3,7 +3,7 @@
 use std::{
     fmt,
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -164,6 +164,7 @@ impl TokenRequest {
     }
 
     async fn send(&self, http: &reqwest::Client) -> Result<Token, TokenError> {
+        let start = Instant::now();
         let network_error = |err: reqwest::Error| TokenError::Network(err.without_url());
         let response = http
             .get(self.url.clone())
@@ -174,6 +175,12 @@ impl TokenRequest {
             .await
             .map_err(network_error)?;
         let status = response.status();
+        // Neither the request URL nor the tokens are logged.
+        tracing::debug!(
+            status = status.as_u16(),
+            elapsed = ?start.elapsed(),
+            "GitHub Actions OIDC token responded"
+        );
         if status != StatusCode::OK {
             return Err(TokenError::Status(status));
         }

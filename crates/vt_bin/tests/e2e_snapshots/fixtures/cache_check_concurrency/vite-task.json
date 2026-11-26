@@ -1,0 +1,31 @@
+{
+  "tasks": {
+    "test": {
+      "command": "vtt print done",
+      "dependsOn": ["hold-reads", "read", "release-reads"],
+      "cache": false
+    },
+    "hold-reads": {
+      "command": "vtt hold-reads input.txt .barrier",
+      "cache": false
+    },
+    "reads-held": {
+      "command": "vtt barrier .barrier held 2",
+      "cache": false
+    },
+    "read": {
+      "command": "vtt print-file input.txt",
+      "dependsOn": ["reads-held"]
+    },
+    "other": {
+      "command": "vtt print other",
+      "dependsOn": ["reads-held"],
+      "cache": false
+    },
+    "release-reads": {
+      "command": "vtt barrier .barrier released 2",
+      "dependsOn": ["other"],
+      "cache": false
+    }
+  }
+}

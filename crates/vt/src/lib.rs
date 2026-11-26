@@ -6,7 +6,8 @@ pub mod session;
 // Public exports for vt_bin
 pub use cli::{CacheSubcommand, Command, RunCommand, RunFlags};
 pub use session::{
-    CommandHandler, ExitStatus, HandledCommand, Session, SessionConfig, print_error,
+    CommandHandler, ExitStatus, HandledCommand, PlanFromCliError, Session, SessionConfig,
+    print_error,
 };
 pub use vt_graph::{
     config::{

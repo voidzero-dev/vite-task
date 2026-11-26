@@ -1,0 +1,1 @@
+Cache settings `env` must be set under `cache` in task root#test, e.g. `cache: { env: [...] }`. Run `vp migrate` to update your config automatically. See https://viteplus.dev/config/run for details.

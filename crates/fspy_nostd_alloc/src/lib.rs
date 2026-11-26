@@ -15,9 +15,9 @@
 #![cfg_attr(not(test), no_std)]
 
 mod c_string;
-#[cfg(unix)]
+#[cfg(any(unix, target_os = "none"))]
 pub mod fs;
-#[cfg(unix)]
+#[cfg(any(unix, target_os = "none"))]
 mod mmap;
 mod pool;
 #[cfg(windows)]
@@ -34,7 +34,7 @@ use bump_scope::{
     settings::{BumpAllocatorSettings, BumpSettings},
 };
 pub use c_string::{CString, OsCString};
-#[cfg(unix)]
+#[cfg(any(unix, target_os = "none"))]
 pub use mmap::MmapAllocator as PageAllocator;
 use pool::ChunkPool;
 #[cfg(windows)]
