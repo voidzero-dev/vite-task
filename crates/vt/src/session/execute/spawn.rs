@@ -101,10 +101,7 @@ where
     let mut tokio_cmd = build_tokio_command(cmd, extra_envs);
     tokio_cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = tokio_cmd.spawn()?;
-    let pipes = ChildPipes {
-        stdout: child.stdout.take().expect("stdout was configured as Stdio::piped()"),
-        stderr: child.stderr.take().expect("stderr was configured as Stdio::piped()"),
-    };
+    let pipes = take_pipes(&mut child.stdout, &mut child.stderr);
     let wait = spawn_tokio_wait(child, cancellation_token)?;
     Ok(PipedChild { pipes, wait })
 }
@@ -163,10 +160,7 @@ where
         super::win_job::assign_to_kill_on_close_job(tracked.process_handle.as_raw_handle())?
     };
 
-    let pipes = ChildPipes {
-        stdout: tracked.stdout.take().expect("stdout was configured as Stdio::piped()"),
-        stderr: tracked.stderr.take().expect("stderr was configured as Stdio::piped()"),
-    };
+    let pipes = take_pipes(&mut tracked.stdout, &mut tracked.stderr);
     let wait_handle = tracked.wait_handle;
 
     let wait = async move {
@@ -184,6 +178,16 @@ where
     .boxed_local();
 
     Ok(PipedChild { pipes, wait })
+}
+
+const fn take_pipes(
+    stdout: &mut Option<ChildStdout>,
+    stderr: &mut Option<ChildStderr>,
+) -> ChildPipes {
+    ChildPipes {
+        stdout: stdout.take().expect("stdout was configured as Stdio::piped()"),
+        stderr: stderr.take().expect("stderr was configured as Stdio::piped()"),
+    }
 }
 
 fn build_tokio_command<E, K, V>(cmd: &SpawnCommand, extra_envs: E) -> tokio::process::Command

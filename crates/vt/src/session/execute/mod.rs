@@ -207,20 +207,17 @@ impl<'a> ExecutionMode<'a> {
     /// Phases 5 & 6: spawn the child process, drain its pipes (if piped), and
     /// wait for exit — concurrently with the IPC driver when cached.
     ///
-    /// Keeping spawn and drain inside a single match on `self` couples each
-    /// spawn entry point directly with its matching [`PipeSinks`] and IPC
-    /// driver so piped-vs-inherited mismatches cannot occur.
+    /// Consumes `self` and returns a mode-typed [`RunOutcome`] so downstream
+    /// phases cannot pair an uncached run with IPC reports (or a cached run
+    /// without them).
     async fn spawn_and_run(
-        &mut self,
+        self,
         spawn_command: &vt_plan::SpawnCommand,
         start: Instant,
         fast_fail_token: &CancellationToken,
-    ) -> Result<(ChildOutcome, Option<Result<Reports, vt_server::Error>>), ExecutionError> {
-        // Box::pin keeps the child-and-pipe stack off the enclosing future:
-        // pipe_stdio alone makes the combined future large enough to trip
-        // clippy::large_futures in every caller otherwise.
+    ) -> Result<RunOutcome<'a>, ExecutionError> {
         match self {
-            Self::Cached { pipe_writers, state } => {
+            Self::Cached { mut pipe_writers, mut state } => {
                 let piped_mode = if state.tracking.fspy.is_some() {
                     PipedMode::Tracked
                 } else {
@@ -243,27 +240,36 @@ impl<'a> ExecutionMode<'a> {
                 // The IPC driver must be polled during pipe drain — otherwise a
                 // tool doing a blocking `getEnv` can deadlock: child stalls on
                 // IPC, stdout stays open, pipe_stdio waits for EOF, driver
-                // never runs. `stop_accepting` fires after child.wait so the
-                // driver drains any in-flight clients.
+                // never runs. `stop_accepting` fires right after child exit so
+                // the driver drains any in-flight clients.
+                //
+                // Box::pin keeps the child-and-pipe stack off the enclosing
+                // future: pipe_stdio alone makes the combined future large
+                // enough to trip clippy::large_futures in every caller.
                 let sinks = PipeSinks {
                     stdout_writer: &mut pipe_writers.stdout_writer,
                     stderr_writer: &mut pipe_writers.stderr_writer,
                     capture: Some(&mut state.std_outputs),
                 };
-                let child_work = Box::pin(run_piped_child(
-                    child,
-                    sinks,
-                    Some(&state.tracking.stop_accepting),
-                    fast_fail_token.clone(),
-                ));
+                let stop_accepting = &state.tracking.stop_accepting;
+                let child_work = async {
+                    let result =
+                        Box::pin(run_piped_child(child, sinks, fast_fail_token.clone())).await;
+                    stop_accepting.signal();
+                    result
+                };
                 let (wait_result, join_result) =
                     tokio::join!(child_work, &mut state.tracking.ipc_server_fut);
                 if let Err(e) = &join_result {
                     tracing::warn!(?e, "IPC server failed; cache will not be updated");
                 }
-                Ok((wait_result?, Some(join_result.map(Recorder::into_reports))))
+                Ok(RunOutcome::Cached {
+                    state: Box::new(state),
+                    outcome: wait_result?,
+                    ipc_result: join_result.map(Recorder::into_reports),
+                })
             }
-            Self::Uncached { pipe_writers: Some(pipe_writers) } => {
+            Self::Uncached { pipe_writers: Some(mut pipe_writers) } => {
                 let child = spawn_piped(
                     spawn_command,
                     PipedMode::Plain,
@@ -283,9 +289,8 @@ impl<'a> ExecutionMode<'a> {
                     stderr_writer: &mut pipe_writers.stderr_writer,
                     capture: None,
                 };
-                let child_work =
-                    Box::pin(run_piped_child(child, sinks, None, fast_fail_token.clone()));
-                Ok((child_work.await?, None))
+                let child_work = Box::pin(run_piped_child(child, sinks, fast_fail_token.clone()));
+                Ok(RunOutcome::Uncached { outcome: child_work.await? })
             }
             Self::Uncached { pipe_writers: None } => {
                 let child = spawn_inherited(spawn_command, fast_fail_token.clone())
@@ -296,8 +301,33 @@ impl<'a> ExecutionMode<'a> {
                     "spawned the task process"
                 );
 
-                Ok((wait_child(child.wait, Instant::now()).await?, None))
+                // Measure post-spawn runtime for the exit debug log, matching
+                // `run_piped_child` rather than including spawn overhead.
+                Ok(RunOutcome::Uncached { outcome: wait_child(child.wait, Instant::now()).await? })
             }
+        }
+    }
+}
+
+/// Mode-typed result of [`ExecutionMode::spawn_and_run`].
+///
+/// Couples `CacheState` and the IPC server's reports inside [`Self::Cached`] so
+/// cached-without-IPC and uncached-with-IPC states are unrepresentable.
+enum RunOutcome<'a> {
+    Cached {
+        state: Box<CacheState<'a>>,
+        outcome: ChildOutcome,
+        ipc_result: Result<Reports, vt_server::Error>,
+    },
+    Uncached {
+        outcome: ChildOutcome,
+    },
+}
+
+impl RunOutcome<'_> {
+    const fn exit_status(&self) -> std::process::ExitStatus {
+        match self {
+            Self::Cached { outcome, .. } | Self::Uncached { outcome } => outcome.exit_status,
         }
     }
 }
@@ -515,7 +545,7 @@ async fn run(
     };
 
     // 4. Fold the cache/fspy/stdio decisions into the typed mode.
-    let mut mode = match ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs) {
+    let mode = match ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs) {
         Ok(mode) => mode,
         Err(err) => return Err(spawn_err(spawn_cache_status, err)),
     };
@@ -525,7 +555,7 @@ async fn run(
 
     // 5 & 6. Spawn the child, drain pipes (if piped), and wait for exit
     //        (concurrently with the IPC driver when cached).
-    let (outcome, ipc_server_result) =
+    let run_outcome =
         match mode.spawn_and_run(&spawn_execution.spawn_command, start, &fast_fail_token).await {
             Ok(result) => result,
             Err(err) => return Err(spawn_err(spawn_cache_status, err)),
@@ -533,56 +563,53 @@ async fn run(
     let duration = start.elapsed();
 
     // Non-zero exit: cache is never updated.
-    if !outcome.exit_status.success() {
+    let exit_status = run_outcome.exit_status();
+    if !exit_status.success() {
         return Ok(SpawnReport::Spawned {
             cache_status: spawn_cache_status,
-            outcome: SpawnLeafOutcome::Failed {
-                exit_code: non_zero_exit_code(outcome.exit_status),
-            },
+            outcome: SpawnLeafOutcome::Failed { exit_code: non_zero_exit_code(exit_status) },
         });
     }
-
-    // Extract reports, or short-circuit when the IPC server failed. An Err
-    // here means reports may be incomplete: caching this run would risk
-    // stale inputs/outputs, so skip all cache-related computation entirely.
-    let reports: Option<Reports> = match ipc_server_result {
-        Some(Ok(reports)) => {
-            tracing::debug!(?reports, "runner-aware tools reported");
-            Some(reports)
-        }
-        None => None,
-        Some(Err(err)) => {
-            return Ok(SpawnReport::Spawned {
-                cache_status: spawn_cache_status,
-                outcome: SpawnLeafOutcome::Success {
-                    cache_update: CacheUpdateOutcome::NotUpdated(
-                        CacheNotUpdatedReason::IpcServerError(err),
-                    ),
-                },
-            });
-        }
-    };
 
     // 7. Decide the cache update (only when we were in `Cached` mode). Cache
     //    update errors do not affect `SpawnOutcome` or fast-fail (the process
     //    exited 0, so we report `SpawnedSuccess`), though the summary reporter
     //    still turns post-run cache errors into a non-zero run exit code.
-    let cache_update = match mode {
-        ExecutionMode::Cached { state, .. } => {
+    let cache_update = match run_outcome {
+        RunOutcome::Cached { state, outcome, ipc_result } => {
+            // Extract reports, or short-circuit when the IPC server failed. An
+            // Err here means reports may be incomplete: caching this run would
+            // risk stale inputs/outputs, so skip all cache-related computation.
+            let reports = match ipc_result {
+                Ok(reports) => {
+                    tracing::debug!(?reports, "runner-aware tools reported");
+                    reports
+                }
+                Err(err) => {
+                    return Ok(SpawnReport::Spawned {
+                        cache_status: spawn_cache_status,
+                        outcome: SpawnLeafOutcome::Success {
+                            cache_update: CacheUpdateOutcome::NotUpdated(
+                                CacheNotUpdatedReason::IpcServerError(err),
+                            ),
+                        },
+                    });
+                }
+            };
             cache_update::update_cache(
                 cache,
                 workspace_root,
                 cache_dir,
-                state,
+                *state,
                 #[cfg(fspy)]
                 outcome.path_accesses.as_ref(),
-                reports.as_ref(),
+                Some(&reports),
                 duration,
                 &cancel_token,
             )
             .await
         }
-        ExecutionMode::Uncached { .. } => {
+        RunOutcome::Uncached { .. } => {
             // Caching was disabled for this task.
             CacheUpdateOutcome::NotUpdated(CacheNotUpdatedReason::CacheDisabled)
         }
@@ -738,12 +765,10 @@ async fn wait_child(wait: ChildWait, start: Instant) -> Result<ChildOutcome, Exe
 
 /// Phase 6 (piped): drain the child's stdout/stderr pipes and wait for exit.
 /// A pipe failure cancels the child so the wait future kills it instead of
-/// orphaning it. After the child exits (on every path), `stop_accepting` is
-/// signalled so the IPC server stops accepting and starts draining.
+/// orphaning it.
 async fn run_piped_child(
     child: PipedChild,
     sinks: PipeSinks<'_>,
-    stop_accepting: Option<&StopAccepting>,
     fast_fail_token: CancellationToken,
 ) -> Result<ChildOutcome, ExecutionError> {
     let start = Instant::now();
@@ -756,19 +781,14 @@ async fn run_piped_child(
             .await
             .map_err(|err| ExecutionError::ForwardTaskProcessOutput(err.into()));
 
-    let wait_result = match pipe_result {
+    match pipe_result {
         Ok(()) => wait_child(child.wait, start).await,
         Err(err) => {
             // Pipe failed — cancel so `child.wait` kills the child instead of
-            // orphaning it. Still signal the server below so it can drain.
+            // orphaning it.
             fast_fail_token.cancel();
             let _ = child.wait.await;
             Err(err)
         }
-    };
-
-    if let Some(stop_accepting) = stop_accepting {
-        stop_accepting.signal();
     }
-    wait_result
 }
