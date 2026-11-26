@@ -54,7 +54,7 @@ fn main() {
         }
         "cp" => cp::run(&args[2..]),
         "exit" => exit::run(&args[2..]),
-        "exit-on-ctrlc" => exit_on_ctrlc::run(),
+        "exit-on-ctrlc" => exit_on_ctrlc::run(&args[2..]),
         "fs" => fs::run(&args[2..]),
         "grep-file" => {
             grep_file::run(&args[2..]);

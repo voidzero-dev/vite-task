@@ -1,0 +1,19 @@
+[[e2e]]
+name = "ctrl_c_lets_parallel_tasks_finish_cleanup"
+comment = """
+Ctrl+C with two parallel tasks: a exits 130 immediately, b takes a second to clean up. b shouldn't get killed when a exits.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "-r",
+    "--parallel",
+    "--no-cache",
+    "dev",
+  ], interactions = [
+    { "expect-milestone" = "ready" },
+    { "expect-milestone" = "ready" },
+    { "write-key" = "ctrl-c" },
+  ] },
+]

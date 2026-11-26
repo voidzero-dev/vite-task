@@ -1,0 +1,6 @@
+{
+  "name": "@ctrl-c-parallel-cleanup/b",
+  "scripts": {
+    "dev": "vtt exit-on-ctrlc 1000"
+  }
+}
