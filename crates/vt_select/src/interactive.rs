@@ -215,43 +215,20 @@ impl<'a> State<'a> {
 }
 
 /// Interactive-only rendering parameters.
-pub struct InteractiveRender<'a> {
+struct InteractiveRender<'a> {
     /// Which selectable item is highlighted (0-based among `Item` rows).
-    pub selected: usize,
+    selected: usize,
     /// Prompt line text rendered above the list.
-    pub prompt: &'a str,
+    prompt: &'a str,
     /// Current search text rendered after the prompt.
-    pub query: &'a str,
+    query: &'a str,
     /// Which slice of `display_rows` to show.
-    pub visible_row_range: std::ops::Range<usize>,
+    visible_row_range: std::ops::Range<usize>,
     /// Number of selectable items beyond the visible range.
-    pub hidden_count: usize,
+    hidden_count: usize,
     /// Maximum visible width per line. Descriptions are truncated to prevent
     /// line wrapping, which would break cursor-based clearing in raw mode.
-    pub max_line_width: usize,
-}
-
-/// Mode-specific rendering parameters.
-///
-/// Separates interactive viewport/styling inputs from non-interactive flat
-/// printing so impossible states (such as a highlight cursor without a prompt,
-/// or a `usize::MAX` width sentinel) are unrepresentable.
-pub enum RenderMode<'a> {
-    /// Interactive terminal UI rendered in raw mode (`\r\n` line endings,
-    /// prompt + query, aligned descriptions truncated to `max_line_width`,
-    /// group headers, highlight marker, pagination footer, and empty-search hint).
-    Interactive(InteractiveRender<'a>),
-    /// Non-interactive flat output (`\n` line endings, no prompt, no cursor,
-    /// no group headers, no truncation).
-    NonInteractive,
-}
-
-/// Parameters for rendering a task list.
-pub struct RenderParams<'a> {
-    pub items: &'a [SelectItem],
-    pub display_rows: &'a [DisplayRow],
-    pub header: Option<&'a str>,
-    pub mode: RenderMode<'a>,
+    max_line_width: usize,
 }
 
 /// Truncate a description string to fit within `max_chars`, appending ellipsis if needed.
@@ -267,27 +244,11 @@ fn truncate_desc<'a>(desc: &'a str, max_chars: usize, buf: &'a mut Str) -> &'a s
     buf.as_str()
 }
 
-/// Render the item list. Shared rendering entrypoint used by both interactive
-/// and non-interactive modes (via [`crate::print_list`]).
+/// Render the interactive terminal UI (`\r\n` line endings, prompt + query,
+/// aligned descriptions truncated to `max_line_width`, group headers,
+/// highlight marker, pagination footer, and empty-search hint).
 ///
 /// Returns the number of lines written.
-pub fn render_items(writer: &mut impl Write, params: &RenderParams<'_>) -> anyhow::Result<usize> {
-    let lines = match &params.mode {
-        RenderMode::Interactive(interactive) => render_interactive_items(
-            writer,
-            params.items,
-            params.display_rows,
-            params.header,
-            interactive,
-        )?,
-        RenderMode::NonInteractive => {
-            render_non_interactive_items(writer, params.items, params.display_rows, params.header)?
-        }
-    };
-    writer.flush()?;
-    Ok(lines)
-}
-
 fn render_interactive_items(
     writer: &mut impl Write,
     items: &[SelectItem],
@@ -344,7 +305,7 @@ fn render_interactive_items(
     let command_col = max_prefix + max_name_width + 1;
 
     // Render visible display rows
-    for row in &display_rows[interactive.visible_row_range.clone()] {
+    for row in display_rows.get(interactive.visible_row_range.clone()).unwrap_or_default() {
         match row {
             DisplayRow::Header(group_name) => {
                 write!(
@@ -418,34 +379,35 @@ fn render_interactive_items(
         lines += 1;
     }
 
+    writer.flush()?;
     Ok(lines)
 }
 
-fn render_non_interactive_items(
+/// Render flat non-interactive output (`\n` line endings, no prompt, no cursor,
+/// no group headers, no truncation).
+pub fn render_non_interactive_items(
     writer: &mut impl Write,
     items: &[SelectItem],
     display_rows: &[DisplayRow],
     header: Option<&str>,
-) -> anyhow::Result<usize> {
-    let mut lines = 0usize;
-
-    // Header (e.g. error message). When there are no matching items, only the
-    // header is written — avoids showing a redundant "No matching tasks." line
-    // after a "not found" header.
+) -> anyhow::Result<()> {
+    // Header (e.g. error message)
     if let Some(header) = header {
         writeln!(writer, "{header}")?;
-        lines += 1;
     }
 
+    // When there are no matching items, this loop writes nothing so only the
+    // header is printed — avoids showing a redundant "No matching tasks." line
+    // after a "not found" header.
     for row in display_rows {
         if let DisplayRow::Item { item_index } = row {
             let item = &items[*item_index];
             writeln!(writer, "  {}: {}", item.display_name, item.description)?;
-            lines += 1;
         }
     }
 
-    Ok(lines)
+    writer.flush()?;
+    Ok(())
 }
 
 fn render(
@@ -469,20 +431,18 @@ fn render(
     // Query terminal width on each render to handle resize
     let max_line_width = terminal::size().map_or(80, |(w, _)| w as usize);
 
-    let lines = render_items(
+    let lines = render_interactive_items(
         stdout,
-        &RenderParams {
-            items: state.items,
-            display_rows: &state.display_rows,
-            header,
-            mode: RenderMode::Interactive(InteractiveRender {
-                selected: state.selected,
-                prompt,
-                query: &state.query,
-                visible_row_range: state.visible_display_rows(),
-                hidden_count: state.hidden_item_count(),
-                max_line_width,
-            }),
+        state.items,
+        &state.display_rows,
+        header,
+        &InteractiveRender {
+            selected: state.selected,
+            prompt,
+            query: &state.query,
+            visible_row_range: state.visible_display_rows(),
+            hidden_count: state.hidden_item_count(),
+            max_line_width,
         },
     )?;
 
@@ -641,20 +601,18 @@ mod tests {
         let display_rows = build_display_rows(items, query);
         let len = display_rows.len();
         let mut buf = Vec::new();
-        render_items(
+        render_interactive_items(
             &mut buf,
-            &RenderParams {
-                items,
-                display_rows: &display_rows,
-                header: None,
-                mode: RenderMode::Interactive(InteractiveRender {
-                    selected: 0,
-                    prompt: TASK_PROMPT,
-                    query,
-                    visible_row_range: 0..len,
-                    hidden_count: 0,
-                    max_line_width,
-                }),
+            items,
+            &display_rows,
+            None,
+            &InteractiveRender {
+                selected: 0,
+                prompt: TASK_PROMPT,
+                query,
+                visible_row_range: 0..len,
+                hidden_count: 0,
+                max_line_width,
             },
         )
         .unwrap();
@@ -710,6 +668,29 @@ mod tests {
         let output =
             render_non_interactive_to_string(&items, Some("zzz"), Some("Task \"zzz\" not found."));
         assert_eq!(output, "Task \"zzz\" not found.\n");
+    }
+
+    #[test]
+    fn non_interactive_filtered_query_prints_header_and_matching_items() {
+        let items = make_items(&[
+            ("build", "echo build"),
+            ("build:watch", "echo watch"),
+            ("lint", "echo lint"),
+        ]);
+        let output = render_non_interactive_to_string(
+            &items,
+            Some("bld"),
+            Some("Task \"bld\" not found. Did you mean:"),
+        );
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(
+            lines,
+            vec![
+                "Task \"bld\" not found. Did you mean:",
+                "  build: echo build",
+                "  build:watch: echo watch",
+            ]
+        );
     }
 
     #[test]

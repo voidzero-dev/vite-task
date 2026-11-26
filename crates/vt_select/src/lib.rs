@@ -4,7 +4,7 @@ mod interactive;
 use std::io::Write;
 
 pub use fuzzy::fuzzy_match;
-use interactive::{RenderMode, RenderParams, build_display_rows, render_items};
+use interactive::{build_display_rows, render_non_interactive_items};
 use vt_str::Str;
 
 /// An item in the selection list.
@@ -87,16 +87,5 @@ pub fn select_interactive(
 /// Returns an error if writing to `writer` fails.
 pub fn print_list(writer: &mut impl Write, params: &PrintListParams<'_>) -> anyhow::Result<()> {
     let display_rows = build_display_rows(params.items, params.query.unwrap_or_default());
-
-    render_items(
-        writer,
-        &RenderParams {
-            items: params.items,
-            display_rows: &display_rows,
-            header: params.header,
-            mode: RenderMode::NonInteractive,
-        },
-    )?;
-
-    Ok(())
+    render_non_interactive_items(writer, params.items, &display_rows, params.header)
 }
