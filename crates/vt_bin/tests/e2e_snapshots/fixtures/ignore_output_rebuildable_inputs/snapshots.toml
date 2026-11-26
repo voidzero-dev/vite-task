@@ -1,0 +1,151 @@
+[[e2e]]
+name = "ignore_output_keeps_tracked_read_required"
+ignore = true
+steps = [
+  [
+    "vtt",
+    "write-file",
+    "state.json",
+    '{"value":"original"}',
+  ],
+  [
+    "vt",
+    "run",
+    "read-state",
+  ],
+  [
+    "vtt",
+    "rm",
+    "state.json",
+    "result.json",
+  ],
+  [
+    "vt",
+    "run",
+    "read-state",
+  ],
+  [
+    "vtt",
+    "print-file",
+    "result.json",
+  ],
+]
+
+[[e2e]]
+name = "ignore_output_keeps_required_directory_link"
+comment = """
+The task lists a directory link, recreates it, and writes a file through it. Deleting the tracked link makes the task rerun.
+"""
+ignore = true
+steps = [
+  [
+    "node",
+    "read-link.mjs",
+  ],
+  [
+    "vt",
+    "run",
+    "read-link",
+  ],
+  [
+    "vtt",
+    "rm",
+    "-r",
+    "alias",
+    "result.txt",
+  ],
+  [
+    "vt",
+    "run",
+    "read-link",
+  ],
+  [
+    "vtt",
+    "print-file",
+    "result.txt",
+  ],
+]
+
+[[e2e]]
+name = "ignore_output_keeps_ignored_input_cache_rebuildable"
+comment = """
+The task reads and writes files under `tool/cache` and reports the cache folder with both `ignoreInput` and `ignoreOutput`. It lists `tool` and the workspace root. Removing `tool` simulates a clean checkout and removes an entry from the root listing.
+"""
+ignore = true
+steps = [
+  [
+    "vt",
+    "run",
+    "ignore-cache",
+  ],
+  [
+    "vtt",
+    "rm",
+    "-r",
+    "tool",
+  ],
+  [
+    "vt",
+    "run",
+    "ignore-cache",
+  ],
+  [
+    "vtt",
+    "stat-file",
+    "tool/cache",
+  ],
+]
+
+[[e2e]]
+name = "ignore_output_keeps_glob_excluded_input_cache_rebuildable"
+comment = """
+The task reports only `ignoreOutput` for `tool/cache`. An input negative glob excludes the cache file it reads and writes, so `tool` can still be rebuilt.
+"""
+ignore = true
+steps = [
+  [
+    "vt",
+    "run",
+    "exclude-cache-input",
+  ],
+  [
+    "vtt",
+    "rm",
+    "-r",
+    "tool",
+  ],
+  [
+    "vt",
+    "run",
+    "exclude-cache-input",
+  ],
+]
+
+[[e2e]]
+name = "ignore_output_keeps_write_only_file_out_of_listing"
+comment = """
+The task lists the workspace and writes `scratch.txt` without reading it. It reports the file with `ignoreOutput`, so a hit leaves the file missing.
+"""
+ignore = true
+steps = [
+  [
+    "vt",
+    "run",
+    "write-only",
+  ],
+  [
+    "vtt",
+    "rm",
+    "scratch.txt",
+  ],
+  [
+    "vt",
+    "run",
+    "write-only",
+  ],
+  [
+    "vtt",
+    "stat-file",
+    "scratch.txt",
+  ],
+]

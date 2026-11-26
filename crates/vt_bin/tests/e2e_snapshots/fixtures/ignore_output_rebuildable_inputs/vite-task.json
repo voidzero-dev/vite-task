@@ -1,0 +1,26 @@
+{
+  "tasks": {
+    "read-state": {
+      "command": "node read-state.mjs",
+      "cache": true
+    },
+    "read-link": {
+      "command": "node read-link.mjs",
+      "cache": true
+    },
+    "ignore-cache": {
+      "command": "node ignored-cache.mjs",
+      "cache": true
+    },
+    "exclude-cache-input": {
+      "command": "node ignored-cache.mjs input-negative",
+      "cache": {
+        "input": [{ "auto": true }, "!tool/cache/state.txt"]
+      }
+    },
+    "write-only": {
+      "command": "node write-only.mjs",
+      "cache": true
+    }
+  }
+}

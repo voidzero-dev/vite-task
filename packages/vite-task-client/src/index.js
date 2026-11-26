@@ -66,6 +66,9 @@ export function ignoreInput(path) {
 /**
  * Tell the runner to ignore writes under `path` when inferring cache outputs.
  *
+ * A file the task reads and writes remains a required input if its read is
+ * still tracked. Deleting or changing it causes a cache miss.
+ *
  * No-op when not running inside a runner.
  *
  * @param {string} path

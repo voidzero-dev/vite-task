@@ -1,34 +1,34 @@
 //! What a task can rebuild, so a later run may find it missing.
 //!
-//! Inputs are fingerprinted as the task left them, so they include the files
-//! a task read and then wrote, such as a tool's cache file. A clean checkout
-//! (CI, a fresh clone) doesn't have those files yet, and running the task
-//! would write them again, so a later run may find them missing. A file that
-//! is there must still be as the task left it.
+//! Inputs are fingerprinted as the task left them, including files it read
+//! and then wrote. A rebuildable file may be missing on a later run, as on
+//! a clean checkout. A file that is there must still match the fingerprint.
 //!
-//! The same goes for an empty folder the task made (built-in ignored paths
-//! such as `.DS_Store` aside), and for a folder that holds only what the task
-//! can rebuild: every file (or symlink) in it is one the task wrote, and every
-//! folder in it is rebuildable too. None of these is fingerprinted at all. A hit
-//! restores the files and the empty folders, which are archived as folders, if
-//! they're among the task's outputs, and the files recreate the folders holding
-//! them; explicit output config can leave them out. Such folders are found after
-//! the run by climbing from the written paths and the empty folders through
-//! their parent folders inside the workspace, listing each one once in the real
-//! file system. A written path or folder that is gone by then plays no part. A
-//! listing of any other folder leaves out its entries that the task can rebuild,
-//! which a later run may find missing too.
+//! A folder is rebuildable when the task made it and it is empty, or when it
+//! contains at least one entry and all entries are rebuildable. Both checks
+//! skip built-in ignored entries such as `.DS_Store`. None of these is
+//! fingerprinted at all. A hit restores the files and the empty folders, which
+//! are archived as folders, if they're among the task's outputs, and the files
+//! recreate the folders holding them; explicit output config can leave them
+//! out. Such folders are found after the run by climbing from the written
+//! paths and the empty folders through their parent folders inside the
+//! workspace, listing each one once in the real file system. A written path or
+//! folder that is gone by then plays no part. A listing of any other folder
+//! leaves out its entries that the task can rebuild, which a later run may
+//! find missing too.
 //!
-//! The written paths are fspy's records before output exclusions and
-//! tool-reported `ignoreOutput` paths are applied: those decide what is
-//! archived, not what the task can rebuild. A rename target that is a folder
-//! after the run, like Vite's `deps` folder renamed into place, stands for
-//! writes of every file (and symlink) under it; the folder itself and the
-//! folders in it don't count as written. The archive takes those files like
-//! any written file. The rename's source, like Vite's `deps_temp_*` folder,
-//! isn't recorded, but a path that is gone after the run and that the task
-//! wrote in counts as written: the task made or removed it. It is
-//! fingerprinted as missing, which a later run must match either way, so this
+//! The written paths come from fspy. A file the task reads and writes is a
+//! required input when `ignoreOutput` covers it and the read survives input
+//! filtering. Its absence makes the next run miss. Output negative globs
+//! only decide what is archived.
+//!
+//! A rename target that is a folder after the run, like Vite's `deps` folder
+//! renamed into place, stands for writes of every file (and symlink) under
+//! it. The folder itself and the folders in it don't count as written.
+//! The archive takes those files like any written file. The rename's source,
+//! like Vite's `deps_temp_*` folder, isn't recorded. A path that is gone after
+//! the run counts as written if the task wrote in it. It is fingerprinted
+//! as missing, which a later run must match either way, so this
 //! only tells it apart from a path the task looked for and didn't find. A
 //! write record on a path that is a folder, from opening it with write
 //! access, is ignored. A mkdir record counts only for a folder that is empty
@@ -45,12 +45,12 @@ use vt_path::{AbsolutePath, RelativePath, RelativePathBuf};
 
 use super::{fingerprint::PathFingerprint, ignored_paths::IgnoredDirEntries};
 
-/// The paths a task wrote, the empty folders it made, and the folders
-/// holding only what it can rebuild, relative to the workspace root.
+/// The rebuildable paths a task wrote, the empty folders it made, and the
+/// folders holding only what it can rebuild, relative to the workspace root.
 #[derive(Debug, Default)]
 pub struct Rebuildable {
     written: FxHashSet<RelativePathBuf>,
-    /// The folders the task made, or tried to make, inside the workspace.
+    /// The folders the task made or tried to make, excluding required paths.
     mkdirs: FxHashSet<RelativePathBuf>,
     /// The `mkdirs` that are empty folders.
     empty_folders: FxHashSet<RelativePathBuf>,
@@ -61,19 +61,17 @@ pub struct Rebuildable {
 }
 
 impl Rebuildable {
-    /// Takes the `written` paths and the `rename_targets` as written, with the
-    /// files under a renamed folder in place of the folder, by looking under
-    /// `workspace_root`, which must be done after the run, and the `mkdirs`.
+    /// Takes the rebuildable `written` paths and `mkdirs`.
     /// No folder is rebuildable, and none of the `mkdirs` is an empty folder,
-    /// until [`Self::with_folders`] or [`Self::with_empty_folders`] finds them.
-    pub fn new(
+    /// until [`Self::with_folders_excluding`] or [`Self::with_empty_folders`] finds them.
+    #[cfg_attr(
+        all(not(fspy), not(test)),
+        expect(dead_code, reason = "only called when processing fspy path accesses")
+    )]
+    pub(super) fn from_written(
         written: FxHashSet<RelativePathBuf>,
-        rename_targets: FxHashSet<RelativePathBuf>,
         mkdirs: FxHashSet<RelativePathBuf>,
-        workspace_root: &AbsolutePath,
-        cache_root: Option<&RelativePath>,
     ) -> Self {
-        let written = files_written(written, rename_targets, workspace_root, cache_root);
         let mut written_in = FxHashSet::default();
         for path in &written {
             let mut dir = path.parent();
@@ -100,14 +98,19 @@ impl Rebuildable {
     /// the task made under `workspace_root`, which must be done after the run.
     /// Only fingerprints of the paths the task read ask about folders, so a
     /// run without such reads takes [`Self::with_empty_folders`] instead.
+    #[cfg_attr(
+        all(not(fspy), not(test)),
+        expect(dead_code, reason = "only called when processing fspy path accesses")
+    )]
     #[must_use]
-    pub fn with_folders(
+    pub(super) fn with_folders_excluding(
         mut self,
         workspace_root: &AbsolutePath,
         cache_root: Option<&RelativePath>,
+        required_writes: &FxHashSet<RelativePathBuf>,
     ) -> Self {
         (self.folders, self.empty_folders) =
-            find_folders(&self.written, &self.mkdirs, workspace_root, cache_root);
+            find_folders(&self.written, required_writes, &self.mkdirs, workspace_root, cache_root);
         self
     }
 
@@ -129,8 +132,8 @@ impl Rebuildable {
         self
     }
 
-    /// The paths the task wrote or renamed a file to, and the files under the
-    /// folders it renamed.
+    /// The rebuildable paths the task wrote or renamed a file to, and the
+    /// rebuildable files under the folders it renamed.
     pub const fn written(&self) -> &FxHashSet<RelativePathBuf> {
         &self.written
     }
@@ -141,12 +144,12 @@ impl Rebuildable {
         &self.empty_folders
     }
 
-    /// Whether a later run may find `path`, which a read found as
-    /// `fingerprint`, missing: the task wrote it, or it is gone after the run
-    /// and the task wrote in it. A write record on a folder, from opening it
-    /// with write access, is ignored. Only a written path that the read found
-    /// as a folder is stat'd under `workspace_root`, to tell a folder from a
-    /// link the task made to one.
+    /// Whether a later run may find the path missing. A rebuildable write
+    /// allows this. A post-run `NotFound` also allows it if the task has a
+    /// rebuildable write below the path. A write record on a folder, from
+    /// opening it with write access, is ignored. Only a written path that the
+    /// read found as a folder is stat'd under `workspace_root`, to tell a
+    /// folder from a link the task made to one.
     pub fn may_be_missing(
         &self,
         path: &RelativePath,
@@ -195,7 +198,11 @@ impl Rebuildable {
 /// under it counts, folder entries are checked against the rebuildable
 /// folders, and the archive skips folders, so only a read of it has to tell
 /// (see [`Rebuildable::may_be_missing`]).
-fn files_written(
+#[cfg_attr(
+    all(not(fspy), not(test)),
+    expect(dead_code, reason = "only called when processing fspy path accesses")
+)]
+pub(super) fn files_written(
     mut written: FxHashSet<RelativePathBuf>,
     rename_targets: FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
@@ -276,8 +283,11 @@ fn is_empty_folder(
 /// candidates too. Climbing stops at the first folder that isn't rebuildable,
 /// since no folder above it can be, and at the workspace root. A folder that
 /// is gone plays no part: its parent is decided by the entries it holds.
+/// Required writes are skipped so a tracked directory link stays required
+/// even if the task wrote through it.
 fn find_folders(
     written: &FxHashSet<RelativePathBuf>,
+    required_writes: &FxHashSet<RelativePathBuf>,
     mkdirs: &FxHashSet<RelativePathBuf>,
     workspace_root: &AbsolutePath,
     cache_root: Option<&RelativePath>,
@@ -300,7 +310,8 @@ fn find_folders(
             empty_folders.insert(dir.to_relative_path_buf());
         }
     }
-    let mut candidates: Vec<&RelativePath> = candidates.into_iter().collect();
+    let mut candidates: Vec<&RelativePath> =
+        candidates.into_iter().filter(|dir| !required_writes.contains(*dir)).collect();
     sort_deepest_first(&mut candidates);
 
     let mut folders = empty_folders.clone();
@@ -351,8 +362,7 @@ fn sort_deepest_first(dirs: &mut [&RelativePath]) {
 /// aside, which don't count, as in directory listing fingerprints.
 enum Holds {
     Nothing,
-    /// At least one entry, each a file (or symlink) the task wrote or a
-    /// rebuildable folder.
+    /// At least one entry, with every entry rebuildable.
     OnlyRebuildable,
     /// Anything else, or entries that can't be read or named.
     Other,
@@ -414,4 +424,28 @@ fn is_rebuildable(
     folders: &FxHashSet<RelativePathBuf>,
 ) -> bool {
     if is_dir { folders.contains(path) } else { written.contains(path) }
+}
+
+#[cfg(test)]
+impl Rebuildable {
+    pub(super) fn new(
+        written: FxHashSet<RelativePathBuf>,
+        rename_targets: FxHashSet<RelativePathBuf>,
+        mkdirs: FxHashSet<RelativePathBuf>,
+        workspace_root: &AbsolutePath,
+        cache_root: Option<&RelativePath>,
+    ) -> Self {
+        Self::from_written(
+            files_written(written, rename_targets, workspace_root, cache_root),
+            mkdirs,
+        )
+    }
+
+    pub(super) fn with_folders(
+        self,
+        workspace_root: &AbsolutePath,
+        cache_root: Option<&RelativePath>,
+    ) -> Self {
+        self.with_folders_excluding(workspace_root, cache_root, &FxHashSet::default())
+    }
 }
