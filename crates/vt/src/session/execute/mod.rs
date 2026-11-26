@@ -577,6 +577,8 @@ async fn run(
     //    still turns post-run cache errors into a non-zero run exit code.
     let cache_update = match run_outcome {
         RunOutcome::Cached { state, outcome, ipc_result } => {
+            #[cfg(not(fspy))]
+            let _ = outcome;
             // Extract reports, or short-circuit when the IPC server failed. An
             // Err here means reports may be incomplete: caching this run would
             // risk stale inputs/outputs, so skip all cache-related computation.
