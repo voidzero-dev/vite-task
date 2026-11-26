@@ -573,13 +573,24 @@ impl<'a> Session<'a> {
             }
         });
 
-        // Build mode-dependent params and call select_list once
-        let mut selected_index = if is_interactive { Some(0) } else { None };
         let mut stdout = std::io::stdout();
-        let mode =
-            selected_index.as_mut().map_or(vt_select::Mode::NonInteractive, |selected_index| {
-                vt_select::Mode::Interactive { selected_index }
-            });
+        if !is_interactive {
+            vt_select::print_list(
+                &mut stdout,
+                &vt_select::PrintListParams {
+                    items: &select_items,
+                    query: not_found_name,
+                    header: header.as_deref(),
+                },
+            )?;
+            return Err(SessionError::EarlyExit(if not_found_name.is_some() {
+                // For `vp run typo`, return FAILURE status
+                ExitStatus::FAILURE
+            } else {
+                // For bare `vp run`, return SUCCESS status
+                ExitStatus::SUCCESS
+            }));
+        }
 
         let params = vt_select::SelectParams {
             items: &select_items,
@@ -589,25 +600,15 @@ impl<'a> Session<'a> {
             page_size: 12,
         };
 
-        let select_result = vt_select::select_list(&mut stdout, &params, mode, |state| {
+        let selected_index = match vt_select::select_interactive(&params, |state| {
             let milestone_name =
                 vt_str::format!("task-select:{}:{}", state.query, state.selected_index);
             vt_pty_terminal_test_client::mark_milestone(&milestone_name);
-        })?;
-
-        if matches!(select_result, vt_select::SelectResult::Cancelled) {
-            return Err(SessionError::EarlyExit(ExitStatus(130)));
-        }
-
-        let Some(selected_index) = selected_index else {
-            // Non-interactive, the list was printed.
-            return Err(SessionError::EarlyExit(if not_found_name.is_some() {
-                // For `vp run typo`, return FAILURE status
-                ExitStatus::FAILURE
-            } else {
-                // For bare `vp run`, return SUCCESS status
-                ExitStatus::SUCCESS
-            }));
+        })? {
+            vt_select::SelectOutcome::Selected(idx) => idx,
+            vt_select::SelectOutcome::Cancelled => {
+                return Err(SessionError::EarlyExit(ExitStatus(130)));
+            }
         };
 
         // Interactive: print selected task and build a QueryPlanRequest using the
