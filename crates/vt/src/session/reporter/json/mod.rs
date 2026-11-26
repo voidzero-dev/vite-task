@@ -6,10 +6,7 @@
 
 mod document;
 
-use std::{
-    cell::RefCell, collections::BTreeMap, io::Write, process::ExitStatus as StdExitStatus, rc::Rc,
-    sync::Arc, time::Duration,
-};
+use std::{cell::RefCell, collections::BTreeMap, io::Write, rc::Rc, sync::Arc, time::Duration};
 
 use document::{
     Baseline, Cache, Change, Changed, CommandStep, Fingerprint, Hit, HowChanged, NestedStep,
@@ -33,7 +30,7 @@ use crate::session::{
         self, BaselineDetails, BaselineOutputs, BaselinePath, CacheMiss, Comparison,
         InputChangeKind,
     },
-    event::{CacheDisabledReason, CacheStatus, CacheUpdateStatus, ExecutionError},
+    event::{CacheDisabledReason, CacheStatus, LeafOutcome},
     json::{self, Version, path_key, task_id},
 };
 
@@ -263,8 +260,8 @@ fn find_step<'a>(
 }
 
 impl LeafExecutionReporter for JsonLeafReporter {
-    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
-        self.report(cache_of(&cache_status));
+    fn start(&mut self, cache_status: &CacheStatus) -> StdioConfig {
+        self.report(cache_of(cache_status));
         // Nothing runs or is replayed, so nothing is written to these.
         StdioConfig {
             suggestion: StdioSuggestion::Piped,
@@ -280,13 +277,8 @@ impl LeafExecutionReporter for JsonLeafReporter {
     ///
     /// A lookup cancelled by Ctrl-C has neither, and also leaves its step
     /// unreported.
-    fn finish(
-        self: Box<Self>,
-        _status: Option<StdExitStatus>,
-        _cache_update_status: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    ) {
-        if let Some(error) = error {
+    fn finish(self: Box<Self>, outcome: LeafOutcome) {
+        if let Some(error) = outcome.into_error() {
             let message = vt_str::format!("{:#}", anyhow::Error::from(error));
             let message = match self.location.as_ref().and_then(|location| location.last()) {
                 Some((id, _)) => vt_str::format!("{id}: {message}"),
@@ -502,7 +494,7 @@ fn change_of(change: &cache::Change) -> Change {
 mod tests {
     use super::*;
     use crate::session::{
-        event::{CacheErrorKind, CacheNotUpdatedReason},
+        event::{CacheErrorKind, ExecutionError},
         json,
         reporter::test_fixtures::{spawn_task, test_path},
     };
@@ -532,11 +524,7 @@ mod tests {
             kind: CacheErrorKind::Lookup,
             source: anyhow::anyhow!("database is locked"),
         };
-        leaf.finish(
-            None,
-            CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::DryRun),
-            Some(error),
-        );
+        leaf.finish(LeafOutcome::FailedBeforeStart(error));
         assert!(reporter.finish().is_err());
     }
 

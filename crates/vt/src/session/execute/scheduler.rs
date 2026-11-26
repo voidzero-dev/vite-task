@@ -21,9 +21,7 @@ use crate::{
     Session,
     session::{
         cache::{ExecutionCache, FileCheck},
-        event::{
-            CacheDisabledReason, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus, RunKind,
-        },
+        event::{CacheDisabledReason, CacheStatus, LeafOutcome, RunKind},
         reporter::{ExitStatus, GraphExecutionReporter, GraphExecutionReporterBuilder, LeafPath},
     },
 };
@@ -236,7 +234,7 @@ impl ExecutionContext<'_> {
             LeafExecutionKind::InProcess(in_process_execution) => {
                 // In-process (built-in) commands: caching is disabled, execute synchronously
                 let mut stdio_config = leaf_reporter
-                    .start(CacheStatus::Disabled(CacheDisabledReason::InProcessExecution));
+                    .start(&CacheStatus::Disabled(CacheDisabledReason::InProcessExecution));
 
                 // A dry run doesn't run it.
                 if self.run_kind == RunKind::Real {
@@ -246,11 +244,7 @@ impl ExecutionContext<'_> {
                     let _ = stdio_config.writers.stdout_writer.flush();
                 }
 
-                leaf_reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-                    None,
-                );
+                leaf_reporter.finish(LeafOutcome::InProcess);
                 false
             }
             LeafExecutionKind::Spawn(spawn_execution) => {
@@ -268,11 +262,11 @@ impl ExecutionContext<'_> {
                 )
                 .await;
                 match outcome {
-                    SpawnOutcome::CacheHit | SpawnOutcome::WouldSpawn | SpawnOutcome::Cancelled => {
-                        false
-                    }
-                    SpawnOutcome::Spawned(status) => !status.success(),
-                    SpawnOutcome::Failed => true,
+                    SpawnOutcome::CacheHit
+                    | SpawnOutcome::WouldSpawn
+                    | SpawnOutcome::SpawnedSuccess
+                    | SpawnOutcome::Cancelled => false,
+                    SpawnOutcome::SpawnedFailed(_) | SpawnOutcome::InfraError => true,
                 }
             }
         };

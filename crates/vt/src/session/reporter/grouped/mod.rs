@@ -1,6 +1,6 @@
 //! Grouped reporter — buffers output per task, prints as a block on completion.
 
-use std::{cell::RefCell, io::Write, process::ExitStatus as StdExitStatus, rc::Rc, sync::Arc};
+use std::{cell::RefCell, io::Write, rc::Rc, sync::Arc};
 
 use owo_colors::Style;
 use vt_path::AbsolutePath;
@@ -12,7 +12,7 @@ use super::{
     format_command_with_cache_status, format_task_label, maybe_strip_writer,
     write_leaf_trailing_output,
 };
-use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError, RunKind};
+use crate::session::event::{CacheStatus, LeafOutcome, RunKind};
 
 mod writer;
 
@@ -92,11 +92,11 @@ struct GroupedLeafReporter {
 }
 
 impl LeafExecutionReporter for GroupedLeafReporter {
-    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
+    fn start(&mut self, cache_status: &CacheStatus) -> StdioConfig {
         let line = format_command_with_cache_status(
             &self.display,
             &self.workspace_path,
-            &cache_status,
+            cache_status,
             RunKind::Real,
         );
 
@@ -127,12 +127,9 @@ impl LeafExecutionReporter for GroupedLeafReporter {
         }
     }
 
-    fn finish(
-        self: Box<Self>,
-        _status: Option<StdExitStatus>,
-        _cache_update_status: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    ) {
+    fn finish(self: Box<Self>, outcome: LeafOutcome) {
+        let error = outcome.into_error();
+
         // Build grouped block: header + buffered output.
         let mut extra = Vec::new();
         if let Some(ref grouped_buffer) = self.grouped_buffer {
@@ -186,7 +183,7 @@ mod tests {
         let mut reporter = builder.build();
         let mut leaf =
             reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind(item));
-        let stdio_config = leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+        let stdio_config = leaf.start(&CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
         assert_eq!(stdio_config.suggestion, StdioSuggestion::Piped);
     }
 }

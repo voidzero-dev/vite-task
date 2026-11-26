@@ -5,7 +5,7 @@
 //! would do next (`, executing` or `, replaying`), and no blank line follows
 //! it.
 
-use std::{cell::RefCell, io::Write, process::ExitStatus as StdExitStatus, rc::Rc, sync::Arc};
+use std::{cell::RefCell, io::Write, rc::Rc, sync::Arc};
 
 use vt_path::AbsolutePath;
 use vt_plan::{ExecutionItemDisplay, LeafExecutionKind};
@@ -17,7 +17,7 @@ use super::{
     StdioConfig, StdioSuggestion, format_command_display, format_command_with_cache_status,
     maybe_strip_writer, write_leaf_trailing_output,
 };
-use crate::session::event::{CacheStatus, CacheUpdateStatus, ExecutionError, RunKind};
+use crate::session::event::{CacheStatus, LeafOutcome, RunKind};
 
 pub struct InterleavedReporterBuilder {
     workspace_path: Arc<AbsolutePath>,
@@ -101,11 +101,11 @@ struct InterleavedLeafReporter {
 }
 
 impl LeafExecutionReporter for InterleavedLeafReporter {
-    fn start(&mut self, cache_status: CacheStatus) -> StdioConfig {
+    fn start(&mut self, cache_status: &CacheStatus) -> StdioConfig {
         let line = format_command_with_cache_status(
             &self.display,
             &self.workspace_path,
-            &cache_status,
+            cache_status,
             self.run_kind,
         );
 
@@ -130,12 +130,8 @@ impl LeafExecutionReporter for InterleavedLeafReporter {
         }
     }
 
-    fn finish(
-        self: Box<Self>,
-        _status: Option<StdExitStatus>,
-        _cache_update_status: CacheUpdateStatus,
-        error: Option<ExecutionError>,
-    ) {
+    fn finish(self: Box<Self>, outcome: LeafOutcome) {
+        let error = outcome.into_error();
         let (command_line, blank_line) = match self.run_kind {
             RunKind::Real => (Str::default(), self.started),
             // A dry run prints only the commands' lines. An error that comes
@@ -158,7 +154,10 @@ mod tests {
     use super::*;
     use crate::session::{
         cache::CacheMiss,
-        event::{CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason},
+        event::{
+            CacheDisabledReason, CacheErrorKind, ExecutionError, LiveSpawnCacheStatus,
+            SpawnLeafOutcome,
+        },
         reporter::{
             StdioSuggestion,
             test_fixtures::{SharedBuffer, in_process_task, spawn_task, test_path},
@@ -184,7 +183,7 @@ mod tests {
         ));
         let mut reporter = builder.build();
         let mut leaf = reporter.new_leaf_execution(&[], display, leaf_kind);
-        leaf.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).suggestion
+        leaf.start(&CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)).suggestion
     }
 
     #[test]
@@ -219,19 +218,20 @@ mod tests {
             RunKind::Dry,
         ))
         .build();
-        let not_updated = || CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::DryRun);
-
         let mut leaf =
             reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind(item));
-        leaf.start(CacheStatus::Miss(CacheMiss::NotFound));
-        leaf.finish(None, not_updated(), None);
+        leaf.start(&CacheStatus::Miss(CacheMiss::NotFound));
+        leaf.finish(LeafOutcome::Spawned {
+            cache_status: LiveSpawnCacheStatus::Miss(CacheMiss::NotFound),
+            outcome: SpawnLeafOutcome::WouldSpawn,
+        });
 
         let leaf = reporter.new_leaf_execution(&[], &item.execution_item_display, leaf_kind(item));
         let error = ExecutionError::Cache {
             kind: CacheErrorKind::Lookup,
             source: anyhow::anyhow!("database is locked"),
         };
-        leaf.finish(None, not_updated(), Some(error));
+        leaf.finish(LeafOutcome::FailedBeforeStart(error));
         reporter.finish().unwrap();
 
         assert_eq!(
