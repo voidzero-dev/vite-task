@@ -1,0 +1,97 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt write-file dist/output.txt built",
+      "cache": {
+        "input": ["src/**"],
+        "output": ["dist/**"]
+      }
+    },
+    "step1": {
+      "command": "vtt print step1",
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
+    "step2": {
+      "command": "vtt print step2",
+      "dependsOn": ["step1"],
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
+    "step3": {
+      "command": "vtt print step3",
+      "dependsOn": ["step2"],
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
+    "step4": {
+      "command": "vtt print step4",
+      "dependsOn": ["step3"],
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
+    "t1": {
+      "command": "vtt print t1",
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
+    "t2": {
+      "command": "vtt print t2",
+      "dependsOn": ["t1"],
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
+    "t3": {
+      "command": "vtt print t3",
+      "dependsOn": ["t2"],
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
+    "t4": {
+      "command": "vtt print t4",
+      "dependsOn": ["t3"],
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
+    "t5": {
+      "command": "vtt print t5",
+      "dependsOn": ["t4"],
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
+    "t6": {
+      "command": "vtt print t6",
+      "dependsOn": ["t5"],
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    },
+    "t7": {
+      "command": "vtt print t7",
+      "dependsOn": ["t6"],
+      "cache": {
+        "input": ["src/**"],
+        "output": []
+      }
+    }
+  }
+}

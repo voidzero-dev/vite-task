@@ -1,0 +1,181 @@
+# Deterministic, zero-sleep e2e tests for remote cache resilience: transient
+# retry (fetch, store, blob download), per-kind outage circuit breaking, and
+# bounded concurrent uploads. These run against the real Cloudflare Worker
+# backend through `remote-cache-server`'s tap proxy, so they are ignored by
+# default and skipped on musl (like `remote_cache`).
+
+[[e2e]]
+name = "retry_transient_failures"
+comment = "Transient 503, 429, connection-drop, and truncated-download errors are retried across fetch, store, and blob restore."
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "--fault",
+    "/fetch=503",
+    "--fault",
+    "/fetch=drop",
+    "--fault",
+    "/store=503",
+    "--fault",
+    "/store=429",
+    "--fault",
+    "/store=drop",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+    [
+      "VP_RUN_INTERNAL_REMOTE_CACHE_NO_BACKOFF",
+      "1",
+    ],
+  ], comment = "Fetch recovers from 503 and connection drop to receive 404. Store retries 503, 429, and connection drop, re-streaming the output archive until 200." },
+  [
+    "vt",
+    "cache",
+    "clean",
+  ],
+  [
+    "vtt",
+    "rm",
+    "-rf",
+    "dist",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--fault",
+    "/fetch=503",
+    "--fault",
+    "/blob=503",
+    "--fault",
+    "/blob=truncate",
+    "vt",
+    "run",
+    "build",
+  ], envs = [
+    [
+      "VP_RUN_INTERNAL_REMOTE_CACHE_NO_BACKOFF",
+      "1",
+    ],
+  ], comment = "Fetch retries 503 and hits the stored entry. Blob download retries 503 and a mid-stream truncation, then restores the output." },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/output.txt",
+  ], comment = "The retried upload and retried download restored the output file." },
+  { argv = [
+    "vtt",
+    "list-dir",
+    "node_modules/.vite/task-cache",
+    "--ext",
+    ".tmp",
+    "--recursive",
+  ], comment = "No temporary download file was left behind after the truncated attempt." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "outage_circuit_breaker_per_kind"
+comment = "Three consecutive exhausted read failures open the read circuit breaker without blocking uploads, and successful uploads do not reset read failures."
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "--always-fail",
+    "/fetch=503",
+    "--summary",
+    "vt",
+    "run",
+    "step4",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+    [
+      "VP_RUN_INTERNAL_REMOTE_CACHE_NO_BACKOFF",
+      "1",
+    ],
+  ], comment = "step1..step3 exhaust 3 fetch attempts each (9 total) and open the read breaker. step4 skips the fetch request, while all 4 stores succeed." },
+  { argv = [
+    "vt",
+    "run",
+    "--last-details",
+  ], comment = "step1..step3 report HTTP status 503; step4 reports remote cache temporarily unavailable; no upload warnings." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]
+
+[[e2e]]
+name = "upload_concurrency_cap"
+comment = "At most 4 concurrent remote cache uploads are in flight at once, and full upload slots do not block fetches."
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  [
+    "remote-cache-server",
+    "start",
+  ],
+  { argv = [
+    "remote-cache-server",
+    "run",
+    "--github-actions",
+    "--hold-stores",
+    "4",
+    "--release-after-fetches",
+    "7",
+    "--summary",
+    "vt",
+    "run",
+    "t7",
+  ], envs = [
+    [
+      "VP_REMOTE_CACHE",
+      "read-write",
+    ],
+    [
+      "VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS",
+      "1",
+    ],
+    [
+      "VP_RUN_INTERNAL_REMOTE_CACHE_NO_BACKOFF",
+      "1",
+    ],
+  ], comment = "The tap holds stores until 4 are concurrently in flight and all 7 fetches have arrived, proving reads are unblocked and max_concurrent_stores stays capped at 4." },
+  [
+    "remote-cache-server",
+    "stop",
+  ],
+]

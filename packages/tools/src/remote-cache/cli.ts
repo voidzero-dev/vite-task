@@ -8,10 +8,19 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crossSpawn from 'cross-spawn';
 import { defaultRequestToken } from './github.ts';
-import { logFile, serverFile, stateDirectory, type ServerInfo } from './state.ts';
+import {
+  logFile,
+  serverFile,
+  stateDirectory,
+  type FaultKind,
+  type FaultRoute,
+  type FaultRule,
+  type RunConfig,
+  type ServerInfo,
+} from './state.ts';
 
 const usage =
-  'Usage: remote-cache-server start [--entries-per-key N] | run [--github-actions] COMMAND [ARGS...] | corrupt-blob NUMBER | expire-entry [--before-download] NUMBER | stop';
+  'Usage: remote-cache-server start [--entries-per-key N] | run [--github-actions] [--fault ROUTE=KIND]... [--always-fail ROUTE=KIND]... [--hold-stores N] [--release-after-fetches N] [--summary] COMMAND [ARGS...] | corrupt-blob NUMBER | expire-entry [--before-download] NUMBER | stop';
 const directory = resolve(stateDirectory);
 
 function fail(message: string): never {
@@ -30,22 +39,36 @@ function readInfo(): ServerInfo {
  * POST to the backend's control server and return the JSON response. A 404
  * fails with `notFound`.
  */
-function control<T>(info: ServerInfo, path: string, notFound = 'unknown request'): Promise<T> {
+function control<T>(
+  info: ServerInfo,
+  path: string,
+  notFound = 'unknown request',
+  body?: unknown,
+): Promise<T> {
   return new Promise((resolve) => {
     const unreachable = (error: Error) =>
       fail(`the backend is unreachable (${error.message}). See ${logFile(stateDirectory)}.`);
-    const call = request(`${info.control}${path}`, { method: 'POST', agent: false }, (response) => {
-      if (response.statusCode === 404) fail(notFound);
-      if (response.statusCode !== 200) {
-        fail(`the backend failed (${response.statusCode}). See ${logFile(stateDirectory)}.`);
-      }
-      const chunks: Buffer[] = [];
-      response.on('data', (chunk: Buffer) => chunks.push(chunk));
-      response.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString()) as T));
-      response.on('error', unreachable);
-    });
+    const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
+    const headers =
+      payload === undefined
+        ? undefined
+        : { 'content-type': 'application/json', 'content-length': String(payload.length) };
+    const call = request(
+      `${info.control}${path}`,
+      { method: 'POST', agent: false, ...(headers === undefined ? {} : { headers }) },
+      (response) => {
+        if (response.statusCode === 404) fail(notFound);
+        if (response.statusCode !== 200) {
+          fail(`the backend failed (${response.statusCode}). See ${logFile(stateDirectory)}.`);
+        }
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString()) as T));
+        response.on('error', unreachable);
+      },
+    );
     call.on('error', unreachable);
-    call.end();
+    call.end(payload);
   });
 }
 
@@ -89,11 +112,72 @@ async function start(argv: string[]): Promise<void> {
   daemon.unref();
 }
 
+function parseFaultSpec(spec: string | undefined): FaultRule {
+  if (spec === undefined) fail(usage);
+  const sep = spec.indexOf('=');
+  if (sep === -1) fail(`invalid fault spec '${spec}', expected <route>=<kind>`);
+  const route = spec.slice(0, sep);
+  const kind = spec.slice(sep + 1);
+  if (route !== '/fetch' && route !== '/store' && route !== '/blob') {
+    fail(`unknown route '${route}'`);
+  }
+  if (kind !== '503' && kind !== '429' && kind !== 'drop' && kind !== 'truncate') {
+    fail(`unknown fault kind '${kind}'`);
+  }
+  if (kind === 'truncate' && route !== '/blob') {
+    fail('truncate fault is only valid for /blob');
+  }
+  return { route: route as FaultRoute, kind: kind as FaultKind };
+}
+
+function parsePositiveInt(value: string | undefined): number {
+  if (value === undefined || !/^[1-9]\d*$/.test(value)) fail(usage);
+  return Number(value);
+}
+
 async function run(argv: string[]): Promise<void> {
-  const githubActions = argv[0] === '--github-actions';
-  const [command, ...args] = githubActions ? argv.slice(1) : argv;
+  let githubActions = false;
+  const faults: FaultRule[] = [];
+  const alwaysFail: FaultRule[] = [];
+  let holdStores = 0;
+  let releaseAfterFetches = 0;
+  let summary = false;
+  let index = 0;
+  while (index < argv.length) {
+    const arg = argv[index]!;
+    if (arg === '--github-actions') {
+      githubActions = true;
+      index += 1;
+    } else if (arg === '--fault') {
+      faults.push(parseFaultSpec(argv[index + 1]));
+      index += 2;
+    } else if (arg === '--always-fail') {
+      alwaysFail.push(parseFaultSpec(argv[index + 1]));
+      index += 2;
+    } else if (arg === '--hold-stores') {
+      holdStores = parsePositiveInt(argv[index + 1]);
+      index += 2;
+    } else if (arg === '--release-after-fetches') {
+      releaseAfterFetches = parsePositiveInt(argv[index + 1]);
+      index += 2;
+    } else if (arg === '--summary') {
+      summary = true;
+      index += 1;
+    } else {
+      break;
+    }
+  }
+  const [command, ...args] = argv.slice(index);
   if (command === undefined) fail(usage);
+  if (releaseAfterFetches > 0 && holdStores === 0) {
+    fail('--release-after-fetches requires --hold-stores');
+  }
   const info = readInfo();
+  const hasRunConfig = faults.length > 0 || alwaysFail.length > 0 || holdStores > 0 || summary;
+  if (hasRunConfig) {
+    const config: RunConfig = { faults, alwaysFail, holdStores, releaseAfterFetches, summary };
+    await control(info, '/configure', 'unknown request', config);
+  }
   const env: NodeJS.ProcessEnv = { ...process.env, VP_REMOTE_CACHE_URL: info.url };
   if (githubActions) {
     // As in a GitHub Actions job with `id-token: write`.

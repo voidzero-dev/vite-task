@@ -13,7 +13,7 @@ use std::{
 use bytes::Bytes;
 use reqwest::{
     Response, StatusCode,
-    header::{CONTENT_TYPE, HeaderMap},
+    header::{CONTENT_TYPE, HeaderMap, RETRY_AFTER},
     multipart::{Form, Part},
 };
 use serde::{Deserialize, Deserializer, Serialize};
@@ -29,6 +29,15 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Time allowed for each read of a response. Until the response headers
 /// arrive, it also bounds sending the request.
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Total timeout for a single `POST /fetch` request. Fetches transfer small
+/// metadata payloads, so bounding them to 10s lets a hung lookup retry once
+/// within the caller's read retry budget instead of stalling for `READ_TIMEOUT`.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Idle timeout for pooled HTTP/1.1 keep-alive connections, kept below typical
+/// NAT and edge proxy idle cutoffs to reduce stale-socket resets on reuse.
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A failed remote cache operation. The messages name only the kind of
 /// failure, so they are the same on every platform. The details, if any, are
@@ -59,11 +68,68 @@ pub enum Error {
     /// The server responded with a status other than 200, or for a fetch,
     /// other than 200 or 404. The source is the message in the response body,
     /// if any.
-    #[error("HTTP status {}", .0.as_u16())]
-    Status(StatusCode, #[source] Option<ServerMessage>),
+    #[error("HTTP status {}", status.as_u16())]
+    Status {
+        /// The HTTP status code returned by the server.
+        status: StatusCode,
+        /// The message in the response body, if any.
+        #[source]
+        message: Option<ServerMessage>,
+        /// Parsed delta-seconds `Retry-After` header, if present and valid.
+        retry_after: Option<Duration>,
+    },
     /// The body of a 200 fetch response isn't an exact or fallback match.
     #[error("malformed response")]
     MalformedResponse(#[source] ciborium::de::Error<std::io::Error>),
+}
+
+/// How a caller's retry, rate-limit, and circuit-breaker policy should treat a
+/// failed remote cache request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryHint {
+    /// Failed locally before a request reached the endpoint (invalid endpoint,
+    /// HTTP client construction, local blob read, or auth failure). Should not
+    /// be retried and carries no signal about endpoint health.
+    Local,
+    /// Permanent response from the endpoint (such as `4xx` other than
+    /// `408`/`429`, `501`/`505`/`511`, or a malformed response). Should not be
+    /// retried, and indicates the endpoint is reachable.
+    Permanent,
+    /// Transient failure (`408 Request Timeout`) that can be retried with
+    /// per-request backoff without counting toward a backend outage breaker.
+    Transient,
+    /// `429 Too Many Requests`: retryable, and callers may coordinate a shared
+    /// cooldown across sibling requests using `retry_after` if present.
+    RateLimited {
+        /// Parsed delta-seconds `Retry-After` header, if present and valid.
+        retry_after: Option<Duration>,
+    },
+    /// Transport or server outage (`Network` or retryable `5xx`): retryable
+    /// with per-request backoff, and counts toward a backend outage breaker.
+    /// Intentionally omits `Retry-After` so coarse server headers on `503` do
+    /// not stall sibling requests.
+    Outage,
+}
+
+impl Error {
+    /// Classify this failure for a caller's retry, rate-limit, and
+    /// circuit-breaker policy.
+    #[must_use]
+    pub const fn retry_hint(&self) -> RetryHint {
+        match self {
+            Self::Network(_) => RetryHint::Outage,
+            Self::Status { status, retry_after, .. } => match status.as_u16() {
+                408 => RetryHint::Transient,
+                429 => RetryHint::RateLimited { retry_after: *retry_after },
+                500 | 502..=504 | 506..=510 | 512..=599 => RetryHint::Outage,
+                _ => RetryHint::Permanent,
+            },
+            Self::MalformedResponse(_) => RetryHint::Permanent,
+            Self::InvalidEndpoint(_) | Self::HttpClient(_) | Self::ReadBlob(_) | Self::Auth(_) => {
+                RetryHint::Local
+            }
+        }
+    }
 }
 
 /// The message in the body of an error response.
@@ -142,6 +208,9 @@ pub enum Fetched {
 }
 
 /// A client for one remote cache endpoint.
+///
+/// Each method sends a single HTTP/1.1 request and leaves retry, rate-limit,
+/// circuit-breaker, and concurrency policies to the caller.
 #[derive(Debug)]
 pub struct Client {
     http: reqwest::Client,
@@ -171,11 +240,16 @@ impl Client {
         // ring too.
         let _ = rustls::crypto::ring::default_provider().install_default();
         // A redirect fails like any other status. Following one could turn a
-        // store into a GET of a login page that responds with 200. HTTPS
-        // endpoints use HTTP/2 if the server accepts it in the TLS handshake.
+        // store into a GET of a login page that responds with 200. Force
+        // HTTP/1.1 connection pooling (even if another crate enables reqwest's
+        // `http2` feature) so concurrent uploads and fetches get independent
+        // sockets instead of sharing fate on one multiplexed H2 connection.
+        // reqwest's default 15s TCP keep-alive stays enabled.
         let http = reqwest::Client::builder()
+            .http1_only()
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(READ_TIMEOUT)
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(Error::HttpClient)?;
@@ -205,6 +279,7 @@ impl Client {
             .post(self.fetch_url.clone())
             .headers(headers)
             .header(CONTENT_TYPE, "application/cbor")
+            .timeout(FETCH_TIMEOUT)
             .body(body)
             .send()
             .await
@@ -217,7 +292,11 @@ impl Client {
             return Ok(None);
         }
         let body = check_status(response).await?.bytes().await.map_err(network_error)?;
-        tracing::debug!(bytes = body.len(), elapsed = ?start.elapsed(), "remote cache fetch received");
+        tracing::debug!(
+            bytes = body.len(),
+            elapsed = ?start.elapsed(),
+            "remote cache fetch received"
+        );
         decode_fetched(&body).map(Some)
     }
 
@@ -260,8 +339,8 @@ impl Client {
         let start = Instant::now();
         let headers = self.auth_headers(Operation::Store).await?;
         let auth = start.elapsed();
-        let metadata = StoreMetadata { key, secondary_key, value };
-        let mut form = Form::new().part("metadata", metadata_part(&metadata));
+        let metadata = encode_cbor(&StoreMetadata { key, secondary_key, value });
+        let mut form = Form::new().part("metadata", metadata_part(metadata));
         let blob_bytes = if let Some(blob) = blob {
             let (part, length) = blob_part(blob).await?;
             form = form.part("blob", part);
@@ -303,18 +382,27 @@ fn log_response(response: &Response, start: Instant) {
     );
 }
 
+/// Parse an integer delta-seconds `Retry-After` header. Non-numeric values
+/// (including HTTP dates) return `None`.
+fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
+    let value = headers.get(RETRY_AFTER)?.to_str().ok()?.trim();
+    let seconds: u64 = value.parse().ok()?;
+    Some(Duration::from_secs(seconds))
+}
+
 /// Only HTTP 200 counts as success. For other statuses, the error includes the
-/// message in the response body.
+/// message in the response body and any valid integer `Retry-After` header.
 async fn check_status(response: Response) -> Result<Response, Error> {
     let status = response.status();
     if status == StatusCode::OK {
         return Ok(response);
     }
+    let retry_after = parse_retry_after(response.headers());
     let message = response.text().await.ok().and_then(|text| {
         let text = text.trim();
         (!text.is_empty()).then(|| ServerMessage(Str::from(text)))
     });
-    Err(Error::Status(status, message))
+    Err(Error::Status { status, message, retry_after })
 }
 
 fn network_error(err: reqwest::Error) -> Error {
@@ -354,8 +442,8 @@ fn encode_cbor(value: &impl Serialize) -> Vec<u8> {
     bytes
 }
 
-fn metadata_part(metadata: &StoreMetadata<'_>) -> Part {
-    Part::bytes(encode_cbor(metadata)).mime_str("application/cbor").expect("valid MIME type")
+fn metadata_part(metadata: Vec<u8>) -> Part {
+    Part::bytes(metadata).mime_str("application/cbor").expect("valid MIME type")
 }
 
 /// The blob part streamed from the file at `path`, and its length.
@@ -485,6 +573,50 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parse_retry_after_handles_valid_and_invalid_values() {
+        let header = |value: &str| {
+            HeaderMap::from_iter([(RETRY_AFTER, HeaderValue::from_str(value).unwrap())])
+        };
+        assert_eq!(parse_retry_after(&HeaderMap::new()), None);
+        assert_eq!(parse_retry_after(&header("0")), Some(Duration::ZERO));
+        assert_eq!(parse_retry_after(&header(" 4 ")), Some(Duration::from_secs(4)));
+        assert_eq!(parse_retry_after(&header("60")), Some(Duration::from_secs(60)));
+        assert_eq!(parse_retry_after(&header("-1")), None);
+        assert_eq!(parse_retry_after(&header("Wed, 21 Oct 2026 07:28:00 GMT")), None);
+    }
+
+    #[test]
+    fn error_retry_hint_handles_statuses_correctly() {
+        let status_err = |code: u16, retry_after: Option<Duration>| Error::Status {
+            status: StatusCode::from_u16(code).unwrap(),
+            message: None,
+            retry_after,
+        };
+        for code in [500, 502, 503, 504, 520, 524] {
+            let err = status_err(code, Some(Duration::from_secs(60)));
+            assert_eq!(err.retry_hint(), RetryHint::Outage, "{code} should be an outage");
+        }
+        assert_eq!(status_err(408, None).retry_hint(), RetryHint::Transient);
+        assert_eq!(
+            status_err(429, Some(Duration::from_secs(5))).retry_hint(),
+            RetryHint::RateLimited { retry_after: Some(Duration::from_secs(5)) }
+        );
+        assert_eq!(
+            status_err(429, None).retry_hint(),
+            RetryHint::RateLimited { retry_after: None }
+        );
+        for code in [400, 401, 403, 404, 413, 501, 505, 511] {
+            let err = status_err(code, None);
+            assert_eq!(err.retry_hint(), RetryHint::Permanent, "{code} should be permanent");
+        }
+        assert_eq!(Error::InvalidEndpoint(None).retry_hint(), RetryHint::Local);
+        assert_eq!(
+            Error::ReadBlob(std::io::Error::from(std::io::ErrorKind::NotFound)).retry_hint(),
+            RetryHint::Local
+        );
+    }
+
     fn client_for(listener: &TcpListener) -> Client {
         client_with_auth(listener, Arc::new(Anonymous))
     }
@@ -558,11 +690,25 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let client = client_for(&listener);
         let server = std::thread::spawn(move || {
-            serve_once(&listener, "HTTP/1.1 503 Service Unavailable", b"try later")
+            serve_raw_once(
+                &listener,
+                b"HTTP/1.1 503 Service Unavailable\r\nretry-after: 60\r\nconnection: close\r\ncontent-length: 9\r\n\r\ntry later",
+            )
         });
 
         let error = client.fetch(b"k", b"s").await.unwrap_err();
-        assert!(matches!(error, Error::Status(StatusCode::SERVICE_UNAVAILABLE, _)), "{error:?}");
+        assert!(
+            matches!(
+                error,
+                Error::Status {
+                    status: StatusCode::SERVICE_UNAVAILABLE,
+                    retry_after: Some(delay),
+                    ..
+                } if delay == Duration::from_secs(60)
+            ),
+            "{error:?}"
+        );
+        assert_eq!(error.to_string(), "HTTP status 503");
         assert_eq!(std::error::Error::source(&error).unwrap().to_string(), "try later");
         server.join().unwrap();
     }
@@ -629,17 +775,17 @@ mod tests {
         });
 
         let err = client.store(b"k", b"s", b"v", Some(&blob)).await.unwrap_err();
-        assert!(matches!(err, Error::Status(StatusCode::INTERNAL_SERVER_ERROR, _)));
+        assert!(matches!(err, Error::Status { status: StatusCode::INTERNAL_SERVER_ERROR, .. }));
         assert_eq!(err.to_string(), "HTTP status 500");
         assert_eq!(std::error::Error::source(&err).unwrap().to_string(), "storage failed");
 
         let request = server.join().unwrap();
+        let blob_part =
+            b"name=\"blob\"\r\nContent-Type: application/octet-stream\r\n\r\narchive bytes\r\n";
         assert!(request.starts_with(b"POST /projects/test/store HTTP/1.1\r\n"));
         assert!(contains(&request, b"content-type: multipart/form-data; boundary="));
         assert!(contains(&request, &metadata_part_bytes()));
-        let blob =
-            b"name=\"blob\"\r\nContent-Type: application/octet-stream\r\n\r\narchive bytes\r\n";
-        assert!(contains(&request, blob));
+        assert!(contains(&request, blob_part));
     }
 
     #[tokio::test]
@@ -670,7 +816,10 @@ mod tests {
         });
 
         let error = client.store(b"k", b"s", b"v", None).await.unwrap_err();
-        assert!(matches!(error, Error::Status(StatusCode::FOUND, None)), "{error:?}");
+        assert!(
+            matches!(error, Error::Status { status: StatusCode::FOUND, message: None, .. }),
+            "{error:?}"
+        );
         server.join().unwrap();
     }
 
@@ -772,7 +921,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn offers_http2_over_tls() {
+    async fn uses_http1_only_over_tls() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let client = Client::new(
@@ -785,8 +934,10 @@ mod tests {
         let error = client.fetch(b"k", b"s").await.unwrap_err();
         assert!(matches!(error, Error::Network(_)), "{error:?}");
 
-        // The ALPN extension lists h2, then http/1.1.
-        assert!(contains(&server.join().unwrap(), b"\x02h2\x08http/1.1"));
+        // HTTP/1.1 only: the ALPN extension lists http/1.1 and must not offer h2.
+        let client_hello = server.join().unwrap();
+        assert!(contains(&client_hello, b"\x08http/1.1"));
+        assert!(!contains(&client_hello, b"\x02h2"));
     }
 
     #[tokio::test]
