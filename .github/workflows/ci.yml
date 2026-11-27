@@ -390,6 +390,11 @@ jobs:
 
       - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
 
+      # Run only Bun's postinstall on musl (`deno` and `workerd` do not ship
+      # musl binaries and their tests are filtered out on `target_env = "musl"`).
+      - name: Install Bun runtime binary
+        run: pnpm --filter vite-task-tools rebuild bun
+
       - name: Run ignored tests
         run: cargo test -- --ignored
 
