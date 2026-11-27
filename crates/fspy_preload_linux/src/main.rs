@@ -168,7 +168,7 @@ mod runtime {
         // SAFETY: `run` executes once in a fresh single-threaded process.
         let bump: &'static PageBump = unsafe { &*STARTUP_BUMP.0.get() };
         let pid = current_pid();
-        KCMP_VM_AVAILABLE.store(shares_vm_with(pid, pid), Ordering::Relaxed);
+        KCMP_VM_AVAILABLE.store(pid > 0 && kcmp_vm(pid, pid) == Ok(0), Ordering::Relaxed);
 
         let bootstrap = Bootstrap::from_env(stack.envs(), bump);
         let sender = bootstrap.ipc_channel_conf.sender(bump);
@@ -631,23 +631,28 @@ mod runtime {
     }
 
     #[inline]
-    fn shares_vm_with(my_pid: i32, other_pid: i32) -> bool {
-        if my_pid <= 0 || other_pid <= 0 {
-            return false;
-        }
+    fn kcmp_vm(pid1: i32, pid2: i32) -> core::result::Result<usize, syscalls::Errno> {
         // SAFETY: `kcmp(pid1, pid2, KCMP_VM, 0, 0)` takes integer arguments
         // only and returns `0` iff both processes share the same `mm_struct`,
         // `1..=3` for distinct `mm_struct`s, or `-errno` on failure.
-        match unsafe {
+        unsafe {
             syscalls::syscall!(
                 Sysno::kcmp,
-                my_pid.cast_unsigned(),
-                other_pid.cast_unsigned(),
+                pid1.cast_unsigned(),
+                pid2.cast_unsigned(),
                 KCMP_VM,
                 0,
                 0
             )
-        } {
+        }
+    }
+
+    #[inline]
+    fn shares_vm_with(my_pid: i32, other_pid: i32) -> bool {
+        if my_pid <= 0 || other_pid <= 0 {
+            return false;
+        }
+        match kcmp_vm(my_pid, other_pid) {
             Ok(0) => true,
             Ok(_) | Err(syscalls::Errno::ESRCH) => false,
             // Treat any other error (`EPERM`, `EINVAL`, `ENOSYS`, etc.)
