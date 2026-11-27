@@ -1,11 +1,9 @@
 use std::{
-    ffi::CString,
     io,
-    os::{
-        fd::{AsRawFd as _, FromRawFd as _, OwnedFd},
-        unix::ffi::OsStrExt as _,
-    },
-    path::{Path, PathBuf},
+    mem::offset_of,
+    os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd},
+    path::Path,
+    sync::RwLock,
 };
 
 use fspy_shared::ipc::{IpcStr, PathAccess, channel::channel};
@@ -13,7 +11,10 @@ use fspy_shared_unix::linux::{BOOTSTRAP_ENV_NAME, Bootstrap, Target, encode_boot
 use futures_util::FutureExt as _;
 use linux_raw_sys::{
     prctl::PR_SET_NO_NEW_PRIVS,
-    ptrace::{BPF_K, BPF_RET, SECCOMP_RET_ALLOW, SECCOMP_SET_MODE_FILTER, sock_filter, sock_fprog},
+    ptrace::{
+        BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_RET, BPF_W, SECCOMP_RET_ALLOW,
+        SECCOMP_RET_TRAP, SECCOMP_SET_MODE_FILTER, seccomp_data, sock_filter, sock_fprog,
+    },
 };
 use syscalls::Sysno;
 use tokio::io::AsyncReadExt as _;
@@ -29,32 +30,62 @@ const PRELOAD_LINUX: Artifact = artifact!("fspy_preload", "CARGO_BIN_FILE_FSPY_P
 
 #[derive(Debug)]
 pub struct SpyImpl {
-    /// Materialized executable path to `fspy_preload_linux`, or `None` when the
-    /// temp directory does not permit executing files (e.g. a `noexec` mount),
-    /// in which case `spawn` falls back to untracked execution.
-    preload_path: Option<Box<IpcStr>>,
+    /// Materialized executable path to `fspy_preload_linux`, or `None` when
+    /// seccomp is unavailable or materialization failed (in which case `spawn`
+    /// falls back to untracked execution). Wrapped in `RwLock` so a file reaped
+    /// from the temp directory (e.g. by `systemd-tmpfiles`) can be lazily
+    /// re-materialized on `ENOENT`.
+    preload_path: RwLock<Option<Box<IpcStr>>>,
     seccomp_available: bool,
 }
 
 impl SpyImpl {
     /// Materializes `fspy_preload_linux` into the user's temp directory and
     /// probes whether this environment permits installing a seccomp filter.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "matches cross-platform SpyImpl::init() -> io::Result<Self> signature"
+    )]
     pub fn init() -> io::Result<Self> {
-        let seccomp_available = probe_seccomp_available()?;
+        let seccomp_available = probe_seccomp_available();
         let preload_path = if seccomp_available {
-            let materialized = materialize_executable_preload().map(|p| p.as_path().into());
+            let materialized = materialize_preload();
             if materialized.is_none() {
                 tracing::warn!(
-                    "the temp directory does not allow executing files, so Linux task \
-                     tracking is off and caching is disabled; set TMPDIR to a directory \
-                     on a filesystem without `noexec` to enable it"
+                    "failed to materialize the Linux task tracker binary, so Linux task \
+                     tracking is off and caching is disabled"
                 );
             }
             materialized
         } else {
             None
         };
-        Ok(Self { preload_path, seccomp_available })
+        Ok(Self { preload_path: RwLock::new(preload_path), seccomp_available })
+    }
+
+    fn preload_path(&self) -> Option<Box<IpcStr>> {
+        if !self.seccomp_available {
+            return None;
+        }
+        self.preload_path
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_deref()
+            .map(clone_ipc_str)
+    }
+
+    fn rematerialize_preload(&self, failed_path: &IpcStr) -> Option<Box<IpcStr>> {
+        let mut guard =
+            self.preload_path.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(current) = guard.as_deref()
+            && (current.as_bytes() != failed_path.as_bytes()
+                || Path::new(current.as_os_str()).exists())
+        {
+            return Some(clone_ipc_str(current));
+        }
+        let new_path = materialize_preload();
+        *guard = new_path.as_deref().map(clone_ipc_str);
+        new_path
     }
 
     pub(crate) async fn spawn(
@@ -62,9 +93,7 @@ impl SpyImpl {
         mut command: Command,
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
-        let Some(preload_path) =
-            (self.seccomp_available).then_some(self.preload_path.as_deref()).flatten()
-        else {
+        let Some(preload_path) = self.preload_path() else {
             return spawn_untracked(command, cancellation_token);
         };
 
@@ -72,14 +101,14 @@ impl SpyImpl {
             .map_err(SpawnError::ChannelCreation)?;
 
         let (read_end, write_end) = create_error_pipe().map_err(SpawnError::OsSpawn)?;
-        let mut pipe_reader = tokio::net::unix::pipe::Receiver::from_owned_fd(read_end)
+        let pipe_reader = tokio::net::unix::pipe::Receiver::from_owned_fd(read_end)
             .map_err(SpawnError::OsSpawn)?;
         let write_raw_fd = write_end.as_raw_fd();
 
         let target_path: &IpcStr = command.target_program().into();
         let bootstrap = Bootstrap {
             ipc_channel_conf: ipc_receiver.conf(),
-            preload_path,
+            preload_path: &preload_path,
             target: Target::Unresolved { path: target_path, error_pipe_fd: write_raw_fd },
         };
         let bump = bumpalo::Bump::new();
@@ -101,48 +130,26 @@ impl SpyImpl {
             });
         }
 
-        let mut child = tokio_command.spawn().map_err(SpawnError::OsSpawn)?;
+        let mut child = match tokio_command.spawn() {
+            Ok(child) => child,
+            Err(err)
+                if err.kind() == io::ErrorKind::NotFound
+                    && !Path::new(preload_path.as_os_str()).exists() =>
+            {
+                match self.rematerialize_preload(&preload_path) {
+                    Some(new_path) if new_path.as_bytes() == preload_path.as_bytes() => {
+                        tokio_command.spawn().map_err(SpawnError::OsSpawn)?
+                    }
+                    _ => return Err(SpawnError::OsSpawn(err)),
+                }
+            }
+            Err(err) => return Err(SpawnError::OsSpawn(err)),
+        };
         // Close the parent's copy of the write end immediately so EOF fires if
         // `fspy_preload_linux` terminates before writing a status code.
         drop(write_end);
 
-        let mut buf = [0u8; 4];
-        let mut filled = 0usize;
-        let mut cancelled = false;
-        while filled < buf.len() {
-            tokio::select! {
-                read_res = pipe_reader.read(&mut buf[filled..]) => match read_res {
-                    Ok(0) => break,
-                    Ok(n) => filled += n,
-                    Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
-                    Err(err) => {
-                        let _ = child.start_kill();
-                        let _ = child.wait().await;
-                        return Err(SpawnError::OsSpawn(err));
-                    }
-                },
-                () = cancellation_token.cancelled() => {
-                    cancelled = true;
-                    break;
-                }
-            }
-        }
-        drop(pipe_reader);
-
-        if !cancelled {
-            if filled < buf.len() {
-                let _ = child.wait().await;
-                return Err(SpawnError::OsSpawn(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "launcher exited before reporting exec status",
-                )));
-            }
-            let code = i32::from_ne_bytes(buf);
-            if code != 0 {
-                let _ = child.wait().await;
-                return Err(SpawnError::OsSpawn(io::Error::from_raw_os_error(code)));
-            }
-        }
+        await_startup_handshake(pipe_reader, &mut child, &cancellation_token).await?;
 
         Ok(TrackedChild {
             stdin: child.stdin.take(),
@@ -165,6 +172,54 @@ impl SpyImpl {
             .boxed(),
         })
     }
+}
+
+async fn await_startup_handshake(
+    mut pipe_reader: tokio::net::unix::pipe::Receiver,
+    child: &mut tokio::process::Child,
+    cancellation_token: &CancellationToken,
+) -> Result<(), SpawnError> {
+    let mut buf = [0u8; 4];
+    let mut filled = 0usize;
+    while filled < buf.len() {
+        tokio::select! {
+            read_res = pipe_reader.read(&mut buf[filled..]) => match read_res {
+                Ok(0) => break,
+                Ok(n) => filled += n,
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+                Err(err) => {
+                    drop(pipe_reader);
+                    let _ = child.start_kill();
+                    let _ = child.wait().await;
+                    return Err(SpawnError::OsSpawn(err));
+                }
+            },
+            () = cancellation_token.cancelled() => {
+                drop(pipe_reader);
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                return Err(SpawnError::OsSpawn(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "spawn cancelled",
+                )));
+            }
+        }
+    }
+    drop(pipe_reader);
+
+    if filled < buf.len() {
+        let _ = child.wait().await;
+        return Err(SpawnError::OsSpawn(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "launcher exited before reporting exec status",
+        )));
+    }
+    let code = i32::from_ne_bytes(buf);
+    if code != 0 {
+        let _ = child.wait().await;
+        return Err(SpawnError::OsSpawn(io::Error::from_raw_os_error(code)));
+    }
+    Ok(())
 }
 
 fn spawn_untracked(
@@ -192,76 +247,68 @@ fn spawn_untracked(
     })
 }
 
-/// Materializes `fspy_preload_linux` into the user's temp directory, or
-/// returns `None` when that directory cannot hold it or sits on a `noexec`
-/// mount (such as a CIS-hardened `/tmp`), so `SpyImpl::spawn` falls back to
-/// untracked execution.
-fn materialize_executable_preload() -> Option<PathBuf> {
-    let path = PRELOAD_LINUX.materialize().executable().at_user_temp_dir("vp_run").ok()?;
-    is_path_executable(&path).then_some(path)
+fn clone_ipc_str(s: &IpcStr) -> Box<IpcStr> {
+    Path::new(s.as_os_str()).into()
 }
 
-/// Returns `true` when `path` is executable (`access(X_OK) == 0`) and not on a
-/// `noexec` mount (`statvfs.f_flag & ST_NOEXEC == 0`).
-fn is_path_executable(path: &Path) -> bool {
-    let Ok(cpath) = CString::new(path.as_os_str().as_bytes()) else {
-        return false;
-    };
-    // SAFETY: `cpath` is a valid NUL-terminated path.
-    if unsafe { libc::access(cpath.as_ptr(), libc::X_OK) } != 0 {
-        return false;
-    }
-    // SAFETY: `libc::statvfs` is a plain C struct valid when zero-initialized.
-    let mut vfs: libc::statvfs = unsafe { std::mem::zeroed() };
-    // SAFETY: `cpath` is NUL-terminated and `vfs` is valid writable storage.
-    if unsafe { libc::statvfs(cpath.as_ptr(), &raw mut vfs) } != 0 {
-        return false;
-    }
-    (vfs.f_flag & libc::ST_NOEXEC) == 0
+fn materialize_preload() -> Option<Box<IpcStr>> {
+    PRELOAD_LINUX
+        .materialize()
+        .executable()
+        .at_user_temp_dir("vp_run")
+        .ok()
+        .map(|p| p.as_path().into())
 }
 
-/// Probes once in a short-lived forked child whether `PR_SET_NO_NEW_PRIVS` and
-/// `seccomp(SECCOMP_SET_MODE_FILTER)` are permitted in the current environment.
-fn probe_seccomp_available() -> io::Result<bool> {
-    // SAFETY: `fork()` is safe to call here; the child performs only
-    // async-signal-safe raw syscalls and exits immediately with `_exit`.
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    if pid == 0 {
-        #[expect(clippy::cast_possible_truncation, reason = "cBPF opcode fits in u16")]
-        let filter =
-            [sock_filter { code: (BPF_RET | BPF_K) as u16, jt: 0, jf: 0, k: SECCOMP_RET_ALLOW }];
-        let prog = sock_fprog { len: 1, filter: filter.as_ptr().cast_mut() };
-        // SAFETY: async-signal-safe raw syscalls on stack-local BPF program.
-        let ok = unsafe {
+/// Probes once on a dedicated short-lived OS thread whether
+/// `PR_SET_NO_NEW_PRIVS` and `seccomp(SECCOMP_SET_MODE_FILTER)` with
+/// `SECCOMP_RET_TRAP` are permitted in the current environment.
+///
+/// Both `PR_SET_NO_NEW_PRIVS` and `SECCOMP_SET_MODE_FILTER` (without
+/// `SECCOMP_FILTER_FLAG_TSYNC`) are per-thread in Linux, so running the probe
+/// on a dedicated thread avoids `fork()` in multi-threaded processes while
+/// leaving every other thread completely unaffected.
+fn probe_seccomp_available() -> bool {
+    const SENTINEL_SYSNO: u32 = 0x7fff_ffff;
+
+    let Ok(handle) = std::thread::Builder::new().name("fspy-seccomp-probe".into()).spawn(|| {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "cBPF opcodes and seccomp_data offsets fit in u16/u32"
+        )]
+        let filter = [
+            sock_filter {
+                code: (BPF_LD | BPF_W | BPF_ABS) as u16,
+                jt: 0,
+                jf: 0,
+                k: offset_of!(seccomp_data, nr) as u32,
+            },
+            sock_filter {
+                code: (BPF_JMP | BPF_JEQ | BPF_K) as u16,
+                jt: 0,
+                jf: 1,
+                k: SENTINEL_SYSNO,
+            },
+            sock_filter { code: (BPF_RET | BPF_K) as u16, jt: 0, jf: 0, k: SECCOMP_RET_TRAP },
+            sock_filter { code: (BPF_RET | BPF_K) as u16, jt: 0, jf: 0, k: SECCOMP_RET_ALLOW },
+        ];
+        let prog = sock_fprog { len: 4, filter: filter.as_ptr().cast_mut() };
+        // SAFETY: installs a per-thread seccomp filter on this short-lived
+        // probe thread using a valid stack-local cBPF program.
+        unsafe {
             syscalls::syscall!(Sysno::prctl, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0).is_ok()
                 && syscalls::syscall!(Sysno::seccomp, SECCOMP_SET_MODE_FILTER, 0, &raw const prog)
                     .is_ok()
-        };
-        // SAFETY: terminates the forked child immediately without running destructors.
-        unsafe { libc::_exit(i32::from(!ok)) };
-    }
-
-    let mut status = 0;
-    loop {
-        // SAFETY: `pid` is our child process and `status` is valid writable storage.
-        let waited = unsafe { libc::waitpid(pid, &raw mut status, 0) };
-        if waited < 0 {
-            let err = io::Error::last_os_error();
-            if err.kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            return Err(err);
         }
-        return Ok(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0);
-    }
+    }) else {
+        return false;
+    };
+    handle.join().unwrap_or(false)
 }
 
 /// Creates a `CLOEXEC` pipe whose read end is non-blocking (for tokio's async
-/// pipe receiver) and whose write end stays blocking for the 4-byte startup
-/// status write from `fspy_preload_linux`.
+/// pipe receiver) and whose write end stays blocking and at FD `>= 3` (so child
+/// stdio `dup2` onto FD 0/1/2 never collides with `error_pipe_fd`).
 fn create_error_pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     let mut fds = [-1; 2];
     // SAFETY: `fds` is a valid 2-element array for `pipe2`.
@@ -272,6 +319,19 @@ fn create_error_pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     let read_end = unsafe { OwnedFd::from_raw_fd(fds[0]) };
     // SAFETY: `pipe2` returned two newly opened descriptors.
     let write_end = unsafe { OwnedFd::from_raw_fd(fds[1]) };
+
+    let write_end = if write_end.as_raw_fd() < 3 {
+        // SAFETY: `write_end` is a valid open descriptor; duplicating to `>= 3`
+        // prevents child stdio `dup2` from clobbering `error_pipe_fd`.
+        let dup = unsafe { libc::fcntl(write_end.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
+        if dup == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `F_DUPFD_CLOEXEC` returned a newly opened descriptor.
+        unsafe { OwnedFd::from_raw_fd(dup) }
+    } else {
+        write_end
+    };
 
     // SAFETY: `read_end` is a valid open descriptor.
     let flags = unsafe { libc::fcntl(read_end.as_raw_fd(), libc::F_GETFL) };
@@ -311,8 +371,8 @@ mod tests {
         assert_eq!(image.ehdr.class, Class::ELF64);
         assert_eq!(image.ehdr.e_type, abi::ET_EXEC);
         let (base, limit) = match image.ehdr.e_machine {
-            abi::EM_X86_64 => (0x5500_0000_0000, 0x5a00_0000_0000),
-            abi::EM_AARCH64 => (0x0002_0000_0000, 0x0005_0000_0000),
+            abi::EM_X86_64 => fspy_elf_loader::LAUNCHER_REGION_X86_64,
+            abi::EM_AARCH64 => fspy_elf_loader::LAUNCHER_REGION_AARCH64,
             machine => panic!("unsupported preload machine: {machine}"),
         };
         let segments: Vec<_> = image.segments().unwrap().iter().collect();

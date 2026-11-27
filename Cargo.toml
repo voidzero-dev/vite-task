@@ -80,6 +80,7 @@ fspy = { path = "crates/fspy" }
 fspy_benchmark_launcher = { path = "crates/fspy_benchmark_launcher", artifact = "bin" }
 fspy_benchmark_target = { path = "crates/fspy_benchmark_target", artifact = "bin" }
 fspy_detours_sys = { path = "crates/fspy_detours_sys" }
+fspy_elf_loader = { path = "crates/fspy_elf_loader" }
 fspy_preload_macos = { path = "crates/fspy_preload_macos", artifact = "cdylib" }
 fspy_preload_windows = { path = "crates/fspy_preload_windows", artifact = "cdylib" }
 fspy_shm = { path = "crates/fspy_shm" }

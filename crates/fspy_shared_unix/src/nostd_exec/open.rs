@@ -47,8 +47,8 @@ pub fn pread_header(fd: BorrowedFd<'_>, buf: &mut [u8]) -> Result<usize> {
 /// absolute), matching `std::path::absolute` without touching `std` or libc
 /// malloc.
 #[cfg_attr(
-    not(any(target_os = "macos", test)),
-    expect(dead_code, reason = "used by macOS path normalization and unit tests")
+    not(target_os = "macos"),
+    expect(dead_code, reason = "used by macOS posix_spawn chdir path normalization")
 )]
 pub fn join_relative_to_base<A: Allocator>(
     base_dir: &[u8],

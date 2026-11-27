@@ -8,7 +8,7 @@ publish.workspace = true
 rust-version.workspace = true
 
 [target.'cfg(target_os = "none")'.dependencies]
-fspy_elf_loader = { path = "../fspy_elf_loader" }
+fspy_elf_loader = { workspace = true }
 fspy_nostd = { workspace = true }
 syscalls = { workspace = true }
 

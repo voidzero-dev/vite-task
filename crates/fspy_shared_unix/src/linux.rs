@@ -7,12 +7,13 @@ use bstr::BStr;
 use fspy_nostd::{
     BorrowedFd, CStr, CWD, Error, OwnedFd, RawFd, Result, Thin,
     fs::{
-        AccessFlags, Mode, OFlags, faccessat, fcntl_dupfd_cloexec, fcntl_is_cloexec, fstat, openat,
+        AccessFlags, Mode, OFlags, faccessat, fcntl_dupfd, fcntl_dupfd_cloexec, fcntl_is_cloexec,
+        fstat, openat,
     },
 };
 use fspy_nostd_alloc::{
     CString,
-    fs::{fd_path, resolve_path_at},
+    fs::{fd_path, format_proc_self_fd, resolve_path_at},
 };
 use fspy_shared::ipc::{IpcStr, channel::ChannelConf};
 use wincode::{SchemaRead, SchemaWrite};
@@ -47,11 +48,18 @@ bitflags! {
     }
 }
 
-/// Output of [`resolve_exec`]: the open final binary descriptor and the
-/// original execution name for `AT_EXECFN`.
+/// Output of [`resolve_exec`].
+///
+/// Contains the open final binary descriptor, the original execution name for
+/// `AT_EXECFN`, and any extra non-`CLOEXEC` readable script descriptor opened
+/// when `execveat(..., AT_EMPTY_PATH)` targeted an `O_PATH` `#!` script.
 pub struct ResolvedExec<A: Allocator> {
     pub file: OwnedFd,
     pub execfn: Vec<u8, A>,
+    /// Readable non-`CLOEXEC` duplicate of an `O_PATH` shebang script passed to
+    /// the interpreter as `/dev/fd/<fd>`. Kept open across `SYS_execve` and
+    /// closed on exec failure.
+    pub extra_fd: Option<OwnedFd>,
 }
 
 /// What the freshly exec'd `fspy_preload_linux` binary should load and run.
@@ -120,12 +128,12 @@ impl<'a> Bootstrap<'a> {
     }
 }
 
-/// Ensures [`BOOTSTRAP_ENV_NAME`] is set to `encoded` on `envs`.
+/// Ensures [`BOOTSTRAP_ENV_NAME`] is set to `encoded` on `envs`, overwriting
+/// and deduplicating any existing entries.
 ///
 /// # Errors
 ///
-/// Returns [`Error::INVAL`] if [`BOOTSTRAP_ENV_NAME`] is already present with a
-/// different value.
+/// Returns [`Error::NOMEM`] if storage cannot be allocated.
 pub fn ensure_bootstrap_env<A: Allocator + Clone>(
     envs: &mut Vec<crate::Env<A>, A>,
     encoded: &str,
@@ -161,17 +169,20 @@ pub fn resolve_exec<A: Allocator + Clone>(
     let allocator = exec.allocator().clone();
     let mut peek_buf = [0u8; LINUX_MAX_LINE_LEN];
 
-    let (execfn, mut depth, mut cur_dirfd, mut cur_nofollow) = if exec.program.is_empty() {
+    let (execfn, extra_fd, mut depth, mut cur_dirfd, mut cur_nofollow) = if exec.program.is_empty()
+    {
         if !flags.contains(ExecAtFlags::EMPTY_PATH) {
             return Err(Error::NOENT);
         }
         match resolve_empty_path(exec, dirfd, &mut peek_buf, &mut on_path_read)? {
             EmptyPathStep::Resolved(resolved) => return Ok(resolved),
-            EmptyPathStep::Shebang { execfn } => (execfn, 1usize, Some(CWD), false),
+            EmptyPathStep::Shebang { execfn, extra_fd } => {
+                (execfn, extra_fd, 1usize, Some(CWD), false)
+            }
         }
     } else {
         let execfn = to_vec_in(&exec.program, allocator.clone());
-        (execfn, 0usize, dirfd, flags.contains(ExecAtFlags::SYMLINK_NOFOLLOW))
+        (execfn, None, 0usize, dirfd, flags.contains(ExecAtFlags::SYMLINK_NOFOLLOW))
     };
 
     loop {
@@ -220,13 +231,13 @@ pub fn resolve_exec<A: Allocator + Clone>(
             continue;
         }
 
-        return Ok(ResolvedExec { file, execfn });
+        return Ok(ResolvedExec { file, execfn, extra_fd });
     }
 }
 
 enum EmptyPathStep<A: Allocator> {
     Resolved(ResolvedExec<A>),
-    Shebang { execfn: Vec<u8, A> },
+    Shebang { execfn: Vec<u8, A>, extra_fd: Option<OwnedFd> },
 }
 
 fn resolve_empty_path<A: Allocator + Clone>(
@@ -252,8 +263,8 @@ fn resolve_empty_path<A: Allocator + Clone>(
         on_path_read(BStr::new(p.as_units()));
     }
 
-    let (file, n) = match pread_header(fd, peek_buf) {
-        Ok(n) => (fcntl_dupfd_cloexec(fd, 0)?, n),
+    let (file, n, reopened_from_o_path) = match pread_header(fd, peek_buf) {
+        Ok(n) => (fcntl_dupfd_cloexec(fd, 0)?, n, false),
         Err(Error::BADF) => {
             // `fd` may have been opened with `O_PATH`; reopen read-only via `/proc/self/fd`.
             let reopened = openat(
@@ -263,7 +274,7 @@ fn resolve_empty_path<A: Allocator + Clone>(
                 Mode::empty(),
             )?;
             let n = pread_header(reopened.as_fd(), peek_buf)?;
-            (reopened, n)
+            (reopened, n, true)
         }
         Err(err) => return Err(err),
     };
@@ -276,23 +287,34 @@ fn resolve_empty_path<A: Allocator + Clone>(
     let Some(shebang) =
         parse_shebang_bytes(&peek_buf[..n], ParseShebangOptions::linux(), allocator.clone())?
     else {
-        return Ok(EmptyPathStep::Resolved(ResolvedExec { file, execfn }));
+        return Ok(EmptyPathStep::Resolved(ResolvedExec { file, execfn, extra_fd: None }));
     };
 
-    drop(file);
     // Matches Linux `binfmt_script`: an `FD_CLOEXEC` script fd cannot be
     // passed to the interpreter as `/dev/fd/<fd>`.
     if fcntl_is_cloexec(fd)? {
         return Err(Error::NOENT);
     }
-    let script_arg = format_dev_fd(raw_fd, allocator);
+
+    // If `fd` was opened with `O_PATH`, the interpreter cannot read through
+    // `/dev/fd/<raw_fd>` (`EBADF`); hand it a non-`CLOEXEC` duplicate of the
+    // readable descriptor we reopened above instead.
+    let (script_fd_num, extra_fd) = if reopened_from_o_path {
+        let readable = fcntl_dupfd(file.as_fd(), 3)?;
+        drop(file);
+        let readable_num = u32::try_from(readable.as_raw_fd()).map_err(|_| Error::BADF)?;
+        (readable_num, Some(readable))
+    } else {
+        drop(file);
+        (raw_fd, None)
+    };
+    let script_arg = format_dev_fd(script_fd_num, allocator);
     apply_shebang(exec, shebang, script_arg);
-    Ok(EmptyPathStep::Shebang { execfn })
+    Ok(EmptyPathStep::Shebang { execfn, extra_fd })
 }
 
-/// Checks whether a non-CWD `dirfd` refers to an unlinked directory whose
-/// `/proc/self/fd/<fd>` symlink ends with ` (deleted)`, making its path
-/// unopenable in the child `fspy_preload_linux` process.
+/// Copies `bytes` into a NUL-terminated [`CString`], rejecting interior NULs
+/// with [`Error::NOENT`].
 fn bytes_to_cstring<A: Allocator>(
     bytes: &[u8],
     allocator: A,
@@ -304,36 +326,14 @@ fn bytes_to_cstring<A: Allocator>(
     CString::from_vec_with_nul(owned).ok_or(Error::NOENT)
 }
 
-fn format_proc_self_fd(buf: &mut [u8; 32], fd: u32) -> CStr<'_, Thin> {
-    format_fd_with_prefix(buf, b"/proc/self/fd/", fd)
-}
-
-fn format_fd_with_prefix<'a>(buf: &'a mut [u8; 32], prefix: &[u8], mut fd: u32) -> CStr<'a, Thin> {
-    let mut digits = [0u8; 10];
-    let mut count = 0;
-    loop {
-        digits[count] = b'0' + (fd % 10) as u8;
-        count += 1;
-        fd /= 10;
-        if fd == 0 {
-            break;
-        }
-    }
-    let mut len = prefix.len();
-    buf[..len].copy_from_slice(prefix);
-    for i in (0..count).rev() {
-        buf[len] = digits[i];
-        len += 1;
-    }
-    buf[len] = 0;
-    // SAFETY: `buf` begins with a NUL-terminated ASCII string for lifetime `'a`.
-    unsafe { CStr::from_ptr(buf.as_ptr()) }
-}
-
 fn format_dev_fd<A: Allocator>(fd: u32, allocator: A) -> Vec<u8, A> {
     let mut buf = [0u8; 32];
-    let cstr = format_fd_with_prefix(&mut buf, b"/dev/fd/", fd);
-    to_vec_in(cstr.count().as_units(), allocator)
+    let proc_fd = format_proc_self_fd(&mut buf, fd).count().as_units();
+    let digits = proc_fd.strip_prefix(b"/proc/self/fd/").unwrap_or(proc_fd);
+    let mut out = Vec::with_capacity_in(b"/dev/fd/".len() + digits.len(), allocator);
+    out.extend_from_slice(b"/dev/fd/");
+    out.extend_from_slice(digits);
+    out
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -342,7 +342,7 @@ mod tests {
         fs::{self, File, Permissions},
         os::unix::{
             ffi::OsStrExt as _,
-            fs::{PermissionsExt as _, symlink},
+            fs::{OpenOptionsExt as _, PermissionsExt as _, symlink},
             io::AsRawFd as _,
         },
         path::Path,
@@ -495,5 +495,24 @@ mod tests {
             resolve_exec(&mut exec, Some(script_fd), ExecAtFlags::EMPTY_PATH, |_| {}).err(),
             Some(Error::NOENT)
         );
+
+        // AT_EMPTY_PATH on non-CLOEXEC O_PATH shebang script reopens readable
+        // and passes `/dev/fd/<extra_fd>` (non-CLOEXEC) to the interpreter.
+        let o_path_cloexec = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(linux_raw_sys::general::O_PATH.cast_signed())
+            .open(&script)
+            .unwrap();
+        // SAFETY: `o_path_cloexec` remains open for the `fcntl_dupfd` call.
+        let o_path_borrowed = unsafe { BorrowedFd::borrow_raw(o_path_cloexec.as_raw_fd()) };
+        let o_path_owned = fcntl_dupfd(o_path_borrowed, 3).unwrap();
+        let mut exec = make_exec(b"", &[]);
+        let resolved =
+            resolve_exec(&mut exec, Some(o_path_owned.as_fd()), ExecAtFlags::EMPTY_PATH, |_| {})
+                .unwrap();
+        let extra = resolved.extra_fd.as_ref().expect("expected reopened readable script fd");
+        assert!(!fcntl_is_cloexec(extra.as_fd()).unwrap());
+        let expected_dev_fd = format!("/dev/fd/{}", extra.as_raw_fd());
+        assert_eq!(exec.args.last().unwrap().as_slice(), expected_dev_fd.as_bytes());
     }
 }

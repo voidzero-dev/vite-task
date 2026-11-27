@@ -156,6 +156,10 @@ jobs:
         if: ${{ env.TEST_TARGET == 'x86_64-unknown-linux-gnu' }}
         run: $TEST_CARGO_CMD test --release -p fspy_elf_loader_tests --target $TEST_BUILD_TARGET
 
+      - name: Run fspy hardening tests (release)
+        if: ${{ env.TEST_TARGET == 'x86_64-unknown-linux-gnu' }}
+        run: $TEST_CARGO_CMD test --release -p fspy --test linux_hardening --test linux_syscalls --test untracked_fallback --target $TEST_BUILD_TARGET
+
       # x86_64-apple-darwin runs on arm64 runner under Rosetta; install x64 Node
       # so fspy's x86_64 preload dylib can be injected into spawned node procs.
       - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
@@ -388,6 +392,9 @@ jobs:
       - name: Run ELF loader tests (release)
         run: cargo test --release -p fspy_elf_loader_tests
 
+      - name: Run fspy hardening tests (release)
+        run: cargo test --release -p fspy --test linux_hardening --test linux_syscalls --test untracked_fallback
+
       - uses: oxc-project/setup-node@f46a72f95efdc55273fcd042d61c84e723b2892c # v1.4.1
 
       # Run only Bun's postinstall on musl (`deno` and `workerd` do not ship
@@ -397,6 +404,36 @@ jobs:
 
       - name: Run ignored tests
         run: cargo test -- --ignored
+
+  test-linux-arm64:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code-changed == 'true'
+    name: Test (linux-arm64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+
+      - name: Update submodules
+        run: git submodule update --init --recursive
+
+      - uses: oxc-project/setup-rust@3d6fb132fbe7cdcb66bf8ec193911c2945369d12 # v1.0.17
+        with:
+          save-cache: ${{ github.ref_name == 'main' }}
+          cache-key: test-linux-arm64
+
+      - run: rustup target add aarch64-unknown-linux-musl aarch64-unknown-none-softfloat
+
+      - name: Run ELF loader tests (debug)
+        run: cargo test -p fspy_elf_loader -p fspy_elf_loader_tests
+
+      - name: Run ELF loader tests (release)
+        run: cargo test --release -p fspy_elf_loader -p fspy_elf_loader_tests
+
+      - name: Run fspy tests (debug)
+        run: cargo test -p fspy
+
+      - name: Run fspy hardening tests (release)
+        run: cargo test --release -p fspy --test linux_hardening --test linux_syscalls --test untracked_fallback
 
   fmt:
     name: Format and Check Deps
@@ -445,6 +482,7 @@ jobs:
       - clippy
       - build-freebsd
       - test
+      - test-linux-arm64
       - test-macos-x64
       - test-musl
       - build-windows-tests

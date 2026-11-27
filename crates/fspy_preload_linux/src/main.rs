@@ -12,7 +12,7 @@ mod runtime {
         ffi::c_void,
         mem::size_of,
         ptr::{self, NonNull},
-        sync::atomic::{AtomicI32, AtomicPtr, Ordering},
+        sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
     };
 
     use allocator_api2::{alloc::Allocator, vec::Vec};
@@ -39,7 +39,8 @@ mod runtime {
         },
     };
     use linux_raw_sys::general::{
-        AT_EMPTY_PATH, O_ACCMODE, O_RDWR, O_WRONLY, SIG_SETMASK, open_how,
+        AT_EMPTY_PATH, O_ACCMODE, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, RENAME_EXCHANGE,
+        SIG_SETMASK, open_how,
     };
     use syscalls::Sysno;
 
@@ -50,11 +51,15 @@ mod runtime {
     /// the process image.
     const AT_EXECVE_CHECK: u32 = 0x10000;
 
+    /// Linux `kcmp(2)` operation comparing two processes' `mm_struct`s
+    /// (`enum kcmp_type::KCMP_VM`).
+    const KCMP_VM: usize = 1;
+
     struct SyncCell<T>(UnsafeCell<T>);
 
     // SAFETY: `STARTUP_BUMP` and `RUNTIME` are initialized once in the fresh,
-    // single-threaded launcher process before `exec_elf` arms seccomp and enters
-    // the target; after that `RUNTIME` is strictly read-only.
+    // single-threaded launcher process before `try_exec_elf` arms seccomp and
+    // enters the target; after that `RUNTIME` is strictly read-only.
     unsafe impl<T> Sync for SyncCell<T> {}
 
     struct Runtime {
@@ -64,31 +69,41 @@ mod runtime {
     }
 
     /// Scratch memory for one `execve` re-routed through the launcher: the
-    /// arena holding the rewritten `argv`/`envp`, and any descriptor kept open
+    /// arena holding the rewritten `argv`/`envp`, and any descriptors kept open
     /// for the new image.
     ///
     /// A successful exec in a `CLONE_VM` child (`vfork` / `posix_spawn`)
     /// leaves the node in its parent's memory, so such nodes are pushed onto
-    /// [`PARKED_EXEC_SCRATCH`] with `active_tid` registered through
-    /// `set_tid_address`. The kernel clears it once the child execs or exits,
-    /// and a later exec trap frees the node.
+    /// [`PARKED_EXEC_SCRATCH`]:
+    /// - Trapped `posix_spawn` / separate-stack `vfork` children are reclaimed
+    ///   immediately when the parent's `clone` returns via
+    ///   [`reclaim_vfork_child`].
+    /// - Untrapped shared-stack `vfork` children are reclaimed on a subsequent
+    ///   exec via `kcmp(my_pid, owner_pid, KCMP_VM, 0, 0) != 0` when
+    ///   [`KCMP_VM_AVAILABLE`] is true, falling back to `set_tid_address`
+    ///   only in restricted containers where `kcmp` is blocked.
     struct ExecScratch {
         next: AtomicPtr<Self>,
         active_tid: AtomicI32,
+        owner_pid: i32,
         parked: bool,
+        used_set_tid_address: bool,
         arena: UnsafeCell<Option<PageBump>>,
         duped_fd: UnsafeCell<RawFd>,
+        extra_fd: UnsafeCell<RawFd>,
     }
 
-    // SAFETY: `arena` and `duped_fd` are mutated only by the exec'ing thread
-    // before `active_tid` becomes `0` (`Release`), and dropped by a reclaimer
-    // only after it observes `0` (`Acquire`) on a node it detached from
-    // `PARKED_EXEC_SCRATCH`.
+    // SAFETY: `arena`, `duped_fd`, and `extra_fd` are mutated only by the
+    // exec'ing thread before it leaves the VM or sets `active_tid` to `0`
+    // (`Release`), and dropped by a reclaimer only after confirming the child
+    // is gone (via `on_vfork_return`, `kcmp(KCMP_VM) != 0`, or `active_tid == 0`
+    // with `Acquire` ordering) on a node it detached from `PARKED_EXEC_SCRATCH`.
     unsafe impl Sync for ExecScratch {}
 
     static STARTUP_BUMP: SyncCell<PageBump> = SyncCell(UnsafeCell::new(page_bump()));
     static RUNTIME: SyncCell<Option<Runtime>> = SyncCell(UnsafeCell::new(None));
     static PARKED_EXEC_SCRATCH: AtomicPtr<ExecScratch> = AtomicPtr::new(ptr::null_mut());
+    static KCMP_VM_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
     #[cfg(target_arch = "x86_64")]
     const TRACKED_SYSCALLS: &[Sysno] = &[
@@ -135,8 +150,11 @@ mod runtime {
         Sysno::execveat,
     ];
 
-    static INTERCEPTOR: SyscallInterceptor =
-        SyscallInterceptor { syscalls: TRACKED_SYSCALLS, handle: handle_syscall };
+    static INTERCEPTOR: SyscallInterceptor = SyscallInterceptor {
+        syscalls: TRACKED_SYSCALLS,
+        handle: handle_syscall,
+        on_vfork_return: Some(reclaim_vfork_child),
+    };
 
     #[inline]
     fn runtime() -> &'static Runtime {
@@ -149,6 +167,9 @@ mod runtime {
     fn run(stack: InitialStack<'_>) -> ! {
         // SAFETY: `run` executes once in a fresh single-threaded process.
         let bump: &'static PageBump = unsafe { &*STARTUP_BUMP.0.get() };
+        let pid = current_pid();
+        KCMP_VM_AVAILABLE.store(shares_vm_with(pid, pid), Ordering::Relaxed);
+
         let bootstrap = Bootstrap::from_env(stack.envs(), bump);
         let sender = bootstrap.ipc_channel_conf.sender(bump);
 
@@ -159,6 +180,18 @@ mod runtime {
                 preload_path: bootstrap.preload_path,
                 sender,
             });
+        }
+
+        // Capture the raw `(ptr, len)` of any `__FSPY_BOOTSTRAP=...` entries on
+        // the launcher's initial kernel stack so `on_ready` can zero them in
+        // place right before entering the target, scrubbing them from
+        // `/proc/self/environ`.
+        let mut bootstrap_entries: Vec<(*mut u8, usize), _> = Vec::new_in(bump);
+        for &entry in stack.envs() {
+            if is_bootstrap_env(entry) {
+                let fat = entry.count();
+                bootstrap_entries.push((fat.as_ptr().cast_mut(), fat.as_units().len()));
+            }
         }
 
         let filtered_envs = stack.envs().iter().copied().filter(|&entry| !is_bootstrap_env(entry));
@@ -175,15 +208,9 @@ mod runtime {
                     envs: Vec::new_in(bump),
                 };
 
-                let resolved = resolve_exec(&mut exec, Some(CWD), ExecAtFlags::empty(), |p| {
+                let resolved = match resolve_exec(&mut exec, Some(CWD), ExecAtFlags::empty(), |p| {
                     send_path(AccessMode::Read, p);
-                })
-                .and_then(|resolved| {
-                    fspy_elf_loader::validate_exec(resolved.file.as_fd())?;
-                    Ok(resolved)
-                });
-
-                let resolved = match resolved {
+                }) {
                     Ok(resolved) => resolved,
                     Err(err) => {
                         write_error_pipe(error_pipe_fd, err.raw_os_error());
@@ -191,32 +218,44 @@ mod runtime {
                     }
                 };
 
-                write_error_pipe(error_pipe_fd, 0);
-                // Close the error pipe before entering the target so it never
-                // leaks an open descriptor into the child process.
-                if error_pipe_fd >= 0 {
-                    // SAFETY: the parent opened `error_pipe_fd` exclusively for
-                    // this startup handshake and transferred ownership to us.
-                    drop(unsafe { OwnedFd::from_raw_fd(error_pipe_fd) });
-                }
-
                 let execfn = leak_cstr(&resolved.execfn, bump);
                 let mut argv = Vec::with_capacity_in(exec.args.len(), bump);
                 for arg in &exec.args {
                     argv.push(leak_cstr(arg, bump));
                 }
 
-                // SAFETY: fresh single-threaded freestanding launcher; `exec_elf`
-                // copies strings onto the new stack before abandoning ours.
-                unsafe {
-                    fspy_elf_loader::exec_elf(
+                let on_ready = || {
+                    scrub_bootstrap_env(&bootstrap_entries);
+                    write_error_pipe(error_pipe_fd, 0);
+                    // Close the error pipe before entering the target so it
+                    // never leaks an open descriptor into the child process.
+                    if error_pipe_fd >= 0 {
+                        // SAFETY: the parent opened `error_pipe_fd` exclusively
+                        // for this startup handshake and transferred ownership
+                        // to us.
+                        drop(unsafe { OwnedFd::from_raw_fd(error_pipe_fd) });
+                    }
+                };
+
+                // SAFETY: fresh single-threaded freestanding launcher;
+                // `try_exec_elf` copies strings onto the new stack before
+                // invoking `on_ready` and abandoning ours.
+                match unsafe {
+                    fspy_elf_loader::try_exec_elf(
                         resolved.file,
                         execfn,
                         argv.into_iter(),
                         filtered_envs,
                         stack.auxv(),
                         Some(INTERCEPTOR),
+                        on_ready,
                     )
+                } {
+                    Ok(never) => match never {},
+                    Err(err) => {
+                        write_error_pipe(error_pipe_fd, err.raw_os_error());
+                        exit_group(127);
+                    }
                 }
             }
             Target::ResolvedFd { fd, execfn, sigmask } => {
@@ -227,18 +266,37 @@ mod runtime {
 
                 restore_sigmask(sigmask);
 
-                // SAFETY: fresh single-threaded freestanding launcher; `exec_elf`
-                // copies strings onto the new stack before abandoning ours.
-                unsafe {
-                    fspy_elf_loader::exec_elf(
+                // SAFETY: fresh single-threaded freestanding launcher;
+                // `try_exec_elf` copies strings onto the new stack before
+                // invoking `on_ready` and abandoning ours.
+                match unsafe {
+                    fspy_elf_loader::try_exec_elf(
                         file,
                         execfn_cstr.as_c_str().as_thin(),
                         stack.args().iter().copied(),
                         filtered_envs,
                         stack.auxv(),
                         Some(INTERCEPTOR),
+                        || scrub_bootstrap_env(&bootstrap_entries),
                     )
+                } {
+                    Ok(never) => match never {},
+                    Err(err) => panic!("exec_elf failed: {err:?}"),
                 }
+            }
+        }
+    }
+
+    fn scrub_bootstrap_env(entries: &[(*mut u8, usize)]) {
+        for &(ptr, len) in entries {
+            for i in 0..len {
+                // SAFETY: `ptr..ptr+len` is a `__FSPY_BOOTSTRAP=...` string on
+                // our writable initial kernel stack. `try_exec_elf` has already
+                // finished reading `filtered_envs` and built the target stack,
+                // so nothing aliases these bytes. Volatile writes prevent
+                // dead-store elimination before entering the target, keeping
+                // the bootstrap payload out of `/proc/self/environ`.
+                unsafe { ptr.add(i).write_volatile(0) };
             }
         }
     }
@@ -338,6 +396,7 @@ mod runtime {
         match flags & O_ACCMODE {
             O_RDWR => AccessMode::ReadWrite,
             O_WRONLY => AccessMode::Write,
+            O_RDONLY if (flags & (O_CREAT | O_TRUNC)) != 0 => AccessMode::ReadWrite,
             _ => AccessMode::Read,
         }
     }
@@ -493,7 +552,13 @@ mod runtime {
             Sysno::mkdirat => report_path_at(dirfd(0), a[1], AccessMode::Mkdir, false),
             #[cfg(target_arch = "x86_64")]
             Sysno::rename => report_path_at(Some(CWD), a[1], AccessMode::RenameTarget, false),
-            Sysno::renameat | Sysno::renameat2 => {
+            Sysno::renameat => {
+                report_path_at(dirfd(2), a[3], AccessMode::RenameTarget, false);
+            }
+            Sysno::renameat2 => {
+                if (arg_u32(a[4]) & RENAME_EXCHANGE) != 0 {
+                    report_path_at(dirfd(0), a[1], AccessMode::RenameTarget, false);
+                }
                 report_path_at(dirfd(2), a[3], AccessMode::RenameTarget, false);
             }
             #[cfg(target_arch = "x86_64")]
@@ -521,6 +586,37 @@ mod runtime {
         )]
         let mode = open_mode(how.flags as u32);
         report_path_at(dirfd, path_ptr, mode, false);
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        reason = "Linux pid_t is a positive 32-bit signed integer"
+    )]
+    #[inline]
+    fn current_pid() -> i32 {
+        // SAFETY: `getpid` takes no arguments and always succeeds.
+        unsafe { syscalls::raw::syscall0(Sysno::getpid as usize) as i32 }
+    }
+
+    #[inline]
+    fn shares_vm_with(my_pid: i32, other_pid: i32) -> bool {
+        if my_pid <= 0 || other_pid <= 0 {
+            return false;
+        }
+        // SAFETY: `kcmp(pid1, pid2, KCMP_VM, 0, 0)` takes integer arguments
+        // only and returns `0` iff both processes share the same `mm_struct`.
+        let rc = unsafe {
+            syscalls::raw::syscall5(
+                Sysno::kcmp as usize,
+                my_pid.cast_unsigned() as usize,
+                other_pid.cast_unsigned() as usize,
+                KCMP_VM,
+                0,
+                0,
+            )
+        };
+        rc == 0
     }
 
     #[inline]
@@ -562,10 +658,11 @@ mod runtime {
         }
     }
 
-    /// Frees parked `CLONE_VM` exec scratch whose child has exec'd or exited,
-    /// keeping parent memory bounded across any number of `vfork` /
-    /// `posix_spawn` children.
-    fn reclaim_exec_scratch() {
+    /// `fspy_elf_loader` hook invoked in the parent right after a trapped
+    /// `clone(CLONE_VM | CLONE_VFORK, non_null_stack)` returns with
+    /// `child_pid > 0` (once the child has already left the parent's
+    /// `mm_struct`).
+    unsafe fn reclaim_vfork_child(child_pid: i32) {
         if PARKED_EXEC_SCRATCH.load(Ordering::Acquire).is_null() {
             return;
         }
@@ -574,10 +671,42 @@ mod runtime {
             // SAFETY: `swap(null)` transferred exclusive ownership of this chain.
             let next = unsafe { (*cur).next.load(Ordering::Relaxed) };
             // SAFETY: `cur` is a live node of the detached chain.
-            if unsafe { (*cur).active_tid.load(Ordering::Acquire) } == 0 {
+            let reclaimable = unsafe {
+                (*cur).owner_pid == child_pid || (*cur).active_tid.load(Ordering::Acquire) == 0
+            };
+            if reclaimable {
+                // SAFETY: `child_pid` has already exited or exec'd (or failure
+                // cleanup released the node), so nothing references `cur`.
+                unsafe { free_exec_scratch(cur) };
+            } else {
+                // SAFETY: `cur` is still in use by another child; park it again.
+                unsafe { push_parked_exec_scratch(cur) };
+            }
+            cur = next;
+        }
+    }
+
+    /// Frees parked `CLONE_VM` exec scratch whose child has exec'd or exited,
+    /// keeping parent memory bounded across any number of `vfork` /
+    /// `posix_spawn` children.
+    fn reclaim_exec_scratch() {
+        if PARKED_EXEC_SCRATCH.load(Ordering::Acquire).is_null() {
+            return;
+        }
+        let my_pid = current_pid();
+        let mut cur = PARKED_EXEC_SCRATCH.swap(ptr::null_mut(), Ordering::AcqRel);
+        while !cur.is_null() {
+            // SAFETY: `swap(null)` transferred exclusive ownership of this chain.
+            let next = unsafe { (*cur).next.load(Ordering::Relaxed) };
+            // SAFETY: `cur` is a live node of the detached chain.
+            let reclaimable = unsafe {
+                (*cur).active_tid.load(Ordering::Acquire) == 0
+                    || (!(*cur).used_set_tid_address && !shares_vm_with(my_pid, (*cur).owner_pid))
+            };
+            if reclaimable {
                 // SAFETY: The child left this memory (or failure cleanup
                 // released the node), so nothing references `cur`. Its
-                // `duped_fd` belonged to the child's descriptor table.
+                // `duped_fd` / `extra_fd` belonged to the child's descriptor table.
                 unsafe { free_exec_scratch(cur) };
             } else {
                 // SAFETY: `cur` is still in use by its child; park it again.
@@ -592,17 +721,24 @@ mod runtime {
     unsafe fn cleanup_exec_scratch(raw: *mut c_void) {
         let node = raw.cast::<ExecScratch>();
         // SAFETY: `node` is the scratch of this failed exec, still owned by
-        // the calling thread, and `duped_fd` is open in its descriptor table.
+        // the calling thread, and `duped_fd`/`extra_fd` are open in its
+        // descriptor table.
         unsafe {
             let fd = *(*node).duped_fd.get();
             *(*node).duped_fd.get() = -1;
             if fd >= 0 {
                 drop(OwnedFd::from_raw_fd(fd));
             }
+            let extra = *(*node).extra_fd.get();
+            *(*node).extra_fd.get() = -1;
+            if extra >= 0 {
+                drop(OwnedFd::from_raw_fd(extra));
+            }
             if (*node).parked {
-                // Already published: release its arena and let a later
-                // reclaim free the node.
-                set_tid_address(ptr::null());
+                // Already published: release its arena and mark reclaimable.
+                if (*node).used_set_tid_address {
+                    set_tid_address(ptr::null());
+                }
                 *(*node).arena.get() = None;
                 (*node).active_tid.store(0, Ordering::Release);
             } else {
@@ -633,14 +769,17 @@ mod runtime {
             node.write(ExecScratch {
                 next: AtomicPtr::new(ptr::null_mut()),
                 active_tid: AtomicI32::new(0),
+                owner_pid: 0,
                 parked: false,
+                used_set_tid_address: false,
                 arena: UnsafeCell::new(Some(page_bump())),
                 duped_fd: UnsafeCell::new(-1),
+                extra_fd: UnsafeCell::new(-1),
             });
         }
         // SAFETY: `arena` was just set and lives until the node is freed.
         let arena: &'static PageBump = unsafe { (*(*node).arena.get()).as_ref().unwrap() };
-        let (raw_out, duped_fd) =
+        let (raw_out, duped_fd, extra_fd) =
             match prepare_exec_in(dirfd, prog_ptr, argv_ptr, envp_ptr, flags, sigmask, arena) {
                 Ok(prepared) => prepared,
                 Err(err) => {
@@ -652,11 +791,19 @@ mod runtime {
         // SAFETY: the node is owned by this thread until published below.
         unsafe {
             *(*node).duped_fd.get() = duped_fd;
+            *(*node).extra_fd.get() = extra_fd;
             if is_shared_vm_child {
+                let use_set_tid = !KCMP_VM_AVAILABLE.load(Ordering::Relaxed);
+                (*node).owner_pid = current_pid();
                 (*node).parked = true;
+                (*node).used_set_tid_address = use_set_tid;
                 (*node).active_tid.store(1, Ordering::Release);
+                if use_set_tid {
+                    // Register before publishing so `SIGKILL` cannot leave a
+                    // permanently parked node with `active_tid == 1`.
+                    set_tid_address(&raw const (*node).active_tid);
+                }
                 push_parked_exec_scratch(node);
-                set_tid_address(&raw const (*node).active_tid);
             }
         }
         Ok(SyscallAction::Execve {
@@ -675,7 +822,7 @@ mod runtime {
         flags: ExecAtFlags,
         sigmask: u64,
         arena: &'static PageBump,
-    ) -> Result<(RawExec, RawFd)> {
+    ) -> Result<(RawExec, RawFd, RawFd)> {
         let raw = RawExec {
             prog: ptr::with_exposed_provenance(prog_ptr),
             argv: ptr::with_exposed_provenance(argv_ptr),
@@ -691,8 +838,9 @@ mod runtime {
         // and `/proc/self/fd/N` targets close with `FD_CLOEXEC` on exec. Keep
         // `duped_fd` open across `SYS_execve` (`fcntl_dupfd` clears
         // `FD_CLOEXEC`). If `prepare_exec_in` fails below, `OwnedFd` closes it
-        // automatically; once handed back as a raw fd, `cleanup_*` closes it on
-        // `SYS_execve` failure while a successful exec transfers it to the child.
+        // (and any `resolved.extra_fd`) automatically; once handed back as raw
+        // fds, `cleanup_exec_scratch` closes them on `SYS_execve` failure while
+        // a successful exec transfers them to the child.
         let duped_fd = fcntl_dupfd(resolved.file.as_fd(), 3)?;
 
         let rt = runtime();
@@ -712,7 +860,9 @@ mod runtime {
         exec.program = copy_bytes(rt.preload_path.as_bytes(), arena);
         let raw_out = RawExec::from_exec(exec);
         let duped_raw = duped_fd.as_raw_fd();
+        let extra_raw = resolved.extra_fd.as_ref().map_or(-1, OwnedFd::as_raw_fd);
         core::mem::forget(duped_fd);
-        Ok((raw_out, duped_raw))
+        core::mem::forget(resolved.extra_fd);
+        Ok((raw_out, duped_raw, extra_raw))
     }
 }

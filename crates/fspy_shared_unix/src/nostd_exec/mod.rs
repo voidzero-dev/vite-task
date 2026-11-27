@@ -11,11 +11,22 @@ use fspy_nostd::{CStr, Error, Result, Thin};
 /// `environ` does not contain a `=` byte.
 pub type Env<A> = (Vec<u8, A>, Option<Vec<u8, A>>);
 
+/// Minimum valid user-space address (page 0 is never mapped, matching
+/// `fspy_elf_loader`'s `usermem::user_cstr`).
+const MIN_USER_ADDR: usize = 4096;
+
 /// Copies `bytes` into a `Vec` in `allocator`.
 pub fn to_vec_in<A: Allocator>(bytes: &[u8], allocator: A) -> Vec<u8, A> {
     let mut vec = Vec::with_capacity_in(bytes.len(), allocator);
     vec.extend_from_slice(bytes);
     vec
+}
+
+fn try_to_vec_in<A: Allocator>(bytes: &[u8], allocator: A) -> Result<Vec<u8, A>> {
+    let mut vec = Vec::new_in(allocator);
+    vec.try_reserve_exact(bytes.len()).map_err(|_| Error::NOMEM)?;
+    vec.extend_from_slice(bytes);
+    Ok(vec)
 }
 
 /// An exec call's program, arguments, and environment.
@@ -50,17 +61,27 @@ impl RawExec {
     unsafe fn collect_c_str_array<T, A: Allocator>(
         strs: *const *const c_char,
         allocator: A,
-        mut map_fn: impl FnMut(&[u8]) -> T,
+        mut map_fn: impl FnMut(&[u8]) -> Result<T>,
     ) -> Result<Vec<T, A>> {
         if strs.is_null() {
             return Ok(Vec::new_in(allocator));
         }
+        if strs.addr() < MIN_USER_ADDR {
+            return Err(Error::FAULT);
+        }
 
         let mut count = 0usize;
         let mut cur_str = strs;
-        // SAFETY: `cur_str` points into a valid NULL-terminated array of C
-        // string pointers (the `argv`/`envp` convention).
-        while !(unsafe { *cur_str }).is_null() {
+        loop {
+            // SAFETY: `cur_str` points into a valid NULL-terminated array of C
+            // string pointers (the `argv`/`envp` convention).
+            let entry_ptr = unsafe { *cur_str };
+            if entry_ptr.is_null() {
+                break;
+            }
+            if entry_ptr.addr() < MIN_USER_ADDR {
+                return Err(Error::FAULT);
+            }
             count += 1;
             // SAFETY: advancing within the bounds of the NULL-terminated array.
             cur_str = unsafe { cur_str.add(1) };
@@ -71,10 +92,10 @@ impl RawExec {
         for i in 0..count {
             // SAFETY: `i < count`, so `strs.add(i)` is within the pointer array.
             let entry_ptr = unsafe { *strs.add(i) };
-            // SAFETY: `entry_ptr` is non-null (verified by the counting loop) and
-            // points to a valid NUL-terminated C string.
+            // SAFETY: `entry_ptr` is non-null and `>= MIN_USER_ADDR` (verified
+            // by the counting loop) and points to a valid NUL-terminated C string.
             let bytes = unsafe { CStr::<Thin>::from_ptr(entry_ptr.cast()) }.count().as_units();
-            str_vec.push(map_fn(bytes));
+            str_vec.push(map_fn(bytes)?);
         }
         Ok(str_vec)
     }
@@ -96,34 +117,36 @@ impl RawExec {
 
     /// Copies the raw exec arguments into `allocator`.
     ///
-    /// Returns [`Error::FAULT`] when `prog` is null. Null `argv` or `envp`
-    /// arrays are treated as empty, matching Linux `execve` semantics.
+    /// Returns [`Error::FAULT`] when `prog` is in page 0 (`< 4096`, including
+    /// null) or when a non-null `argv`/`envp` array or entry lies in page 0.
+    /// Null `argv` or `envp` arrays are treated as empty, matching Linux
+    /// `execve` semantics.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::FAULT`] if `prog` is null, or [`Error::NOMEM`] if
-    /// storage cannot be allocated.
+    /// Returns [`Error::FAULT`] for invalid first-page pointers, or
+    /// [`Error::NOMEM`] if storage cannot be allocated.
     ///
     /// # Safety
     ///
-    /// When non-null, `prog` must point to a valid NUL-terminated C string, and
-    /// `argv` and `envp` must each point to a readable, NULL-terminated array
-    /// of valid C string pointers.
+    /// When non-null and outside page 0, `prog` must point to a valid
+    /// NUL-terminated C string, and `argv` and `envp` must each point to a
+    /// readable, NULL-terminated array of valid C string pointers.
     pub unsafe fn to_exec<A: Allocator + Clone>(self, allocator: A) -> Result<Exec<A>> {
-        if self.prog.is_null() {
+        if self.prog.addr() < MIN_USER_ADDR {
             return Err(Error::FAULT);
         }
 
-        // SAFETY: `self.prog` is non-null and points to a valid NUL-terminated
-        // C string, as required by the caller.
+        // SAFETY: `self.prog` is outside page 0 and points to a valid
+        // NUL-terminated C string, as required by the caller.
         let prog_bytes = unsafe { CStr::<Thin>::from_ptr(self.prog.cast()) }.count().as_units();
-        let program = to_vec_in(prog_bytes, allocator.clone());
+        let program = try_to_vec_in(prog_bytes, allocator.clone())?;
 
         // SAFETY: `self.argv` is null or a valid NULL-terminated array of C
         // string pointers.
         let args = unsafe {
             Self::collect_c_str_array(self.argv, allocator.clone(), |arg| {
-                to_vec_in(arg, allocator.clone())
+                try_to_vec_in(arg, allocator.clone())
             })
         }?;
 
@@ -131,15 +154,14 @@ impl RawExec {
         // string pointers.
         let envs = unsafe {
             Self::collect_c_str_array(self.envp, allocator.clone(), |env| {
-                env.iter().position(|b| *b == b'=').map_or_else(
-                    || (to_vec_in(env, allocator.clone()), None),
-                    |eq_pos| {
-                        (
-                            to_vec_in(&env[..eq_pos], allocator.clone()),
-                            Some(to_vec_in(&env[(eq_pos + 1)..], allocator.clone())),
-                        )
-                    },
-                )
+                if let Some(eq_pos) = env.iter().position(|b| *b == b'=') {
+                    Ok((
+                        try_to_vec_in(&env[..eq_pos], allocator.clone())?,
+                        Some(try_to_vec_in(&env[(eq_pos + 1)..], allocator.clone())?),
+                    ))
+                } else {
+                    Ok((try_to_vec_in(env, allocator.clone())?, None))
+                }
             })
         }?;
 
@@ -170,28 +192,40 @@ impl RawExec {
     }
 }
 
-/// Ensures an environment variable is set to `value`.
-///
-/// If absent, it is inserted. If present with the same value, no change is
-/// made. If present with a different value (or without `=`), returns
-/// [`Error::INVAL`].
+/// Ensures an environment variable is set to `value`, overwriting and
+/// deduplicating any existing entries with the same `name`.
 ///
 /// # Errors
 ///
-/// Returns [`Error::INVAL`] when `name` already exists with a different value.
+/// Returns [`Error::NOMEM`] if storage cannot be allocated.
 pub fn ensure_env<A: Allocator + Clone>(
     envs: &mut Vec<Env<A>, A>,
     name: &[u8],
     value: &[u8],
 ) -> Result<()> {
-    if let Some((_, existing_value)) = envs.iter().find(|(n, _)| n.as_bstr() == name) {
-        return match existing_value.as_deref() {
-            Some(existing) if existing == value => Ok(()),
-            _ => Err(Error::INVAL),
-        };
-    }
     let allocator = envs.allocator().clone();
-    envs.push((to_vec_in(name, allocator.clone()), Some(to_vec_in(value, allocator))));
+    let mut updated = false;
+    let mut i = 0;
+    while i < envs.len() {
+        if envs[i].0.as_bstr() == name {
+            if updated {
+                envs.remove(i);
+                continue;
+            }
+            if envs[i].1.as_deref() != Some(value) {
+                envs[i].1 = Some(try_to_vec_in(value, allocator.clone())?);
+            }
+            updated = true;
+        }
+        i += 1;
+    }
+    if !updated {
+        envs.try_reserve(1).map_err(|_| Error::NOMEM)?;
+        envs.push((
+            try_to_vec_in(name, allocator.clone())?,
+            Some(try_to_vec_in(value, allocator)?),
+        ));
+    }
     Ok(())
 }
 
@@ -345,5 +379,55 @@ mod tests {
         // Untouched when the target entry is absent.
         remove_path_env(&mut envs, b"DYLD_INSERT_LIBRARIES", b"/ours.dylib");
         assert_eq!(envs[0].1.as_deref(), Some(b"/user1.dylib:/user2.dylib".as_slice()));
+    }
+
+    #[test]
+    fn raw_exec_rejects_first_page_pointers() {
+        let low = ptr::with_exposed_provenance::<c_char>(0x10);
+        let low_arr = ptr::with_exposed_provenance::<*const c_char>(0x10);
+
+        let bad_prog = RawExec { prog: low, argv: ptr::null(), envp: ptr::null() };
+        // SAFETY: `to_exec` rejects pointers in page 0 without dereferencing them.
+        assert_eq!(unsafe { bad_prog.to_exec(Global) }.unwrap_err(), Error::FAULT);
+
+        let bad_argv = RawExec { prog: c"/bin/true".as_ptr(), argv: low_arr, envp: ptr::null() };
+        // SAFETY: `to_exec` rejects non-null `argv` in page 0 without dereferencing.
+        assert_eq!(unsafe { bad_argv.to_exec(Global) }.unwrap_err(), Error::FAULT);
+
+        let bad_envp = RawExec { prog: c"/bin/true".as_ptr(), argv: ptr::null(), envp: low_arr };
+        // SAFETY: `to_exec` rejects non-null `envp` in page 0 without dereferencing.
+        assert_eq!(unsafe { bad_envp.to_exec(Global) }.unwrap_err(), Error::FAULT);
+
+        let bad_elem_arr = [low, ptr::null()];
+        let bad_elem =
+            RawExec { prog: c"/bin/true".as_ptr(), argv: bad_elem_arr.as_ptr(), envp: ptr::null() };
+        // SAFETY: `bad_elem_arr` is a readable NULL-terminated array; `to_exec`
+        // rejects the first-page element pointer without dereferencing it.
+        assert_eq!(unsafe { bad_elem.to_exec(Global) }.unwrap_err(), Error::FAULT);
+    }
+
+    #[test]
+    fn ensure_env_inserts_overwrites_and_deduplicates() {
+        let mut envs: Vec<Env<Global>, Global> = Vec::new_in(Global);
+        ensure_env(&mut envs, b"__FSPY_BOOTSTRAP", b"v1").unwrap();
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].0.as_slice(), b"__FSPY_BOOTSTRAP");
+        assert_eq!(envs[0].1.as_deref(), Some(b"v1".as_slice()));
+
+        // Idempotent when value matches.
+        ensure_env(&mut envs, b"__FSPY_BOOTSTRAP", b"v1").unwrap();
+        assert_eq!(envs.len(), 1);
+
+        // Overwrites a different value and deduplicates multiple occurrences
+        // (including bare entries without `=`), preserving unrelated variables.
+        envs.push((to_vec_in(b"KEEP", Global), Some(to_vec_in(b"ok", Global))));
+        envs.push((to_vec_in(b"__FSPY_BOOTSTRAP", Global), None));
+        envs.push((to_vec_in(b"__FSPY_BOOTSTRAP", Global), Some(to_vec_in(b"stale", Global))));
+        ensure_env(&mut envs, b"__FSPY_BOOTSTRAP", b"v2").unwrap();
+        assert_eq!(envs.len(), 2);
+        assert_eq!(envs[0].0.as_slice(), b"__FSPY_BOOTSTRAP");
+        assert_eq!(envs[0].1.as_deref(), Some(b"v2".as_slice()));
+        assert_eq!(envs[1].0.as_slice(), b"KEEP");
+        assert_eq!(envs[1].1.as_deref(), Some(b"ok".as_slice()));
     }
 }

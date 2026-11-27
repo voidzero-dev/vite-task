@@ -109,8 +109,7 @@ impl<'a> EncodedPayload<'a> {
     ///
     /// Returns OS-compatible `errno` values on empty program (`ENOENT`),
     /// inaccessible or non-regular executables (`ENOENT`/`EACCES`), malformed
-    /// or nested shebangs (`ENOEXEC`), or conflicting `FSPY_PAYLOAD` values
-    /// (`EINVAL`).
+    /// or nested shebangs (`ENOEXEC`), or allocation failure (`ENOMEM`).
     pub fn prepare_exec<A: Allocator + Clone>(
         &self,
         exec: &mut Exec<A>,

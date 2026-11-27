@@ -312,3 +312,302 @@ async fn deep_exec_chain_preserves_fd_env_and_seccomp_filter_hygiene() -> anyhow
     let _accesses = test_utils::spawn_command(cmd).await?;
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn e2big_on_execve_and_posix_spawn_cleans_up_scratch_without_leaking() -> anyhow::Result<()> {
+    let cmd = vt_subprocess_test::command_for_fn!((), |()| {
+        use std::ffi::CString;
+
+        fn count_open_fds() -> usize {
+            std::fs::read_dir("/proc/self/fd")
+                .unwrap()
+                .filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok())
+                .filter(|&fd| {
+                    // SAFETY: `F_GETFD` only queries flags and returns `-1` for
+                    // the already-closed `read_dir` descriptor.
+                    unsafe { libc::fcntl(fd, libc::F_GETFD) >= 0 }
+                })
+                .count()
+        }
+
+        let prog = CString::new("/bin/true").unwrap();
+        let arg0 = CString::new("true").unwrap();
+        let argv = [arg0.as_ptr(), std::ptr::null()];
+
+        // Exceeds Linux `MAX_ARG_STRLEN` (32 * PAGE_SIZE) on both 4 KiB and
+        // 64 KiB page kernels so `SYS_execve` fails cleanly with `E2BIG`.
+        let mut big = Vec::with_capacity(4 + 3 * 1024 * 1024 + 1);
+        big.extend_from_slice(b"BIG=");
+        big.resize(4 + 3 * 1024 * 1024, b'x');
+        let big_cstr = CString::new(big).unwrap();
+        let huge_envp = [big_cstr.as_ptr(), std::ptr::null()];
+
+        let fds_before = count_open_fds();
+
+        // 1. Direct `execve` returns `-1` / `E2BIG` and runs `cleanup_exec_scratch`.
+        // SAFETY: `prog`, `argv`, and `huge_envp` are valid NUL/NULL-terminated arrays.
+        let rc = unsafe { libc::execve(prog.as_ptr(), argv.as_ptr(), huge_envp.as_ptr()) };
+        assert_eq!(rc, -1, "oversized execve unexpectedly succeeded");
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::E2BIG),
+            "expected E2BIG from oversized execve"
+        );
+        assert_eq!(count_open_fds(), fds_before, "execve E2BIG leaked an open FD");
+
+        // 2. `posix_spawn` (`CLONE_VM | CLONE_VFORK`) returns `E2BIG` cleanly
+        //    and releases its parked `ExecScratch` and duped FD without crashing.
+        let mut pid: libc::pid_t = 0;
+        let argv_mut = [arg0.as_ptr().cast_mut(), std::ptr::null_mut()];
+        let huge_envp_mut = [big_cstr.as_ptr().cast_mut(), std::ptr::null_mut()];
+        // SAFETY: `prog`, `argv_mut`, and `huge_envp_mut` are valid arrays.
+        let spawn_rc = unsafe {
+            libc::posix_spawn(
+                &raw mut pid,
+                prog.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                argv_mut.as_ptr(),
+                huge_envp_mut.as_ptr(),
+            )
+        };
+        assert_eq!(spawn_rc, libc::E2BIG, "expected E2BIG from oversized posix_spawn");
+        assert_eq!(count_open_fds(), fds_before, "posix_spawn E2BIG leaked an open FD");
+
+        // 3. Process remains healthy: a normal `posix_spawn` still succeeds.
+        let empty_envp = [std::ptr::null_mut::<libc::c_char>()];
+        let mut ok_pid: libc::pid_t = 0;
+        // SAFETY: `prog`, `argv_mut`, and `empty_envp` are valid arrays.
+        let ok_rc = unsafe {
+            libc::posix_spawn(
+                &raw mut ok_pid,
+                prog.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                argv_mut.as_ptr(),
+                empty_envp.as_ptr(),
+            )
+        };
+        assert_eq!(ok_rc, 0, "follow-up posix_spawn failed with errno {ok_rc}");
+        let mut status: libc::c_int = 0;
+        // SAFETY: `ok_pid` is our child and `status` is writable.
+        assert_eq!(unsafe { libc::waitpid(ok_pid, &raw mut status, 0) }, ok_pid);
+        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0);
+    });
+
+    let _accesses = test_utils::spawn_command(cmd).await?;
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn inherited_sigsys_ign_and_blocked_mask_survive_execve() -> anyhow::Result<()> {
+    let probe_path = Path::new("/fspy-inherited-sigsys-probe");
+    let cmd = vt_subprocess_test::command_for_fn!(
+        probe_path.to_str().unwrap().to_owned(),
+        |probe_path: String| {
+            use std::{ffi::CString, os::unix::ffi::OsStrExt as _};
+
+            if std::env::var_os("FSPY_TEST_SIGSYS_STAGE").is_some() {
+                // Verify `SIGSYS` is still virtually `SIG_IGN`.
+                // SAFETY: `libc::sigaction` is a plain C struct valid when zeroed.
+                let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+                // SAFETY: querying current disposition for `SIGSYS`.
+                let rc = unsafe { libc::sigaction(libc::SIGSYS, std::ptr::null(), &raw mut old) };
+                assert_eq!(rc, 0);
+                assert_eq!(
+                    old.sa_sigaction,
+                    libc::SIG_IGN,
+                    "inherited SIGSYS SIG_IGN was not preserved across execve"
+                );
+
+                // Verify both `SIGSYS` and `SIGUSR1` remain blocked in the signal mask.
+                // SAFETY: `sigset_t` is a plain C struct valid when zeroed.
+                let mut cur_mask: libc::sigset_t = unsafe { std::mem::zeroed() };
+                // SAFETY: querying current thread signal mask.
+                let mask_rc = unsafe {
+                    libc::sigprocmask(libc::SIG_SETMASK, std::ptr::null(), &raw mut cur_mask)
+                };
+                assert_eq!(mask_rc, 0);
+                // SAFETY: `cur_mask` was initialized by `sigprocmask`.
+                let sigsys_blocked =
+                    unsafe { libc::sigismember(&raw const cur_mask, libc::SIGSYS) };
+                assert_eq!(sigsys_blocked, 1, "inherited blocked SIGSYS was lost across execve");
+                // SAFETY: `cur_mask` was initialized by `sigprocmask`.
+                let sigusr1_blocked =
+                    unsafe { libc::sigismember(&raw const cur_mask, libc::SIGUSR1) };
+                assert_eq!(sigusr1_blocked, 1, "inherited blocked SIGUSR1 was lost across execve");
+
+                // Verify syscall tracking still works with virtualized SIGSYS ignored+blocked.
+                let _ = std::fs::File::open(&probe_path);
+                return;
+            }
+
+            // Stage 0: set `SIGSYS` to `SIG_IGN` and block `SIGSYS` + `SIGUSR1`.
+            // SAFETY: `libc::sigaction` is a plain C struct valid when zeroed.
+            let mut ign: libc::sigaction = unsafe { std::mem::zeroed() };
+            ign.sa_sigaction = libc::SIG_IGN;
+            // SAFETY: installing `SIG_IGN` for `SIGSYS`.
+            let ign_rc =
+                unsafe { libc::sigaction(libc::SIGSYS, &raw const ign, std::ptr::null_mut()) };
+            assert_eq!(ign_rc, 0);
+
+            // SAFETY: `sigset_t` is initialized via `sigemptyset`/`sigaddset`.
+            let mut block_set: libc::sigset_t = unsafe { std::mem::zeroed() };
+            // SAFETY: valid stack-local `sigset_t`.
+            unsafe {
+                libc::sigemptyset(&raw mut block_set);
+                libc::sigaddset(&raw mut block_set, libc::SIGSYS);
+                libc::sigaddset(&raw mut block_set, libc::SIGUSR1);
+                assert_eq!(
+                    libc::sigprocmask(libc::SIG_BLOCK, &raw const block_set, std::ptr::null_mut()),
+                    0
+                );
+            }
+
+            let exe = std::fs::read_link("/proc/self/exe").unwrap();
+            let prog = CString::new(exe.as_os_str().as_bytes()).unwrap();
+            let mut args: Vec<CString> =
+                std::env::args_os().map(|a| CString::new(a.as_bytes()).unwrap()).collect();
+            if args.is_empty() {
+                let cmdline = std::fs::read("/proc/self/cmdline").unwrap();
+                let mut parts: Vec<&[u8]> = cmdline.split(|&b| b == 0).collect();
+                if parts.last().is_some_and(|s| s.is_empty()) {
+                    parts.pop();
+                }
+                args = parts.into_iter().map(|p| CString::new(p).unwrap()).collect();
+            }
+            let mut argv: Vec<*const libc::c_char> = args.iter().map(|s| s.as_ptr()).collect();
+            argv.push(std::ptr::null());
+
+            let mut env_cstrs: Vec<CString> = std::env::vars_os()
+                .map(|(k, v)| {
+                    let mut bytes = k.as_bytes().to_vec();
+                    bytes.push(b'=');
+                    bytes.extend_from_slice(v.as_bytes());
+                    CString::new(bytes).unwrap()
+                })
+                .collect();
+            env_cstrs.push(CString::new("FSPY_TEST_SIGSYS_STAGE=1").unwrap());
+            let mut envp: Vec<*const libc::c_char> = env_cstrs.iter().map(|s| s.as_ptr()).collect();
+            envp.push(std::ptr::null());
+
+            // SAFETY: `prog`, `argv`, and `envp` are valid NUL/NULL-terminated arrays.
+            unsafe { libc::execve(prog.as_ptr(), argv.as_ptr(), envp.as_ptr()) };
+            panic!("execve failed: {}", std::io::Error::last_os_error());
+        }
+    );
+
+    let accesses = test_utils::spawn_command(cmd).await?;
+    assert_contains(&accesses, probe_path, fspy::PathAccess::Read);
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn proc_self_environ_does_not_expose_fspy_bootstrap() -> anyhow::Result<()> {
+    let cmd = vt_subprocess_test::command_for_fn!((), |()| {
+        fn assert_bootstrap_scrubbed(label: &str) {
+            assert!(
+                std::env::var_os("__FSPY_BOOTSTRAP").is_none(),
+                "{label}: __FSPY_BOOTSTRAP present in process env"
+            );
+            let raw = std::fs::read("/proc/self/environ").unwrap();
+            let needle = b"__FSPY_BOOTSTRAP";
+            assert!(
+                !raw.windows(needle.len()).any(|w| w == needle),
+                "{label}: __FSPY_BOOTSTRAP found in /proc/self/environ"
+            );
+        }
+
+        // Check initial spawn (`Target::Unresolved`).
+        assert_bootstrap_scrubbed("initial spawn");
+
+        // Also check a child spawned via `execve` (`Target::ResolvedFd`).
+        let output = std::process::Command::new("/bin/cat")
+            .arg("/proc/self/environ")
+            .output()
+            .expect("failed to run /bin/cat /proc/self/environ");
+        assert!(output.status.success());
+        let needle = b"__FSPY_BOOTSTRAP";
+        assert!(
+            !output.stdout.windows(needle.len()).any(|w| w == needle),
+            "child execve: __FSPY_BOOTSTRAP found in /proc/self/environ"
+        );
+    });
+
+    let _accesses = test_utils::spawn_command(cmd).await?;
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn child_execve_with_stale_bootstrap_env_succeeds() -> anyhow::Result<()> {
+    let probe_path = Path::new("/fspy-stale-bootstrap-probe");
+    let cmd = vt_subprocess_test::command_for_fn!(
+        (test_bin_path().to_str().unwrap().to_owned(), probe_path.to_str().unwrap().to_owned()),
+        |(static_bin, probe_path): (String, String)| {
+            use std::ffi::CString;
+
+            // 1. Exec static test binary with duplicate stale `__FSPY_BOOTSTRAP`
+            //    entries in `envp` — must overwrite/deduplicate cleanly instead
+            //    of failing with `EINVAL`.
+            let prog = CString::new(static_bin).unwrap();
+            let arg0 = CString::new("test_bin").unwrap();
+            let arg1 = CString::new("open_read").unwrap();
+            let arg2 = CString::new(probe_path).unwrap();
+            let argv = [arg0.as_ptr(), arg1.as_ptr(), arg2.as_ptr(), std::ptr::null()];
+            let envp = [
+                c"__FSPY_BOOTSTRAP=stale".as_ptr(),
+                c"__FSPY_BOOTSTRAP=stale2".as_ptr(),
+                c"KEEP=yes".as_ptr(),
+                std::ptr::null(),
+            ];
+
+            // SAFETY: `fork()` followed by async-signal-safe `execve` + `_exit`.
+            let pid = unsafe { libc::fork() };
+            assert!(pid >= 0, "fork failed");
+            if pid == 0 {
+                // SAFETY: `prog`, `argv`, and `envp` are valid arrays.
+                unsafe {
+                    libc::execve(prog.as_ptr(), argv.as_ptr(), envp.as_ptr());
+                    libc::_exit(127);
+                }
+            }
+            let mut status: libc::c_int = 0;
+            // SAFETY: `pid` is our child and `status` is writable.
+            assert_eq!(unsafe { libc::waitpid(pid, &raw mut status, 0) }, pid);
+            assert!(
+                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                "child execve with stale __FSPY_BOOTSTRAP failed with status {status}"
+            );
+
+            // 2. Exec `/bin/sh` with stale `__FSPY_BOOTSTRAP=stale` and verify
+            //    the child sees `KEEP=yes` and no `__FSPY_BOOTSTRAP`.
+            let sh_argv = [
+                c"/bin/sh".as_ptr(),
+                c"-c".as_ptr(),
+                c"test -z \"${__FSPY_BOOTSTRAP+x}\" && test \"$KEEP\" = \"yes\"".as_ptr(),
+                std::ptr::null(),
+            ];
+            // SAFETY: `fork()` followed by async-signal-safe `execve` + `_exit`.
+            let pid2 = unsafe { libc::fork() };
+            assert!(pid2 >= 0, "fork failed");
+            if pid2 == 0 {
+                // SAFETY: `sh_argv` and `envp` are valid arrays.
+                unsafe {
+                    libc::execve(c"/bin/sh".as_ptr(), sh_argv.as_ptr(), envp.as_ptr());
+                    libc::_exit(127);
+                }
+            }
+            let mut status2: libc::c_int = 0;
+            // SAFETY: `pid2` is our child and `status2` is writable.
+            assert_eq!(unsafe { libc::waitpid(pid2, &raw mut status2, 0) }, pid2);
+            assert!(
+                libc::WIFEXITED(status2) && libc::WEXITSTATUS(status2) == 0,
+                "sh execve with stale __FSPY_BOOTSTRAP failed with status {status2}"
+            );
+        }
+    );
+
+    let accesses = test_utils::spawn_command(cmd).await?;
+    assert_contains(&accesses, probe_path, fspy::PathAccess::Read);
+    Ok(())
+}

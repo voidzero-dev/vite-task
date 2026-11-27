@@ -1366,6 +1366,7 @@ dependencies = [
  "elf",
  "flate2",
  "fspy_detours_sys",
+ "fspy_elf_loader",
  "fspy_preload_linux",
  "fspy_preload_macos",
  "fspy_preload_windows",
