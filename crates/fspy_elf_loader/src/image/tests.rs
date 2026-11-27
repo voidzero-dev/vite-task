@@ -283,12 +283,30 @@ fn validate_exec_checks_valid_and_invalid_images_without_closing_fd() {
     // Verify `fd` was NOT closed by `validate_exec`.
     assert!(fs::fstat(valid_pie.as_fd()).is_ok());
 
-    // Valid ET_EXEC image.
-    let mut exec_bytes = fixture(page, 0x180, abi::PF_R | abi::PF_W);
+    // Valid ET_EXEC image at a non-zero fixed load address.
+    let exec_base = 0x40_0000_u64;
+    let mut exec_bytes = std::vec![0xa5; 2 * page];
+    write_header(&mut exec_bytes, 1, exec_base + 0x200);
     exec_bytes[16..18].copy_from_slice(&abi::ET_EXEC.to_le_bytes());
+    Phdr {
+        p_type: abi::PT_LOAD,
+        p_flags: abi::PF_R | abi::PF_X,
+        p_offset: 0,
+        p_vaddr: exec_base,
+        p_filesz: u64::try_from(page + 0x100).unwrap(),
+        p_memsz: u64::try_from(page + 0x100).unwrap(),
+        p_align: u64::try_from(page).unwrap(),
+    }
+    .write_to(&mut exec_bytes, 0);
     let valid_exec = open_bytes(&exec_bytes);
     assert_eq!(crate::validate_exec(valid_exec.as_fd()), Ok(()));
     assert!(fs::fstat(valid_exec.as_fd()).is_ok());
+
+    // Zero-address ET_EXEC image -> NOEXEC (cannot reserve address 0).
+    let mut zero_exec_bytes = fixture(page, 0x180, abi::PF_R | abi::PF_W);
+    zero_exec_bytes[16..18].copy_from_slice(&abi::ET_EXEC.to_le_bytes());
+    let zero_exec = open_bytes(&zero_exec_bytes);
+    assert_eq!(crate::validate_exec(zero_exec.as_fd()), Err(Error::NOEXEC));
 
     // Non-ELF -> NOEXEC, fd stays open.
     let non_elf = open_bytes(b"#!/bin/sh\necho hi\n");
