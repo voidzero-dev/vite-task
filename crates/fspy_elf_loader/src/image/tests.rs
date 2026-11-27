@@ -418,6 +418,31 @@ fn maps_et_dyn_with_high_nonzero_p_vaddr_without_underflow() {
     assert_eq!(image.phdr, mapped_base + EHDR_SIZE);
 }
 
+#[test]
+fn accepts_non_ev_current_ident_and_header_versions() {
+    let page = fspy_nostd::param::page_size();
+    for (ei_version, e_version) in [(0_u8, 0_u32), (0, 1), (1, 0), (2, 2), (2, 0)] {
+        let mut bytes = fixture(page, 0x180, abi::PF_R | abi::PF_W);
+        bytes[abi::EI_VERSION] = ei_version;
+        bytes[20..24].copy_from_slice(&e_version.to_le_bytes());
+
+        let fd = open_bytes(&bytes);
+        let parsed = File::open(fd.as_fd()).expect("non-EV_CURRENT ELF should open");
+        let _layout = parsed.validate_segments(page).expect("non-EV_CURRENT ELF should validate");
+        assert_eq!(crate::validate_exec(fd.as_fd()), Ok(()));
+    }
+
+    // Magic, ELF64 class, and little-endian data checks must still reject invalid images.
+    for (offset, bad_byte) in
+        [(0_usize, 0x00_u8), (abi::EI_CLASS, abi::ELFCLASS32), (abi::EI_DATA, abi::ELFDATA2MSB)]
+    {
+        let mut bytes = fixture(page, 0x180, abi::PF_R | abi::PF_W);
+        bytes[offset] = bad_byte;
+        let fd = open_bytes(&bytes);
+        assert_eq!(File::open(fd.as_fd()).err(), Some(Error::NOEXEC));
+    }
+}
+
 fn fixture(page: usize, memory_size: usize, flags: u32) -> std::vec::Vec<u8> {
     let mut bytes = std::vec![0xa5; 3 * page];
     write_header(&mut bytes, 2, 0x200);
