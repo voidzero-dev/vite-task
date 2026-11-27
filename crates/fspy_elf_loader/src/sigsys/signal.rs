@@ -9,10 +9,11 @@
 //! This module virtualizes `SIGSYS` across:
 //! - `rt_sigaction`: stores a process-wide virtualized `SIGSYS` action without
 //!   modifying the kernel's `SIGSYS` disposition, strips `SIGSYS` from
-//!   `sa_mask` of other signals while preserving it on read-back, ignores
-//!   writes from `CLONE_VM` (`vfork`/`posix_spawn`) children so they cannot
-//!   corrupt the parent's signal table, and forwards non-seccomp or foreign
-//!   `SIGSYS` deliveries to the virtualized disposition.
+//!   `sa_mask` of other signals while preserving it on read-back, tracks
+//!   per-child `SIG_DFL`/`SIG_IGN` overrides from `CLONE_VM`
+//!   (`vfork`/`posix_spawn`) children without mutating the parent's signal
+//!   table, and forwards non-seccomp or foreign `SIGSYS` deliveries to the
+//!   virtualized disposition.
 //! - `rt_sigprocmask` & `rt_sigpending`: updates `ucontext.uc_sigmask` directly
 //!   so `rt_sigreturn` commits non-`SIGSYS` bits atomically, tracks per-TID
 //!   virtual `SIGSYS` blocked and pending state in a lock-free `(pid, tid)`
@@ -68,6 +69,10 @@ const KEY_PART_MASK: u64 = (1_u64 << KEY_BITS) - 1;
 const KEY_MASK: u64 = (1_u64 << (KEY_BITS * 2)) - 1;
 const BIT_BLOCKED: u64 = 1_u64 << 60;
 const BIT_PENDING: u64 = 1_u64 << 61;
+const BIT_CHILD_SIGSYS_DFL: u64 = 1_u64 << 62;
+const BIT_CHILD_SIGSYS_IGN: u64 = 1_u64 << 63;
+const CHILD_SIGSYS_MASK: u64 = BIT_CHILD_SIGSYS_DFL | BIT_CHILD_SIGSYS_IGN;
+const ALL_TID_FLAGS: u64 = BIT_BLOCKED | BIT_PENDING | CHILD_SIGSYS_MASK;
 const INFO_LOCK_BIT: u64 = 1_u64 << 63;
 
 struct SyncCell<T>(UnsafeCell<T>);
@@ -218,7 +223,39 @@ static USER_SIGSYS_ACTION: SeqAction = SeqAction::new_dfl();
 
 /// Returns `true` when the target's virtualized `SIGSYS` disposition is `SIG_IGN`.
 pub fn is_sigsys_ignored() -> bool {
+    if is_shared_vm_child() {
+        let flags = lookup_tid_flags(getpid(), gettid());
+        if (flags & BIT_CHILD_SIGSYS_DFL) != 0 {
+            return false;
+        }
+        if (flags & BIT_CHILD_SIGSYS_IGN) != 0 {
+            return true;
+        }
+    }
     USER_SIGSYS_ACTION.read().sa_handler == SIG_IGN_RAW
+}
+
+fn read_effective_sigsys_action(shared_vm: bool) -> KernelSigaction {
+    if shared_vm {
+        let flags = lookup_tid_flags(getpid(), gettid());
+        if (flags & BIT_CHILD_SIGSYS_DFL) != 0 {
+            return KernelSigaction {
+                sa_handler: SIG_DFL_RAW,
+                sa_flags: 0,
+                sa_restorer: 0,
+                sa_mask: 0,
+            };
+        }
+        if (flags & BIT_CHILD_SIGSYS_IGN) != 0 {
+            return KernelSigaction {
+                sa_handler: SIG_IGN_RAW,
+                sa_flags: 0,
+                sa_restorer: 0,
+                sa_mask: 0,
+            };
+        }
+    }
+    USER_SIGSYS_ACTION.read()
 }
 
 /// Bit `sig - 1` records whether the target included `SIGSYS` in `sa_mask`
@@ -231,8 +268,15 @@ static SA_MASK_HAS_SIGSYS: AtomicU64 = AtomicU64::new(0);
 /// - bits `30..60`: Linux PID
 /// - bit `60`: `BIT_BLOCKED`
 /// - bit `61`: `BIT_PENDING`
+/// - bit `62`: `BIT_CHILD_SIGSYS_DFL` (`CLONE_VM` child override)
+/// - bit `63`: `BIT_CHILD_SIGSYS_IGN` (`CLONE_VM` child override)
 static TID_SLOTS: [AtomicU64; MAX_TID_SLOTS] = [const { AtomicU64::new(0) }; MAX_TID_SLOTS];
 static OCCUPIED_SLOTS: AtomicUsize = AtomicUsize::new(0);
+/// Monotonic upper bound (`<= MAX_TID_SLOTS`) on published indices in
+/// [`TID_SLOTS`], updated via `fetch_max(idx + 1, Release)` BEFORE publishing
+/// a non-zero slot value and reset only in single-threaded [`clear_all_tid_slots`].
+static SLOT_HIGH_WATER: AtomicUsize = AtomicUsize::new(0);
+static INSERT_REAP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 struct PendingInfoSlot {
     key: AtomicU64,
@@ -315,7 +359,7 @@ pub fn take_current_tid_entry() -> Option<(u64, Option<siginfo>)> {
         return None;
     }
     let key = make_key(getpid(), gettid())?;
-    let prev_flags = update_tid_flags(key, 0, BIT_BLOCKED | BIT_PENDING).ok()?;
+    let prev_flags = update_tid_flags(key, 0, ALL_TID_FLAGS).ok()?;
     if prev_flags == 0 {
         return None;
     }
@@ -366,6 +410,11 @@ const fn slot_tid(val: u64) -> i32 {
     (val & KEY_PART_MASK) as i32
 }
 
+#[inline]
+fn slot_scan_limit() -> usize {
+    SLOT_HIGH_WATER.load(Ordering::Acquire).min(MAX_TID_SLOTS)
+}
+
 fn clear_all_tid_slots() {
     for (slot, seq) in TID_SLOTS.iter().zip(TID_DEFERRED_SEQ.iter()) {
         slot.store(0, Ordering::Relaxed);
@@ -374,7 +423,32 @@ fn clear_all_tid_slots() {
     for slot in &PENDING_INFOS {
         slot.key.store(0, Ordering::Relaxed);
     }
+    SLOT_HIGH_WATER.store(0, Ordering::Release);
+    INSERT_REAP_COUNTER.store(0, Ordering::Relaxed);
     OCCUPIED_SLOTS.store(0, Ordering::Release);
+}
+
+/// Removes all `TID_SLOTS` entries belonging to `pid` (e.g. a `CLONE_VM` /
+/// `CLONE_VFORK` child that has left the parent's address space, including
+/// one that `_exit`ed after a failed `execve`).
+pub fn clear_pid_slots(pid: i32) {
+    if pid <= 0 || OCCUPIED_SLOTS.load(Ordering::Acquire) == 0 {
+        return;
+    }
+    let limit = slot_scan_limit();
+    for slot in &TID_SLOTS[..limit] {
+        loop {
+            let val = slot.load(Ordering::Acquire);
+            if val == 0 || slot_pid(val) != pid {
+                break;
+            }
+            if slot.compare_exchange_weak(val, 0, Ordering::AcqRel, Ordering::Relaxed).is_ok() {
+                OCCUPIED_SLOTS.fetch_sub(1, Ordering::Release);
+                let _ = take_pending_info(val & KEY_MASK);
+                break;
+            }
+        }
+    }
 }
 
 fn find_tid_slot_index(pid: i32, tid: i32) -> Option<usize> {
@@ -382,7 +456,8 @@ fn find_tid_slot_index(pid: i32, tid: i32) -> Option<usize> {
         return None;
     }
     let key = make_key(pid, tid)?;
-    for (idx, slot) in TID_SLOTS.iter().enumerate() {
+    let limit = slot_scan_limit();
+    for (idx, slot) in TID_SLOTS[..limit].iter().enumerate() {
         let val = slot.load(Ordering::Acquire);
         if val != 0 && (val & KEY_MASK) == key {
             return Some(idx);
@@ -408,10 +483,11 @@ fn lookup_tid_flags(pid: i32, tid: i32) -> u64 {
     let Some(key) = make_key(pid, tid) else {
         return 0;
     };
-    for slot in &TID_SLOTS {
+    let limit = slot_scan_limit();
+    for slot in &TID_SLOTS[..limit] {
         let val = slot.load(Ordering::Acquire);
         if val != 0 && (val & KEY_MASK) == key {
-            return val & (BIT_BLOCKED | BIT_PENDING);
+            return val & ALL_TID_FLAGS;
         }
     }
     0
@@ -459,7 +535,8 @@ fn is_tid_alive(my_pid: i32, slot_p: i32, slot_t: i32) -> bool {
 }
 
 fn reap_dead_tids(my_pid: i32) {
-    for slot in &TID_SLOTS {
+    let limit = slot_scan_limit();
+    for slot in &TID_SLOTS[..limit] {
         let val = slot.load(Ordering::Acquire);
         if val == 0 {
             continue;
@@ -476,17 +553,19 @@ fn reap_dead_tids(my_pid: i32) {
 }
 
 /// Atomically sets `set_bits` and clears `clear_bits` on the `(pid, tid)`
-/// slot, returning the previous flags (`BIT_BLOCKED | BIT_PENDING`).
+/// slot, returning the previous flags (`ALL_TID_FLAGS`).
 fn update_tid_flags(key: u64, set_bits: u64, clear_bits: u64) -> Result<u64> {
+    let set_bits = set_bits & ALL_TID_FLAGS;
     // 1. Update an existing entry for `key` if present.
     if OCCUPIED_SLOTS.load(Ordering::Acquire) != 0 {
-        for slot in &TID_SLOTS {
+        let limit = slot_scan_limit();
+        for slot in &TID_SLOTS[..limit] {
             loop {
                 let val = slot.load(Ordering::Acquire);
                 if val == 0 || (val & KEY_MASK) != key {
                     break;
                 }
-                let old_flags = val & (BIT_BLOCKED | BIT_PENDING);
+                let old_flags = val & ALL_TID_FLAGS;
                 let new_flags = (old_flags | set_bits) & !clear_bits;
                 if new_flags == old_flags {
                     return Ok(old_flags);
@@ -510,21 +589,29 @@ fn update_tid_flags(key: u64, set_bits: u64, clear_bits: u64) -> Result<u64> {
         return Ok(0);
     }
 
-    // 2. Insert a new slot; if the table is under pressure or full, reap dead
-    //    TIDs (e.g. exited pthreads that blocked signals on teardown).
-    if OCCUPIED_SLOTS.load(Ordering::Acquire) >= MAX_TID_SLOTS / 2 {
+    // 2. Insert a new slot; eagerly reap dead TIDs (e.g. exited pthreads that
+    //    blocked signals on teardown) so dead entries are cleared before TID
+    //    reuse and `SLOT_HIGH_WATER` stays compact.
+    let occupied = OCCUPIED_SLOTS.load(Ordering::Acquire);
+    if occupied > 0
+        && (occupied <= 16
+            || occupied >= MAX_TID_SLOTS / 2
+            || INSERT_REAP_COUNTER.fetch_add(1, Ordering::Relaxed).trailing_zeros() >= 6)
+    {
         reap_dead_tids(slot_pid(key));
     }
 
     for attempt in 0..2 {
-        for slot in &TID_SLOTS {
-            if slot.load(Ordering::Relaxed) == 0
-                && slot
+        for (idx, slot) in TID_SLOTS.iter().enumerate() {
+            if slot.load(Ordering::Relaxed) == 0 {
+                SLOT_HIGH_WATER.fetch_max(idx + 1, Ordering::Release);
+                if slot
                     .compare_exchange(0, key | new_flags, Ordering::AcqRel, Ordering::Relaxed)
                     .is_ok()
-            {
-                OCCUPIED_SLOTS.fetch_add(1, Ordering::Release);
-                return Ok(0);
+                {
+                    OCCUPIED_SLOTS.fetch_add(1, Ordering::Release);
+                    return Ok(0);
+                }
             }
         }
         if attempt == 0 {
@@ -666,14 +753,15 @@ fn discard_all_pending_sigsys(pid: i32) {
     if OCCUPIED_SLOTS.load(Ordering::Acquire) == 0 {
         return;
     }
-    for slot in &TID_SLOTS {
+    let limit = slot_scan_limit();
+    for slot in &TID_SLOTS[..limit] {
         loop {
             let val = slot.load(Ordering::Acquire);
             if val == 0 || slot_pid(val) != pid || (val & BIT_PENDING) == 0 {
                 break;
             }
             let key = val & KEY_MASK;
-            let new_flags = (val & (BIT_BLOCKED | BIT_PENDING)) & !BIT_PENDING;
+            let new_flags = (val & ALL_TID_FLAGS) & !BIT_PENDING;
             let new_val = if new_flags == 0 { 0 } else { key | new_flags };
             if slot.compare_exchange_weak(val, new_val, Ordering::AcqRel, Ordering::Relaxed).is_ok()
             {
@@ -719,22 +807,41 @@ pub unsafe fn handle_rt_sigaction(inv: SyscallInvocation) -> isize {
         // Read `prev` first and validate/write `oldact` before mutating the
         // virtualized action so an unwritable `oldact` returns `-EFAULT`
         // without changing signal state.
-        let prev = USER_SIGSYS_ACTION.read();
+        let prev = read_effective_sigsys_action(shared_vm);
         // SAFETY: user pointer from the trapped syscall (see `usermem`).
         if oldact_ptr != 0 && unsafe { usermem::write_user(oldact_ptr, &prev) }.is_err() {
             return neg_errno(EFAULT);
         }
 
-        if let Some(act) = new_act
-            && !shared_vm
-        {
-            let actual_prev = USER_SIGSYS_ACTION.write_with(|cur| (act, cur));
-            if oldact_ptr != 0 && actual_prev != prev {
-                // SAFETY: `oldact_ptr` was validated writable above.
-                let _ = unsafe { usermem::write_user(oldact_ptr, &actual_prev) };
-            }
-            if act.sa_handler == SIG_IGN_RAW {
-                discard_all_pending_sigsys(getpid());
+        if let Some(act) = new_act {
+            if shared_vm {
+                let Some(key) = make_key(getpid(), gettid()) else {
+                    return neg_errno(EINVAL);
+                };
+                if act.sa_handler == SIG_IGN_RAW {
+                    let Ok(prev_flags) = update_tid_flags(
+                        key,
+                        BIT_CHILD_SIGSYS_IGN,
+                        BIT_CHILD_SIGSYS_DFL | BIT_PENDING,
+                    ) else {
+                        return neg_errno(ENOMEM);
+                    };
+                    if (prev_flags & BIT_PENDING) != 0 {
+                        let _ = take_pending_info(key);
+                    }
+                } else if update_tid_flags(key, BIT_CHILD_SIGSYS_DFL, BIT_CHILD_SIGSYS_IGN).is_err()
+                {
+                    return neg_errno(ENOMEM);
+                }
+            } else {
+                let actual_prev = USER_SIGSYS_ACTION.write_with(|cur| (act, cur));
+                if oldact_ptr != 0 && actual_prev != prev {
+                    // SAFETY: `oldact_ptr` was validated writable above.
+                    let _ = unsafe { usermem::write_user(oldact_ptr, &actual_prev) };
+                }
+                if act.sa_handler == SIG_IGN_RAW {
+                    discard_all_pending_sigsys(getpid());
+                }
             }
         }
         return 0;
@@ -923,16 +1030,22 @@ pub unsafe fn handle_rt_sigpending(inv: SyscallInvocation) -> isize {
     rc
 }
 
-/// Completes a masked-wait syscall in `ucontext`, delivering any pending
-/// `SIGSYS` AFTER writing the syscall return value so `SA_SIGINFO` handlers
-/// observe the real return value and any edits they make to `ucontext` survive.
-unsafe fn finish_masked_wait(ucontext: &mut Ucontext, rc: isize, pending: Option<siginfo>) {
+/// Completes a masked-wait syscall in `ucontext` with no pending `SIGSYS`
+/// delivery.
+const fn finish_masked_wait(ucontext: &mut Ucontext, rc: isize) {
     set_syscall_result(ucontext, rc);
     *uc_sigmask_mut(ucontext) &= !SIGSYS_BIT;
-    if let Some(mut info) = pending {
-        // SAFETY: `info` is valid stack storage and `ucontext` is writable.
-        unsafe { deliver_sigsys_now(SIGSYS_I32, &raw mut info, ucontext) };
-    }
+}
+
+/// Completes a masked-wait syscall in `ucontext`, delivering a pending `SIGSYS`
+/// AFTER writing the syscall return value so `SA_SIGINFO` handlers observe the
+/// real return value and any edits they make to `ucontext` survive.
+#[inline(never)]
+unsafe fn finish_masked_wait_with_pending(ucontext: &mut Ucontext, rc: isize, mut info: siginfo) {
+    set_syscall_result(ucontext, rc);
+    *uc_sigmask_mut(ucontext) &= !SIGSYS_BIT;
+    // SAFETY: `info` is valid stack storage and `ucontext` is writable.
+    unsafe { deliver_sigsys_now(SIGSYS_I32, &raw mut info, ucontext) };
 }
 
 /// Handles masked-wait syscalls where `args[mask_idx]` is a `*const u64`
@@ -964,8 +1077,7 @@ pub unsafe fn handle_masked_wait(
             // `rt_sigsuspend(NULL, ...)` fails immediately with `-EFAULT`.
             // SAFETY: Replays the invalid invocation directly.
             let rc = unsafe { replay(inv) };
-            // SAFETY: Completes `ucontext` with no pending delivery.
-            unsafe { finish_masked_wait(ucontext, rc, None) };
+            finish_masked_wait(ucontext, rc);
             return;
         }
         let orig_mask = ucontext.uc_sigmask & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
@@ -973,23 +1085,20 @@ pub unsafe fn handle_masked_wait(
         inv.args[size_idx] = KERNEL_SIGSET_SIZE;
         // SAFETY: `orig_mask` remains valid on the entry stack for the syscall.
         let rc = unsafe { replay_masked_wait(&inv, ucontext) };
-        // SAFETY: Completes `ucontext` with no pending delivery.
-        unsafe { finish_masked_wait(ucontext, rc, None) };
+        finish_masked_wait(ucontext, rc);
         return;
     }
 
     if sigsetsize != KERNEL_SIGSET_SIZE {
         // SAFETY: Replay invalid sigsetsize to preserve exact `-EINVAL`.
         let rc = unsafe { replay(inv) };
-        // SAFETY: Completes `ucontext` with no pending delivery.
-        unsafe { finish_masked_wait(ucontext, rc, None) };
+        finish_masked_wait(ucontext, rc);
         return;
     }
 
     // SAFETY: `u64` accepts any bit pattern.
     let Ok(raw_mask) = (unsafe { usermem::read_user::<u64>(mask_ptr) }) else {
-        // SAFETY: Completes `ucontext` with `-EFAULT`.
-        unsafe { finish_masked_wait(ucontext, neg_errno(EFAULT), None) };
+        finish_masked_wait(ucontext, neg_errno(EFAULT));
         return;
     };
 
@@ -1015,15 +1124,13 @@ pub unsafe fn handle_pselect6(mut inv: SyscallInvocation, ucontext: &mut Ucontex
         inv.args[5] = (&raw const local_wrapper).addr();
         // SAFETY: `local_wrapper` and `orig_mask` live on the entry stack.
         let rc = unsafe { replay_masked_wait(&inv, ucontext) };
-        // SAFETY: Completes `ucontext` with no pending delivery.
-        unsafe { finish_masked_wait(ucontext, rc, None) };
+        finish_masked_wait(ucontext, rc);
         return;
     }
 
     // SAFETY: `PselectSigmask` is a plain `#[repr(C)]` struct of pointer + usize.
     let Ok(wrapper) = (unsafe { usermem::read_user::<PselectSigmask>(sig_ptr) }) else {
-        // SAFETY: Completes `ucontext` with `-EFAULT`.
-        unsafe { finish_masked_wait(ucontext, neg_errno(EFAULT), None) };
+        finish_masked_wait(ucontext, neg_errno(EFAULT));
         return;
     };
     if wrapper.ss.is_null() {
@@ -1031,22 +1138,19 @@ pub unsafe fn handle_pselect6(mut inv: SyscallInvocation, ucontext: &mut Ucontex
         inv.args[5] = (&raw const local_wrapper).addr();
         // SAFETY: `local_wrapper` and `orig_mask` live on the entry stack.
         let rc = unsafe { replay_masked_wait(&inv, ucontext) };
-        // SAFETY: Completes `ucontext` with no pending delivery.
-        unsafe { finish_masked_wait(ucontext, rc, None) };
+        finish_masked_wait(ucontext, rc);
         return;
     }
     if wrapper.ss_len != KERNEL_SIGSET_SIZE {
         // SAFETY: Invalid sigsetsize; replay directly to return `-EINVAL`.
         let rc = unsafe { replay(inv) };
-        // SAFETY: Completes `ucontext` with no pending delivery.
-        unsafe { finish_masked_wait(ucontext, rc, None) };
+        finish_masked_wait(ucontext, rc);
         return;
     }
 
     // SAFETY: `u64` accepts any bit pattern.
     let Ok(raw_mask) = (unsafe { usermem::read_user::<u64>(wrapper.ss.addr()) }) else {
-        // SAFETY: Completes `ucontext` with `-EFAULT`.
-        unsafe { finish_masked_wait(ucontext, neg_errno(EFAULT), None) };
+        finish_masked_wait(ucontext, neg_errno(EFAULT));
         return;
     };
     let filtered = raw_mask & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
@@ -1193,6 +1297,49 @@ unsafe fn replay_masked_wait_deferring_sigsys(
     }
 }
 
+/// Out-of-line slow path for masked waits that temporarily toggle virtual
+/// `SIGSYS` blocking (kept out of `run_wait_with_virtual_sigsys` so the common
+/// path keeps its entry-stack frame minimal on tight `sigaltstack`s).
+#[inline(never)]
+unsafe fn run_wait_toggling_sigsys(
+    pid: i32,
+    tid: i32,
+    inv: SyscallInvocation,
+    ucontext: &mut Ucontext,
+    wait_blocks_sigsys: bool,
+) {
+    if !wait_blocks_sigsys {
+        // Wait mask temporarily unblocks `SIGSYS`. If one is already pending,
+        // write `-EINTR` to `ucontext` first and then deliver it immediately
+        // (matching Linux `sigsuspend`).
+        if let Some(info) = take_pending_sigsys(pid, tid) {
+            // SAFETY: Delivering pending virtual `SIGSYS` on entry stack.
+            unsafe { finish_masked_wait_with_pending(ucontext, neg_errno(EINTR), info) };
+            return;
+        }
+        let _ = set_tid_blocked(pid, tid, false);
+        // SAFETY: `inv` points to valid entry-stack wait args.
+        let rc = unsafe { replay_masked_wait(&inv, ucontext) };
+        let _ = set_tid_blocked(pid, tid, true);
+        finish_masked_wait(ucontext, rc);
+        return;
+    }
+
+    // Wait mask temporarily blocks `SIGSYS`; defer any non-seccomp `SIGSYS`
+    // that arrives during the wait until the wait completes, then write
+    // `rc` to `ucontext` BEFORE delivering any deferred `SIGSYS`.
+    let _ = set_tid_blocked(pid, tid, true);
+    // SAFETY: `inv` points to valid entry-stack wait args.
+    let rc = unsafe { replay_masked_wait_deferring_sigsys(pid, tid, inv, ucontext) };
+    let _ = set_tid_blocked(pid, tid, false);
+    if let Some(info) = take_pending_sigsys(pid, tid) {
+        // SAFETY: Writes `rc` before delivering any deferred `SIGSYS`.
+        unsafe { finish_masked_wait_with_pending(ucontext, rc, info) };
+    } else {
+        finish_masked_wait(ucontext, rc);
+    }
+}
+
 /// Runs a masked-wait syscall while honoring the caller's temporary `SIGSYS`
 /// blocked/unblocked bit in the wait mask, and completes `ucontext`.
 unsafe fn run_wait_with_virtual_sigsys(
@@ -1204,35 +1351,9 @@ unsafe fn run_wait_with_virtual_sigsys(
     let tid = gettid();
     let was_blocked = (lookup_tid_flags(pid, tid) & BIT_BLOCKED) != 0;
 
-    if !wait_blocks_sigsys && was_blocked {
-        // Wait mask temporarily unblocks `SIGSYS`. If one is already pending,
-        // write `-EINTR` to `ucontext` first and then deliver it immediately
-        // (matching Linux `sigsuspend`).
-        if let Some(info) = take_pending_sigsys(pid, tid) {
-            // SAFETY: Delivering pending virtual `SIGSYS` on entry stack.
-            unsafe { finish_masked_wait(ucontext, neg_errno(EINTR), Some(info)) };
-            return;
-        }
-        let _ = set_tid_blocked(pid, tid, false);
-        // SAFETY: `inv` points to valid entry-stack wait args.
-        let rc = unsafe { replay_masked_wait(&inv, ucontext) };
-        let _ = set_tid_blocked(pid, tid, true);
-        // SAFETY: Completes `ucontext` with no pending delivery.
-        unsafe { finish_masked_wait(ucontext, rc, None) };
-        return;
-    }
-
-    if wait_blocks_sigsys && !was_blocked {
-        // Wait mask temporarily blocks `SIGSYS`; defer any non-seccomp `SIGSYS`
-        // that arrives during the wait until the wait completes, then write
-        // `rc` to `ucontext` BEFORE delivering any deferred `SIGSYS`.
-        let _ = set_tid_blocked(pid, tid, true);
-        // SAFETY: `inv` points to valid entry-stack wait args.
-        let rc = unsafe { replay_masked_wait_deferring_sigsys(pid, tid, inv, ucontext) };
-        let _ = set_tid_blocked(pid, tid, false);
-        let pending = take_pending_sigsys(pid, tid);
-        // SAFETY: Writes `rc` before delivering any deferred `SIGSYS`.
-        unsafe { finish_masked_wait(ucontext, rc, pending) };
+    if wait_blocks_sigsys != was_blocked {
+        // SAFETY: forwarded from caller contract.
+        unsafe { run_wait_toggling_sigsys(pid, tid, inv, ucontext, wait_blocks_sigsys) };
         return;
     }
 
@@ -1243,8 +1364,7 @@ unsafe fn run_wait_with_virtual_sigsys(
         // SAFETY: `inv` points to valid entry-stack wait args.
         unsafe { replay_masked_wait(&inv, ucontext) }
     };
-    // SAFETY: Completes `ucontext` with no pending delivery.
-    unsafe { finish_masked_wait(ucontext, rc, None) };
+    finish_masked_wait(ucontext, rc);
 }
 
 /// Handles a non-seccomp or foreign-seccomp `SIGSYS` delivery, deferring
@@ -1265,7 +1385,7 @@ pub unsafe fn forward_non_seccomp_sigsys(signum: i32, info: *mut siginfo, uconte
     if !is_foreign_seccomp && is_current_tid_blocked() {
         let pid = getpid();
         let tid = gettid();
-        if USER_SIGSYS_ACTION.read().sa_handler != SIG_IGN_RAW {
+        if !is_sigsys_ignored() {
             record_pending_sigsys(pid, tid, info);
         }
         bump_tid_deferred_seq(pid, tid);
@@ -1290,9 +1410,11 @@ pub unsafe fn forward_non_seccomp_sigsys(signum: i32, info: *mut siginfo, uconte
 pub unsafe fn deliver_sigsys_now(mut signum: i32, mut info: *mut siginfo, ucontext: &mut Ucontext) {
     let mut deferred_info: siginfo;
     loop {
-        let user_act = {
+        let user_act = if is_shared_vm_child() {
+            read_effective_sigsys_action(true)
+        } else {
             let act = USER_SIGSYS_ACTION.read();
-            if (act.sa_flags & SA_RESETHAND as usize) != 0 && !is_shared_vm_child() {
+            if (act.sa_flags & SA_RESETHAND as usize) != 0 {
                 USER_SIGSYS_ACTION.write_with(|mut cur| {
                     let prev = cur;
                     if (cur.sa_flags & SA_RESETHAND as usize) != 0 {
@@ -1412,34 +1534,46 @@ mod tests {
         let _guard = TID_SLOT_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         clear_all_tid_slots();
         let pid = getpid();
-        assert_eq!(lookup_tid_flags(pid, 42), 0);
-        set_tid_blocked(pid, 42, true).unwrap();
-        assert_eq!(lookup_tid_flags(pid, 42), BIT_BLOCKED);
-        assert_eq!(lookup_tid_flags(pid, 99), 0);
-        assert_eq!(lookup_tid_flags(pid + 1, 42), 0);
+        let tid1 = gettid();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let helper = std::thread::spawn(move || {
+            tx.send(gettid()).unwrap();
+            let _ = done_rx.recv();
+        });
+        let tid2 = rx.recv().unwrap();
+
+        assert_eq!(lookup_tid_flags(pid, tid1), 0);
+        set_tid_blocked(pid, tid1, true).unwrap();
+        assert_eq!(lookup_tid_flags(pid, tid1), BIT_BLOCKED);
+        assert_eq!(lookup_tid_flags(pid, tid2), 0);
+        assert_eq!(lookup_tid_flags(pid + 1, tid1), 0);
 
         // Duplicate insert is a no-op.
-        set_tid_blocked(pid, 42, true).unwrap();
+        set_tid_blocked(pid, tid1, true).unwrap();
         assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 1);
 
         // Pending bit coexists with blocked bit.
-        record_pending_sigsys(pid, 42, ptr::null());
-        assert_eq!(lookup_tid_flags(pid, 42), BIT_BLOCKED | BIT_PENDING);
-        let taken = take_pending_sigsys(pid, 42);
+        record_pending_sigsys(pid, tid1, ptr::null());
+        assert_eq!(lookup_tid_flags(pid, tid1), BIT_BLOCKED | BIT_PENDING);
+        let taken = take_pending_sigsys(pid, tid1);
         assert!(taken.is_some());
-        assert_eq!(lookup_tid_flags(pid, 42), BIT_BLOCKED);
+        assert_eq!(lookup_tid_flags(pid, tid1), BIT_BLOCKED);
 
-        set_tid_blocked(pid, 99, true).unwrap();
+        set_tid_blocked(pid, tid2, true).unwrap();
         assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 2);
 
-        set_tid_blocked(pid, 42, false).unwrap();
-        assert_eq!(lookup_tid_flags(pid, 42), 0);
-        assert_eq!(lookup_tid_flags(pid, 99), BIT_BLOCKED);
+        set_tid_blocked(pid, tid1, false).unwrap();
+        assert_eq!(lookup_tid_flags(pid, tid1), 0);
+        assert_eq!(lookup_tid_flags(pid, tid2), BIT_BLOCKED);
         assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 1);
 
-        set_tid_blocked(pid, 99, false).unwrap();
-        assert_eq!(lookup_tid_flags(pid, 99), 0);
+        set_tid_blocked(pid, tid2, false).unwrap();
+        assert_eq!(lookup_tid_flags(pid, tid2), 0);
         assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 0);
+
+        let _ = done_tx.send(());
+        helper.join().unwrap();
     }
 
     #[test]
@@ -1447,17 +1581,31 @@ mod tests {
         let _guard = TID_SLOT_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         clear_all_tid_slots();
         let pid = getpid();
-        set_tid_blocked(pid, 10, true).unwrap();
-        record_pending_sigsys(pid, 10, ptr::null());
-        record_pending_sigsys(pid, 11, ptr::null());
-        record_pending_sigsys(pid + 1, 10, ptr::null());
+        let tid1 = gettid();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let helper = std::thread::spawn(move || {
+            tx.send(gettid()).unwrap();
+            let _ = done_rx.recv();
+        });
+        let tid2 = rx.recv().unwrap();
+        // PID 1 always exists (`kill(1, 0)` never returns `-ESRCH`).
+        let other_pid = if pid == 1 { 2 } else { 1 };
+
+        set_tid_blocked(pid, tid1, true).unwrap();
+        record_pending_sigsys(pid, tid1, ptr::null());
+        record_pending_sigsys(pid, tid2, ptr::null());
+        record_pending_sigsys(other_pid, 1, ptr::null());
 
         discard_all_pending_sigsys(pid);
 
-        assert_eq!(lookup_tid_flags(pid, 10), BIT_BLOCKED);
-        assert_eq!(lookup_tid_flags(pid, 11), 0);
-        assert_eq!(lookup_tid_flags(pid + 1, 10), BIT_PENDING);
+        assert_eq!(lookup_tid_flags(pid, tid1), BIT_BLOCKED);
+        assert_eq!(lookup_tid_flags(pid, tid2), 0);
+        assert_eq!(lookup_tid_flags(other_pid, 1), BIT_PENDING);
         clear_all_tid_slots();
+
+        let _ = done_tx.send(());
+        helper.join().unwrap();
     }
 
     #[test]
@@ -1479,5 +1627,100 @@ mod tests {
         cell.seq.fetch_add(1, Ordering::Relaxed);
         cell.reset_after_fork();
         assert_eq!(cell.read(), custom);
+    }
+
+    #[test]
+    fn slot_high_water_tracks_and_eager_reaping_clears_dead_tids() {
+        let _guard = TID_SLOT_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        clear_all_tid_slots();
+        assert_eq!(SLOT_HIGH_WATER.load(Ordering::Acquire), 0);
+
+        let pid = getpid();
+        let tid = gettid();
+        // Insert a dead TID (TID 1_000_000_000 cannot exist in this thread group).
+        let dead_tid = 1_000_000_000;
+        let dead_key = make_key(pid, dead_tid).unwrap();
+        update_tid_flags(dead_key, BIT_BLOCKED, 0).unwrap();
+        assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 1);
+        assert_eq!(SLOT_HIGH_WATER.load(Ordering::Acquire), 1);
+
+        // Inserting a new live slot while occupied <= 16 eagerly reaps the dead
+        // TID first and reuses slot 0, keeping SLOT_HIGH_WATER at 1.
+        set_tid_blocked(pid, tid, true).unwrap();
+        assert_eq!(lookup_tid_flags(pid, dead_tid), 0);
+        assert_eq!(lookup_tid_flags(pid, tid), BIT_BLOCKED);
+        assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 1);
+        assert_eq!(SLOT_HIGH_WATER.load(Ordering::Acquire), 1);
+
+        // Clearing the live thread returns OCCUPIED_SLOTS to 0.
+        set_tid_blocked(pid, tid, false).unwrap();
+        assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 0);
+
+        // Multiple live-looking (distinct) slots advance high water and reset on clear.
+        let k1 = make_key(pid, tid).unwrap();
+        let k2 = make_key(pid, dead_tid).unwrap();
+        update_tid_flags(k1, BIT_BLOCKED, 0).unwrap();
+        update_tid_flags(k2, BIT_BLOCKED, 0).unwrap();
+        assert!(SLOT_HIGH_WATER.load(Ordering::Acquire) >= 2);
+        clear_all_tid_slots();
+        assert_eq!(SLOT_HIGH_WATER.load(Ordering::Acquire), 0);
+        assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn child_sigsys_override_flags_survive_sigmask_execve_save_restore_and_clear_pid() {
+        let _guard = TID_SLOT_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        clear_all_tid_slots();
+
+        let pid = getpid();
+        let tid = gettid();
+        let key = make_key(pid, tid).unwrap();
+
+        // Set BIT_CHILD_SIGSYS_DFL, then toggle BIT_BLOCKED and BIT_PENDING.
+        update_tid_flags(key, BIT_CHILD_SIGSYS_DFL, BIT_CHILD_SIGSYS_IGN).unwrap();
+        assert_eq!(lookup_tid_flags(pid, tid), BIT_CHILD_SIGSYS_DFL);
+
+        set_tid_blocked(pid, tid, true).unwrap();
+        assert_eq!(lookup_tid_flags(pid, tid), BIT_CHILD_SIGSYS_DFL | BIT_BLOCKED);
+
+        record_pending_sigsys(pid, tid, ptr::null());
+        assert_eq!(lookup_tid_flags(pid, tid), BIT_CHILD_SIGSYS_DFL | BIT_BLOCKED | BIT_PENDING);
+
+        // discard_all_pending_sigsys must preserve BIT_CHILD_SIGSYS_DFL and BIT_BLOCKED.
+        discard_all_pending_sigsys(pid);
+        assert_eq!(lookup_tid_flags(pid, tid), BIT_CHILD_SIGSYS_DFL | BIT_BLOCKED);
+
+        // Unblocking BIT_BLOCKED must preserve BIT_CHILD_SIGSYS_DFL.
+        set_tid_blocked(pid, tid, false).unwrap();
+        assert_eq!(lookup_tid_flags(pid, tid), BIT_CHILD_SIGSYS_DFL);
+        assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 1);
+
+        // Switching to BIT_CHILD_SIGSYS_IGN clears BIT_CHILD_SIGSYS_DFL.
+        update_tid_flags(key, BIT_CHILD_SIGSYS_IGN, BIT_CHILD_SIGSYS_DFL).unwrap();
+        assert_eq!(lookup_tid_flags(pid, tid), BIT_CHILD_SIGSYS_IGN);
+
+        // take_current_tid_entry clears ALL_TID_FLAGS; restore_current_tid_entry puts them back.
+        set_tid_blocked(pid, tid, true).unwrap();
+        let saved = take_current_tid_entry();
+        assert!(saved.is_some());
+        assert_eq!(lookup_tid_flags(pid, tid), 0);
+        assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 0);
+        restore_current_tid_entry(saved);
+        assert_eq!(lookup_tid_flags(pid, tid), BIT_CHILD_SIGSYS_IGN | BIT_BLOCKED);
+        assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 1);
+
+        // clear_pid_slots removes only the target PID's slots and pending infos.
+        let child_pid = pid + 1;
+        let child_key = make_key(child_pid, child_pid).unwrap();
+        update_tid_flags(child_key, BIT_CHILD_SIGSYS_DFL | BIT_BLOCKED, 0).unwrap();
+        record_pending_sigsys(child_pid, child_pid, ptr::null());
+        assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 2);
+
+        clear_pid_slots(child_pid);
+        assert_eq!(lookup_tid_flags(child_pid, child_pid), 0);
+        assert_eq!(lookup_tid_flags(pid, tid), BIT_CHILD_SIGSYS_IGN | BIT_BLOCKED);
+        assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 1);
+
+        clear_all_tid_slots();
     }
 }

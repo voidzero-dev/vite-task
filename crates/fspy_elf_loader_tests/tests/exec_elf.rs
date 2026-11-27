@@ -750,6 +750,29 @@ fn stack_pool_overflow_handles_more_than_64_concurrent_threads() {
     }
 }
 
+#[test]
+#[timeout(15_000)]
+fn thread_exit_reaps_dead_tid_slots_for_subsequent_threads() {
+    for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
+        check_virt_subcommand(fixture, "thread-exit-tid-cleanup", b"thread-exit-tid-cleanup-ok\n");
+    }
+}
+
+#[test]
+#[timeout(10_000)]
+fn posix_spawn_setsigdef_preserves_child_sigsys_dfl_without_mutating_parent() {
+    for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
+        let mut loaded = launcher();
+        loaded
+            .args(["--test-interceptor", fixture, fixture, "posix-spawn-sigsys-dfl"])
+            .env("FSPY_TEST_INTERCEPTOR_ACTIVE", "1");
+        let loaded = output(loaded);
+        assert_eq!(loaded.status.code(), Some(0), "posix-spawn-sigsys-dfl ({fixture}): {loaded:?}");
+        assert_eq!(loaded.stdout, b"posix-spawn-sigsys-dfl-ok\n");
+        assert!(loaded.stderr.is_empty(), "posix-spawn-sigsys-dfl ({fixture}): {loaded:?}");
+    }
+}
+
 fn check_virt_subcommand(fixture: &str, subcommand: &str, expected_stdout: &[u8]) {
     let canonical = std::fs::canonicalize(fixture).unwrap();
 

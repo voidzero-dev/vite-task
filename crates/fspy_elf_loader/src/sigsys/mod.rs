@@ -399,15 +399,18 @@ unsafe fn finish_vfork_altstack(ucontext_ptr: *const Ucontext, packet: &Phase2Pa
         stack_pool::release_stack(save_top);
     }
     stack_pool::release_stack(altstack_top);
-    if rc > 0 && INTERCEPTOR_INSTALLED.load(Ordering::Acquire) {
-        // SAFETY: `INTERCEPTOR` was written once before `Release` store.
-        let hook = unsafe { (*INTERCEPTOR.0.get()).and_then(|ic| ic.on_vfork_return) };
-        if let Some(on_vfork_return) = hook {
-            #[expect(clippy::cast_possible_truncation, reason = "Linux pid_t fits in i32")]
-            let child_pid = rc as i32;
-            // SAFETY: `on_vfork_return` was validated inside `PF_X`, and `rc > 0`
-            // means the vfork child has already left the parent's `mm_struct`.
-            unsafe { on_vfork_return(child_pid) };
+    if rc > 0 {
+        #[expect(clippy::cast_possible_truncation, reason = "Linux pid_t fits in i32")]
+        let child_pid = rc as i32;
+        signal::clear_pid_slots(child_pid);
+        if INTERCEPTOR_INSTALLED.load(Ordering::Acquire) {
+            // SAFETY: `INTERCEPTOR` was written once before `Release` store.
+            let hook = unsafe { (*INTERCEPTOR.0.get()).and_then(|ic| ic.on_vfork_return) };
+            if let Some(on_vfork_return) = hook {
+                // SAFETY: `on_vfork_return` was validated inside `PF_X`, and `rc > 0`
+                // means the vfork child has already left the parent's `mm_struct`.
+                unsafe { on_vfork_return(child_pid) };
+            }
         }
     }
     rc
