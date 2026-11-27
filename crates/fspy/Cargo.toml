@@ -33,6 +33,7 @@ fspy_shared_unix = { workspace = true }
 # overrides. Cargo provides `CARGO_BIN_FILE_*` / `CARGO_CDYLIB_FILE_*` while
 # compiling this crate for `artifact!` to embed.
 [target.'cfg(target_os = "linux")'.dependencies]
+fspy_elf_loader = { workspace = true }
 linux-raw-sys = { workspace = true, features = ["general", "prctl", "ptrace"] }
 syscalls = { workspace = true }
 tracing = { workspace = true }
@@ -68,7 +69,6 @@ nix = { workspace = true, features = ["fs"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 elf = { workspace = true }
-fspy_elf_loader = { workspace = true }
 
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dev-dependencies]
 fspy_test_bin = { path = "../fspy_test_bin", artifact = "bin", target = "aarch64-unknown-linux-musl" }

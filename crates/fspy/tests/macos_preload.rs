@@ -607,3 +607,135 @@ async fn posix_spawn_addchdir_np_is_fork_safe_under_concurrent_churn() -> anyhow
 
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn posix_spawn_defers_relative_addchdir_and_addfchdir_resolution_to_spawn_time()
+-> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+
+    let dir_a = root.join("dir_a");
+    let dir_b = root.join("dir_b");
+    let sub_a = dir_a.join("sub");
+    let sub_b = dir_b.join("sub");
+    fs::create_dir_all(&sub_a)?;
+    fs::create_dir_all(&sub_b)?;
+
+    let marker_rel_a = sub_a.join("marker_rel_a");
+    let marker_rel_b = sub_b.join("marker_rel_b");
+    let marker_fd_a = dir_a.join("marker_fd_a");
+    let marker_fd_b = dir_b.join("marker_fd_b");
+    for m in [&marker_rel_a, &marker_rel_b, &marker_fd_a, &marker_fd_b] {
+        fs::write(m, "ok")?;
+    }
+
+    let script_rel_a = sub_a.join("run.sh");
+    let script_rel_b = sub_b.join("run.sh");
+    let script_fd_a = dir_a.join("run_fd.sh");
+    let script_fd_b = dir_b.join("run_fd.sh");
+    write_executable(&script_rel_a, "#!/bin/sh\ncat marker_rel_a >/dev/null\n")?;
+    write_executable(&script_rel_b, "#!/bin/sh\ncat marker_rel_b >/dev/null\n")?;
+    write_executable(&script_fd_a, "#!/bin/sh\ncat marker_fd_a >/dev/null\n")?;
+    write_executable(&script_fd_b, "#!/bin/sh\ncat marker_fd_b >/dev/null\n")?;
+
+    let args = (dir_a.to_str().unwrap().to_owned(), dir_b.to_str().unwrap().to_owned());
+    let accesses = track_fn!(args, |(dir_a, dir_b): (String, String)| {
+        unsafe extern "C" {
+            fn posix_spawn_file_actions_addchdir_np(
+                file_actions: *mut libc::posix_spawn_file_actions_t,
+                path: *const libc::c_char,
+            ) -> libc::c_int;
+            fn posix_spawn_file_actions_addfchdir_np(
+                file_actions: *mut libc::posix_spawn_file_actions_t,
+                fd: libc::c_int,
+            ) -> libc::c_int;
+        }
+
+        let spawn_and_wait = |prog: &std::ffi::CStr, actions: &libc::posix_spawn_file_actions_t| {
+            let argv = [prog.as_ptr().cast_mut(), std::ptr::null_mut()];
+            let path_env = c"PATH=/bin:/usr/bin";
+            let envp = [path_env.as_ptr().cast_mut(), std::ptr::null_mut()];
+            let mut child: libc::pid_t = 0;
+            // SAFETY: all pointers are valid C strings/arrays and `actions` is initialized.
+            let rc = unsafe {
+                libc::posix_spawn(
+                    &raw mut child,
+                    prog.as_ptr(),
+                    std::ptr::from_ref(actions),
+                    std::ptr::null(),
+                    argv.as_ptr(),
+                    envp.as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0, "posix_spawn({prog:?}) failed with errno {rc}");
+            let mut status: libc::c_int = 0;
+            // SAFETY: `child` is our child and `status` is writable.
+            assert_eq!(unsafe { libc::waitpid(child, &raw mut status, 0) }, child);
+            assert!(
+                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                "child for {prog:?} failed with raw status {status:#x}"
+            );
+        };
+
+        // 1. Single `file_actions` with relative `addchdir_np("sub")` reused across `chdir`.
+        std::env::set_current_dir(&dir_a).unwrap();
+        let mut rel_actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+        // SAFETY: valid uninitialized handle and NUL-terminated relative path.
+        unsafe {
+            assert_eq!(libc::posix_spawn_file_actions_init(&raw mut rel_actions), 0);
+            assert_eq!(
+                posix_spawn_file_actions_addchdir_np(&raw mut rel_actions, c"sub".as_ptr()),
+                0
+            );
+        }
+        spawn_and_wait(c"./run.sh", &rel_actions);
+
+        std::env::set_current_dir(&dir_b).unwrap();
+        spawn_and_wait(c"./run.sh", &rel_actions);
+        // SAFETY: destroying initialized `rel_actions`.
+        unsafe { assert_eq!(libc::posix_spawn_file_actions_destroy(&raw mut rel_actions), 0) };
+
+        // 2. Single `file_actions` with `addfchdir_np(fd)` where `dup2` retargets `fd`
+        //    from `dir_a` to `dir_b` before the second spawn.
+        let dir_a_c = CString::new(dir_a.as_str()).unwrap();
+        let dir_b_c = CString::new(dir_b.as_str()).unwrap();
+        // SAFETY: valid C path strings for opening directory fds.
+        let fd_a = unsafe { libc::open(dir_a_c.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) };
+        assert!(fd_a >= 0, "open(dir_a) failed: {}", std::io::Error::last_os_error());
+        // SAFETY: valid C path string.
+        let fd_b = unsafe { libc::open(dir_b_c.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) };
+        assert!(fd_b >= 0, "open(dir_b) failed: {}", std::io::Error::last_os_error());
+
+        let mut fd_actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+        // SAFETY: valid uninitialized handle and open directory descriptor `fd_a`.
+        unsafe {
+            assert_eq!(libc::posix_spawn_file_actions_init(&raw mut fd_actions), 0);
+            assert_eq!(posix_spawn_file_actions_addfchdir_np(&raw mut fd_actions, fd_a), 0);
+        }
+        spawn_and_wait(c"./run_fd.sh", &fd_actions);
+
+        // Retarget `fd_a` to point at `dir_b` and spawn again with the same `fd_actions`.
+        // SAFETY: `fd_b` and `fd_a` are valid open descriptors.
+        assert_eq!(unsafe { libc::dup2(fd_b, fd_a) }, fd_a);
+        spawn_and_wait(c"./run_fd.sh", &fd_actions);
+
+        // SAFETY: destroying initialized handle and closing owned descriptors.
+        unsafe {
+            assert_eq!(libc::posix_spawn_file_actions_destroy(&raw mut fd_actions), 0);
+            libc::close(fd_a);
+            libc::close(fd_b);
+        }
+    })
+    .await?;
+
+    assert_contains(&accesses, &script_rel_a, PathAccess::Read);
+    assert_contains(&accesses, &marker_rel_a, PathAccess::Read);
+    assert_contains(&accesses, &script_rel_b, PathAccess::Read);
+    assert_contains(&accesses, &marker_rel_b, PathAccess::Read);
+    assert_contains(&accesses, &script_fd_a, PathAccess::Read);
+    assert_contains(&accesses, &marker_fd_a, PathAccess::Read);
+    assert_contains(&accesses, &script_fd_b, PathAccess::Read);
+    assert_contains(&accesses, &marker_fd_b, PathAccess::Read);
+
+    Ok(())
+}

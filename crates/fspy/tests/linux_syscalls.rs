@@ -238,6 +238,22 @@ async fn execveat_nofollow_dirfd_o_path_and_empty_path_scripts() -> anyhow::Resu
             };
             assert_eq!(rc_cloexec, -1, "AT_EMPTY_PATH on CLOEXEC script should fail");
             assert_eq!(errno(), libc::ENOENT);
+
+            // 7. `execveat(AT_FDCWD, "", ..., AT_EMPTY_PATH)` refers to the current
+            //    working directory and must return `EACCES` (matching Linux kernel).
+            // SAFETY: valid arguments to `execveat` expected to fail with `EACCES`.
+            let rc_cwd_empty = unsafe {
+                libc::syscall(
+                    libc::SYS_execveat,
+                    libc::AT_FDCWD,
+                    c"".as_ptr(),
+                    argv_empty_script.as_ptr(),
+                    envp_empty.as_ptr(),
+                    libc::AT_EMPTY_PATH,
+                )
+            };
+            assert_eq!(rc_cwd_empty, -1, "execveat(AT_FDCWD, \"\", AT_EMPTY_PATH) should fail");
+            assert_eq!(errno(), libc::EACCES);
         })
         .await?;
 
@@ -539,11 +555,12 @@ async fn openat_rdonly_creat_trunc_and_renameat2_exchange() -> anyhow::Result<()
 
 #[cfg(target_arch = "x86_64")]
 #[test(tokio::test)]
-async fn legacy_x86_64_open_stat_lstat_syscalls_are_tracked() -> anyhow::Result<()> {
+async fn legacy_x86_64_open_creat_stat_lstat_syscalls_are_tracked() -> anyhow::Result<()> {
     let tmp_dir = tempfile::tempdir()?;
     let root = tmp_dir.path().canonicalize()?;
 
     let open_target = root.join("legacy_open");
+    let creat_target = root.join("legacy_creat");
     let stat_target = root.join("legacy_stat");
     let lstat_target = root.join("legacy_lstat_link");
     fs::write(&open_target, b"open")?;
@@ -552,38 +569,49 @@ async fn legacy_x86_64_open_stat_lstat_syscalls_are_tracked() -> anyhow::Result<
 
     let args = (
         open_target.to_str().unwrap().to_owned(),
+        creat_target.to_str().unwrap().to_owned(),
         stat_target.to_str().unwrap().to_owned(),
         lstat_target.to_str().unwrap().to_owned(),
     );
 
-    let accesses = track_fn!(args, |(p_open, p_stat, p_lstat): (String, String, String)| {
-        use std::ffi::CString;
+    let accesses =
+        track_fn!(args, |(p_open, p_creat, p_stat, p_lstat): (String, String, String, String)| {
+            use std::ffi::CString;
 
-        #[repr(C, align(8))]
-        struct RawStatBuf([u8; 256]);
+            #[repr(C, align(8))]
+            struct RawStatBuf([u8; 256]);
 
-        let c_open = CString::new(p_open).unwrap();
-        let c_stat = CString::new(p_stat).unwrap();
-        let c_lstat = CString::new(p_lstat).unwrap();
+            let c_open = CString::new(p_open).unwrap();
+            let c_creat = CString::new(p_creat).unwrap();
+            let c_stat = CString::new(p_stat).unwrap();
+            let c_lstat = CString::new(p_lstat).unwrap();
 
-        // SAFETY: valid C string; `SYS_open` takes `(path, flags, mode)`.
-        let fd = unsafe { libc::syscall(libc::SYS_open, c_open.as_ptr(), libc::O_RDONLY, 0) };
-        assert!(fd >= 0, "SYS_open failed: {}", errno());
-        // SAFETY: closing our owned descriptor.
-        unsafe { libc::close(libc::c_int::try_from(fd).unwrap()) };
+            // SAFETY: valid C string; `SYS_open` takes `(path, flags, mode)`.
+            let fd = unsafe { libc::syscall(libc::SYS_open, c_open.as_ptr(), libc::O_RDONLY, 0) };
+            assert!(fd >= 0, "SYS_open failed: {}", errno());
+            // SAFETY: closing our owned descriptor.
+            unsafe { libc::close(libc::c_int::try_from(fd).unwrap()) };
 
-        let mut stat_buf = RawStatBuf([0; 256]);
-        // SAFETY: valid C string and 256-byte aligned buffer (>= x86_64 `struct stat`).
-        let rc_stat = unsafe { libc::syscall(libc::SYS_stat, c_stat.as_ptr(), &raw mut stat_buf) };
-        assert_eq!(rc_stat, 0);
-        // SAFETY: valid C string and 256-byte aligned buffer (>= x86_64 `struct stat`).
-        let rc_lstat =
-            unsafe { libc::syscall(libc::SYS_lstat, c_lstat.as_ptr(), &raw mut stat_buf) };
-        assert_eq!(rc_lstat, 0);
-    })
-    .await?;
+            // SAFETY: valid C string; `SYS_creat` takes `(path, mode)`.
+            let creat_fd = unsafe { libc::syscall(libc::SYS_creat, c_creat.as_ptr(), 0o644) };
+            assert!(creat_fd >= 0, "SYS_creat failed: {}", errno());
+            // SAFETY: closing our owned descriptor.
+            unsafe { libc::close(libc::c_int::try_from(creat_fd).unwrap()) };
+
+            let mut stat_buf = RawStatBuf([0; 256]);
+            // SAFETY: valid C string and 256-byte aligned buffer (>= x86_64 `struct stat`).
+            let rc_stat =
+                unsafe { libc::syscall(libc::SYS_stat, c_stat.as_ptr(), &raw mut stat_buf) };
+            assert_eq!(rc_stat, 0);
+            // SAFETY: valid C string and 256-byte aligned buffer (>= x86_64 `struct stat`).
+            let rc_lstat =
+                unsafe { libc::syscall(libc::SYS_lstat, c_lstat.as_ptr(), &raw mut stat_buf) };
+            assert_eq!(rc_lstat, 0);
+        })
+        .await?;
 
     assert_includes(&accesses, &open_target, PathAccess::Read);
+    assert_includes(&accesses, &creat_target, PathAccess::Write);
     assert_includes(&accesses, &stat_target, PathAccess::Read);
     assert_includes(&accesses, &lstat_target, PathAccess::Read);
     Ok(())

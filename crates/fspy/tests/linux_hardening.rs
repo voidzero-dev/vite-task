@@ -770,3 +770,106 @@ async fn posix_spawn_setsigdef_resets_child_sigsys_without_mutating_parent() -> 
     assert_contains(&accesses, probe_path, fspy::PathAccess::Read);
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn nested_fspy_falls_back_cleanly_while_outer_tracks_subtree() -> anyhow::Result<()> {
+    let probe_path = Path::new("/fspy-nested-inner-child-probe");
+    let cmd = vt_subprocess_test::command_for_fn!(
+        (test_bin_path().to_str().unwrap().to_owned(), probe_path.to_str().unwrap().to_owned()),
+        |(static_bin, probe_path): (String, String)| {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(async move {
+                let mut inner_cmd = fspy::Command::new(&static_bin);
+                inner_cmd.args(["open_read", &probe_path]);
+                let termination = inner_cmd
+                    .spawn(tokio_util::sync::CancellationToken::new())
+                    .await
+                    .expect("nested fspy spawn must succeed via untracked fallback")
+                    .wait_handle
+                    .await
+                    .expect("nested fspy child wait failed");
+                assert!(
+                    termination.status.success(),
+                    "nested child exited unsuccessfully: {:?}",
+                    termination.status
+                );
+                assert!(
+                    termination.path_accesses.is_err(),
+                    "nested fspy must report TrackingIncomplete while delegating to outer tracker"
+                );
+            });
+        }
+    );
+
+    let accesses = test_utils::spawn_command(cmd).await?;
+    assert_contains(&accesses, probe_path, fspy::PathAccess::Read);
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn execve_of_et_exec_overlapping_launcher_region_returns_eexist_cleanly() -> anyhow::Result<()>
+{
+    #[cfg(target_arch = "x86_64")]
+    const MACHINE: u16 = elf::abi::EM_X86_64;
+    #[cfg(target_arch = "aarch64")]
+    const MACHINE: u16 = elf::abi::EM_AARCH64;
+
+    let survived_probe = Path::new("/fspy-overlap-et-exec-survived-probe");
+    let tmp_dir = tempfile::tempdir()?;
+    let overlap_path = tmp_dir.path().canonicalize()?.join("overlap_et_exec");
+
+    // Construct a minimal valid native ELF64 `ET_EXEC` whose `PT_LOAD` overlaps
+    // `fspy_elf_loader::LAUNCHER_REGION`.
+    // SAFETY: `_SC_PAGESIZE` is a standard `sysconf` query.
+    let page = usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).unwrap();
+    let vaddr = u64::try_from(fspy_elf_loader::LAUNCHER_REGION.0 + 4 * page).unwrap();
+
+    let mut bytes = vec![0_u8; 2 * page];
+    bytes[0..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    bytes[16..18].copy_from_slice(&elf::abi::ET_EXEC.to_le_bytes());
+    bytes[18..20].copy_from_slice(&MACHINE.to_le_bytes());
+    bytes[20..24].copy_from_slice(&1_u32.to_le_bytes());
+    bytes[24..32].copy_from_slice(&(vaddr + 0x200).to_le_bytes());
+    bytes[32..40].copy_from_slice(&64_u64.to_le_bytes()); // e_phoff
+    bytes[52..54].copy_from_slice(&64_u16.to_le_bytes()); // e_ehsize
+    bytes[54..56].copy_from_slice(&56_u16.to_le_bytes()); // e_phentsize
+    bytes[56..58].copy_from_slice(&1_u16.to_le_bytes()); // e_phnum
+
+    let ph = &mut bytes[64..64 + 56];
+    ph[0..4].copy_from_slice(&elf::abi::PT_LOAD.to_le_bytes());
+    ph[4..8].copy_from_slice(&(elf::abi::PF_R | elf::abi::PF_X).to_le_bytes());
+    ph[8..16].copy_from_slice(&0_u64.to_le_bytes()); // p_offset
+    ph[16..24].copy_from_slice(&vaddr.to_le_bytes()); // p_vaddr
+    ph[32..40].copy_from_slice(&u64::try_from(page).unwrap().to_le_bytes()); // p_filesz
+    ph[40..48].copy_from_slice(&u64::try_from(page).unwrap().to_le_bytes()); // p_memsz
+    ph[48..56].copy_from_slice(&u64::try_from(page).unwrap().to_le_bytes()); // p_align
+
+    std::fs::write(&overlap_path, &bytes)?;
+    std::fs::set_permissions(&overlap_path, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
+
+    let cmd = vt_subprocess_test::command_for_fn!(
+        (overlap_path.to_str().unwrap().to_owned(), survived_probe.to_str().unwrap().to_owned()),
+        |(overlap_path, survived_probe): (String, String)| {
+            use std::ffi::CString;
+
+            let prog = CString::new(overlap_path).unwrap();
+            let argv = [prog.as_ptr(), std::ptr::null()];
+            let envp = [std::ptr::null::<libc::c_char>()];
+            // SAFETY: valid NUL/NULL-terminated arrays; `execve` must fail with `EEXIST`.
+            let rc = unsafe { libc::execve(prog.as_ptr(), argv.as_ptr(), envp.as_ptr()) };
+            assert_eq!(rc, -1, "overlapping ET_EXEC execve unexpectedly succeeded");
+            assert_eq!(
+                std::io::Error::last_os_error().raw_os_error(),
+                Some(libc::EEXIST),
+                "expected EEXIST (not ENOEXEC) for ET_EXEC overlapping LAUNCHER_REGION"
+            );
+
+            // Caller survived and syscall tracking remains healthy.
+            let _ = std::fs::File::open(&survived_probe);
+        }
+    );
+
+    let accesses = test_utils::spawn_command(cmd).await?;
+    assert_contains(&accesses, survived_probe, fspy::PathAccess::Read);
+    Ok(())
+}

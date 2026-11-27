@@ -8,7 +8,7 @@ use std::{
 
 use allocator_api2::vec::Vec as AllocVec;
 use fspy_nostd::{BorrowedFd, CStr, CWD, Thin};
-use fspy_nostd_alloc::fs::{fd_path, resolve_path_at};
+use fspy_nostd_alloc::fs::fd_path;
 use fspy_shared_unix::RawExec;
 use libc::{c_char, c_int};
 
@@ -31,16 +31,35 @@ const INITIAL_CAPACITY: usize = 64;
 /// completely in the common case when no chdir action is active.
 static ACTIVE_CHDIRS: AtomicUsize = AtomicUsize::new(0);
 
+/// Base anchor for deferred `posix_spawn_file_actions_addchdir_np` /
+/// `posix_spawn_file_actions_addfchdir_np` resolution.
+///
+/// Resolved at `posix_spawn(p)` time rather than at `add*chdir_np` time so
+/// reusing a `posix_spawn_file_actions_t` across `chdir(2)` or `dup2(2)`
+/// matches kernel semantics.
+enum ChdirBase {
+    Cwd,
+    Abs(Box<[u8]>),
+    Fd(c_int),
+}
+
+struct SpawnChdir {
+    base: ChdirBase,
+    /// Relative components appended by subsequent relative `addchdir_np`
+    /// calls, joined by `/` without lexically collapsing `..`.
+    tail: Box<[u8]>,
+}
+
 /// Fork-safe table mapping live `posix_spawn_file_actions_t` handle values
-/// (`*file_actions as usize`) to their effective absolute working directory
-/// from `addchdir_np` / `addfchdir_np`.
+/// (`*file_actions as usize`) to their deferred working-directory actions from
+/// `addchdir_np` / `addfchdir_np`.
 ///
 /// Coordinated across `fork()` via `pthread_atfork`. No heap allocation or
 /// deallocation ever runs while holding `mutex`, avoiding lock-order inversion
 /// with libmalloc's own `atfork` handlers.
 struct SpawnChdirTable {
     mutex: UnsafeCell<libc::pthread_mutex_t>,
-    entries: UnsafeCell<Vec<(usize, Box<[u8]>)>>,
+    entries: UnsafeCell<Vec<(usize, SpawnChdir)>>,
 }
 
 // SAFETY: `entries` is only accessed while holding `mutex`.
@@ -85,12 +104,12 @@ fn ensure_init() {
     });
 }
 
-fn set_spawn_chdir(key: usize, path: Box<[u8]>) {
+fn set_spawn_chdir(key: usize, entry: SpawnChdir) {
     ensure_init();
-    let mut pending = Some(path);
-    let mut spare: Option<Vec<(usize, Box<[u8]>)>> = None;
-    let mut to_drop_entry: Option<Box<[u8]>> = None;
-    let mut to_drop_vec: Option<Vec<(usize, Box<[u8]>)>> = None;
+    let mut pending = Some(entry);
+    let mut spare: Option<Vec<(usize, SpawnChdir)>> = None;
+    let mut to_drop_entry: Option<SpawnChdir> = None;
+    let mut to_drop_vec: Option<Vec<(usize, SpawnChdir)>> = None;
 
     loop {
         // SAFETY: `SPAWN_CHDIRS.mutex` serializes all access to `entries`, and
@@ -100,8 +119,8 @@ fn set_spawn_chdir(key: usize, path: Box<[u8]>) {
             let map = &mut *SPAWN_CHDIRS.entries.get();
 
             let result = if let Some((_, existing)) = map.iter_mut().find(|(k, _)| *k == key) {
-                let new_path = pending.take().unwrap();
-                to_drop_entry = Some(core::mem::replace(existing, new_path));
+                let new_entry = pending.take().unwrap();
+                to_drop_entry = Some(core::mem::replace(existing, new_entry));
                 None
             } else if map.len() < map.capacity() {
                 map.push((key, pending.take().unwrap()));
@@ -138,13 +157,99 @@ fn set_spawn_chdir(key: usize, path: Box<[u8]>) {
     drop(spare);
 }
 
+fn append_relative_chdir(key: usize, rel: &[u8]) {
+    ensure_init();
+    let mut scratch = Vec::with_capacity(256);
+    let mut spare: Option<Vec<(usize, SpawnChdir)>> = None;
+    let mut new_entry = Some(SpawnChdir { base: ChdirBase::Cwd, tail: Box::from(rel) });
+    let mut new_tail: Option<Box<[u8]>> = None;
+    let mut to_drop_tail: Option<Box<[u8]>> = None;
+    let mut to_drop_vec: Option<Vec<(usize, SpawnChdir)>> = None;
+
+    loop {
+        enum Action {
+            Done,
+            GrowVec(usize),
+            BuildJoinedTail(usize),
+        }
+
+        // SAFETY: `SPAWN_CHDIRS.mutex` serializes all access to `entries`, and
+        // no allocation or deallocation occurs while the lock is held.
+        let action = unsafe {
+            libc::pthread_mutex_lock(SPAWN_CHDIRS.mutex.get());
+            let map = &mut *SPAWN_CHDIRS.entries.get();
+
+            let action = if let Some((_, existing)) = map.iter_mut().find(|(k, _)| *k == key) {
+                if new_tail.is_some() && existing.tail.as_ref() == scratch.as_slice() {
+                    let joined = new_tail.take().unwrap();
+                    to_drop_tail = Some(core::mem::replace(&mut existing.tail, joined));
+                    Action::Done
+                } else if existing.tail.len() <= scratch.capacity() {
+                    scratch.clear();
+                    scratch.extend_from_slice(&existing.tail);
+                    Action::BuildJoinedTail(0)
+                } else {
+                    Action::BuildJoinedTail(existing.tail.len())
+                }
+            } else if map.len() < map.capacity() {
+                map.push((key, new_entry.take().unwrap()));
+                ACTIVE_CHDIRS.store(map.len(), Ordering::Release);
+                Action::Done
+            } else if let Some(mut grown) = spare.take()
+                && grown.capacity() > map.len()
+            {
+                grown.append(map);
+                grown.push((key, new_entry.take().unwrap()));
+                let old_vec = core::mem::replace(map, grown);
+                ACTIVE_CHDIRS.store(map.len(), Ordering::Release);
+                to_drop_vec = Some(old_vec);
+                Action::Done
+            } else {
+                Action::GrowVec(map.capacity().max(INITIAL_CAPACITY).saturating_mul(2))
+            };
+
+            libc::pthread_mutex_unlock(SPAWN_CHDIRS.mutex.get());
+            action
+        };
+
+        // Drop replaced allocations strictly outside `SPAWN_CHDIRS.mutex`.
+        drop(to_drop_tail.take());
+        drop(to_drop_vec.take());
+
+        match action {
+            Action::Done => break,
+            Action::GrowVec(cap) => {
+                spare = Some(Vec::with_capacity(cap));
+            }
+            Action::BuildJoinedTail(min_cap) if min_cap > 0 => {
+                scratch.reserve(min_cap.saturating_sub(scratch.len()));
+            }
+            Action::BuildJoinedTail(_) => {
+                let mut joined = Vec::with_capacity(scratch.len() + 1 + rel.len());
+                if !scratch.is_empty() {
+                    joined.extend_from_slice(&scratch);
+                    if joined.last() != Some(&b'/') {
+                        joined.push(b'/');
+                    }
+                }
+                joined.extend_from_slice(rel);
+                new_tail = Some(joined.into_boxed_slice());
+            }
+        }
+    }
+
+    drop(new_entry);
+    drop(new_tail);
+    drop(spare);
+}
+
 fn remove_spawn_chdir(key: usize) {
     if ACTIVE_CHDIRS.load(Ordering::Acquire) == 0 {
         return;
     }
     ensure_init();
     // SAFETY: `SPAWN_CHDIRS.mutex` serializes access to `entries`; the removed
-    // `Box<[u8]>` is dropped strictly after unlocking.
+    // `SpawnChdir` is dropped strictly after unlocking.
     let removed = unsafe {
         libc::pthread_mutex_lock(SPAWN_CHDIRS.mutex.get());
         let map = &mut *SPAWN_CHDIRS.entries.get();
@@ -159,10 +264,21 @@ fn remove_spawn_chdir(key: usize) {
     drop(removed);
 }
 
-fn get_spawn_chdir_in<A: allocator_api2::alloc::Allocator>(
+fn resolve_spawn_chdir_in<A: allocator_api2::alloc::Allocator + Copy>(
     file_actions: *const libc::posix_spawn_file_actions_t,
     allocator: A,
 ) -> Option<AllocVec<u8, A>> {
+    enum SnapshotBase {
+        Cwd,
+        Abs,
+        Fd(c_int),
+    }
+    enum Status {
+        Missing,
+        Found(SnapshotBase),
+        NeedCap { base: usize, tail: usize },
+    }
+
     if file_actions.is_null() || ACTIVE_CHDIRS.load(Ordering::Acquire) == 0 {
         return None;
     }
@@ -174,34 +290,80 @@ fn get_spawn_chdir_in<A: allocator_api2::alloc::Allocator>(
     ensure_init();
 
     // Pre-allocate outside `SPAWN_CHDIRS.mutex` (macOS PATH_MAX is 1024).
-    let mut out = AllocVec::with_capacity_in(1024, allocator);
-    loop {
+    let mut base_buf = AllocVec::with_capacity_in(1024, allocator);
+    let mut tail_buf = AllocVec::with_capacity_in(256, allocator);
+
+    let snapshot = loop {
         // SAFETY: `SPAWN_CHDIRS.mutex` serializes access to `entries`, and
-        // copying into pre-allocated `out` performs no heap allocation.
+        // copying into pre-allocated buffers performs no heap allocation.
         let status = unsafe {
             libc::pthread_mutex_lock(SPAWN_CHDIRS.mutex.get());
             let map = &*SPAWN_CHDIRS.entries.get();
             let status = match map.iter().find(|(k, _)| *k == key) {
-                None => Ok(false),
-                Some((_, bytes)) if bytes.len() <= out.capacity() => {
-                    out.clear();
-                    out.extend_from_slice(bytes);
-                    Ok(true)
+                None => Status::Missing,
+                Some((_, entry)) => {
+                    let abs_bytes = match &entry.base {
+                        ChdirBase::Abs(b) => Some(b.as_ref()),
+                        ChdirBase::Cwd | ChdirBase::Fd(_) => None,
+                    };
+                    let need_base = abs_bytes.map_or(0, <[u8]>::len);
+                    let need_tail = entry.tail.len();
+                    if need_base <= base_buf.capacity() && need_tail <= tail_buf.capacity() {
+                        base_buf.clear();
+                        if let Some(b) = abs_bytes {
+                            base_buf.extend_from_slice(b);
+                        }
+                        tail_buf.clear();
+                        tail_buf.extend_from_slice(&entry.tail);
+                        let base_kind = match entry.base {
+                            ChdirBase::Cwd => SnapshotBase::Cwd,
+                            ChdirBase::Abs(_) => SnapshotBase::Abs,
+                            ChdirBase::Fd(fd) => SnapshotBase::Fd(fd),
+                        };
+                        Status::Found(base_kind)
+                    } else {
+                        Status::NeedCap { base: need_base, tail: need_tail }
+                    }
                 }
-                Some((_, bytes)) => Err(bytes.len()),
             };
             libc::pthread_mutex_unlock(SPAWN_CHDIRS.mutex.get());
             status
         };
 
         match status {
-            Ok(true) => return Some(out),
-            Ok(false) => return None,
-            Err(needed) => {
-                out.reserve(needed.saturating_sub(out.len()));
+            Status::Missing => return None,
+            Status::Found(base_kind) => break base_kind,
+            Status::NeedCap { base, tail } => {
+                base_buf.reserve(base.saturating_sub(base_buf.len()));
+                tail_buf.reserve(tail.saturating_sub(tail_buf.len()));
             }
         }
+    };
+
+    // Resolve the base anchor outside `SPAWN_CHDIRS.mutex` at `posix_spawn(p)` time.
+    match snapshot {
+        SnapshotBase::Abs => {}
+        SnapshotBase::Fd(fd) => {
+            // SAFETY: `fd` was accepted by `addfchdir_np`; invalid/closed fds yield `Ok(None)`.
+            let borrowed = unsafe { BorrowedFd::try_borrow_raw(fd) }?;
+            let dir = fd_path(allocator, borrowed).ok()??;
+            base_buf.clear();
+            base_buf.extend_from_slice(dir.as_units());
+        }
+        SnapshotBase::Cwd => {
+            let dir = fd_path(allocator, CWD).ok()??;
+            base_buf.clear();
+            base_buf.extend_from_slice(dir.as_units());
+        }
     }
+
+    if !tail_buf.is_empty() {
+        if base_buf.last() != Some(&b'/') {
+            base_buf.push(b'/');
+        }
+        base_buf.extend_from_slice(&tail_buf);
+    }
+    Some(base_buf)
 }
 
 intercept!(posix_spawn_file_actions_addchdir_np: unsafe extern "C" fn(
@@ -222,30 +384,12 @@ unsafe extern "C" fn posix_spawn_file_actions_addchdir_np(
             let c_path = unsafe { CStr::<Thin>::from_ptr(path.cast()) };
             let raw = c_path.count().as_units();
             if raw.starts_with(b"/") {
-                set_spawn_chdir(key, Box::from(raw));
-            } else if !raw.is_empty() {
-                let prev =
-                    get_spawn_chdir_in(file_actions.cast_const(), allocator_api2::alloc::Global);
-                let resolved = prev.map_or_else(
-                    || {
-                        let arena = fspy_nostd_alloc::pooled_bump();
-                        resolve_path_at(&arena, Some(CWD), c_path)
-                            .ok()
-                            .flatten()
-                            .map(|p| Box::from(p.as_units()))
-                    },
-                    |base| {
-                        let mut joined = base.to_vec();
-                        if joined.last() != Some(&b'/') {
-                            joined.push(b'/');
-                        }
-                        joined.extend_from_slice(raw);
-                        Some(joined.into_boxed_slice())
-                    },
+                set_spawn_chdir(
+                    key,
+                    SpawnChdir { base: ChdirBase::Abs(Box::from(raw)), tail: Box::from([]) },
                 );
-                if let Some(dir) = resolved {
-                    set_spawn_chdir(key, dir);
-                }
+            } else if !raw.is_empty() {
+                append_relative_chdir(key, raw);
             }
         }
     }
@@ -266,14 +410,7 @@ unsafe extern "C" fn posix_spawn_file_actions_addfchdir_np(
         // SAFETY: `original` succeeded on non-null `file_actions`.
         let key = (unsafe { *file_actions }) as usize;
         if key != 0 {
-            // SAFETY: `fd` was accepted by `addfchdir_np`.
-            let borrowed = unsafe { BorrowedFd::try_borrow_raw(fd) };
-            if let Some(borrowed) = borrowed {
-                let arena = fspy_nostd_alloc::pooled_bump();
-                if let Ok(Some(dir)) = fd_path(&arena, borrowed) {
-                    set_spawn_chdir(key, Box::from(dir.as_units()));
-                }
-            }
+            set_spawn_chdir(key, SpawnChdir { base: ChdirBase::Fd(fd), tail: Box::from([]) });
         }
     }
     ret
@@ -316,7 +453,7 @@ unsafe fn handle_posix_spawn(
         .expect("posix_spawn(p) unexpectedly called before client initialized in ctor");
 
     let arena = fspy_nostd_alloc::pooled_bump();
-    let spawn_cwd = get_spawn_chdir_in(file_actions, &arena);
+    let spawn_cwd = resolve_spawn_chdir_in(file_actions, &arena);
     // SAFETY: file, argv, and envp are valid pointers forwarded from posix_spawn(p).
     let raw_command = match unsafe {
         client.handle_exec_in_dir(

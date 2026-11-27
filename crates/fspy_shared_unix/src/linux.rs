@@ -226,7 +226,11 @@ pub fn resolve_exec<A: Allocator + Clone>(
             drop(file);
 
             // Preserve relative path as `script_arg` when relative to CWD (matching
-            // kernel `execve`), or substitute the resolved path for non-CWD `dirfd`.
+            // kernel `execve`), or substitute the resolved absolute path for
+            // non-CWD `dirfd`. We intentionally keep the resolved absolute path
+            // rather than `/dev/fd/<dirfd>/<rel>` here because `send_path` filters
+            // `/dev/*` paths, so switching to `/dev/fd/...` would drop sibling-file
+            // tracking via `dirname "$0"`.
             let script_arg =
                 if is_abs || cur_dirfd.is_some_and(|d| d.as_raw_fd() == CWD.as_raw_fd()) {
                     to_vec_in(&exec.program, allocator.clone())
@@ -261,6 +265,12 @@ fn resolve_empty_path<A: Allocator + Clone>(
     let Some(fd) = dirfd else {
         return Err(Error::BADF);
     };
+    // Match Linux `execveat(AT_FDCWD, "", ..., AT_EMPTY_PATH)`: `AT_FDCWD`
+    // refers to the current working directory (not a regular file), so fail
+    // with `EACCES` rather than passing `AT_FDCWD` to `fstat` (`EBADF`).
+    if fd.as_raw_fd() == CWD.as_raw_fd() {
+        return Err(Error::ACCES);
+    }
     if !fstat(fd)?.is_regular_file() {
         return Err(Error::ACCES);
     }
@@ -490,6 +500,14 @@ mod tests {
         assert_eq!(
             resolve_exec(&mut exec, Some(CWD), ExecAtFlags::empty(), |_| reads += 1).err(),
             Some(Error::NOENT)
+        );
+        assert_eq!(reads, 0);
+
+        // `AT_EMPTY_PATH` with `AT_FDCWD` refers to the current directory -> EACCES.
+        let mut exec = make_exec(b"", &[]);
+        assert_eq!(
+            resolve_exec(&mut exec, Some(CWD), ExecAtFlags::EMPTY_PATH, |_| reads += 1).err(),
+            Some(Error::ACCES)
         );
         assert_eq!(reads, 0);
 

@@ -110,6 +110,7 @@ mod runtime {
         Sysno::open,
         Sysno::openat,
         Sysno::openat2,
+        Sysno::creat,
         Sysno::getdents,
         Sysno::getdents64,
         Sysno::stat,
@@ -282,7 +283,10 @@ mod runtime {
                     )
                 } {
                     Ok(never) => match never {},
-                    Err(err) => panic!("exec_elf failed: {err:?}"),
+                    Err(err) => {
+                        write_exec_error_stderr(err);
+                        exit_group(127);
+                    }
                 }
             }
         }
@@ -384,6 +388,49 @@ mod runtime {
                 size_of::<u64>()
             )
         };
+    }
+
+    fn write_exec_error_stderr(err: Error) {
+        const PREFIX: &[u8] = b"fspy_preload_linux: exec_elf failed (errno=";
+        const SUFFIX: &[u8] = b")\n";
+        let mut buf = [0_u8; 64];
+        let mut len = PREFIX.len();
+        buf[..len].copy_from_slice(PREFIX);
+        let code = err.raw_os_error();
+        let abs = code.unsigned_abs();
+        if code < 0 {
+            buf[len] = b'-';
+            len += 1;
+        }
+        let mut digits = [0_u8; 10];
+        let mut n = 0;
+        let mut rem = abs;
+        loop {
+            digits[n] = b'0' + (rem % 10) as u8;
+            n += 1;
+            rem /= 10;
+            if rem == 0 {
+                break;
+            }
+        }
+        for i in (0..n).rev() {
+            buf[len] = digits[i];
+            len += 1;
+        }
+        buf[len..len + SUFFIX.len()].copy_from_slice(SUFFIX);
+        len += SUFFIX.len();
+
+        // SAFETY: fd 2 is standard error; errors on closed/unwritable stderr are ignored.
+        let stderr = unsafe { BorrowedFd::borrow_raw(2) };
+        let mut written = 0;
+        while written < len {
+            match fspy_nostd::io::write(stderr, &buf[written..len]) {
+                Ok(0) => break,
+                Ok(k) => written += k,
+                Err(Error::INTR) => {}
+                Err(_) => break,
+            }
+        }
     }
 
     fn exit_group(code: i32) -> ! {
@@ -542,6 +589,8 @@ mod runtime {
             Sysno::open => report_path_at(Some(CWD), a[0], open_mode(arg_u32(a[1])), false),
             Sysno::openat => report_path_at(dirfd(0), a[1], open_mode(arg_u32(a[2])), false),
             Sysno::openat2 => report_openat2(dirfd(0), a[1], a[2], a[3]),
+            #[cfg(target_arch = "x86_64")]
+            Sysno::creat => report_path_at(Some(CWD), a[0], AccessMode::Write, false),
             #[cfg(target_arch = "x86_64")]
             Sysno::getdents => {
                 if let Some(fd) = dirfd(0) {
