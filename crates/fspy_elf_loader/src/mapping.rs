@@ -57,7 +57,7 @@ impl Mapping {
         let ptr = unsafe {
             mm::mmap_anonymous(ptr::null_mut(), len, ProtFlags::empty(), MapFlags::PRIVATE)
         }?;
-        Ok(Self::new(ptr.cast(), len))
+        Self::try_new(ptr.cast(), len)
     }
 
     pub fn try_reserve_at(address: usize, len: usize) -> Result<Self> {
@@ -78,7 +78,7 @@ impl Mapping {
                 MapFlags::PRIVATE | MapFlags::FIXED_NOREPLACE,
             )
         }?;
-        let mapping = Self::new(ptr.cast(), len);
+        let mapping = Self::try_new(ptr.cast(), len)?;
         // Older kernels can ignore FIXED_NOREPLACE and choose another address.
         // Release that reservation before failing; MAP_FIXED below must never
         // run unless we own the exact requested range.
@@ -117,10 +117,6 @@ impl Mapping {
             return Err(Error::NOMEM);
         };
         Ok(Self { ptr, len })
-    }
-
-    fn new(ptr: *mut u8, len: usize) -> Self {
-        Self::try_new(ptr, len).expect("mmap returned address zero")
     }
 
     /// Only called on immutable, fully readable file mappings.
