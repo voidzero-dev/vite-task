@@ -1,0 +1,24 @@
+[[e2e]]
+name = "oxlint_negative_build"
+comment = """
+`oxlint -D no-debugger` lints the package, whose `.gitignore` lists `build/`, another task's output, so oxlint skips it. It lists the package root, which holds `build` once that task runs. The lint task has `"!build/**"` in its `input`.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "lint",
+  ], redact = { 'with \d+ rules' = 'with <n> rules' } },
+  { argv = [
+    "vtt",
+    "write-file",
+    "build/out.js",
+    "debugger;",
+  ], comment = "another task's `build` folder appears, holding code oxlint would reject if it didn't skip `build/`" },
+  { argv = [
+    "vt",
+    "run",
+    "lint",
+  ], redact = { 'with \d+ rules' = 'with <n> rules' } },
+]

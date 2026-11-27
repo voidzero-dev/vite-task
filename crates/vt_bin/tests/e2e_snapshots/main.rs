@@ -1,6 +1,7 @@
 mod redact;
 
 use std::{
+    collections::BTreeMap,
     env::{self, join_paths, split_paths},
     ffi::OsStr,
     io::Write,
@@ -46,7 +47,7 @@ struct StepConfig {
     /// Defaults to the case-level `cwd`.
     #[serde(default)]
     cwd: Option<RelativePathBuf>,
-    /// Appended as `# comment` in the snapshot display line.
+    /// Shown under the step's heading in the snapshot.
     #[serde(default)]
     comment: Option<Str>,
     /// Extra environment variables set for this step.
@@ -59,6 +60,10 @@ struct StepConfig {
     /// assertion. Default `false` keeps the plain-text behaviour.
     #[serde(default, rename = "formatted-snapshot")]
     formatted_snapshot: bool,
+    /// Regex → replacement pairs for output that varies between runs, applied
+    /// in key order after the global redactions.
+    #[serde(default, deserialize_with = "deserialize_redactions")]
+    redact: Vec<(regex::Regex, Str)>,
 }
 
 impl Step {
@@ -148,6 +153,13 @@ impl Step {
             Self::Simple(_) => false,
         }
     }
+
+    fn redactions(&self) -> &[(regex::Regex, Str)] {
+        match self {
+            Self::Detailed(config) => &config.redact,
+            Self::Simple(_) => &[],
+        }
+    }
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]
@@ -219,6 +231,22 @@ impl WriteKey {
             Self::CtrlC => b"\x03",
         }
     }
+}
+
+/// Compiles a step's `redact` table in key order, so an invalid regex fails
+/// when the fixtures load.
+fn deserialize_redactions<'de, D>(deserializer: D) -> Result<Vec<(regex::Regex, Str)>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let table = <BTreeMap<Str, Str> as serde::Deserialize>::deserialize(deserializer)?;
+    table
+        .into_iter()
+        .map(|(pattern, replacement)| {
+            let regex = regex::Regex::new(pattern.as_str()).map_err(serde::de::Error::custom)?;
+            Ok((regex, replacement))
+        })
+        .collect()
 }
 
 fn deserialize_cfg_expr<'de, D>(
@@ -501,6 +529,12 @@ fn run_case(
             // by vt100's `Screen::contents()` when the snapshot is rendered,
             // so this does not introduce colour-noise into existing snapshots.
             cmd.env("TERM", "xterm-256color");
+            // `vp run` checks cache entries on rayon's pool, and a task starts
+            // once its check finishes. With one thread, the checks finish in
+            // the order they're submitted, so tasks that become ready
+            // together start, and print their commands, in the same order
+            // every run.
+            cmd.env("RAYON_NUM_THREADS", "1");
             // The macOS x64 CI shard needs Playwright to select an x64 browser
             // while running under Rosetta on Apple Silicon.
             if let Some(value) = env::var_os("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE") {
@@ -652,7 +686,7 @@ fn run_case(
                 }
             }
 
-            e2e_outputs.push_str(&redact_e2e_output(output, e2e_stage_path_str));
+            e2e_outputs.push_str(&redact_e2e_output(output, e2e_stage_path_str, step.redactions()));
 
             // Skip remaining steps if timed out
             if matches!(termination_state, TerminationState::TimedOut) {
@@ -666,7 +700,14 @@ fn run_case(
 
 #[expect(clippy::disallowed_types, reason = "Path required for CARGO_MANIFEST_DIR path traversal")]
 fn main() {
-    let tmp_dir = tempfile::tempdir().unwrap();
+    // On Windows CI, stage the fixtures in `RUNNER_TEMP`, on the checkout's
+    // drive: the staged workspaces resolve `node_modules` into the checkout,
+    // and Next.js builds its client entry from a path relative to the project,
+    // which can't cross drives.
+    let tmp_dir = match std::env::var_os("RUNNER_TEMP") {
+        Some(runner_temp) if cfg!(windows) => tempfile::tempdir_in(runner_temp).unwrap(),
+        _ => tempfile::tempdir().unwrap(),
+    };
     let tmp_dir_path = AbsolutePathBuf::new(tmp_dir.path().canonicalize().unwrap()).unwrap();
 
     let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());

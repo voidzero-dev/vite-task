@@ -16,11 +16,13 @@ anstream = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
+cow-utils = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
 clap = { workspace = true, features = ["derive"] }
 ctrlc = { workspace = true }
 derive_more = { workspace = true, features = ["debug", "from"] }
 futures-util = { workspace = true }
+getrandom = { workspace = true }
 once_cell = { workspace = true }
 owo-colors = { workspace = true, features = ["supports-colors"] }
 petgraph = { workspace = true }
@@ -41,6 +43,7 @@ tokio = { workspace = true, features = [
   "macros",
   "process",
   "sync",
+  "time",
 ] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
@@ -66,6 +69,12 @@ vt_server = { workspace = true }
 vt_workspace = { workspace = true }
 wax = { workspace = true }
 zstd = { workspace = true }
+
+[dev-dependencies]
+# `preserve_order` keeps the schema's properties in declaration order, as the document prints them.
+schemars = { workspace = true, features = ["preserve_order"] }
+vt_snapshot_test = { workspace = true }
+vt_str = { workspace = true, features = ["schemars"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 fspy = { workspace = true }

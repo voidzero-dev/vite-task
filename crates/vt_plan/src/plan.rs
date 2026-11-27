@@ -12,14 +12,13 @@ use std::{
 };
 
 use futures_util::FutureExt;
-use petgraph::Direction;
 use rustc_hash::FxHashMap;
 use vt_casefold::EnvName;
 use vt_graph::{
-    TaskNodeIndex, TaskSource,
+    TaskId, TaskNode, TaskSource,
     config::{
-        CacheConfig, EnabledCacheConfig, ResolvedGlobConfig, ResolvedGlobalCacheConfig,
-        ResolvedTaskOptions,
+        CacheConfig, EnabledCacheConfig, GlobResolver, ResolvedGlobConfig,
+        ResolvedGlobalCacheConfig, ResolvedTaskOptions,
         user::{UserCacheConfig, UserTaskOptions},
     },
     query::TaskQuery,
@@ -87,16 +86,14 @@ fn effective_cache_config(
 ///   never expanded more than one level deep (matching npm behavior).
 #[expect(clippy::too_many_lines, reason = "sequential planning steps are clearer in one function")]
 async fn plan_task_as_execution_node(
-    task_node_index: TaskNodeIndex,
-    mut context: PlanContext<'_>,
+    task_node: &TaskNode,
+    mut context: PlanContext<'_, '_>,
     with_hooks: bool,
 ) -> Result<TaskExecution, Error> {
     // Check for recursions in the task call stack.
-    context.check_recursion(task_node_index)?;
+    context.check_recursion(&task_node.id)?;
 
-    let task_node = &context.indexed_task_graph().task_graph()[task_node_index];
-
-    let package_path = context.indexed_task_graph().get_package_path_for_task(task_node_index);
+    let package_path = &task_node.task_display.package_path;
     // Prepend {package_path}/node_modules/.bin to PATH
     let package_node_modules_bin_path = package_path.join("node_modules").join(".bin");
     if let Err(join_paths_error) = context.prepend_path(&package_node_modules_bin_path) {
@@ -111,17 +108,17 @@ async fn plan_task_as_execution_node(
     // Resolve the flag once before any mutable borrow of `context` (duplicate() needs &mut).
     let pre_post_scripts_enabled =
         with_hooks && context.indexed_task_graph().pre_post_scripts_enabled();
-    let pre_hook_idx = if pre_post_scripts_enabled {
-        context.indexed_task_graph().get_script_hook(task_node_index, "pre")
+    let pre_hook = if pre_post_scripts_enabled {
+        context.indexed_task_graph().get_script_hook(task_node, "pre").await?
     } else {
         None
     };
-    if let Some(pre_hook_idx) = pre_hook_idx {
+    if let Some(pre_hook) = pre_hook {
         let mut pre_context = context.duplicate();
         // Extra args (e.g. `vt run test --coverage`) must not be forwarded to hooks.
         pre_context.set_extra_args(Arc::new([]));
         let pre_execution =
-            Box::pin(plan_task_as_execution_node(pre_hook_idx, pre_context, false)).await?;
+            Box::pin(plan_task_as_execution_node(pre_hook, pre_context, false)).await?;
         items.extend(pre_execution.items);
     }
 
@@ -141,7 +138,7 @@ async fn plan_task_as_execution_node(
             {
                 // Duplicate the context before modifying it for each and_item
                 let mut context = context.duplicate();
-                context.push_stack_frame(task_node_index, add_item_span.clone());
+                context.push_stack_frame(task_node.id.clone(), add_item_span.clone());
 
                 // This command's env context: extend the planning context with
                 // the command's prefix envs (`FOO=1 tool ...`). Everything that
@@ -303,10 +300,11 @@ async fn plan_task_as_execution_node(
                             &and_item.envs,
                             synthetic_plan_request,
                             Some(task_execution_cache_key),
-                            &cwd,
+                            &script_command.cwd,
                             package_path,
                             parent_cache_config,
                             context.resolved_remote_cache(),
+                            context.glob_resolver(),
                         )?;
                         ExecutionItemKind::Leaf(LeafExecutionKind::Spawn(spawn_execution))
                     }
@@ -365,7 +363,7 @@ async fn plan_task_as_execution_node(
                 if cfg!(target_os = "windows") { &["/d", "/s", "/c"] } else { &["-c"] };
 
             let mut context = context.duplicate();
-            context.push_stack_frame(task_node_index, 0..command_str.len());
+            context.push_stack_frame(task_node.id.clone(), 0..command_str.len());
 
             let extra_args =
                 if is_last_command { Arc::clone(context.extra_args()) } else { Arc::new([]) };
@@ -418,17 +416,17 @@ async fn plan_task_as_execution_node(
     }
 
     // Expand post-hook (`postX`) for package.json scripts.
-    let post_hook_idx = if pre_post_scripts_enabled {
-        context.indexed_task_graph().get_script_hook(task_node_index, "post")
+    let post_hook = if pre_post_scripts_enabled {
+        context.indexed_task_graph().get_script_hook(task_node, "post").await?
     } else {
         None
     };
-    if let Some(post_hook_idx) = post_hook_idx {
+    if let Some(post_hook) = post_hook {
         let mut post_context = context.duplicate();
         // Extra args must not be forwarded to hooks.
         post_context.set_extra_args(Arc::new([]));
         let post_execution =
-            Box::pin(plan_task_as_execution_node(post_hook_idx, post_context, false)).await?;
+            Box::pin(plan_task_as_execution_node(post_hook, post_context, false)).await?;
         items.extend(post_execution.items);
     }
 
@@ -471,6 +469,7 @@ fn resolve_synthetic_cache_config(
     synthetic_cache_config: UserCacheConfig,
     package_dir: &AbsolutePath,
     workspace_path: &AbsolutePath,
+    glob_resolver: &GlobResolver,
 ) -> Result<Option<CacheConfig>, Error> {
     match parent {
         ParentCacheConfig::None => {
@@ -483,6 +482,7 @@ fn resolve_synthetic_cache_config(
                 },
                 &package_dir.into(),
                 workspace_path,
+                glob_resolver,
             )
             .map_err(Error::ResolveTaskConfig)?
             .cache_config)
@@ -508,6 +508,7 @@ fn resolve_synthetic_cache_config(
                             Some(&input),
                             package_dir,
                             workspace_path,
+                            glob_resolver,
                         )
                         .map_err(Error::ResolveTaskConfig)?;
                         // Merge globs but preserve the parent's includes_auto —
@@ -528,6 +529,7 @@ fn resolve_synthetic_cache_config(
                             Some(&output),
                             package_dir,
                             workspace_path,
+                            glob_resolver,
                         )
                         .map_err(Error::ResolveTaskConfig)?;
                         parent_config
@@ -560,6 +562,7 @@ pub fn plan_synthetic_request(
     package_dir: &AbsolutePath,
     parent_cache_config: ParentCacheConfig,
     resolved_remote_cache: Option<&ResolvedRemoteCacheConfig>,
+    glob_resolver: &GlobResolver,
 ) -> Result<SpawnExecution, Error> {
     let SyntheticPlanRequest { program, args, cache_config, envs } = synthetic_plan_request;
 
@@ -571,6 +574,7 @@ pub fn plan_synthetic_request(
         cache_config,
         package_dir,
         workspace_path,
+        glob_resolver,
     )?;
     let resolved_options =
         ResolvedTaskOptions { cwd: Arc::clone(cwd), cache_config: resolved_cache_config };
@@ -745,7 +749,7 @@ fn plan_spawn_execution(
 pub async fn plan_query_request(
     query: Arc<TaskQuery>,
     plan_options: PlanOptions,
-    mut context: PlanContext<'_>,
+    mut context: PlanContext<'_, '_>,
 ) -> Result<crate::PlanResult, Error> {
     // Apply cache override from `--cache` / `--no-cache` flags on this request.
     //
@@ -813,7 +817,7 @@ pub async fn plan_query_request(
     // should succeed silently) or no selected package has the task (caller
     // should error or show the task selector). `selected_package_count`
     // tells the caller which case applies.
-    let task_query_result = context.indexed_task_graph().query_tasks(&query)?;
+    let task_query_result = context.indexed_task_graph().query_tasks(&query).await?;
 
     // Strict mode (`--fail-if-no-match`): any user-provided `--filter` that
     // contributed zero packages is an error. Skip the per-filter warnings
@@ -828,70 +832,75 @@ pub async fn plan_query_request(
     }
 
     let no_packages_matched = task_query_result.selected_package_count == 0;
-    let task_node_index_graph = task_query_result.execution_graph;
+    let queried_tasks = task_query_result.execution_graph.tasks;
 
     // Prune rule: if the expanding task appears in the expansion, prune it.
     // This handles cases like root `"build": "vp run build"` — the root's build
     // task is in the result but expanding it would recurse, so we remove it and
     // reconnect its predecessors directly to its successors.
-    let pruned_task =
-        context.expanding_task().filter(|t| task_node_index_graph.graph.contains_node(*t));
+    let pruned_task: Option<TaskId> =
+        context.expanding_task().filter(|id| queried_tasks.contains_key(id)).cloned();
 
-    let mut execution_node_indices_by_task_index =
-        FxHashMap::<TaskNodeIndex, ExecutionNodeIndex>::with_capacity_and_hasher(
-            task_node_index_graph.graph.node_count(),
+    let mut execution_node_indices_by_task_id =
+        FxHashMap::<&TaskId, ExecutionNodeIndex>::with_capacity_and_hasher(
+            queried_tasks.len(),
             rustc_hash::FxBuildHasher,
         );
 
     // Build the inner DiGraph first, then validate acyclicity at the end.
     let mut inner_graph = InnerExecutionGraph::with_capacity(
-        task_node_index_graph.graph.node_count(),
-        task_node_index_graph.graph.edge_count(),
+        queried_tasks.len(),
+        queried_tasks.values().map(|task| task.dependencies.len()).sum(),
     );
 
-    // Plan each task node as execution nodes, skipping the pruned task
-    for task_index in task_node_index_graph.graph.nodes() {
-        if Some(task_index) == pruned_task {
+    // Plan each task as an execution node, skipping the pruned task
+    for (task_id, task) in &queried_tasks {
+        if Some(task_id) == pruned_task.as_ref() {
             continue;
         }
         let mut task_context = context.duplicate();
         // Only the explicitly requested tasks receive CLI extra args.
         // Dep-only tasks (pulled in via `dependsOn`) run with empty extras.
-        if task_node_index_graph.requested.contains(&task_index) {
+        if task.requested {
             task_context.set_extra_args(Arc::clone(&extra_args));
         } else {
             task_context.set_extra_args(Arc::clone(&empty_extra_args));
         }
         let task_execution =
-            plan_task_as_execution_node(task_index, task_context, true).boxed_local().await?;
-        execution_node_indices_by_task_index
-            .insert(task_index, inner_graph.add_node(task_execution));
+            plan_task_as_execution_node(task.node, task_context, true).boxed_local().await?;
+        execution_node_indices_by_task_id.insert(task_id, inner_graph.add_node(task_execution));
     }
 
     // Add edges between execution nodes according to task dependencies,
     // skipping edges involving the pruned task.
-    for (from_task_index, to_task_index, ()) in task_node_index_graph.graph.all_edges() {
-        if Some(from_task_index) == pruned_task || Some(to_task_index) == pruned_task {
-            continue;
+    for (from_task_id, task) in &queried_tasks {
+        for to_task_id in &task.dependencies {
+            if Some(from_task_id) == pruned_task.as_ref()
+                || Some(to_task_id) == pruned_task.as_ref()
+            {
+                continue;
+            }
+            inner_graph.add_edge(
+                execution_node_indices_by_task_id[from_task_id],
+                execution_node_indices_by_task_id[to_task_id],
+                (),
+            );
         }
-        inner_graph.add_edge(
-            execution_node_indices_by_task_index[&from_task_index],
-            execution_node_indices_by_task_index[&to_task_index],
-            (),
-        );
     }
 
     // Reconnect through the pruned node: wire each predecessor directly to each successor.
-    if let Some(pruned) = pruned_task {
-        let preds: Vec<_> =
-            task_node_index_graph.graph.neighbors_directed(pruned, Direction::Incoming).collect();
-        let succs: Vec<_> =
-            task_node_index_graph.graph.neighbors_directed(pruned, Direction::Outgoing).collect();
+    if let Some(pruned) = &pruned_task {
+        let preds: Vec<&TaskId> = queried_tasks
+            .iter()
+            .filter(|(_, task)| task.dependencies.contains(pruned))
+            .map(|(task_id, _)| task_id)
+            .collect();
+        let succs = &queried_tasks[pruned].dependencies;
         for &pred in &preds {
-            for &succ in &succs {
+            for succ in succs {
                 if let (Some(&pe), Some(&se)) = (
-                    execution_node_indices_by_task_index.get(&pred),
-                    execution_node_indices_by_task_index.get(&succ),
+                    execution_node_indices_by_task_id.get(pred),
+                    execution_node_indices_by_task_id.get(succ),
                 ) {
                     inner_graph.add_edge(pe, se, ());
                 }
@@ -911,21 +920,18 @@ pub async fn plan_query_request(
         ExecutionGraph::try_from_graph(inner_graph, effective_concurrency).map_err(|cycle| {
             // Map each execution node index in the cycle path to its human-readable TaskDisplay.
             // Every node in the cycle was added via `inner_graph.add_node()` above,
-            // with a corresponding entry in `execution_node_indices_by_task_index`.
+            // with a corresponding entry in `execution_node_indices_by_task_id`.
             let displays = cycle
                 .cycle_path()
                 .iter()
                 .map(|&exec_idx| {
-                    execution_node_indices_by_task_index
+                    execution_node_indices_by_task_id
                         .iter()
-                        .find_map(|(task_idx, &mapped_exec_idx)| {
-                            if mapped_exec_idx == exec_idx {
-                                Some(context.indexed_task_graph().display_task(*task_idx))
-                            } else {
-                                None
-                            }
+                        .find_map(|(task_id, &mapped_exec_idx)| {
+                            (mapped_exec_idx == exec_idx)
+                                .then(|| queried_tasks[*task_id].node.task_display.clone())
                         })
-                        .expect("cycle node must exist in execution_node_indices_by_task_index")
+                        .expect("cycle node must exist in execution_node_indices_by_task_id")
                 })
                 .collect();
             Error::CycleDependencyDetected(displays)
@@ -955,7 +961,7 @@ mod tests {
 
     use rustc_hash::FxHashSet;
     use vt_graph::config::{
-        CacheConfig, EnabledCacheConfig, EnvConfig, ResolvedGlobConfig,
+        CacheConfig, EnabledCacheConfig, EnvConfig, GlobResolver, ResolvedGlobConfig,
         user::{UserCacheConfig, UserInputEntry},
     };
     use vt_path::AbsolutePathBuf;
@@ -1016,6 +1022,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1039,6 +1046,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1062,6 +1070,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1091,6 +1100,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1118,6 +1128,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1143,6 +1154,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap();
         assert!(result.is_none());
@@ -1157,6 +1169,7 @@ mod tests {
             UserCacheConfig::disabled(),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap();
         assert!(result.is_none());
@@ -1177,6 +1190,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();
@@ -1198,6 +1212,7 @@ mod tests {
             }),
             &pkg,
             &ws,
+            &GlobResolver::default(),
         )
         .unwrap()
         .unwrap();

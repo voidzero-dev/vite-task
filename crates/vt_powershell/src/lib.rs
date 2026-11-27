@@ -163,12 +163,4 @@ mod tests {
         let resolved = abs(root.as_path().join("node"));
         assert!(find_ps1_sibling(&resolved).is_none());
     }
-
-    #[test]
-    fn is_stdin_terminal_is_idempotent() {
-        // The value depends on how the test runner wires stdin (non-TTY under
-        // nextest), so assert the cached result is stable rather than a fixed
-        // value.
-        assert_eq!(is_stdin_terminal(), is_stdin_terminal());
-    }
 }

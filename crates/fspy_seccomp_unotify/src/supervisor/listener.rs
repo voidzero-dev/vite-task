@@ -21,7 +21,11 @@ impl TryFrom<OwnedFd> for NotifyListener {
     type Error = io::Error;
 
     fn try_from(value: OwnedFd) -> Result<Self, Self::Error> {
-        Ok(Self { async_fd: AsyncFd::new(value)?, notif_buf: alloc_seccomp_notif() })
+        // SAFETY: `value` is an owned fd. `AsyncFd` stores it until the
+        // `AsyncFd` is dropped, and nothing replaces or closes the descriptor
+        // while it is registered.
+        let async_fd = unsafe { AsyncFd::register(value)? };
+        Ok(Self { async_fd, notif_buf: alloc_seccomp_notif() })
     }
 }
 impl AsFd for NotifyListener {

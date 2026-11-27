@@ -1,8 +1,7 @@
 use std::{ffi::CStr, ptr::null};
 
-use allocator_api2::alloc::Allocator;
-use bstr::{BStr, BString, ByteSlice};
-use fspy_shared_unix::exec::Exec;
+use allocator_api2::{alloc::Allocator, vec::Vec};
+use fspy_shared_unix::exec::{Exec, to_vec_in};
 
 #[derive(Clone, Copy)]
 pub struct RawExec {
@@ -12,10 +11,11 @@ pub struct RawExec {
 }
 
 impl RawExec {
-    unsafe fn collect_c_str_array<T>(
+    unsafe fn collect_c_str_array<T, A: Allocator>(
         strs: *const *const libc::c_char,
-        mut map_fn: impl FnMut(&BStr) -> T,
-    ) -> Vec<T> {
+        allocator: A,
+        mut map_fn: impl FnMut(&[u8]) -> T,
+    ) -> Vec<T, A> {
         let mut count = 0usize;
         let mut cur_str = strs;
         // SAFETY: cur_str points into a valid null-terminated array of C
@@ -27,65 +27,66 @@ impl RawExec {
             cur_str = unsafe { cur_str.add(1) };
         }
 
-        let mut str_vec = Vec::<T>::with_capacity(count);
+        let mut str_vec = Vec::with_capacity_in(count, allocator);
         for i in 0..count {
             // SAFETY: i < count, so strs.add(i) is within the bounds of the
             // pointer array.
             let cur_str = unsafe { strs.add(i) };
             // SAFETY: *cur_str is a non-null pointer to a valid
             // null-terminated C string, verified by the counting loop above.
-            str_vec.push(map_fn(unsafe { CStr::from_ptr(*cur_str) }.to_bytes().as_bstr()));
+            str_vec.push(map_fn(unsafe { CStr::from_ptr(*cur_str) }.to_bytes()));
         }
         str_vec
     }
 
-    pub fn to_c_str<R>(mut s: BString, f: impl FnOnce(*const libc::c_char) -> R) -> R {
+    /// NUL-terminates `s` and leaks it into its allocator.
+    fn into_c_str<A: Allocator>(mut s: Vec<u8, A>) -> *const libc::c_char {
         s.push(0);
-        f(s.as_ptr().cast())
+        s.leak().as_ptr().cast()
     }
 
-    fn to_c_str_array<R>(
-        mut strs: Vec<BString>,
-        allocator: impl Allocator,
-        f: impl FnOnce(*const *const libc::c_char) -> R,
-    ) -> R {
-        // The pointer array exists only for the `f` call below, and building
-        // it must not go through libc malloc: exec runs in the child of
-        // `fork()` in multithreaded programs (`posix_spawn` forks then
-        // execs), where malloc's lock may be held by a thread that no longer
-        // exists. The interception's per-call bump has exactly this
-        // lifetime, and hands back the memory when the call ends.
-        let mut ptr_vec = allocator_api2::vec::Vec::with_capacity_in(strs.len() + 1, allocator);
-        for s in &mut strs {
-            s.push(0);
-            ptr_vec.push(s.as_ptr().cast::<libc::c_char>());
-        }
-        ptr_vec.push(null());
-        f(ptr_vec.as_ptr())
+    /// Builds a NULL-terminated array of C strings, leaked into the strings'
+    /// allocator.
+    fn into_c_str_array<A: Allocator + Clone>(
+        strs: Vec<Vec<u8, A>, A>,
+    ) -> *const *const libc::c_char {
+        let mut ptrs = Vec::with_capacity_in(strs.len() + 1, strs.allocator().clone());
+        ptrs.extend(strs.into_iter().map(Self::into_c_str));
+        ptrs.push(null());
+        ptrs.leak().as_ptr()
     }
 
-    /// Copies the raw exec arguments into owned Rust values.
+    /// Copies the raw exec arguments into `allocator`.
     ///
     /// # Safety
     ///
     /// `prog` must point to a valid C string. `argv` and `envp` must each
     /// point to a readable, null-terminated array of valid C string pointers.
-    pub unsafe fn to_exec(self) -> Exec {
+    pub unsafe fn to_exec<A: Allocator + Clone>(self, allocator: A) -> Exec<A> {
         // SAFETY: self.prog is a non-null pointer to a valid null-terminated C
         // string, as guaranteed by the libc exec calling convention.
-        let program = unsafe { CStr::from_ptr(self.prog) }.to_bytes().as_bstr().to_owned();
+        let program = to_vec_in(unsafe { CStr::from_ptr(self.prog) }.to_bytes(), allocator.clone());
 
         // SAFETY: self.argv is a valid null-terminated array of C string
         // pointers, as guaranteed by the libc exec calling convention.
-        let args = unsafe { Self::collect_c_str_array(self.argv, BStr::to_owned) };
+        let args = unsafe {
+            Self::collect_c_str_array(self.argv, allocator.clone(), |arg| {
+                to_vec_in(arg, allocator.clone())
+            })
+        };
 
         // SAFETY: self.envp is a valid null-terminated array of C string
         // pointers, as guaranteed by the libc exec calling convention.
         let envs = unsafe {
-            Self::collect_c_str_array(self.envp, |env| {
+            Self::collect_c_str_array(self.envp, allocator.clone(), |env| {
                 env.iter().position(|b| *b == b'=').map_or_else(
-                    || (env.to_owned(), None),
-                    |eq_pos| (env[..eq_pos].to_owned(), Some(env[(eq_pos + 1)..].to_owned())),
+                    || (to_vec_in(env, allocator.clone()), None),
+                    |eq_pos| {
+                        (
+                            to_vec_in(&env[..eq_pos], allocator.clone()),
+                            Some(to_vec_in(&env[(eq_pos + 1)..], allocator.clone())),
+                        )
+                    },
                 )
             })
         };
@@ -93,24 +94,29 @@ impl RawExec {
         Exec { program, args, envs }
     }
 
-    pub fn from_exec<R>(cmd: Exec, allocator: impl Allocator, f: impl FnOnce(Self) -> R) -> R {
-        let envs: Vec<BString> = cmd
-            .envs
-            .into_iter()
-            .map(|(name, value)| {
-                let mut env = name;
-                if let Some(value) = value {
-                    env.push(b'=');
-                    env.extend_from_slice(&value);
-                }
-                env
-            })
-            .collect();
+    /// Builds the C strings and pointer arrays for `cmd` in its allocator.
+    ///
+    /// They are leaked there rather than freed, so the pointers stay valid
+    /// until the allocator itself goes away. In the preload that is the
+    /// interception's per-call bump: exec runs in the child of `fork()` in
+    /// multithreaded programs, where libc malloc's lock may be held by a
+    /// thread that no longer exists, and the bump hands everything back
+    /// when the call ends.
+    pub fn from_exec<A: Allocator + Clone>(cmd: Exec<A>) -> Self {
+        let mut envs = Vec::with_capacity_in(cmd.envs.len(), cmd.allocator().clone());
+        for (name, value) in cmd.envs {
+            let mut env = name;
+            if let Some(value) = value {
+                env.push(b'=');
+                env.extend_from_slice(&value);
+            }
+            envs.push(env);
+        }
 
-        Self::to_c_str(cmd.program, |prog| {
-            Self::to_c_str_array(cmd.args, &allocator, |argv| {
-                Self::to_c_str_array(envs, &allocator, |envp| f(Self { prog, argv, envp }))
-            })
-        })
+        Self {
+            prog: Self::into_c_str(cmd.program),
+            argv: Self::into_c_str_array(cmd.args),
+            envp: Self::into_c_str_array(envs),
+        }
     }
 }

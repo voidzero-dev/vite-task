@@ -2,7 +2,9 @@ mod cache_update;
 pub mod fingerprint;
 pub mod glob;
 mod hash;
+pub mod ignored_paths;
 pub mod pipe;
+mod rebuildable;
 mod redact;
 mod scheduler;
 pub mod spawn;
@@ -14,8 +16,9 @@ mod win_job;
 use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
+    num::NonZeroI32,
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use futures_util::future::LocalBoxFuture;
@@ -29,13 +32,17 @@ use vt_server::{Recorder, Reports, ServerHandle, StopAccepting, serve};
 use self::{
     glob::compute_globbed_inputs,
     pipe::{PipeSinks, StdOutput, pipe_stdio},
-    spawn::{ChildHandle, ChildOutcome, SpawnStdio, spawn},
+    spawn::{ChildOutcome, ChildWait, PipedChild, PipedMode, spawn_inherited, spawn_piped},
 };
 use super::{
-    cache::{CacheHit, CacheHitSource, CacheMiss, ExecutionCache},
+    cache::{
+        BaselineDetails, CacheHit, CacheHitSource, CacheMiss, ExecutionCache, FileCheck,
+        run_off_thread,
+    },
     event::{
-        CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus, CacheUpdateStatus,
-        ExecutionError,
+        CacheDisabledReason, CacheErrorKind, CacheNotUpdatedReason, CacheStatus,
+        CacheUpdateOutcome, ExecutionError, LeafOutcome, LiveSpawnCacheStatus, RunKind,
+        SpawnLeafOutcome, non_zero_exit_code,
     },
     reporter::{LeafExecutionReporter, PipeWriters, StdioConfig, StdioSuggestion},
 };
@@ -46,14 +53,21 @@ use super::{
 /// already reported through `LeafExecutionReporter::finish()` before this
 /// value is returned — the caller does not need to handle error display.
 pub enum SpawnOutcome {
-    /// Cache hit — no process was spawned. Cached outputs were replayed.
+    /// Cache hit — no process was spawned. Cached outputs were replayed, except
+    /// in a dry run.
     CacheHit,
-    /// Process was spawned and exited with this status.
-    Spawned(std::process::ExitStatus),
-    /// An infrastructure error prevented the process from running
-    /// (cache lookup failure or spawn failure).
-    /// Already reported through the leaf reporter.
-    Failed,
+    /// In a dry run, the cache missed or is disabled, so a real run would
+    /// spawn the process. Nothing was spawned.
+    WouldSpawn,
+    /// Process was spawned and exited with status 0.
+    SpawnedSuccess,
+    /// Process was spawned and exited with a non-zero exit code.
+    SpawnedFailed(NonZeroI32),
+    /// An infrastructure error prevented the process from running, prevented
+    /// observing it to completion, or prevented restoring a cache hit's outputs
+    /// (cache lookup, cache restore, IPC bind, spawn, output forwarding, or
+    /// wait failure). Already reported through the leaf reporter.
+    InfraError,
     /// The run was cancelled during the cache lookup, so the process didn't
     /// start and no cached outputs were restored. Like a task that was never
     /// scheduled, it isn't reported.
@@ -122,27 +136,18 @@ struct Tracking<'a> {
     stop_accepting: StopAccepting,
 }
 
-/// The IPC server's handles for the run phase. The two halves are
-/// inseparable — whenever the driver is polled, `stop_accepting` must be
-/// signalled after the child exits or the driver never resolves — so they
-/// travel as one value and a driver-without-signal state is unrepresentable.
-struct IpcHandles<'m> {
-    /// Signalled after the child exits so the server stops accepting and
-    /// drains.
-    stop_accepting: &'m StopAccepting,
-    /// The server's driver, polled alongside the child.
-    driver: &'m mut IpcDriver,
-}
-
-/// Mode-scoped borrows for the run phase, extracted in one pass so the pipe
-/// sinks and the IPC handles can be borrowed simultaneously (disjoint fields
-/// of the same mode).
-struct RunHandles<'m> {
-    /// Pipe writers + capture slot. `None` only in the inherited-uncached
-    /// case, where there are no pipes to drain.
-    sinks: Option<PipeSinks<'m>>,
-    /// The IPC server's handles. `None` iff execution is uncached.
-    ipc: Option<IpcHandles<'m>>,
+impl Tracking<'_> {
+    /// The extra envs to inject into the child: IPC connection info + the
+    /// napi addon path runner-aware tools `require()`.
+    fn injected_envs(&self) -> Vec<(&OsStr, &OsStr)> {
+        let mut envs: Vec<(&OsStr, &OsStr)> =
+            self.ipc_envs.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
+        envs.push((
+            OsStr::new(NODE_CLIENT_PATH_ENV_NAME),
+            crate::napi_client::napi_client_path().as_path().as_os_str(),
+        ));
+        envs
+    }
 }
 
 impl<'a> ExecutionMode<'a> {
@@ -199,129 +204,187 @@ impl<'a> ExecutionMode<'a> {
         })
     }
 
-    /// The extra envs to inject into the child: IPC connection info + the
-    /// napi addon path runner-aware tools `require()`. Empty when execution
-    /// is uncached.
-    fn injected_envs(&self) -> Vec<(&OsStr, &OsStr)> {
+    /// Phases 5 & 6: spawn the child process, drain its pipes (if piped), and
+    /// wait for exit — concurrently with the IPC driver when cached.
+    ///
+    /// Consumes `self` and returns a mode-typed [`RunOutcome`] so downstream
+    /// phases cannot pair an uncached run with IPC reports (or a cached run
+    /// without them).
+    async fn spawn_and_run(
+        self,
+        spawn_command: &vt_plan::SpawnCommand,
+        start: Instant,
+        fast_fail_token: &CancellationToken,
+    ) -> Result<RunOutcome<'a>, ExecutionError> {
         match self {
-            Self::Cached { state: CacheState { tracking: t, .. }, .. } => {
-                let mut envs: Vec<(&OsStr, &OsStr)> =
-                    t.ipc_envs.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
-                envs.push((
-                    OsStr::new(NODE_CLIENT_PATH_ENV_NAME),
-                    crate::napi_client::napi_client_path().as_path().as_os_str(),
-                ));
-                envs
-            }
-            Self::Uncached { .. } => Vec::new(),
-        }
-    }
+            Self::Cached { mut pipe_writers, mut state } => {
+                let piped_mode = if state.tracking.fspy.is_some() {
+                    PipedMode::Tracked
+                } else {
+                    PipedMode::Plain
+                };
+                let child = spawn_piped(
+                    spawn_command,
+                    piped_mode,
+                    fast_fail_token.clone(),
+                    state.tracking.injected_envs(),
+                )
+                .await
+                .map_err(ExecutionError::Spawn)?;
+                tracing::debug!(
+                    fspy = (piped_mode == PipedMode::Tracked),
+                    elapsed = ?start.elapsed(),
+                    "spawned the task process"
+                );
 
-    /// The arguments `spawn()` derives from the mode: stdio handling and
-    /// whether fspy tracking is on.
-    const fn spawn_config(&self) -> (SpawnStdio, bool) {
-        match self {
-            Self::Cached { state, .. } => (SpawnStdio::Piped, state.tracking.fspy.is_some()),
-            Self::Uncached { pipe_writers: Some(_) } => (SpawnStdio::Piped, false),
-            Self::Uncached { pipe_writers: None } => (SpawnStdio::Inherited, false),
-        }
-    }
-
-    /// Extract all mode-scoped borrows for the run phase in one pass: the
-    /// pipe sinks plus the IPC server's handles (disjoint field borrows
-    /// inside the same match arm).
-    fn run_handles(&mut self) -> RunHandles<'_> {
-        match self {
-            Self::Cached { pipe_writers, state } => {
-                let sinks = Some(PipeSinks {
+                // The IPC driver must be polled during pipe drain — otherwise a
+                // tool doing a blocking `getEnv` can deadlock: child stalls on
+                // IPC, stdout stays open, pipe_stdio waits for EOF, driver
+                // never runs. `stop_accepting` fires right after child exit so
+                // the driver drains any in-flight clients.
+                //
+                // Box::pin keeps the child-and-pipe stack off the enclosing
+                // future: pipe_stdio alone makes the combined future large
+                // enough to trip clippy::large_futures in every caller.
+                let sinks = PipeSinks {
                     stdout_writer: &mut pipe_writers.stdout_writer,
                     stderr_writer: &mut pipe_writers.stderr_writer,
                     capture: Some(&mut state.std_outputs),
-                });
-                let ipc = Some(IpcHandles {
-                    stop_accepting: &state.tracking.stop_accepting,
-                    driver: &mut state.tracking.ipc_server_fut,
-                });
-                RunHandles { sinks, ipc }
+                };
+                let stop_accepting = &state.tracking.stop_accepting;
+                let child_work = async {
+                    let result =
+                        Box::pin(run_piped_child(child, sinks, fast_fail_token.clone())).await;
+                    stop_accepting.signal();
+                    result
+                };
+                let (wait_result, join_result) =
+                    tokio::join!(child_work, &mut state.tracking.ipc_server_fut);
+                if let Err(e) = &join_result {
+                    tracing::warn!(?e, "IPC server failed; cache will not be updated");
+                }
+                Ok(RunOutcome::Cached {
+                    state: Box::new(state),
+                    outcome: wait_result?,
+                    ipc_result: join_result.map(Recorder::into_reports),
+                })
             }
-            Self::Uncached { pipe_writers: Some(pipe_writers) } => RunHandles {
-                sinks: Some(PipeSinks {
+            Self::Uncached { pipe_writers: Some(mut pipe_writers) } => {
+                let child = spawn_piped(
+                    spawn_command,
+                    PipedMode::Plain,
+                    fast_fail_token.clone(),
+                    std::iter::empty::<(&OsStr, &OsStr)>(),
+                )
+                .await
+                .map_err(ExecutionError::Spawn)?;
+                tracing::debug!(
+                    fspy = false,
+                    elapsed = ?start.elapsed(),
+                    "spawned the task process"
+                );
+
+                let sinks = PipeSinks {
                     stdout_writer: &mut pipe_writers.stdout_writer,
                     stderr_writer: &mut pipe_writers.stderr_writer,
                     capture: None,
-                }),
-                ipc: None,
-            },
-            Self::Uncached { pipe_writers: None } => RunHandles { sinks: None, ipc: None },
+                };
+                let child_work = Box::pin(run_piped_child(child, sinks, fast_fail_token.clone()));
+                Ok(RunOutcome::Uncached { outcome: child_work.await? })
+            }
+            Self::Uncached { pipe_writers: None } => {
+                let child = spawn_inherited(spawn_command, fast_fail_token.clone())
+                    .map_err(ExecutionError::Spawn)?;
+                tracing::debug!(
+                    fspy = false,
+                    elapsed = ?start.elapsed(),
+                    "spawned the task process"
+                );
+
+                // Measure post-spawn runtime for the exit debug log, matching
+                // `run_piped_child` rather than including spawn overhead.
+                Ok(RunOutcome::Uncached { outcome: wait_child(child.wait, Instant::now()).await? })
+            }
         }
     }
 }
 
-/// Everything the pipeline reports through the single
+/// Mode-typed result of [`ExecutionMode::spawn_and_run`].
+///
+/// Couples `CacheState` and the IPC server's reports inside [`Self::Cached`] so
+/// cached-without-IPC and uncached-with-IPC states are unrepresentable.
+enum RunOutcome<'a> {
+    Cached {
+        state: Box<CacheState<'a>>,
+        outcome: ChildOutcome,
+        ipc_result: Result<Reports, vt_server::Error>,
+    },
+    Uncached {
+        outcome: ChildOutcome,
+    },
+}
+
+impl RunOutcome<'_> {
+    const fn exit_status(&self) -> std::process::ExitStatus {
+        match self {
+            Self::Cached { outcome, .. } | Self::Uncached { outcome } => outcome.exit_status,
+        }
+    }
+}
+
+/// Everything the spawn pipeline reports through the single
 /// `LeafExecutionReporter::finish()` call at the end of [`execute_spawn`].
 ///
-/// Phases construct a `Report` instead of reporting in place, so finishing —
-/// which consumes the boxed reporter — happens in exactly one spot. Each
-/// variant carries exactly the data its outcome can be accompanied by:
-/// a failure always has an error and never an exit status, a cache hit has
-/// neither, and a spawned process always has its exit status. Nonsense
-/// pairings are unrepresentable.
-enum Report {
-    /// An infrastructure error prevented the process from running (or from
-    /// being observed to completion).
-    Failed { cache_update: CacheUpdateStatus, error: ExecutionError },
-    /// Cache hit: captured outputs were replayed, no process ran.
-    CacheHit,
-    /// The process ran to completion; its exit status is reported regardless
-    /// of how the cache update went.
-    Spawned {
-        exit_status: std::process::ExitStatus,
-        cache_update: CacheUpdateStatus,
-        error: Option<ExecutionError>,
+/// Separate from [`LeafOutcome`] so that in-process execution is unrepresentable
+/// inside the spawn pipeline.
+enum SpawnReport {
+    CacheHit {
+        replayed_duration: Duration,
+        source: CacheHitSource,
+        baseline: Option<Arc<BaselineDetails>>,
     },
-    /// The run was cancelled before the process started.
+    RestoreFailed {
+        source: CacheHitSource,
+        error: ExecutionError,
+    },
+    Spawned {
+        cache_status: LiveSpawnCacheStatus,
+        outcome: SpawnLeafOutcome,
+    },
+    FailedBeforeStart(ExecutionError),
     Cancelled,
 }
 
-impl Report {
-    /// An infrastructure failure outside any cache-specific context.
-    const fn failed(error: ExecutionError) -> Self {
-        Self::Failed {
-            cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled),
-            error,
-        }
-    }
-
-    /// Perform the pipeline's single `finish()` call and yield the outcome
-    /// [`execute_spawn`] returns to its caller.
+impl SpawnReport {
+    /// Perform the pipeline's single `finish()` call and yield the
+    /// [`SpawnOutcome`] [`execute_spawn`] returns to its caller.
     fn finish(self, reporter: Box<dyn LeafExecutionReporter>) -> SpawnOutcome {
-        match self {
-            Self::Failed { cache_update, error } => {
-                reporter.finish(None, cache_update, Some(error));
-                SpawnOutcome::Failed
+        let (spawn_outcome, leaf_outcome) = match self {
+            Self::CacheHit { replayed_duration, source, baseline } => (
+                SpawnOutcome::CacheHit,
+                LeafOutcome::CacheHit { replayed_duration, source, baseline },
+            ),
+            Self::RestoreFailed { source, error } => {
+                (SpawnOutcome::InfraError, LeafOutcome::RestoreFailed { source, error })
             }
-            Self::CacheHit => {
-                reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
-                    None,
-                );
-                SpawnOutcome::CacheHit
+            Self::Spawned { cache_status, outcome } => {
+                let spawn_outcome = match &outcome {
+                    SpawnLeafOutcome::Success { .. } => SpawnOutcome::SpawnedSuccess,
+                    SpawnLeafOutcome::Failed { exit_code } => {
+                        SpawnOutcome::SpawnedFailed(*exit_code)
+                    }
+                    SpawnLeafOutcome::SpawnError(_) => SpawnOutcome::InfraError,
+                    SpawnLeafOutcome::WouldSpawn => SpawnOutcome::WouldSpawn,
+                };
+                (spawn_outcome, LeafOutcome::Spawned { cache_status, outcome })
             }
-            Self::Spawned { exit_status, cache_update, error } => {
-                reporter.finish(Some(exit_status), cache_update, error);
-                SpawnOutcome::Spawned(exit_status)
+            Self::FailedBeforeStart(error) => {
+                (SpawnOutcome::InfraError, LeafOutcome::FailedBeforeStart(error))
             }
-            // `start()` wasn't called, so the reporter shows and saves nothing.
-            Self::Cancelled => {
-                reporter.finish(
-                    None,
-                    CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::Cancelled),
-                    None,
-                );
-                SpawnOutcome::Cancelled
-            }
-        }
+            Self::Cancelled => (SpawnOutcome::Cancelled, LeafOutcome::Cancelled),
+        };
+        reporter.finish(leaf_outcome);
+        spawn_outcome
     }
 }
 
@@ -333,11 +396,16 @@ impl Report {
 /// The full lifecycle is:
 /// 1. Cache lookup (determines cache status). If the run was cancelled by
 ///    the time it ends, nothing else happens.
-/// 2. `leaf_reporter.start(cache_status)` → `StdioConfig`
+/// 2. `leaf_reporter.start(&cache_status)` → `StdioConfig`
 /// 3. If cache hit: replay cached outputs via `StdioConfig` writers
-/// 4. Otherwise: `spawn()` with the chosen stdio mode, drain pipes and wait
-///    via [`run_child`], then decide the cache update
-///    ([`cache_update::update_cache`])
+/// 4. Otherwise: spawn the child with the chosen stdio/tracking mode, drain
+///    pipes (if piped) and wait via [`ExecutionMode::spawn_and_run`], then
+///    decide the cache update ([`cache_update::update_cache`])
+///
+/// A dry run (`RunKind::Dry`) only looks: the lookup in step 1 writes
+/// nothing, and steps 3 and 4 are skipped.
+///
+/// `file_check` says how many changed files a cache miss lists.
 ///
 /// Cancelling `fast_fail_token` kills the process. `cancel_token` must be a
 /// child of `fast_fail_token` that Ctrl-C also cancels: cancelling it stops
@@ -360,6 +428,8 @@ pub async fn execute_spawn(
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     program_name: &str,
+    run_kind: RunKind,
+    file_check: FileCheck,
     fast_fail_token: CancellationToken,
     cancel_token: CancellationToken,
 ) -> SpawnOutcome {
@@ -370,6 +440,8 @@ pub async fn execute_spawn(
         workspace_root,
         cache_dir,
         program_name,
+        run_kind,
+        file_check,
         fast_fail_token,
         cancel_token,
     );
@@ -381,12 +453,13 @@ pub async fn execute_spawn(
 
 /// The spawn pipeline.
 ///
-/// Both sides of the `Result` carry the same [`Report`] on purpose: `Err` is
-/// the `?`-short-circuit channel for phases that already determined the final
-/// report, `Ok` is the report of a pipeline that ran to the end. The caller
-/// unwraps both into the same single `finish()`, so the distinction is pure
-/// control flow and a value on either side is equally valid.
+/// Both sides of the `Result` carry the same [`SpawnReport`] on purpose: `Err`
+/// is the `?`-short-circuit channel for phases that already determined the
+/// final outcome, `Ok` is the outcome of a pipeline that ran to the end. The
+/// caller unwraps both into the same single `finish()`, so the distinction is
+/// pure control flow and a value on either side is equally valid.
 #[expect(clippy::too_many_arguments, reason = "forwarded verbatim from `execute_spawn`")]
+#[expect(clippy::too_many_lines, reason = "the phases of one spawn, in order")]
 async fn run(
     reporter: &mut dyn LeafExecutionReporter,
     spawn_execution: &SpawnExecution,
@@ -394,9 +467,11 @@ async fn run(
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     program_name: &str,
+    run_kind: RunKind,
+    file_check: FileCheck,
     fast_fail_token: CancellationToken,
     cancel_token: CancellationToken,
-) -> Result<Report, Report> {
+) -> Result<SpawnReport, SpawnReport> {
     let cache_metadata = spawn_execution.cache_metadata.as_ref();
 
     // 1. Determine cache status FIRST by trying cache hit, so the reporter can
@@ -404,24 +479,41 @@ async fn run(
     //    error, `start()` is never called — there is no valid status to show.
     //    A lookup can take a while, especially a remote one. If the run was
     //    cancelled meanwhile, neither start the process nor restore outputs.
-    let lookup =
-        lookup_cache(cache_metadata, cache, workspace_root, cache_dir, &cancel_token).await?;
+    let lookup = lookup_cache(
+        cache_metadata,
+        cache,
+        workspace_root,
+        cache_dir,
+        run_kind,
+        file_check,
+        &cancel_token,
+    )
+    .await?;
     if cancel_token.is_cancelled() {
-        return Err(Report::Cancelled);
+        return Err(SpawnReport::Cancelled);
     }
 
     // 2. Report execution start with the looked-up cache status (`start()`
     //    runs exactly once on every arm) and either replay the hit — no need
     //    to execute the command — or carry the globbed inputs into the run.
-    let (stdio_config, globbed_inputs) = match lookup {
+    let (stdio_config, spawn_cache_status, globbed_inputs) = match lookup {
         CacheLookup::Hit { hit, metadata } => {
-            let mut stdio_config = reporter.start(CacheStatus::Hit {
+            let mut stdio_config = reporter.start(&CacheStatus::Hit {
                 replayed_duration: hit.value.duration,
                 source: hit.source,
+                restores_outputs: hit.value.output_archive.is_some(),
+                baseline: hit.baseline.clone(),
             });
+            if run_kind == RunKind::Dry {
+                return Ok(SpawnReport::CacheHit {
+                    replayed_duration: hit.value.duration,
+                    source: hit.source,
+                    baseline: hit.baseline,
+                });
+            }
             return Ok(replay_cache_hit(
                 &mut stdio_config,
-                &hit,
+                hit,
                 cache,
                 metadata,
                 workspace_root,
@@ -431,103 +523,104 @@ async fn run(
             .await);
         }
         CacheLookup::Miss { miss, globbed_inputs } => {
-            (reporter.start(CacheStatus::Miss(miss)), globbed_inputs)
+            let stdio_config = reporter.start(&CacheStatus::Miss(miss.clone()));
+            (stdio_config, LiveSpawnCacheStatus::Miss(miss), globbed_inputs)
         }
-        CacheLookup::Disabled => (
-            reporter.start(CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata)),
-            BTreeMap::new(),
-        ),
+        CacheLookup::Disabled => {
+            let stdio_config =
+                reporter.start(&CacheStatus::Disabled(CacheDisabledReason::NoCacheMetadata));
+            (stdio_config, LiveSpawnCacheStatus::Disabled, BTreeMap::new())
+        }
+    };
+    if run_kind == RunKind::Dry {
+        return Ok(SpawnReport::Spawned {
+            cache_status: spawn_cache_status,
+            outcome: SpawnLeafOutcome::WouldSpawn,
+        });
+    }
+
+    let spawn_err = |cache_status, err| SpawnReport::Spawned {
+        cache_status,
+        outcome: SpawnLeafOutcome::SpawnError(err),
     };
 
     // 4. Fold the cache/fspy/stdio decisions into the typed mode.
-    let mut mode = ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs)
-        .map_err(Report::failed)?;
+    let mode = match ExecutionMode::build(cache_metadata, stdio_config, globbed_inputs) {
+        Ok(mode) => mode,
+        Err(err) => return Err(spawn_err(spawn_cache_status, err)),
+    };
 
-    // Measure end-to-end duration here — spawn() doesn't track time.
+    // Measure end-to-end duration here — spawn doesn't track time.
     let start = Instant::now();
 
-    // 5. Spawn. Returns pipes (Piped) or `None` (Inherited) plus a
-    //    cancellation-aware wait future.
-    let (spawn_stdio, fspy_enabled) = mode.spawn_config();
-    let child = spawn(
-        &spawn_execution.spawn_command,
-        fspy_enabled,
-        spawn_stdio,
-        fast_fail_token.clone(),
-        mode.injected_envs(),
-    )
-    .await
-    .map_err(|err| Report::failed(ExecutionError::Spawn(err)))?;
-
-    // 6. Drain the pipes and wait for exit, concurrently with the IPC driver.
-    //    The driver must be polled during pipe drain — otherwise a tool doing
-    //    a blocking `getEnv` can deadlock: child stalls on IPC, stdout stays
-    //    open, pipe_stdio waits for EOF, driver never runs. `stop_accepting`
-    //    fires after child.wait so the driver drains any in-flight clients.
-    //    Box::pin keeps the child-and-pipe stack off the enclosing future:
-    //    pipe_stdio alone makes the combined future large enough to trip
-    //    clippy::large_futures in every caller otherwise.
-    let RunHandles { sinks, ipc } = mode.run_handles();
-    let (wait_result, ipc_server_result) = if let Some(IpcHandles { stop_accepting, driver }) = ipc
-    {
-        let child_work =
-            Box::pin(run_child(child, sinks, Some(stop_accepting), fast_fail_token.clone()));
-        let (wait_result, join_result) = tokio::join!(child_work, driver);
-        if let Err(e) = &join_result {
-            tracing::warn!(?e, "IPC server failed; cache will not be updated");
-        }
-        (wait_result, Some(join_result.map(Recorder::into_reports)))
-    } else {
-        let child_work = Box::pin(run_child(child, sinks, None, fast_fail_token.clone()));
-        (child_work.await, None)
-    };
-    let outcome = wait_result.map_err(Report::failed)?;
+    // 5 & 6. Spawn the child, drain pipes (if piped), and wait for exit
+    //        (concurrently with the IPC driver when cached).
+    let run_outcome =
+        match mode.spawn_and_run(&spawn_execution.spawn_command, start, &fast_fail_token).await {
+            Ok(result) => result,
+            Err(err) => return Err(spawn_err(spawn_cache_status, err)),
+        };
     let duration = start.elapsed();
 
-    // Extract reports, or short-circuit when the IPC server failed. An Err
-    // here means reports may be incomplete: caching this run would risk
-    // stale inputs/outputs, so skip all cache-related computation entirely.
-    let reports: Option<Reports> = match ipc_server_result {
-        Some(Ok(reports)) => {
-            tracing::debug!(?reports, "runner-aware tools reported");
-            Some(reports)
-        }
-        None => None,
-        Some(Err(err)) => {
-            return Err(Report::Spawned {
-                exit_status: outcome.exit_status,
-                cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::IpcServerError(
-                    err,
-                )),
-                error: None,
-            });
-        }
-    };
+    // Non-zero exit: cache is never updated.
+    let exit_status = run_outcome.exit_status();
+    if !exit_status.success() {
+        return Ok(SpawnReport::Spawned {
+            cache_status: spawn_cache_status,
+            outcome: SpawnLeafOutcome::Failed { exit_code: non_zero_exit_code(exit_status) },
+        });
+    }
 
     // 7. Decide the cache update (only when we were in `Cached` mode). Cache
-    //    update errors are reported but do not affect the exit status we
-    //    return — the process ran, so we return its actual status.
-    let (cache_update, error) = match mode {
-        ExecutionMode::Cached { state, .. } => {
+    //    update errors do not affect `SpawnOutcome` or fast-fail (the process
+    //    exited 0, so we report `SpawnedSuccess`), though the summary reporter
+    //    still turns post-run cache errors into a non-zero run exit code.
+    let cache_update = match run_outcome {
+        RunOutcome::Cached { state, outcome, ipc_result } => {
+            #[cfg(not(fspy))]
+            let _ = outcome;
+            // Extract reports, or short-circuit when the IPC server failed. An
+            // Err here means reports may be incomplete: caching this run would
+            // risk stale inputs/outputs, so skip all cache-related computation.
+            let reports = match ipc_result {
+                Ok(reports) => {
+                    tracing::debug!(?reports, "runner-aware tools reported");
+                    reports
+                }
+                Err(err) => {
+                    return Ok(SpawnReport::Spawned {
+                        cache_status: spawn_cache_status,
+                        outcome: SpawnLeafOutcome::Success {
+                            cache_update: CacheUpdateOutcome::NotUpdated(
+                                CacheNotUpdatedReason::IpcServerError(err),
+                            ),
+                        },
+                    });
+                }
+            };
             cache_update::update_cache(
                 cache,
                 workspace_root,
                 cache_dir,
-                state,
-                &outcome,
-                reports.as_ref(),
+                *state,
+                #[cfg(fspy)]
+                outcome.path_accesses.as_ref(),
+                Some(&reports),
                 duration,
                 &cancel_token,
             )
             .await
         }
-        ExecutionMode::Uncached { .. } => {
+        RunOutcome::Uncached { .. } => {
             // Caching was disabled for this task.
-            (CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheDisabled), None)
+            CacheUpdateOutcome::NotUpdated(CacheNotUpdatedReason::CacheDisabled)
         }
     };
 
-    Ok(Report::Spawned { exit_status: outcome.exit_status, cache_update, error })
+    Ok(SpawnReport::Spawned {
+        cache_status: spawn_cache_status,
+        outcome: SpawnLeafOutcome::Success { cache_update },
+    })
 }
 
 /// Outcome of the cache-lookup phase. Each variant carries exactly what that
@@ -538,46 +631,80 @@ enum CacheLookup<'a> {
     /// Cache hit — the cached entry to replay, where it came from, and the
     /// metadata that looked it up.
     Hit { hit: CacheHit, metadata: &'a CacheMetadata },
-    /// Cache miss — the detailed reason (`NotFound` or `FingerprintMismatch`).
+    /// Cache miss — the detailed reason (`NotFound`, `Changed`, or a failed
+    /// remote read).
     Miss { miss: CacheMiss, globbed_inputs: BTreeMap<RelativePathBuf, u64> },
     /// Caching is disabled for this task (no cache metadata).
     Disabled,
 }
 
 /// Phase 1: compute the globbed inputs and try to hit the cache. A remote hit
-/// downloads its output archive into `cache_dir`. Remote requests stop when
-/// `cancel_token` is cancelled.
+/// downloads its output archive into `cache_dir`, except in a dry run. The
+/// inputs are hashed, and entries checked, off the scheduler's thread (see
+/// [`run_off_thread`]). The lookup stops when `cancel_token` is cancelled, and
+/// is then [`SpawnReport::Cancelled`] or a miss that isn't reported.
 async fn lookup_cache<'a>(
     cache_metadata: Option<&'a CacheMetadata>,
     cache: &ExecutionCache,
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
+    run_kind: RunKind,
+    file_check: FileCheck,
     cancel_token: &CancellationToken,
-) -> Result<CacheLookup<'a>, Report> {
+) -> Result<CacheLookup<'a>, SpawnReport> {
     let Some(cache_metadata) = cache_metadata else {
         return Ok(CacheLookup::Disabled);
     };
 
     // Compute globbed inputs from positive globs at execution time.
     // Globs are already workspace-root-relative (resolved at task graph stage).
-    let globbed_inputs = compute_globbed_inputs(
-        workspace_root,
-        &cache_metadata.input_config.positive_globs,
-        &cache_metadata.input_config.negative_globs,
-    )
-    .map_err(|err| {
-        Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err })
-    })?;
+    let (root, input_config) = (Arc::clone(workspace_root), cache_metadata.input_config.clone());
+    let hashed = run_off_thread(cancel_token, move || {
+        let start = Instant::now();
+        let globbed_inputs = compute_globbed_inputs(
+            &root,
+            &input_config.positive_globs,
+            &input_config.negative_globs,
+        )?;
+        tracing::debug!(
+            files = globbed_inputs.len(),
+            elapsed = ?start.elapsed(),
+            "hashed the globbed inputs"
+        );
+        anyhow::Ok(globbed_inputs)
+    })
+    .await
+    .ok_or(SpawnReport::Cancelled)?;
+    let globbed_inputs = Arc::new(hashed.map_err(|err| {
+        SpawnReport::FailedBeforeStart(ExecutionError::Cache {
+            kind: CacheErrorKind::Lookup,
+            source: err,
+        })
+    })?);
 
     match cache
-        .try_hit(cache_metadata, &globbed_inputs, workspace_root, cache_dir, cancel_token)
+        .try_hit(
+            cache_metadata,
+            &globbed_inputs,
+            workspace_root,
+            cache_dir,
+            run_kind,
+            file_check,
+            cancel_token,
+        )
         .await
     {
-        Ok(Ok(hit)) => Ok(CacheLookup::Hit { hit, metadata: cache_metadata }),
-        Ok(Err(miss)) => Ok(CacheLookup::Miss { miss, globbed_inputs }),
-        Err(err) => {
-            Err(Report::failed(ExecutionError::Cache { kind: CacheErrorKind::Lookup, source: err }))
+        Ok(Some(Ok(hit))) => Ok(CacheLookup::Hit { hit, metadata: cache_metadata }),
+        // Unless the lookup was cancelled, its checks have finished and
+        // dropped their references, so the inputs aren't copied.
+        Ok(Some(Err(miss))) => {
+            Ok(CacheLookup::Miss { miss, globbed_inputs: Arc::unwrap_or_clone(globbed_inputs) })
         }
+        Ok(None) => Err(SpawnReport::Cancelled),
+        Err(err) => Err(SpawnReport::FailedBeforeStart(ExecutionError::Cache {
+            kind: CacheErrorKind::Lookup,
+            source: err,
+        })),
     }
 }
 
@@ -585,13 +712,13 @@ async fn lookup_cache<'a>(
 /// output files.
 async fn replay_cache_hit(
     stdio_config: &mut StdioConfig,
-    hit: &CacheHit,
+    hit: CacheHit,
     cache: &ExecutionCache,
     cache_metadata: &CacheMetadata,
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     program_name: &str,
-) -> Report {
+) -> SpawnReport {
     for output in hit.value.std_outputs.iter() {
         let writer: &mut dyn std::io::Write = match output.kind {
             pipe::OutputKind::StdOut => &mut stdio_config.writers.stdout_writer,
@@ -604,7 +731,7 @@ async fn replay_cache_hit(
     // Failure here means the archive is missing or unreadable, or its files
     // can't be written. The task fails because the cache promised the
     // outputs would be restored.
-    if let Err(err) = cache.restore(cache_metadata, hit, workspace_root, cache_dir).await {
+    if let Err(err) = cache.restore(cache_metadata, &hit, workspace_root, cache_dir).await {
         let error = match hit.source {
             CacheHitSource::Local => {
                 ExecutionError::LocalCacheRestore { program_name: program_name.into(), source: err }
@@ -614,53 +741,56 @@ async fn replay_cache_hit(
                 ExecutionError::Cache { kind: CacheErrorKind::Restore, source: err }
             }
         };
-        return Report::Failed {
-            cache_update: CacheUpdateStatus::NotUpdated(CacheNotUpdatedReason::CacheHit),
-            error,
-        };
+        return SpawnReport::RestoreFailed { source: hit.source, error };
     }
 
-    Report::CacheHit
+    SpawnReport::CacheHit {
+        replayed_duration: hit.value.duration,
+        source: hit.source,
+        baseline: hit.baseline,
+    }
 }
 
-/// Phase 6: drain the child's pipes (if piped) and wait for exit. A pipe
-/// failure cancels the child so the wait future kills it instead of orphaning
-/// it. After the child exits (on every path), `stop_accepting` is signalled so
-/// the IPC server stops accepting and starts draining.
-async fn run_child(
-    mut child: ChildHandle,
-    sinks: Option<PipeSinks<'_>>,
-    stop_accepting: Option<&StopAccepting>,
+/// Wait for an already-spawned child to exit and log its exit status.
+async fn wait_child(wait: ChildWait, start: Instant) -> Result<ChildOutcome, ExecutionError> {
+    let wait_result = wait.await.map_err(|err| ExecutionError::WaitForTaskProcessExit(err.into()));
+    if let Ok(outcome) = &wait_result {
+        tracing::debug!(
+            success = outcome.exit_status.success(),
+            exit_code = outcome.exit_status.code(),
+            elapsed = ?start.elapsed(),
+            "the task process exited"
+        );
+    }
+    wait_result
+}
+
+/// Phase 6 (piped): drain the child's stdout/stderr pipes and wait for exit.
+/// A pipe failure cancels the child so the wait future kills it instead of
+/// orphaning it.
+async fn run_piped_child(
+    child: PipedChild,
+    sinks: PipeSinks<'_>,
     fast_fail_token: CancellationToken,
 ) -> Result<ChildOutcome, ExecutionError> {
-    let pipe_result: Result<(), ExecutionError> = if let Some(sinks) = sinks {
-        let stdout = child.stdout.take().expect("SpawnStdio::Piped yields a stdout pipe");
-        let stderr = child.stderr.take().expect("SpawnStdio::Piped yields a stderr pipe");
-        #[expect(
-            clippy::large_futures,
-            reason = "pipe_stdio streams child I/O and creates a large future"
-        )]
-        let r = pipe_stdio(stdout, stderr, sinks, fast_fail_token.clone()).await;
-        r.map_err(|err| ExecutionError::ForwardTaskProcessOutput(err.into()))
-    } else {
-        Ok(())
-    };
+    let start = Instant::now();
+    #[expect(
+        clippy::large_futures,
+        reason = "pipe_stdio streams child I/O and creates a large future"
+    )]
+    let pipe_result =
+        pipe_stdio(child.pipes.stdout, child.pipes.stderr, sinks, fast_fail_token.clone())
+            .await
+            .map_err(|err| ExecutionError::ForwardTaskProcessOutput(err.into()));
 
-    let wait_result = match pipe_result {
-        Ok(()) => {
-            child.wait.await.map_err(|err| ExecutionError::WaitForTaskProcessExit(err.into()))
-        }
+    match pipe_result {
+        Ok(()) => wait_child(child.wait, start).await,
         Err(err) => {
             // Pipe failed — cancel so `child.wait` kills the child instead of
-            // orphaning it. Still signal the server below so it can drain.
+            // orphaning it.
             fast_fail_token.cancel();
             let _ = child.wait.await;
             Err(err)
         }
-    };
-
-    if let Some(stop_accepting) = stop_accepting {
-        stop_accepting.signal();
     }
-    wait_result
 }

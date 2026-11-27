@@ -1,0 +1,5 @@
+{
+  "name": "nitro-build-cache-fixture",
+  "private": true,
+  "type": "module"
+}

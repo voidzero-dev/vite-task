@@ -5,7 +5,9 @@ use std::{
 };
 
 #[cfg(unix)]
-use fspy_shared_unix::exec::Exec;
+use allocator_api2::alloc::Global;
+#[cfg(unix)]
+use fspy_shared_unix::exec::{Exec, to_vec_in};
 use rustc_hash::FxHashMap;
 use tokio::process::Command as TokioCommand;
 use tokio_util::sync::CancellationToken;
@@ -53,44 +55,44 @@ impl Command {
 
     #[cfg(unix)]
     #[must_use]
-    pub(crate) fn get_exec(&self) -> Exec {
-        use std::{
-            iter::once,
-            os::unix::ffi::{OsStrExt, OsStringExt},
-        };
+    pub(crate) fn get_exec(&self) -> Exec<Global> {
+        use std::{iter::once, os::unix::ffi::OsStrExt};
 
-        use bstr::{BString, ByteSlice as _};
-        let arg0 =
-            BString::from(self.arg0.clone().unwrap_or_else(|| self.program.clone()).into_vec());
+        let arg0 = self.arg0.as_ref().unwrap_or(&self.program);
         Exec {
-            program: self.program.as_bytes().into(),
+            program: to_vec_in(self.program.as_bytes(), Global),
             args: once(arg0)
-                .chain(self.args.iter().map(|arg| arg.as_bytes().as_bstr().to_owned()))
+                .chain(&self.args)
+                .map(|arg| to_vec_in(arg.as_bytes(), Global))
                 .collect(),
             envs: self
                 .envs
                 .iter()
                 .map(|(name, value)| {
-                    (name.inner().as_bytes().into(), Some(value.as_bytes().into()))
+                    (
+                        to_vec_in(name.inner().as_bytes(), Global),
+                        Some(to_vec_in(value.as_bytes(), Global)),
+                    )
                 })
                 .collect(),
         }
     }
 
     #[cfg(unix)]
-    pub(crate) fn set_exec(&mut self, mut exec: Exec) {
-        use std::os::unix::ffi::OsStringExt;
+    pub(crate) fn set_exec(&mut self, mut exec: Exec<Global>) {
+        use std::os::unix::ffi::OsStrExt;
 
-        self.program = OsString::from_vec(exec.program.into());
-        self.arg0 = Some(OsString::from_vec(exec.args.remove(0).into()));
-        self.args = exec.args.into_iter().map(|arg| OsString::from_vec(arg.into())).collect();
+        let to_os_string = |bytes: &[u8]| OsStr::from_bytes(bytes).to_os_string();
+        self.program = to_os_string(&exec.program);
+        self.arg0 = Some(to_os_string(&exec.args.remove(0)));
+        self.args = exec.args.iter().map(|arg| to_os_string(arg)).collect();
         self.envs = exec
             .envs
-            .into_iter()
+            .iter()
             .map(|(name, value)| {
                 (
-                    EnvName::new(OsString::from_vec(name.into())),
-                    OsString::from_vec(value.unwrap_or_default().into()),
+                    EnvName::new(to_os_string(name)),
+                    to_os_string(value.as_deref().unwrap_or_default()),
                 )
             })
             .collect();

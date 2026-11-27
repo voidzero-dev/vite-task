@@ -76,7 +76,7 @@ steps = [
 [[e2e]]
 name = "ignore_output_allows_read_write_overlap"
 comment = """
-Exercises `ignoreOutput` with auto output tracking. The task reads and writes `sidecar/tmp.txt`; without the ignore the runner's read-write overlap check would refuse to cache the run. The task also writes `dist/out.txt`, which should be auto-archived and restored on a cache hit.
+Exercises `ignoreOutput` with auto output tracking. The task reads and writes `sidecar/tmp.txt`, which the ignore keeps out of the archived outputs. The task also writes `dist/out.txt`, which should be auto-archived and restored on a cache hit.
 """
 ignore = true
 steps = [
@@ -169,7 +169,7 @@ steps = [
 [[e2e]]
 name = "output_negative_glob_prevents_read_write_overlap"
 comment = """
-Exercises `output: [{ auto: true }, "!scratch/**"]` on a task that reads and writes `scratch/overlap.txt`. Because the write is excluded from the auto-output set, it should not count as a read-write overlap, while non-excluded outputs are still archived and restored.
+Exercises `output: [{ auto: true }, "!scratch/**"]` on a task that reads and writes `scratch/overlap.txt`. The write is excluded from the auto-output set, so it isn't archived, while non-excluded outputs are still archived and restored.
 """
 ignore = true
 steps = [
@@ -669,4 +669,52 @@ steps = [
       "c",
     ],
   ], comment = "cache hit: changed match set was requested with tracked: false" },
+]
+
+[[e2e]]
+name = "every_tracked_env_change_is_listed"
+comment = """
+A miss lists every tracked env and query match that changed, not just the first, along with the first changed file. The inline reason names the env changes together.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "fetch-env-and-envs",
+  ], envs = [
+    [
+      "TRACKED_ENV",
+      "first",
+    ],
+    [
+      "PROBE_A",
+      "a",
+    ],
+  ] },
+  [
+    "vtt",
+    "write-file",
+    "envs_input.txt",
+    "second",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "-v",
+    "fetch-env-and-envs",
+  ], envs = [
+    [
+      "TRACKED_ENV",
+      "second",
+    ],
+    [
+      "PROBE_A",
+      "a",
+    ],
+    [
+      "PROBE_B",
+      "b",
+    ],
+  ], comment = "TRACKED_ENV changed, PROBE_B was added, and the input file was modified." },
 ]

@@ -39,6 +39,27 @@ impl InProcessExecution {
     }
 }
 
+impl InProcessExecution {
+    /// The built-in's name, such as `echo`.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match &self.kind {
+            InProcessExecutionKind::Echo { .. } => "echo",
+        }
+    }
+
+    /// The built-in's arguments, as written.
+    #[must_use]
+    pub fn args(&self) -> Vec<Str> {
+        match &self.kind {
+            InProcessExecutionKind::Echo { strings, trailing_newline } => {
+                let no_newline = (!trailing_newline).then(|| Str::from("-n"));
+                no_newline.into_iter().chain(strings.iter().cloned()).collect()
+            }
+        }
+    }
+}
+
 /// The kind of an in-process execution.
 #[derive(Debug, Serialize)]
 enum InProcessExecutionKind {

@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt fs mkdir out write out/a.txt hi stat out",
+      "cache": true
+    }
+  }
+}

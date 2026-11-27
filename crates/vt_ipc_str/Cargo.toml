@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"], optional = true }
+bstr = { workspace = true }
 bumpalo = { workspace = true }
 bytemuck = { workspace = true, features = ["derive", "extern_crate_alloc", "must_cast"] }
 fspy_nostd = { workspace = true, optional = true }

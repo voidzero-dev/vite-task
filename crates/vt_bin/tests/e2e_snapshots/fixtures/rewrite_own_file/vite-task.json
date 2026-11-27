@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "rewrite": {
+      "command": "vtt fs read state.txt write state.txt v1",
+      "cache": true
+    }
+  }
+}

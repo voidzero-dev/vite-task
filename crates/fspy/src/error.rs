@@ -35,10 +35,13 @@ pub enum SpawnError {
 /// so the accesses collected for the run are a subset of what it really
 /// touched.
 ///
+/// The tracking channel can be full, or a process can continue untracked
+/// because the seccomp filter could not be installed.
+///
 /// The run itself is unaffected: recording must never stop the program
 /// doing the work. What cannot be done is anything that needs every
 /// access, caching above all, which has to treat the run as untracked
 /// rather than as having touched only the paths that fit.
 #[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, Debug)]
-#[error("the file-access records did not fit in the tracking channel")]
+#[error("automatic file tracking could not record every file access")]
 pub struct TrackingIncomplete;

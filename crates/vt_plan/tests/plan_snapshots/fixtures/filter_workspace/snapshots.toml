@@ -135,6 +135,12 @@ compact = true
 name = "transitive_with_package_specifier"
 args = ["run", "-t", "@test/app#build"]
 
+# package#task with a short name auto-completes to the one scoped package.
+[[plan]]
+compact = true
+name = "short_package_specifier"
+args = ["run", "app#build"]
+
 # recursive flag = All
 [[plan]]
 compact = true

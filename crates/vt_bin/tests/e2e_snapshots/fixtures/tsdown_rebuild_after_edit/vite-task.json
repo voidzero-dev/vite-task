@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "build": {
+      "command": "tsdown --log-level error",
+      "cache": true
+    }
+  }
+}

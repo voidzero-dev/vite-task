@@ -13,6 +13,12 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(fspy)");
     println!("cargo::rerun-if-changed=build.rs");
 
+    // The JSON Schemas that `vp run --json` and `vp run --dry-run --json` output point to,
+    // embedded with `artifact!`.
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    println!("cargo::rustc-env=VT_TASK_GRAPH_SCHEMA={manifest_dir}/schemas/task-graph.json");
+    println!("cargo::rustc-env=VT_RUN_PLAN_SCHEMA={manifest_dir}/schemas/run-plan.json");
+
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     if matches!(target_os.as_str(), "windows" | "macos" | "linux") {
         println!("cargo::rustc-cfg=fspy");

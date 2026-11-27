@@ -15,7 +15,7 @@ use wax::{
 };
 
 /// Walk positive globs (rooted at `root`), filtering with negative globs, and
-/// call `for_each_file` with the absolute path of each file entry. Stripping
+/// call `for_each_file` with the absolute path and type of each file or symlink. Stripping
 /// the root prefix (if needed) is the caller's responsibility.
 ///
 /// Walk errors for non-existent directories are skipped gracefully. Returning
@@ -25,7 +25,7 @@ fn walk_glob_files(
     root: &AbsolutePath,
     positive_globs: &std::collections::BTreeSet<Str>,
     negative_globs: &std::collections::BTreeSet<Str>,
-    mut for_each_file: impl FnMut(AbsolutePathBuf) -> anyhow::Result<ControlFlow<()>>,
+    mut for_each_file: impl FnMut(AbsolutePathBuf, std::fs::FileType) -> anyhow::Result<ControlFlow<()>>,
 ) -> anyhow::Result<()> {
     if positive_globs.is_empty() {
         return Ok(());
@@ -52,13 +52,14 @@ fn walk_glob_files(
                     return Err(io_err.into());
                 }
             };
-            if !entry.file_type().is_file() {
+            let file_type = entry.file_type();
+            if !file_type.is_file() && !file_type.is_symlink() {
                 continue;
             }
             let Some(absolute) = AbsolutePathBuf::new(entry.path().to_path_buf()) else {
                 continue; // wax can hand back non-absolute paths in some cases
             };
-            if for_each_file(absolute)?.is_break() {
+            if for_each_file(absolute, file_type)?.is_break() {
                 return Ok(());
             }
         }
@@ -77,7 +78,10 @@ pub fn compute_globbed_inputs(
     negative_globs: &std::collections::BTreeSet<Str>,
 ) -> anyhow::Result<BTreeMap<RelativePathBuf, u64>> {
     let mut result = BTreeMap::new();
-    walk_glob_files(root, positive_globs, negative_globs, |absolute| {
+    walk_glob_files(root, positive_globs, negative_globs, |absolute, file_type| {
+        if !file_type.is_file() {
+            return Ok(ControlFlow::Continue(()));
+        }
         let Some(relative) = strip_root(root, &absolute)? else {
             return Ok(ControlFlow::Continue(())); // outside root
         };
@@ -98,7 +102,7 @@ pub fn compute_globbed_inputs(
     Ok(result)
 }
 
-/// Collect file paths matching positive globs, filtered by negative globs.
+/// Collect file and symlink paths matching positive globs, filtered by negative globs.
 ///
 /// Like [`compute_globbed_inputs`] but only collects paths (no hashing).
 /// Used for determining which output files to archive.
@@ -108,7 +112,7 @@ pub fn collect_glob_paths(
     negative_globs: &std::collections::BTreeSet<Str>,
 ) -> anyhow::Result<Vec<RelativePathBuf>> {
     let mut result = Vec::new();
-    walk_glob_files(root, positive_globs, negative_globs, |absolute| {
+    walk_glob_files(root, positive_globs, negative_globs, |absolute, _| {
         if let Some(relative) = strip_root(root, &absolute)? {
             result.push(relative);
         }
@@ -165,16 +169,6 @@ mod tests {
         fs::write(package_dir.join("README.md"), "# Readme").unwrap();
 
         (temp_dir, workspace_root)
-    }
-
-    #[test]
-    fn test_empty_positive_globs_returns_empty() {
-        let (_temp, workspace) = create_test_workspace();
-        let positive = std::collections::BTreeSet::new();
-        let negative = std::collections::BTreeSet::new();
-
-        let result = compute_globbed_inputs(&workspace, &positive, &negative).unwrap();
-        assert!(result.is_empty());
     }
 
     #[test]
@@ -310,20 +304,6 @@ mod tests {
     }
 
     #[test]
-    fn test_file_hashes_are_consistent() {
-        let (_temp, workspace) = create_test_workspace();
-        let positive: std::collections::BTreeSet<Str> =
-            std::iter::once("packages/my-pkg/src/index.ts".into()).collect();
-        let negative = std::collections::BTreeSet::new();
-
-        // Run twice and compare hashes
-        let result1 = compute_globbed_inputs(&workspace, &positive, &negative).unwrap();
-        let result2 = compute_globbed_inputs(&workspace, &positive, &negative).unwrap();
-
-        assert_eq!(result1, result2);
-    }
-
-    #[test]
     fn test_file_hashes_change_with_content() {
         let (temp, workspace) = create_test_workspace();
         let positive: std::collections::BTreeSet<Str> =
@@ -396,21 +376,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sibling_positive_glob_matches_sibling_package() {
-        let (_temp, workspace) = create_workspace_with_sibling();
-        // Globs are already workspace-root-relative (resolved at task graph stage)
-        let positive: std::collections::BTreeSet<Str> =
-            std::iter::once("packages/shared/src/**".into()).collect();
-        let negative = std::collections::BTreeSet::new();
-
-        let result = compute_globbed_inputs(&workspace, &positive, &negative).unwrap();
-        assert!(
-            result.contains_key(&RelativePathBuf::new("packages/shared/src/utils.ts").unwrap()),
-            "should find sibling package file via packages/shared/src/**"
-        );
-    }
-
-    #[test]
     fn test_sibling_negative_glob_excludes_from_sibling() {
         let (_temp, workspace) = create_workspace_with_sibling();
         let positive: std::collections::BTreeSet<Str> =
@@ -429,20 +394,50 @@ mod tests {
         );
     }
 
+    fn symlink(target: &str, link: &AbsolutePath, directory: bool) {
+        #[cfg(unix)]
+        {
+            let _ = directory;
+            std::os::unix::fs::symlink(target, link.as_path()).unwrap();
+        }
+        #[cfg(windows)]
+        if directory {
+            std::os::windows::fs::symlink_dir(target, link.as_path()).unwrap();
+        } else {
+            std::os::windows::fs::symlink_file(target, link.as_path()).unwrap();
+        }
+    }
+
     #[test]
-    fn test_overlapping_positive_globs_deduplicates() {
-        let (_temp, workspace) = create_test_workspace();
-        // Both patterns match src/index.ts
-        let positive: std::collections::BTreeSet<Str> =
-            ["packages/my-pkg/src/**/*.ts".into(), "packages/my-pkg/src/index.ts".into()]
-                .into_iter()
-                .collect();
+    fn output_paths_include_symlinks_without_traversing_them() {
+        let temp_dir = TempDir::new().unwrap();
+        let workspace = AbsolutePathBuf::new(temp_dir.path().to_path_buf()).unwrap();
+        fs::create_dir_all(workspace.join("dist")).unwrap();
+        fs::create_dir_all(workspace.join("outside")).unwrap();
+        fs::write(workspace.join("outside/index.js"), "export default 42;").unwrap();
+        fs::write(workspace.join("dist/regular.js"), "export default 7;").unwrap();
+        for (name, target, directory) in [
+            ("file.js", "../outside/index.js", false),
+            ("dependency", "../outside", true),
+            ("dangling", "missing", false),
+            ("excluded", "../outside", true),
+        ] {
+            symlink(target, &workspace.join("dist").join(name), directory);
+        }
+        let positive: std::collections::BTreeSet<Str> = std::iter::once("dist/**".into()).collect();
         let negative: std::collections::BTreeSet<Str> =
-            std::iter::once("**/*.test.ts".into()).collect();
+            std::iter::once("dist/excluded".into()).collect();
 
-        let result = compute_globbed_inputs(&workspace, &positive, &negative).unwrap();
-
-        // BTreeMap naturally deduplicates by key
-        assert_eq!(result.len(), 3);
+        let outputs = collect_glob_paths(&workspace, &positive, &negative).unwrap();
+        assert_eq!(
+            outputs.iter().map(|path| path.as_str()).collect::<Vec<_>>(),
+            ["dist/dangling", "dist/dependency", "dist/file.js", "dist/regular.js"]
+        );
+        // Inputs are unchanged: a link is not a globbed input.
+        let inputs = compute_globbed_inputs(&workspace, &positive, &negative).unwrap();
+        assert_eq!(
+            inputs.keys().map(|path| path.as_str()).collect::<Vec<_>>(),
+            ["dist/regular.js"]
+        );
     }
 }

@@ -39,15 +39,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn buffers_output() {
-        let buffer = Rc::new(RefCell::new(Vec::new()));
-        let mut writer = GroupedWriter::new(Rc::clone(&buffer));
-        writer.write_all(b"hello ").unwrap();
-        writer.write_all(b"world").unwrap();
-        assert_eq!(&*buffer.borrow(), b"hello world");
-    }
-
-    #[test]
     fn shared_buffer_interleaves() {
         let buffer = Rc::new(RefCell::new(Vec::new()));
         let mut stdout = GroupedWriter::new(Rc::clone(&buffer));

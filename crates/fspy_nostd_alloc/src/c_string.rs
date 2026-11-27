@@ -11,7 +11,7 @@ pub struct CString<R, A: Allocator, U: CStrUnit = u8> {
 
 /// An allocator-backed owned C string of the platform's native path code
 /// units: bytes on Unix and wide (`u16`) code units on Windows.
-#[cfg(unix)]
+#[cfg(any(unix, target_os = "none"))]
 pub type OsCString<R, A> = CString<R, A>;
 /// An allocator-backed owned C string of the platform's native path code
 /// units: bytes on Unix and wide (`u16`) code units on Windows.

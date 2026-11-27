@@ -1,6 +1,7 @@
 #[cfg(not(target_env = "musl"))]
 use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _, path::Path};
 
+use allocator_api2::alloc::Allocator;
 use fspy_seccomp_unotify::{payload::SeccompPayload, target::install_target};
 #[cfg(not(target_env = "musl"))]
 use memmap2::Mmap;
@@ -30,8 +31,8 @@ impl PreExec {
     }
 }
 
-pub fn handle_exec(
-    command: &mut Exec,
+pub fn handle_exec<A: Allocator + Clone>(
+    command: &mut Exec<A>,
     encoded_payload: &EncodedPayload,
 ) -> nix::Result<Option<PreExec>> {
     // On musl targets, LD_PRELOAD is not available (cdylib not supported).
@@ -58,6 +59,8 @@ pub fn handle_exec(
         }
     }
 
-    command.envs.retain(|(name, _)| name != LD_PRELOAD && name != PAYLOAD_ENV_NAME);
+    command
+        .envs
+        .retain(|(name, _)| name != LD_PRELOAD.as_bytes() && name != PAYLOAD_ENV_NAME.as_bytes());
     Ok(Some(PreExec(encoded_payload.payload.seccomp_payload.clone())))
 }

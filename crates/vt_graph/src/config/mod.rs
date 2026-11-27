@@ -1,8 +1,9 @@
 pub mod user;
 
-use std::{collections::BTreeSet, sync::Arc};
+use std::{cell::RefCell, collections::BTreeSet, rc::Rc, sync::Arc};
 
-use rustc_hash::FxHashSet;
+use hashbrown::hash_map::EntryRef;
+use rustc_hash::{FxBuildHasher, FxHashSet};
 use serde::Serialize;
 pub use user::{
     AutoTracking, Command, EnabledCacheConfig, GlobWithBase, InputBase, ResolvedGlobalCacheConfig,
@@ -57,6 +58,7 @@ impl ResolvedTaskOptions {
         user_options: UserTaskOptions,
         dir: &Arc<AbsolutePath>,
         workspace_root: &AbsolutePath,
+        glob_resolver: &GlobResolver,
     ) -> Result<Self, ResolveTaskConfigError> {
         let cwd: Arc<AbsolutePath> = match user_options.cwd_relative_to_package {
             Some(ref cwd) if !cwd.as_str().is_empty() => dir.join(cwd).into(),
@@ -73,12 +75,14 @@ impl ResolvedTaskOptions {
                     enabled_cache_config.input.as_ref(),
                     dir,
                     workspace_root,
+                    glob_resolver,
                 )?;
 
                 let output_config = ResolvedGlobConfig::from_user_output_config(
                     enabled_cache_config.output.as_ref(),
                     dir,
                     workspace_root,
+                    glob_resolver,
                 )?;
 
                 Some(CacheConfig {
@@ -154,6 +158,7 @@ impl ResolvedGlobConfig {
         user_inputs: Option<&UserInputsConfig>,
         package_dir: &AbsolutePath,
         workspace_root: &AbsolutePath,
+        glob_resolver: &GlobResolver,
     ) -> Result<Self, ResolveTaskConfigError> {
         let Some(entries) = user_inputs else {
             // None means default to auto-inference
@@ -173,6 +178,7 @@ impl ResolvedGlobConfig {
                         pattern.as_str(),
                         package_dir,
                         workspace_root,
+                        glob_resolver,
                         &mut positive_globs,
                         &mut negative_globs,
                     )?;
@@ -186,6 +192,7 @@ impl ResolvedGlobConfig {
                         pattern.as_str(),
                         base_dir,
                         workspace_root,
+                        glob_resolver,
                         &mut positive_globs,
                         &mut negative_globs,
                     )?;
@@ -209,6 +216,7 @@ impl ResolvedGlobConfig {
         user_outputs: Option<&Vec<UserOutputEntry>>,
         package_dir: &AbsolutePath,
         workspace_root: &AbsolutePath,
+        glob_resolver: &GlobResolver,
     ) -> Result<Self, ResolveTaskConfigError> {
         let mut positive_globs = BTreeSet::new();
         let mut negative_globs = BTreeSet::new();
@@ -225,6 +233,7 @@ impl ResolvedGlobConfig {
                         pattern.as_str(),
                         package_dir,
                         workspace_root,
+                        glob_resolver,
                         &mut positive_globs,
                         &mut negative_globs,
                     )?;
@@ -238,6 +247,7 @@ impl ResolvedGlobConfig {
                         pattern.as_str(),
                         base_dir,
                         workspace_root,
+                        glob_resolver,
                         &mut positive_globs,
                         &mut negative_globs,
                     )?;
@@ -256,69 +266,112 @@ impl ResolvedGlobConfig {
         pattern: &str,
         base_dir: &AbsolutePath,
         workspace_root: &AbsolutePath,
+        glob_resolver: &GlobResolver,
         positive_globs: &mut BTreeSet<Str>,
         negative_globs: &mut BTreeSet<Str>,
     ) -> Result<(), ResolveTaskConfigError> {
         if let Some(negated) = pattern.strip_prefix('!') {
-            let resolved = resolve_glob_to_workspace_relative(negated, base_dir, workspace_root)?;
+            let resolved = glob_resolver.resolve(negated, base_dir, workspace_root)?;
             negative_globs.insert(resolved);
         } else {
-            let resolved = resolve_glob_to_workspace_relative(pattern, base_dir, workspace_root)?;
+            let resolved = glob_resolver.resolve(pattern, base_dir, workspace_root)?;
             positive_globs.insert(resolved);
         }
         Ok(())
     }
 }
 
-/// Resolve a single glob pattern to be workspace-root-relative.
+/// Resolves cache glob patterns to be workspace-root-relative, parsing each distinct pattern once.
 ///
-/// The algorithm:
-/// 1. Partition the glob into an invariant prefix and a variant part
-/// 2. Join the invariant prefix with `package_dir` and clean the path
-/// 3. Strip the `workspace_root` prefix from the cleaned path
-/// 4. Re-escape the stripped prefix and rejoin with the variant
-fn resolve_glob_to_workspace_relative(
-    pattern: &str,
-    package_dir: &AbsolutePath,
-    workspace_root: &AbsolutePath,
-) -> Result<Str, ResolveTaskConfigError> {
-    // A trailing `/` is shorthand for all files under that directory
-    let expanded: Str;
-    let pattern = if pattern.ends_with('/') {
-        expanded = vt_str::format!("{pattern}**");
-        expanded.as_str()
-    } else {
-        pattern
-    };
+/// `wax` compiles a regular expression both when it parses a glob and when it partitions one,
+/// and only the partition's text is kept here. The partition depends on the pattern alone, while
+/// workspaces repeat the same patterns across packages and tasks, so loading a task graph would
+/// otherwise compile the same expressions thousands of times.
+///
+/// Pass one by reference to every resolve that should share the cache. It is neither `Send` nor
+/// `Sync`, so its cache needs no lock.
+#[derive(Debug, Default)]
+pub struct GlobResolver {
+    partitioned: RefCell<hashbrown::HashMap<Str, Rc<PartitionedGlob>, FxBuildHasher>>,
+}
 
-    let glob = wax::Glob::new(pattern).map_err(|source| ResolveTaskConfigError::InvalidGlob {
-        pattern: Str::from(pattern),
-        source: Box::new(source),
-    })?;
-    let (invariant_prefix, variant) = glob.partition();
+impl GlobResolver {
+    /// Resolve a single glob pattern to be workspace-root-relative.
+    ///
+    /// The algorithm:
+    /// 1. Partition the glob into an invariant prefix and a variant part
+    /// 2. Join the invariant prefix with `package_dir` and clean the path
+    /// 3. Strip the `workspace_root` prefix from the cleaned path
+    /// 4. Re-escape the stripped prefix and rejoin with the variant
+    fn resolve(
+        &self,
+        pattern: &str,
+        package_dir: &AbsolutePath,
+        workspace_root: &AbsolutePath,
+    ) -> Result<Str, ResolveTaskConfigError> {
+        // A trailing `/` is shorthand for all files under that directory
+        let expanded: Str;
+        let pattern = if pattern.ends_with('/') {
+            expanded = vt_str::format!("{pattern}**");
+            expanded.as_str()
+        } else {
+            pattern
+        };
 
-    let joined = package_dir.join(&invariant_prefix).clean();
-    let stripped = joined.strip_prefix(workspace_root).map_err(|_| {
-        ResolveTaskConfigError::GlobOutsideWorkspace { pattern: Str::from(pattern) }
-    })?;
+        let partitioned = self.partition(pattern)?;
 
-    // Re-escape the prefix path for use in a glob pattern
-    let stripped = stripped.ok_or_else(|| ResolveTaskConfigError::GlobOutsideWorkspace {
-        pattern: Str::from(pattern),
-    })?;
+        let joined = package_dir.join(partitioned.invariant_prefix.as_str()).clean();
+        let stripped = joined.strip_prefix(workspace_root).map_err(|_| {
+            ResolveTaskConfigError::GlobOutsideWorkspace { pattern: Str::from(pattern) }
+        })?;
 
-    let escaped_prefix = wax::escape(stripped.as_str());
+        // Re-escape the prefix path for use in a glob pattern
+        let stripped = stripped.ok_or_else(|| ResolveTaskConfigError::GlobOutsideWorkspace {
+            pattern: Str::from(pattern),
+        })?;
 
-    let result = match variant {
-        Some(variant_glob) if escaped_prefix.is_empty() => {
-            Str::from(variant_glob.to_string().as_str())
-        }
-        Some(variant_glob) => vt_str::format!("{escaped_prefix}/{variant_glob}"),
-        None if escaped_prefix.is_empty() => Str::from("**"),
-        None => Str::from(escaped_prefix.as_ref()),
-    };
+        let escaped_prefix = wax::escape(stripped.as_str());
 
-    Ok(result)
+        let result = match &partitioned.variant {
+            Some(variant_glob) if escaped_prefix.is_empty() => variant_glob.clone(),
+            Some(variant_glob) => vt_str::format!("{escaped_prefix}/{variant_glob}"),
+            None if escaped_prefix.is_empty() => Str::from("**"),
+            None => Str::from(escaped_prefix.as_ref()),
+        };
+
+        Ok(result)
+    }
+
+    /// Parse and partition `pattern`, at most once per distinct pattern.
+    fn partition(&self, pattern: &str) -> Result<Rc<PartitionedGlob>, ResolveTaskConfigError> {
+        let mut partitioned = self.partitioned.borrow_mut();
+        // `entry_ref` hashes the pattern once and builds the owned key only for a new pattern.
+        let partition = match partitioned.entry_ref(pattern) {
+            EntryRef::Occupied(entry) => entry.into_mut(),
+            EntryRef::Vacant(entry) => {
+                let invalid = |source| ResolveTaskConfigError::InvalidGlob {
+                    pattern: Str::from(pattern),
+                    source: Box::new(source),
+                };
+                let (invariant_prefix, variant) =
+                    wax::Glob::new(pattern).map_err(invalid)?.partition();
+                entry.insert(Rc::new(PartitionedGlob {
+                    // The prefix is made of the pattern's own literal components, so this is
+                    // lossless.
+                    invariant_prefix: Str::from(invariant_prefix.to_string_lossy().as_ref()),
+                    variant: variant.map(|glob| Str::from(glob.to_string().as_str())),
+                }))
+            }
+        };
+        Ok(Rc::clone(partition))
+    }
+}
+
+/// A glob pattern split into its literal prefix and the glob that follows it.
+#[derive(Debug)]
+struct PartitionedGlob {
+    invariant_prefix: Str,
+    variant: Option<Str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -357,6 +410,7 @@ impl ResolvedTaskConfig {
         package_dir: &Arc<AbsolutePath>,
         package_json_script: &str,
         workspace_root: &AbsolutePath,
+        glob_resolver: &GlobResolver,
     ) -> Result<Self, ResolveTaskConfigError> {
         Ok(Self {
             commands: vec![package_json_script.into()].into(),
@@ -364,6 +418,7 @@ impl ResolvedTaskConfig {
                 UserTaskOptions::default(),
                 package_dir,
                 workspace_root,
+                glob_resolver,
             )?,
         })
     }
@@ -377,6 +432,7 @@ impl ResolvedTaskConfig {
         user_config: UserTaskConfig,
         package_dir: &Arc<AbsolutePath>,
         workspace_root: &AbsolutePath,
+        glob_resolver: &GlobResolver,
     ) -> Result<Self, ResolveTaskConfigError> {
         let UserTaskConfig { command, options, top_level_cache_fields: _ } = user_config;
         let commands = match command {
@@ -385,7 +441,12 @@ impl ResolvedTaskConfig {
         };
         Ok(Self {
             commands,
-            resolved_options: ResolvedTaskOptions::resolve(options, package_dir, workspace_root)?,
+            resolved_options: ResolvedTaskOptions::resolve(
+                options,
+                package_dir,
+                workspace_root,
+                glob_resolver,
+            )?,
         })
     }
 }
@@ -502,6 +563,20 @@ mod tests {
         }
     }
 
+    /// Resolves `user_inputs` with a fresh [`GlobResolver`].
+    fn resolve_inputs(
+        user_inputs: Option<&UserInputsConfig>,
+        package_dir: &AbsolutePath,
+        workspace_root: &AbsolutePath,
+    ) -> Result<ResolvedGlobConfig, ResolveTaskConfigError> {
+        ResolvedGlobConfig::from_user_config(
+            user_inputs,
+            package_dir,
+            workspace_root,
+            &GlobResolver::default(),
+        )
+    }
+
     #[test]
     fn test_resolved_input_config_default_auto() {
         let config = ResolvedGlobConfig::default_auto();
@@ -514,7 +589,7 @@ mod tests {
     fn test_resolved_input_config_from_none() {
         let (pkg, ws) = test_paths();
         // None means default to auto-inference
-        let config = ResolvedGlobConfig::from_user_config(None, &pkg, &ws).unwrap();
+        let config = resolve_inputs(None, &pkg, &ws).unwrap();
         assert!(config.includes_auto);
         assert!(config.positive_globs.is_empty());
         assert!(config.negative_globs.is_empty());
@@ -525,7 +600,7 @@ mod tests {
         let (pkg, ws) = test_paths();
         // Empty array means no inputs, inference disabled
         let user_inputs = vec![];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert!(config.positive_globs.is_empty());
         assert!(config.negative_globs.is_empty());
@@ -535,7 +610,7 @@ mod tests {
     fn test_resolved_input_config_auto_only() {
         let (pkg, ws) = test_paths();
         let user_inputs = vec![UserInputEntry::Auto(AutoTracking { auto: true })];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
         assert!(config.positive_globs.is_empty());
         assert!(config.negative_globs.is_empty());
@@ -545,7 +620,7 @@ mod tests {
     fn test_resolved_input_config_auto_false_ignored() {
         let (pkg, ws) = test_paths();
         let user_inputs = vec![UserInputEntry::Auto(AutoTracking { auto: false })];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert!(config.positive_globs.is_empty());
         assert!(config.negative_globs.is_empty());
@@ -559,7 +634,7 @@ mod tests {
             UserInputEntry::Glob("src/**/*.ts".into()),
             UserInputEntry::Glob("package.json".into()),
         ];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert_eq!(config.positive_globs.len(), 2);
         // Globs should now be workspace-root-relative
@@ -575,7 +650,7 @@ mod tests {
             UserInputEntry::Glob("src/**".into()),
             UserInputEntry::Glob("!src/**/*.test.ts".into()),
         ];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert_eq!(config.positive_globs.len(), 1);
         assert!(config.positive_globs.contains("packages/my-pkg/src/**"));
@@ -591,7 +666,7 @@ mod tests {
             UserInputEntry::Auto(AutoTracking { auto: true }),
             UserInputEntry::Glob("!node_modules/**".into()),
         ];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
         assert_eq!(config.positive_globs.len(), 1);
         assert!(config.positive_globs.contains("packages/my-pkg/package.json"));
@@ -607,7 +682,7 @@ mod tests {
             UserInputEntry::Glob("src/**/*.ts".into()),
             UserInputEntry::Auto(AutoTracking { auto: true }),
         ];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
     }
 
@@ -615,7 +690,7 @@ mod tests {
     fn test_resolved_input_config_dotdot_resolution() {
         let (pkg, ws) = test_paths();
         let user_inputs = vec![UserInputEntry::Glob("../shared/src/**".into())];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert_eq!(config.positive_globs.len(), 1);
         assert!(
             config.positive_globs.contains("packages/shared/src/**"),
@@ -625,10 +700,37 @@ mod tests {
     }
 
     #[test]
+    fn test_resolved_input_config_same_pattern_in_two_packages() {
+        // A resolver parses a pattern once; each package still resolves it against its own
+        // directory, and the workspace check still applies to each use.
+        let (pkg, ws) = test_paths();
+        let other = pkg.parent().unwrap().join("other-pkg");
+        let globs = GlobResolver::default();
+        let user_inputs = vec![UserInputEntry::Glob("src/**".into())];
+        let own =
+            ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws, &globs).unwrap();
+        let from_other =
+            ResolvedGlobConfig::from_user_config(Some(&user_inputs), &other, &ws, &globs).unwrap();
+        assert!(own.positive_globs.contains("packages/my-pkg/src/**"), "{:?}", own.positive_globs);
+        assert!(
+            from_other.positive_globs.contains("packages/other-pkg/src/**"),
+            "{:?}",
+            from_other.positive_globs
+        );
+        let user_inputs = vec![UserInputEntry::Glob("../../../outside/**".into())];
+        assert!(
+            ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws, &globs).is_err()
+        );
+        assert!(
+            ResolvedGlobConfig::from_user_config(Some(&user_inputs), &other, &ws, &globs).is_err()
+        );
+    }
+
+    #[test]
     fn test_resolved_input_config_outside_workspace_error() {
         let (pkg, ws) = test_paths();
         let user_inputs = vec![UserInputEntry::Glob("../../../outside/**".into())];
-        let result = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws);
+        let result = resolve_inputs(Some(&user_inputs), &pkg, &ws);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ResolveTaskConfigError::GlobOutsideWorkspace { .. }));
     }
@@ -640,7 +742,7 @@ mod tests {
             pattern: "configs/tsconfig.json".into(),
             base: InputBase::Workspace,
         })];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(!config.includes_auto);
         assert_eq!(config.positive_globs.len(), 1);
         // Workspace-base: should NOT have the package prefix
@@ -658,7 +760,7 @@ mod tests {
             pattern: "!dist/**".into(),
             base: InputBase::Workspace,
         })];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert_eq!(config.negative_globs.len(), 1);
         assert!(
             config.negative_globs.contains("dist/**"),
@@ -675,7 +777,7 @@ mod tests {
             pattern: "src/**/*.ts".into(),
             base: InputBase::Package,
         })];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert_eq!(config.positive_globs.len(), 1);
         assert!(
             config.positive_globs.contains("packages/my-pkg/src/**/*.ts"),
@@ -699,7 +801,7 @@ mod tests {
                 base: InputBase::Workspace,
             }),
         ];
-        let config = ResolvedGlobConfig::from_user_config(Some(&user_inputs), &pkg, &ws).unwrap();
+        let config = resolve_inputs(Some(&user_inputs), &pkg, &ws).unwrap();
         assert!(config.includes_auto);
         assert_eq!(config.positive_globs.len(), 2);
         assert!(config.positive_globs.contains("packages/my-pkg/src/**"));

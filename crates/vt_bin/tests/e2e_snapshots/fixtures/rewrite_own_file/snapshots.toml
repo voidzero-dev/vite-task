@@ -1,0 +1,43 @@
+[[e2e]]
+name = "rewrite_own_file"
+comment = """
+The task reads `state.txt` and writes it back, like a tool that reads and rewrites its cache file.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "rewrite",
+  ], comment = "no state.txt yet: the task probes for it and writes it" },
+  { argv = [
+    "vt",
+    "run",
+    "rewrite",
+  ], comment = "state.txt is as the task left it" },
+  { argv = [
+    "vtt",
+    "rm",
+    "state.txt",
+  ], comment = "remove the file the task wrote, as on a clean checkout" },
+  [
+    "vt",
+    "run",
+    "rewrite",
+  ],
+  [
+    "vtt",
+    "print-file",
+    "state.txt",
+  ],
+  { argv = [
+    "vtt",
+    "write-file",
+    "state.txt",
+    "garbage",
+  ], comment = "a file that is there must be as the task left it" },
+  [
+    "vt",
+    "run",
+    "rewrite",
+  ],
+]

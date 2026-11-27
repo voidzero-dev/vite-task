@@ -121,6 +121,9 @@ pub enum PackageQueryResolveError {
         package_paths.iter().map(|p| p.as_path().display().to_string()).collect::<Vec<_>>().join(", ")
     )]
     AmbiguousPackageName { package_name: Str, package_paths: Box<[Arc<AbsolutePath>]> },
+
+    #[error("Package '{package_name}' not found in the workspace")]
+    PackageNotFound { package_name: Str },
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -206,7 +209,8 @@ impl IndexedPackageGraph {
     /// # Errors
     ///
     /// Returns [`PackageQueryResolveError::AmbiguousPackageName`] when an exact
-    /// package name (from a `pkg#task` specifier) matches multiple packages.
+    /// package name (from a `pkg#task` specifier) matches multiple packages, and
+    /// [`PackageQueryResolveError::PackageNotFound`] when it matches none.
     pub fn resolve_query(
         &self,
         query: &PackageQuery,
@@ -343,29 +347,24 @@ impl IndexedPackageGraph {
     /// For `Exact` names, scoped auto-completion applies
     /// (pnpm ref: <https://github.com/pnpm/pnpm/blob/491a84fb26fa716408bf6bd361680f6a450c61fc/workspace/filter-workspace-packages/src/index.ts#L303-L306>):
     /// if `"bar"` has no exact match but exactly one `@*/bar` package exists,
-    /// that package is used instead.
+    /// that package is used instead. An `exactly_one` name that still matches
+    /// no package, or several, is an error.
     fn match_by_name_pattern(
         &self,
         pattern: &PackageNamePattern,
         out: &mut FxHashSet<PackageNodeIndex>,
     ) -> Result<(), PackageQueryResolveError> {
         match pattern {
-            PackageNamePattern::Exact { name, unique } => {
+            PackageNamePattern::Exact { name, exactly_one } => {
                 if let Some(indices) = self.get_package_indices_by_name(name) {
-                    if *unique && indices.len() > 1 {
-                        return Err(PackageQueryResolveError::AmbiguousPackageName {
-                            package_name: name.clone(),
-                            package_paths: indices
-                                .iter()
-                                .map(|i| Arc::clone(&self.graph[*i].absolute_path))
-                                .collect(),
-                        });
+                    if *exactly_one && indices.len() > 1 {
+                        return Err(self.ambiguous_package_name(name, indices));
                     }
                     out.extend(indices.iter().copied());
                 } else {
                     // Scoped auto-completion: `"bar"` → `"@scope/bar"` if exactly one match.
                     let scoped_suffix = vt_str::format!("/{}", name);
-                    let scoped: Vec<_> = self
+                    let mut scoped: Vec<_> = self
                         .indices_by_name
                         .iter()
                         .filter(|(pkg_name, _)| {
@@ -375,8 +374,18 @@ impl IndexedPackageGraph {
                         .collect();
                     if scoped.len() == 1 {
                         out.insert(scoped[0]);
+                    } else if *exactly_one {
+                        if scoped.is_empty() {
+                            return Err(PackageQueryResolveError::PackageNotFound {
+                                package_name: name.clone(),
+                            });
+                        }
+                        // Sorted so the listed paths don't depend on hash order.
+                        scoped.sort_unstable();
+                        return Err(self.ambiguous_package_name(name, &scoped));
                     }
-                    // 0 matches: nothing to insert.
+                    // For `--filter`:
+                    // 0 matches: nothing to insert; the caller warns about the filter.
                     // >1 matches: ambiguous; skip rather than guessing wrong.
                 }
             }
@@ -391,6 +400,21 @@ impl IndexedPackageGraph {
             }
         }
         Ok(())
+    }
+
+    /// The error for a `pkg#task` name that matches several packages.
+    fn ambiguous_package_name(
+        &self,
+        name: &Str,
+        indices: &[PackageNodeIndex],
+    ) -> PackageQueryResolveError {
+        PackageQueryResolveError::AmbiguousPackageName {
+            package_name: name.clone(),
+            package_paths: indices
+                .iter()
+                .map(|i| Arc::clone(&self.graph[*i].absolute_path))
+                .collect(),
+        }
     }
 
     /// Match packages by a directory pattern, inserting into `out`.

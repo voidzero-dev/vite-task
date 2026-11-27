@@ -15,7 +15,7 @@ fn get_fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> nix::Result<Op
         return Ok(Some(path));
     }
     let mut path = [0; PROC_FD_PATH_CAPACITY];
-    let path = proc_fd_path(fd, &mut path);
+    let path = proc_fd_path(fd.as_raw_fd(), &mut path);
     match fspy_nostd_alloc::fs::readlinkat(allocator, CWD, path) {
         Ok(path) => Ok(Some(path)),
         Err(fspy_nostd::Error::BADF | fspy_nostd::Error::NOENT) => Ok(None),
@@ -24,18 +24,19 @@ fn get_fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> nix::Result<Op
 }
 
 #[cfg(target_os = "linux")]
-const PROC_FD_PATH_CAPACITY: usize =
+pub const PROC_FD_PATH_CAPACITY: usize =
     b"/proc/self/fd/".len() + <c_int as itoa::Integer>::MAX_STR_LEN + 1;
 
+/// Formats `/proc/self/fd/{fd}` into `buf`, without allocating.
 #[cfg(target_os = "linux")]
-fn proc_fd_path<'buf>(
-    fd: BorrowedFd<'_>,
-    buf: &'buf mut [u8; PROC_FD_PATH_CAPACITY],
-) -> fspy_nostd::CStr<'buf, fspy_nostd::Thin> {
+pub fn proc_fd_path(
+    fd: c_int,
+    buf: &mut [u8; PROC_FD_PATH_CAPACITY],
+) -> fspy_nostd::CStr<'_, fspy_nostd::Thin> {
     const PREFIX: &[u8] = b"/proc/self/fd/";
 
     let mut formatted = itoa::Buffer::new();
-    let fd = formatted.format(fd.as_raw_fd()).as_bytes();
+    let fd = formatted.format(fd).as_bytes();
 
     buf[..PREFIX.len()].copy_from_slice(PREFIX);
     let end = PREFIX.len() + fd.len();

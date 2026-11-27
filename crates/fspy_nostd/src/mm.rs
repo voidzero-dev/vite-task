@@ -53,6 +53,14 @@ mod unix {
             const SHARED = imp::MAP_SHARED;
             /// Changes are private to this mapping.
             const PRIVATE = imp::MAP_PRIVATE;
+            /// Replace mappings at the requested address instead of using it as a hint.
+            #[cfg(any(target_os = "linux", target_os = "none"))]
+            const FIXED = linux_raw_sys::general::MAP_FIXED;
+            /// Request an exact address without replacing existing mappings.
+            /// Kernels before Linux 4.17 may treat the address as a hint;
+            /// callers must check the returned address.
+            #[cfg(any(target_os = "linux", target_os = "none"))]
+            const FIXED_NOREPLACE = linux_raw_sys::general::MAP_FIXED_NOREPLACE;
         }
     }
 

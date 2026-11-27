@@ -8,7 +8,6 @@ publish = false
 [dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
 wincode = { workspace = true }
-bstr = { workspace = true, features = ["alloc", "std"] }
 bumpalo = { workspace = true, features = ["allocator-api2", "collections"] }
 derive_more = { workspace = true, features = ["debug"] }
 vt_materialized_artifact = { workspace = true }

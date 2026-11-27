@@ -10,7 +10,7 @@ pub mod plan_request;
 mod ps1_shim;
 pub mod remote_cache;
 
-use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, sync::Arc};
+use std::{collections::BTreeMap, ffi::OsStr, fmt::Debug, rc::Rc, sync::Arc};
 
 use context::PlanContext;
 pub use envs::MARKER_ENV_NAME;
@@ -23,7 +23,7 @@ use plan_request::{CacheOverride, PlanRequest, QueryPlanRequest, SyntheticPlanRe
 use rustc_hash::FxHashMap;
 use serde::{Serialize, ser::SerializeMap as _};
 use vt_casefold::EnvName;
-use vt_graph::{TaskGraphLoadError, display::TaskDisplay};
+use vt_graph::{IndexedTaskGraph, config::GlobResolver, display::TaskDisplay};
 use vt_path::AbsolutePath;
 use vt_str::Str;
 
@@ -167,16 +167,12 @@ pub trait PlanRequestParser: Debug {
     /// - If it returns `Ok(Some(PlanRequest::Query))`, the command will be expanded as a `ExpandedExecution` with a task graph queried from the returned `TaskQuery`.
     /// - If it returns `Ok(Some(PlanRequest::Synthetic))`, the command will become a `SpawnExecution` with the synthetic task.
     ///
-    /// When a `PlanRequest` is returned, any mutations to `command` are discarded.
+    /// When a `PlanRequest` is returned, mutations to `command` are discarded, except that
+    /// a `PlanRequest::Synthetic` runs in the (potentially mutated) `command.cwd`.
     async fn get_plan_request(
         &mut self,
         command: &mut plan_request::ScriptCommand,
     ) -> anyhow::Result<Option<PlanRequest>>;
-}
-
-#[async_trait::async_trait(?Send)]
-pub trait TaskGraphLoader {
-    async fn load_task_graph(&mut self) -> Result<&vt_graph::IndexedTaskGraph, TaskGraphLoadError>;
 }
 
 /// Output of [`plan_query`] (and the internal `plan_query_request`).
@@ -193,10 +189,10 @@ pub struct PlanResult {
     pub no_packages_matched: bool,
 }
 
-/// Plan a query execution: load the task graph, query it, and build the execution graph.
+/// Plan a query execution: query the task graph and build the execution graph.
 ///
 /// # Errors
-/// Returns an error if task graph loading, query, or execution planning fails.
+/// Returns an error if loading the tasks it reads, the query, or execution planning fails.
 #[tracing::instrument(level = "debug", skip_all)]
 #[expect(clippy::implicit_hasher, reason = "FxHashMap is the only hasher used in this codebase")]
 pub async fn plan_query(
@@ -205,10 +201,9 @@ pub async fn plan_query(
     cwd: &Arc<AbsolutePath>,
     envs: &Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
     plan_request_parser: &mut (dyn PlanRequestParser + '_),
-    task_graph_loader: &mut (dyn TaskGraphLoader + '_),
+    indexed_task_graph: &IndexedTaskGraph<'_>,
+    glob_resolver: &Rc<GlobResolver>,
 ) -> Result<PlanResult, Error> {
-    let indexed_task_graph = task_graph_loader.load_task_graph().await?;
-
     let resolved_global_cache = indexed_task_graph.global_cache_config().clone();
 
     let QueryPlanRequest { query, plan_options } = query_plan_request;
@@ -219,6 +214,7 @@ pub async fn plan_query(
         Arc::clone(envs),
         plan_request_parser,
         indexed_task_graph,
+        Rc::clone(glob_resolver),
         resolved_global_cache,
         Arc::clone(&query),
     );
@@ -258,6 +254,7 @@ pub fn plan_synthetic(
     cwd: &Arc<AbsolutePath>,
     synthetic_plan_request: SyntheticPlanRequest,
     cache_key: Arc<[Str]>,
+    glob_resolver: &GlobResolver,
 ) -> Result<SpawnExecution, Error> {
     let execution_cache_key = cache_metadata::ExecutionCacheKey::ExecAPI(cache_key);
     plan_synthetic_request(
@@ -269,5 +266,6 @@ pub fn plan_synthetic(
         cwd,
         ParentCacheConfig::None,
         None,
+        glob_resolver,
     )
 }

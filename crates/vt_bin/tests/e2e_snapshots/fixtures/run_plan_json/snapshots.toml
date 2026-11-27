@@ -1,0 +1,168 @@
+# `vt run --dry-run --json` lays out the run plan. Nothing is cached, so every
+# cached step is `noBaseline`. `vtt` is outside the workspace, at an absolute
+# path, so it's redacted, and on Windows `tool` resolves to `tool.cmd`.
+
+[[e2e]]
+name = "tasks"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "-r",
+    "build",
+  ], comment = "Package edges from `-r`, `pre` and `post` scripts as hooks, a program inside the workspace and one outside it, and a package path with `#` in its ID.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"', '"program": "[^"]*vtt[^"]*"' = '"program": "<vtt>"', 'tool\.cmd"' = 'tool"' } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "--parallel",
+    "-r",
+    "build",
+  ], comment = "`--parallel` drops the edges.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"', '"program": "[^"]*vtt[^"]*"' = '"program": "<vtt>"', 'tool\.cmd"' = 'tool"' } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "--no-cache",
+    "--filter",
+    "@acme/web",
+    "build",
+  ], comment = "`--no-cache` disables caching for every step.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"', 'tool\.cmd"' = 'tool"' } },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "--cache",
+    "--filter",
+    "@acme/ui",
+    "build",
+  ], comment = "`--cache` turns caching on for scripts, which are uncached by default.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*vtt[^"]*"' = '"program":"<vtt>"' } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "b%c",
+  ], comment = "`%` in a task name is encoded in its ID.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"' } },
+]
+
+[[e2e]]
+name = "steps"
+cwd = "packages/web"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "build",
+    "--watch",
+  ], comment = "Args after the task name are part of the step's args.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"', 'tool\.cmd"' = 'tool"' } },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "pipe",
+  ], comment = "A command with shell syntax runs through the shell: `/bin/sh -c`, or `cmd.exe /d /s /c` on Windows.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*","args":\["(-c|/d","/s","/c)",' = '"program":"<shell>","args":["<shell flags>",' } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "cd",
+  ], comment = "A `cd` changes the cwd of the steps after it.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"', '"program": "[^"]*vtt[^"]*"' = '"program": "<vtt>"' } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "in-src",
+  ], comment = "So does the task's `cwd` setting.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"', '"program": "[^"]*vtt[^"]*"' = '"program": "<vtt>"' } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "steps",
+  ], comment = "Each `&&` part is a step, and a built-in such as `echo` has no `cache`.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"', '"program": "[^"]*vtt[^"]*"' = '"program": "<vtt>"' } },
+]
+
+[[e2e]]
+name = "selection"
+comment = """
+A task missing from some of the selected packages is left out of the plan. Missing from all of them, it's an error, but a filter that matches no package gives an empty plan, unless `--fail-if-no-match` is set.
+"""
+steps = [
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "-r",
+    "steps",
+  ], comment = "Only `@acme/web` has `steps`.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*vtt[^"]*"' = '"program":"<vtt>"' } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "--filter",
+    "@acme/ui",
+    "steps",
+  ], comment = "The only selected package doesn't have it." },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "-r",
+    "typo",
+  ], comment = "No package has it." },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "nope#build",
+  ], comment = "No package is named `nope`, so, as in a real run, it's an error and nothing goes to stdout." },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "--filter",
+    "nope",
+    "build",
+  ], comment = "No package matched, so the plan is empty.", redact = { '"\$schema":"[^"]*"' = '"$$schema":"<schema>"', '"program":"[^"]*vtt[^"]*"' = '"program":"<vtt>"' } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "--fail-if-no-match",
+    "--filter",
+    "nope",
+    "build",
+  ], comment = "`--fail-if-no-match` makes that an error." },
+]

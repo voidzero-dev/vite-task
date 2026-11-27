@@ -1,0 +1,19 @@
+[[e2e]]
+name = "step_redact_rewrites_only_its_own_output"
+comment = """
+A step's `redact` table rewrites regex matches in that step's output and leaves other steps' output alone.
+"""
+steps = [
+  { argv = [
+    "vtt",
+    "print",
+    "value:",
+    "8f3a1c",
+  ], comment = "`redact` replaces the value", redact = { 'value: \w+' = 'value: <value>' } },
+  { argv = [
+    "vtt",
+    "print",
+    "value:",
+    "8f3a1c",
+  ], comment = "no `redact`, so the value stays" },
+]

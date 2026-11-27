@@ -1,13 +1,12 @@
+use core::{fmt::Debug, mem::MaybeUninit};
 #[cfg(unix)]
 use std::ffi::OsStr;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt as _;
-use std::{
-    fmt::Debug,
-    mem::MaybeUninit,
-    path::{Path, StripPrefixError},
-};
+#[cfg(not(target_os = "none"))]
+use std::path::{Path, PathBuf, StripPrefixError};
 
+#[cfg(not(target_os = "none"))]
 use bumpalo::Bump;
 use bytemuck::TransparentWrapper;
 use vt_ipc_str::IpcStr;
@@ -22,8 +21,9 @@ use wincode::{
 ///
 /// On Windows, tracked paths are NT Object Manager paths (`\??` prefix),
 /// whose raw data is not meaningful for direct consumption. The only way
-/// to use the path is through [`strip_path_prefix`](IpcPath::strip_path_prefix),
-/// which normalizes platform differences and extracts a workspace-relative path.
+/// to use the path is through [`strip_path_prefix`](IpcPath::strip_path_prefix)
+/// or [`clean_and_strip_path_prefix`](IpcPath::clean_and_strip_path_prefix),
+/// which normalize platform differences and extract a workspace-relative path.
 #[derive(TransparentWrapper, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct IpcPath {
@@ -56,16 +56,24 @@ unsafe impl<'de, C: Config> SchemaRead<'de, C> for &'de IpcPath {
 }
 
 impl IpcPath {
+    #[cfg(any(unix, target_os = "none"))]
+    #[must_use]
+    pub fn from_bytes(bytes: &[u8]) -> &Self {
+        Self::wrap_ref(IpcStr::from_bytes(bytes))
+    }
+
     #[cfg(windows)]
     #[must_use]
     pub fn from_wide(wide: &[u16]) -> &Self {
         Self::wrap_ref(IpcStr::from_wide(wide))
     }
 
+    #[cfg(not(target_os = "none"))]
     pub fn clone_in<'bump>(&self, bump: &'bump Bump) -> &'bump Self {
         Self::wrap_ref(self.inner.clone_in(bump))
     }
 
+    #[cfg(not(target_os = "none"))]
     pub fn strip_path_prefix<P: AsRef<Path>, R, F: FnOnce(Result<&Path, StripPrefixError>) -> R>(
         &self,
         base: P,
@@ -74,10 +82,30 @@ impl IpcPath {
         let me = self.inner.to_cow_os_str();
         f(vt_path::strip_path_prefix(&me, base.as_ref().as_os_str()))
     }
+
+    /// Like [`strip_path_prefix`](IpcPath::strip_path_prefix), but resolves
+    /// `.` and `..` in the path lexically first.
+    ///
+    /// On Unix, a relative path is tracked as the working directory joined
+    /// with it, `..` included: opening `../site` in `/repo` is tracked as
+    /// `/repo/../site`, which isn't under `/repo`. On Windows, `..` is
+    /// resolved before fspy sees the path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `base` is not a path prefix of the cleaned path.
+    #[cfg(not(target_os = "none"))]
+    pub fn clean_and_strip_path_prefix<P: AsRef<Path>>(
+        &self,
+        base: P,
+    ) -> Result<PathBuf, StripPrefixError> {
+        let me = self.inner.to_cow_os_str();
+        vt_path::clean_and_strip_path_prefix(&me, base.as_ref().as_os_str())
+    }
 }
 
 impl Debug for IpcPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         <IpcStr as Debug>::fmt(&self.inner, f)
     }
 }
@@ -85,6 +113,6 @@ impl Debug for IpcPath {
 #[cfg(unix)]
 impl<'a, S: AsRef<OsStr> + ?Sized> From<&'a S> for &'a IpcPath {
     fn from(value: &'a S) -> Self {
-        IpcPath::wrap_ref(IpcStr::from_bytes(value.as_ref().as_bytes()))
+        IpcPath::from_bytes(value.as_ref().as_bytes())
     }
 }

@@ -1,6 +1,11 @@
 # restore_failure
 
-## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server vt run build`
+## `remote-cache-server start`
+
+```
+```
+
+## `VP_REMOTE_CACHE=read-write VP_RUN_INTERNAL_HIDE_PENDING_UPLOADS=1 remote-cache-server run --github-actions vt run build`
 
 ```
 $ vtt write-file dist/output.txt built
@@ -26,7 +31,7 @@ A file where the output directory goes makes restoring fail.
 ```
 ```
 
-## `remote-cache-server vt run build`
+## `remote-cache-server run vt run build`
 
 The remote hit can't be restored, so the task fails.
 
@@ -36,7 +41,7 @@ The remote hit can't be restored, so the task fails.
 $ vtt write-file dist/output.txt built ◉ remote cache hit, replaying
 ✗ Cache restore failed: failed to extract the output archive: failed to unpack `<workspace>/dist/output.txt`: failed to unpack `dist/output.txt` into `<workspace>/dist/output.txt`: <os error>
 
-[remote-cache] POST /fetch 200 exact
+[remote-cache] POST /fetch 200 exact [1]
 [remote-cache] GET /blob/1 200
 ```
 
@@ -79,7 +84,7 @@ The downloaded archive was removed, and the entry wasn't cached locally.
 ```
 ```
 
-## `remote-cache-server vt run build`
+## `remote-cache-server run vt run build`
 
 Nothing was cached locally, so the remote entry is fetched and restored again.
 
@@ -88,6 +93,11 @@ $ vtt write-file dist/output.txt built ◉ remote cache hit, replaying
 
 ---
 vt run: remote cache hit.
-[remote-cache] POST /fetch 200 exact
+[remote-cache] POST /fetch 200 exact [1]
 [remote-cache] GET /blob/1 200
+```
+
+## `remote-cache-server stop`
+
+```
 ```

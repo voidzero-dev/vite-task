@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "build": {
+      "command": "vtt fs mkdir tmp write tmp/a.js x rename tmp deps read deps/a.js",
+      "cache": true
+    }
+  }
+}

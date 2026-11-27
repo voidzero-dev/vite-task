@@ -1,11 +1,14 @@
 use std::path::Path;
 
-use bstr::{BString, ByteSlice};
+use allocator_api2::{alloc::Allocator, vec::Vec};
+use bstr::ByteSlice;
+
+use super::to_vec_in;
 
 #[derive(Debug, Clone)]
-pub struct Shebang {
-    pub interpreter: BString,
-    pub arguments: Vec<BString>,
+pub struct Shebang<A: Allocator> {
+    pub interpreter: Vec<u8, A>,
+    pub arguments: Vec<Vec<u8, A>, A>,
 }
 
 const fn is_whitespace(c: u8) -> bool {
@@ -61,7 +64,8 @@ impl Default for ParseShebangOptions {
     }
 }
 
-/// Parses the shebang line of the executable at `path` the way the kernel does.
+/// Parses the shebang line of the executable at `path` the way the kernel
+/// does, copying the interpreter and arguments into `allocator`.
 ///
 /// Returns `ENOEXEC` where the kernel would refuse the script instead of
 /// running a truncated interpreter path.
@@ -69,11 +73,12 @@ impl Default for ParseShebangOptions {
 /// # Panics
 ///
 /// Panics if `options.max_line_len` is larger than 512.
-pub fn parse_shebang(
+pub fn parse_shebang<A: Allocator + Clone>(
     mut peek_executable: impl FnMut(&Path, &mut [u8]) -> nix::Result<usize>,
     path: &Path,
     options: ParseShebangOptions,
-) -> Result<Option<Shebang>, nix::Error> {
+    allocator: A,
+) -> Result<Option<Shebang<A>>, nix::Error> {
     let mut buf = [0u8; MACOS_MAX_LINE_LEN];
     let buf = &mut buf[..options.max_line_len];
 
@@ -110,21 +115,17 @@ pub fn parse_shebang(
     }
     let arguments_buf = line[interpreter.len()..].trim_ascii_start().as_bstr();
 
-    let arguments: Vec<BString> = if options.split_arguments {
-        arguments_buf
-            .split(|ch| is_whitespace(*ch))
-            .filter_map(|arg| {
-                let arg = arg.trim_ascii();
-                if arg.is_empty() { None } else { Some(arg.as_bstr().to_owned()) }
-            })
-            .collect()
-    } else if arguments_buf.is_empty() {
-        vec![]
-    } else {
-        vec![arguments_buf.to_owned()]
-    };
+    let mut arguments = Vec::new_in(allocator.clone());
+    if options.split_arguments {
+        arguments.extend(arguments_buf.split(|ch| is_whitespace(*ch)).filter_map(|arg| {
+            let arg = arg.trim_ascii();
+            if arg.is_empty() { None } else { Some(to_vec_in(arg, allocator.clone())) }
+        }));
+    } else if !arguments_buf.is_empty() {
+        arguments.push(to_vec_in(arguments_buf, allocator.clone()));
+    }
 
-    Ok(Some(Shebang { interpreter: interpreter.as_bstr().to_owned(), arguments }))
+    Ok(Some(Shebang { interpreter: to_vec_in(interpreter, allocator), arguments }))
 }
 
 // #[derive(Debug)]
@@ -223,7 +224,7 @@ pub fn parse_shebang(
 //         let shebang = parse_shebang(&mut buf, "#! /bin/sh a \n".as_bytes())
 //             .unwrap()
 //             .unwrap();
-//         assert_eq!(shebang.interpreter, "/bin/sh");
+//         assert_eq!(shebang.interpreter, b"/bin/sh");
 //         assert_eq!(shebang.arguments.as_one().as_bytes(), b"a");
 //         assert_eq!(
 //             shebang
@@ -241,7 +242,7 @@ pub fn parse_shebang(
 //         let shebang = parse_shebang(&mut buf, "#! /bin/sh a  b\tc \n".as_bytes())
 //             .unwrap()
 //             .unwrap();
-//         assert_eq!(shebang.interpreter, "/bin/sh");
+//         assert_eq!(shebang.interpreter, b"/bin/sh");
 //         assert_eq!(
 //             shebang
 //                 .arguments
@@ -285,9 +286,11 @@ pub fn parse_shebang(
 mod tests {
     use std::path::Path;
 
+    use allocator_api2::alloc::Global;
+
     use super::*;
 
-    fn parse(content: &[u8], options: ParseShebangOptions) -> nix::Result<Option<Shebang>> {
+    fn parse(content: &[u8], options: ParseShebangOptions) -> nix::Result<Option<Shebang<Global>>> {
         parse_shebang(
             |_, buf| {
                 let len = content.len().min(buf.len());
@@ -296,10 +299,11 @@ mod tests {
             },
             Path::new("/script"),
             options,
+            Global,
         )
     }
 
-    fn script_with_interpreter_len(len: usize) -> (Vec<u8>, Vec<u8>) {
+    fn script_with_interpreter_len(len: usize) -> (std::vec::Vec<u8>, std::vec::Vec<u8>) {
         let interpreter = [b"/".as_slice(), &vec![b'x'; len - 1]].concat();
         let script = [b"#!".as_slice(), &interpreter, b"\necho hi\n"].concat();
         (script, interpreter)
@@ -310,7 +314,7 @@ mod tests {
         for options in [ParseShebangOptions::macos(), ParseShebangOptions::linux()] {
             let (script, interpreter) = script_with_interpreter_len(200);
             let shebang = parse(&script, options).unwrap().unwrap();
-            assert_eq!(shebang.interpreter, interpreter);
+            assert_eq!(shebang.interpreter, interpreter.as_slice());
         }
     }
 
@@ -319,7 +323,7 @@ mod tests {
         // "#!" + 509 bytes + "\n" is exactly 512 bytes.
         let (script, interpreter) = script_with_interpreter_len(509);
         let shebang = parse(&script, ParseShebangOptions::macos()).unwrap().unwrap();
-        assert_eq!(shebang.interpreter, interpreter);
+        assert_eq!(shebang.interpreter, interpreter.as_slice());
 
         let (script, _) = script_with_interpreter_len(510);
         assert_eq!(parse(&script, ParseShebangOptions::macos()).unwrap_err(), nix::Error::ENOEXEC);
@@ -337,8 +341,8 @@ mod tests {
         let script =
             [b"#!/bin/sh -e ".as_slice(), &[b' '; 200], b"# comment", &[b'x'; 400]].concat();
         let shebang = parse(&script, ParseShebangOptions::macos()).unwrap().unwrap();
-        assert_eq!(shebang.interpreter, "/bin/sh");
-        assert_eq!(shebang.arguments, vec![BString::from("-e")]);
+        assert_eq!(shebang.interpreter, b"/bin/sh");
+        assert_eq!(shebang.arguments, [b"-e"]);
     }
 
     #[test]
@@ -346,7 +350,7 @@ mod tests {
         // "#!" + 253 bytes + "\n" is exactly 256 bytes.
         let (script, interpreter) = script_with_interpreter_len(253);
         let shebang = parse(&script, ParseShebangOptions::linux()).unwrap().unwrap();
-        assert_eq!(shebang.interpreter, interpreter);
+        assert_eq!(shebang.interpreter, interpreter.as_slice());
 
         let (script, _) = script_with_interpreter_len(254);
         assert_eq!(parse(&script, ParseShebangOptions::linux()).unwrap_err(), nix::Error::ENOEXEC);
@@ -355,8 +359,8 @@ mod tests {
     #[test]
     fn linux_accepts_missing_newline_at_end_of_file() {
         let shebang = parse(b"#!/bin/sh -e", ParseShebangOptions::linux()).unwrap().unwrap();
-        assert_eq!(shebang.interpreter, "/bin/sh");
-        assert_eq!(shebang.arguments, vec![BString::from("-e")]);
+        assert_eq!(shebang.interpreter, b"/bin/sh");
+        assert_eq!(shebang.arguments, [b"-e"]);
     }
 
     #[test]
@@ -365,7 +369,7 @@ mod tests {
         let interpreter = [b"/".as_slice(), &[b'x'; 252]].concat();
         let script = [b"#!".as_slice(), &interpreter, b" ", &[b'a'; 100]].concat();
         let shebang = parse(&script, ParseShebangOptions::linux()).unwrap().unwrap();
-        assert_eq!(shebang.interpreter, interpreter);
+        assert_eq!(shebang.interpreter, interpreter.as_slice());
         assert!(shebang.arguments.is_empty());
     }
 
@@ -379,9 +383,9 @@ mod tests {
     fn linux_truncates_long_arguments() {
         let script = [b"#!/bin/sh ".as_slice(), &[b'a'; 300], b"\n"].concat();
         let shebang = parse(&script, ParseShebangOptions::linux()).unwrap().unwrap();
-        assert_eq!(shebang.interpreter, "/bin/sh");
+        assert_eq!(shebang.interpreter, b"/bin/sh");
         // 256-byte buffer, minus "#!/bin/sh " and the reserved last byte.
-        assert_eq!(shebang.arguments, vec![BString::from(vec![b'a'; 256 - 10 - 1])]);
+        assert_eq!(shebang.arguments, [[b'a'; 256 - 10 - 1]]);
     }
 
     #[test]

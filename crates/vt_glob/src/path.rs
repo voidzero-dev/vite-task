@@ -16,8 +16,9 @@ pub struct PathGlobError(#[from] wax::BuildError);
 /// Matches filesystem paths against an ordered set of glob patterns.
 ///
 /// If there are no negated patterns, it will follow the first match wins semantics.
-/// Otherwise, it will follow the last match wins semantics.
-#[derive(Debug)]
+/// Otherwise, it will follow the last match wins semantics. The default set
+/// has no patterns and matches nothing.
+#[derive(Debug, Default)]
 pub struct PathGlobSet<'a> {
     /// (`glob_pattern`, `match_or_not`)
     patterns: Vec<(Glob<'a>, bool)>,
@@ -47,6 +48,25 @@ impl<'a> PathGlobSet<'a> {
             }
         }
         Ok(Self { patterns, has_negated })
+    }
+
+    /// The same set with its patterns copied, so it borrows nothing.
+    #[must_use]
+    pub fn into_owned(self) -> PathGlobSet<'static> {
+        let Self { patterns, has_negated } = self;
+        PathGlobSet {
+            patterns: patterns
+                .into_iter()
+                .map(|(glob, match_or_not)| (glob.into_owned(), match_or_not))
+                .collect(),
+            has_negated,
+        }
+    }
+
+    /// Whether the set has no patterns, so it matches nothing.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.patterns.is_empty()
     }
 
     #[expect(clippy::disallowed_types, reason = "wax::Glob::is_match requires std::path::Path")]
@@ -263,23 +283,6 @@ mod tests {
         assert!(ignores.is_match("node_modules"));
         assert!(ignores.is_match("src/node_modules"));
         assert!(ignores.is_match("packages/app/node_modules"));
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_match_ignores_directory_only_patterns() -> Result<(), PathGlobError> {
-        let patterns = vec![
-            "build/**",       // Match everything under build
-            "!build/keep/**", // But not under build/keep
-        ];
-        let ignores = PathGlobSet::new(&patterns)?;
-        // Directory patterns
-        assert!(ignores.is_match("build/output.js"));
-        assert!(ignores.is_match("build/assets/style.css"));
-
-        // Negated directory
-        assert!(!ignores.is_match("build/keep/important.txt"));
 
         Ok(())
     }

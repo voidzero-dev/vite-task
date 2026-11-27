@@ -1,13 +1,13 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(not(test), no_std)]
 
-#[cfg(unix)]
+#[cfg(any(unix, target_os = "none"))]
 mod unix;
 #[cfg(windows)]
 mod windows;
 
 pub use platform::{Mapping, ShmHandle, create, open, remove};
-#[cfg(unix)]
+#[cfg(any(unix, target_os = "none"))]
 use unix as platform;
 #[cfg(windows)]
 use windows as platform;
@@ -249,6 +249,25 @@ mod tests {
             let (logical_size, endpoint_allocation) = backing_file_sizes(&path);
             assert_eq!(logical_size, PRODUCTION_SIZE as u64);
             assert!(endpoint_allocation < MAX_ENDPOINT_ALLOCATION);
+        }
+    }
+
+    /// A 4 GiB view placed by the system lands on Cygwin's fixed-address
+    /// shared regions, which breaks every MSYS2 program a tracked task starts
+    /// (vite-task#830). Windows 10 1803 and later can place it above them.
+    #[cfg(windows)]
+    #[test]
+    fn four_gib_mapping_lies_above_the_cygwin_fixed_layout() {
+        const PRODUCTION_SIZE: usize = 4 * 1024 * 1024 * 1024;
+
+        let path = BackingPath::new();
+        let handle = create(path.as_c_str(), PRODUCTION_SIZE).unwrap();
+        for mapping in [handle.map().unwrap(), open(path.as_c_str()).unwrap().map().unwrap()] {
+            assert!(
+                mapping.as_ptr() as usize >= super::windows::ABOVE_CYGWIN_FIXED_LAYOUT,
+                "view at {:p}",
+                mapping.as_ptr(),
+            );
         }
     }
 
