@@ -1,3 +1,5 @@
+use fspy_nostd::OwnedFd;
+
 use super::*;
 
 #[test]
@@ -192,40 +194,166 @@ fn accepts_page_congruent_segment_incongruent_with_large_p_align() {
 }
 
 #[test]
-#[should_panic(expected = "overlapping ELF segments")]
 fn rejects_overlapping_load_segments() {
     let page = fspy_nostd::param::page_size();
     let mut bytes = std::vec![0xa5; 2 * page];
     write_header(&mut bytes, 2, 0x80);
     load(&mut bytes, 0, 0, 0x200, 0x200, abi::PF_R | abi::PF_X, page);
     load(&mut bytes, 1, 0x100, 0x200, 0x200, abi::PF_R | abi::PF_W, page);
-    map_bytes(&bytes);
+    let fd = open_bytes(&bytes);
+    let file = File::open(fd.as_fd()).unwrap();
+    assert_eq!(file.validate_segments(page).unwrap_err(), Error::NOEXEC);
 }
 
 #[test]
 fn reports_no_interpreter_when_pt_interp_is_absent() {
     let page = fspy_nostd::param::page_size();
-    let file = File::new(open_bytes(&fixture(page, 0x180, abi::PF_R | abi::PF_W)));
-    assert!(file.interpreter().is_none());
+    let fd = open_bytes(&fixture(page, 0x180, abi::PF_R | abi::PF_W));
+    let file = File::open(fd.as_fd()).unwrap();
+    assert!(file.interpreter().unwrap().is_none());
 }
 
 #[test]
 fn accepts_pt_interp_padded_with_extra_nuls() {
-    let file = File::new(open_bytes(&interp_image(b"ld.so\0\0\0")));
-    let path = file.interpreter().unwrap();
+    let fd = open_bytes(&interp_image(b"ld.so\0\0\0"));
+    let file = File::open(fd.as_fd()).unwrap();
+    let path = file.interpreter().unwrap().unwrap();
     assert_eq!(path.as_units(), b"ld.so");
 }
 
 #[test]
-#[should_panic(expected = "unterminated PT_INTERP")]
-fn rejects_unterminated_pt_interp() {
-    let _ = File::new(open_bytes(&interp_image(b"ld.so"))).interpreter();
+fn rejects_unterminated_and_empty_pt_interp() {
+    let fd_unterm = open_bytes(&interp_image(b"ld.so"));
+    assert_eq!(File::open(fd_unterm.as_fd()).unwrap().interpreter().err(), Some(Error::NOEXEC));
+
+    let fd_empty = open_bytes(&interp_image(b"\0\0\0"));
+    assert_eq!(File::open(fd_empty.as_fd()).unwrap().interpreter().err(), Some(Error::NOEXEC));
 }
 
 #[test]
-#[should_panic(expected = "empty PT_INTERP path")]
-fn rejects_empty_pt_interp() {
-    let _ = File::new(open_bytes(&interp_image(b"\0\0\0"))).interpreter();
+fn validate_exec_checks_valid_and_invalid_images_without_closing_fd() {
+    let page = fspy_nostd::param::page_size();
+
+    // Valid ET_DYN (PIE) image.
+    let valid_pie = open_bytes(&fixture(page, 0x180, abi::PF_R | abi::PF_W));
+    assert_eq!(crate::validate_exec(valid_pie.as_fd()), Ok(()));
+    // Verify `fd` was NOT closed by `validate_exec`.
+    assert!(fs::fstat(valid_pie.as_fd()).is_ok());
+
+    // Valid ET_EXEC image.
+    let mut exec_bytes = fixture(page, 0x180, abi::PF_R | abi::PF_W);
+    exec_bytes[16..18].copy_from_slice(&abi::ET_EXEC.to_le_bytes());
+    let valid_exec = open_bytes(&exec_bytes);
+    assert_eq!(crate::validate_exec(valid_exec.as_fd()), Ok(()));
+    assert!(fs::fstat(valid_exec.as_fd()).is_ok());
+
+    // Non-ELF -> NOEXEC, fd stays open.
+    let non_elf = open_bytes(b"#!/bin/sh\necho hi\n");
+    assert_eq!(crate::validate_exec(non_elf.as_fd()), Err(Error::NOEXEC));
+    assert!(fs::fstat(non_elf.as_fd()).is_ok());
+
+    // Truncated ELF header -> NOEXEC.
+    let truncated = open_bytes(&exec_bytes[..32]);
+    assert_eq!(crate::validate_exec(truncated.as_fd()), Err(Error::NOEXEC));
+
+    // Wrong architecture -> NOEXEC.
+    let mut bad_arch = fixture(page, 0x180, abi::PF_R | abi::PF_W);
+    bad_arch[18..20].copy_from_slice(&0_u16.to_le_bytes());
+    let bad_arch_fd = open_bytes(&bad_arch);
+    assert_eq!(crate::validate_exec(bad_arch_fd.as_fd()), Err(Error::NOEXEC));
+
+    // Executable PT_GNU_STACK -> NOEXEC.
+    let mut exec_stack = std::vec![0; 2 * page];
+    write_header(&mut exec_stack, 2, 0x200);
+    load(&mut exec_stack, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    Phdr {
+        p_type: abi::PT_GNU_STACK,
+        p_flags: abi::PF_R | abi::PF_W | abi::PF_X,
+        p_offset: 0,
+        p_vaddr: 0,
+        p_filesz: 0,
+        p_memsz: 0,
+        p_align: 16,
+    }
+    .write_to(&mut exec_stack, 1);
+    let exec_stack_fd = open_bytes(&exec_stack);
+    assert_eq!(crate::validate_exec(exec_stack_fd.as_fd()), Err(Error::NOEXEC));
+
+    // Missing PT_INTERP -> NOENT.
+    let missing_interp_path = b"/nonexistent-fspy-interp-for-test\0";
+    let mut missing_interp = std::vec![0; 2 * page];
+    write_header(&mut missing_interp, 2, 0x200);
+    load(&mut missing_interp, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    let path_off = page - missing_interp_path.len();
+    missing_interp[path_off..page].copy_from_slice(missing_interp_path);
+    Phdr {
+        p_type: abi::PT_INTERP,
+        p_flags: abi::PF_R,
+        p_offset: u64::try_from(path_off).unwrap(),
+        p_vaddr: u64::try_from(path_off).unwrap(),
+        p_filesz: u64::try_from(missing_interp_path.len()).unwrap(),
+        p_memsz: u64::try_from(missing_interp_path.len()).unwrap(),
+        p_align: 1,
+    }
+    .write_to(&mut missing_interp, 1);
+    let missing_interp_fd = open_bytes(&missing_interp);
+    assert_eq!(crate::validate_exec(missing_interp_fd.as_fd()), Err(Error::NOENT));
+    assert!(fs::fstat(missing_interp_fd.as_fd()).is_ok());
+
+    // Valid PT_INTERP pointing to a valid ET_DYN interpreter succeeds; pointing
+    // to an ET_EXEC interpreter fails with NOEXEC.
+    let dyn_interp_file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(dyn_interp_file.path(), fixture(page, 0x180, abi::PF_R | abi::PF_W)).unwrap();
+    let dyn_interp_path =
+        std::ffi::CString::new(dyn_interp_file.path().as_os_str().as_encoded_bytes()).unwrap();
+    let mut with_valid_interp = std::vec![0; 2 * page];
+    write_header(&mut with_valid_interp, 2, 0x200);
+    load(&mut with_valid_interp, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    let pbytes = dyn_interp_path.as_bytes_with_nul();
+    let p_off = page - pbytes.len();
+    with_valid_interp[p_off..page].copy_from_slice(pbytes);
+    Phdr {
+        p_type: abi::PT_INTERP,
+        p_flags: abi::PF_R,
+        p_offset: u64::try_from(p_off).unwrap(),
+        p_vaddr: u64::try_from(p_off).unwrap(),
+        p_filesz: u64::try_from(pbytes.len()).unwrap(),
+        p_memsz: u64::try_from(pbytes.len()).unwrap(),
+        p_align: 1,
+    }
+    .write_to(&mut with_valid_interp, 1);
+    let valid_dyn_fd = open_bytes(&with_valid_interp);
+    assert_eq!(crate::validate_exec(valid_dyn_fd.as_fd()), Ok(()));
+
+    // Overwrite interpreter with ET_EXEC -> validate_exec rejects with NOEXEC.
+    std::fs::write(dyn_interp_file.path(), &exec_bytes).unwrap();
+    assert_eq!(crate::validate_exec(valid_dyn_fd.as_fd()), Err(Error::NOEXEC));
+}
+
+#[test]
+fn maps_et_dyn_with_high_nonzero_p_vaddr_without_underflow() {
+    let page = fspy_nostd::param::page_size();
+    let high_vaddr = 0x7000_0000_0000_u64;
+    let mut bytes = std::vec![0x3c; 2 * page];
+    write_header(&mut bytes, 1, high_vaddr + 0x200);
+    Phdr {
+        p_type: abi::PT_LOAD,
+        p_flags: abi::PF_R | abi::PF_X,
+        p_offset: 0,
+        p_vaddr: high_vaddr,
+        p_filesz: u64::try_from(page + 0x100).unwrap(),
+        p_memsz: u64::try_from(page + 0x100).unwrap(),
+        p_align: u64::try_from(page).unwrap(),
+    }
+    .write_to(&mut bytes, 0);
+
+    let file = open_bytes(&bytes);
+    let parsed = File::open(file.as_fd()).unwrap();
+    let layout = parsed.validate_segments(page).unwrap();
+    let image = parsed.map(page, &layout);
+    let mapped_base = image.bias.wrapping_add(layout.low);
+    assert_eq!(image.entry, mapped_base + 0x200);
+    assert_eq!(image.phdr, Some(mapped_base + EHDR_SIZE));
 }
 
 fn fixture(page: usize, memory_size: usize, flags: u32) -> std::vec::Vec<u8> {
@@ -318,7 +446,11 @@ fn load(
 }
 
 fn map_bytes(bytes: &[u8]) -> Image {
-    File::new(open_bytes(bytes)).map(fspy_nostd::param::page_size())
+    let page = fspy_nostd::param::page_size();
+    let fd = open_bytes(bytes);
+    let file = File::open(fd.as_fd()).unwrap();
+    let layout = file.validate_segments(page).unwrap();
+    file.map(page, &layout)
 }
 
 fn open_bytes(bytes: &[u8]) -> OwnedFd {

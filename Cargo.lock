@@ -1475,6 +1475,7 @@ dependencies = [
  "elf",
  "fspy_nostd",
  "linux-raw-sys 0.12.1",
+ "syscalls",
  "tempfile",
 ]
 

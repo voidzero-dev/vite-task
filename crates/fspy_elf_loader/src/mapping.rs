@@ -1,7 +1,7 @@
 use core::{ptr, ptr::NonNull, slice};
 
 use fspy_nostd::{
-    BorrowedFd,
+    BorrowedFd, Error, Result,
     mm::{self, MapFlags, ProtFlags},
 };
 
@@ -17,6 +17,17 @@ pub const fn align_up(value: usize, alignment: usize) -> usize {
     assert!(alignment.is_power_of_two(), "invalid ELF alignment");
     let mask = sub(alignment, 1);
     add(value, mask) & !mask
+}
+
+pub const fn try_align_up(value: usize, alignment: usize) -> Option<usize> {
+    if !alignment.is_power_of_two() {
+        return None;
+    }
+    let mask = alignment - 1;
+    match value.checked_add(mask) {
+        Some(sum) => Some(sum & !mask),
+        None => None,
+    }
 }
 
 pub fn word(value: u64) -> usize {
@@ -72,16 +83,23 @@ impl Mapping {
         mapping
     }
 
-    pub fn file(fd: BorrowedFd<'_>, len: usize) -> Self {
-        Self::check_len(len);
+    pub fn try_file(fd: BorrowedFd<'_>, len: usize) -> Result<Self> {
+        if len == 0 || isize::try_from(len).is_err() {
+            return Err(Error::NOEXEC);
+        }
         // One contiguous view makes file-offset parsing possible. This is
         // separate from the segments mapped at their final execution addresses.
         // SAFETY: private read-only view at a kernel-selected address. The
-        // exec_elf contract keeps the file unchanged while this view is used.
+        // caller keeps the file unchanged while this view is used.
         let ptr =
-            unsafe { mm::mmap(ptr::null_mut(), len, ProtFlags::READ, MapFlags::PRIVATE, fd, 0) }
-                .expect("cannot map ELF metadata");
-        Self::new(ptr.cast(), len)
+            unsafe { mm::mmap(ptr::null_mut(), len, ProtFlags::READ, MapFlags::PRIVATE, fd, 0) }?;
+        let Some(ptr) = NonNull::new(ptr.cast()) else {
+            // SAFETY: this successful mapping is owned here, but address zero
+            // cannot back Rust references, so release it before failing.
+            let _ = unsafe { mm::munmap(ptr, len) };
+            return Err(Error::NOMEM);
+        };
+        Ok(Self { ptr, len })
     }
 
     fn check_len(len: usize) {

@@ -19,27 +19,44 @@
 #[cfg(test)]
 extern crate std;
 
-use fspy_nostd::{CStr, OwnedFd, Thin, env::AuxEntry};
-use linux_raw_sys::auxvec::AT_PAGESZ;
+use fspy_nostd::{BorrowedFd, CStr, OwnedFd, Result, Thin, env::AuxEntry};
+use linux_raw_sys::{auxvec::AT_PAGESZ, prctl::PR_SET_NAME};
+use syscalls::Sysno;
 
 mod image;
 mod mapping;
 mod stack;
 
+/// Validates that `fd` refers to a loadable ELF64 executable (and, if present,
+/// a valid `PT_INTERP` dynamic interpreter) without mapping execution segments,
+/// mutating process state, or closing `fd`.
+///
+/// # Errors
+///
+/// Returns [`fspy_nostd::Error::NOEXEC`] for malformed or unsupported ELF
+/// images (including wrong architecture, non-ELF64, executable `PT_GNU_STACK`,
+/// fixed-address `PT_INTERP`, or nested `PT_INTERP`), or the underlying OS
+/// error if `fd` or its `PT_INTERP` cannot be inspected or opened.
+pub fn validate_exec(fd: BorrowedFd<'_>) -> Result<()> {
+    image::validate_exec_fd(fd, fspy_nostd::param::page_size())
+}
+
 /// Loads an ELF executable into the current process and enters it.
 ///
 /// Takes ownership of a private executable descriptor and closes it after
-/// mapping. Loads the executable and, when present, its `PT_INTERP`. Builds an
-/// initial stack and transfers control to the interpreter, or to the
-/// executable when there is no interpreter.
+/// mapping. Loads the executable and, when present, its `PT_INTERP`. Sets the
+/// process name (`PR_SET_NAME`) to the basename of `execfn`, sizes the new
+/// stack from `RLIMIT_STACK` (clamped to `[8 MiB, 64 MiB]`), builds an initial
+/// stack, and transfers control to the interpreter, or to the executable when
+/// there is no interpreter.
 ///
-/// `execfn` is the original execution name used for `AT_EXECFN`; it need not
-/// match `argv[0]`. Arguments and environment entries are copied to the new
-/// stack. `inherited_auxv` borrows entries from the loader's original kernel
-/// stack, excluding `AT_NULL`. Its `AT_PAGESZ` supplies the page size used for
-/// mapping. Image-specific entries are replaced, reusable entries are
-/// preserved, and referenced data is copied where needed. The resulting
-/// vector ends with `AT_NULL`.
+/// `execfn` is the original execution name used for `AT_EXECFN` and
+/// `PR_SET_NAME`; it need not match `argv[0]`. Arguments and environment
+/// entries are copied to the new stack. `inherited_auxv` borrows entries from
+/// the loader's original kernel stack, excluding `AT_NULL`. Its `AT_PAGESZ`
+/// supplies the page size used for mapping. Image-specific entries are
+/// replaced, reusable entries are preserved, and referenced data is copied
+/// where needed. The resulting vector ends with `AT_NULL`.
 ///
 /// Path resolution, shebang handling, and execution-policy checks belong to
 /// the caller. This function does not perform kernel exec cleanup: installed
@@ -51,10 +68,9 @@ mod stack;
 /// x86-64, with a non-executable stack. Both PIE (`ET_DYN`) and fixed-address
 /// (`ET_EXEC`) images are supported, with or without `PT_INTERP`.
 /// Fixed-address images must not overlap any existing process mappings.
-/// The new stack has a fixed 8 MiB capacity and a guard page. Existing loader
-/// mappings, the old stack, and kernel process metadata (including `/proc`
-/// identity and `brk`) are retained. This does not emulate a complete exec.
-/// Processor-specific GNU properties are not applied.
+/// Existing loader mappings, the old stack, and kernel process metadata
+/// (including `/proc` identity and `brk`) are retained. This does not emulate
+/// a complete exec. Processor-specific GNU properties are not applied.
 ///
 /// # Safety
 ///
@@ -87,25 +103,39 @@ pub unsafe fn exec_elf<'a>(
         .expect("missing AT_PAGESZ")
         .value;
     assert!(page_size.is_power_of_two(), "invalid AT_PAGESZ");
-    let executable = image::File::new(elf_file);
+
+    let executable = image::File::open(elf_file.as_fd()).expect("invalid ELF executable");
+    let executable_layout =
+        executable.validate_segments(page_size).expect("invalid ELF executable segments");
+    assert!(executable_layout.has_phdr, "program headers are not mapped by PT_LOAD");
+
     // PT_INTERP names a second ELF file. Loading it here lets us delegate
     // dynamic linking and libc startup to the program's own interpreter.
     // Static and static-PIE images omit it; the executable is the startup image.
-    let interpreter = executable.interpreter().map(|path| {
-        let fd = fspy_nostd::fs::openat(
+    let interp_path = executable.interpreter().expect("invalid PT_INTERP");
+    let interp_fd = interp_path.map(|path| {
+        fspy_nostd::fs::openat(
             fspy_nostd::CWD,
             path,
             fspy_nostd::fs::OFlags::RDONLY | fspy_nostd::fs::OFlags::CLOEXEC,
             fspy_nostd::fs::Mode::empty(),
         )
-        .expect("cannot open ELF interpreter");
-        let file = image::File::new(fd);
-        assert!(file.is_dynamic(), "fixed-address PT_INTERP is unsupported");
-        assert!(file.interpreter().is_none(), "nested PT_INTERP is unsupported");
-        file
+        .expect("cannot open ELF interpreter")
     });
-    let executable_image = executable.map(page_size);
-    let interpreter_image = interpreter.as_ref().map(|file| file.map(page_size));
+    let interpreter = interp_fd.as_ref().map(|fd| {
+        let file = image::File::open(fd.as_fd()).expect("invalid ELF interpreter");
+        assert!(file.is_dynamic(), "fixed-address PT_INTERP is unsupported");
+        assert!(
+            file.interpreter().expect("invalid nested PT_INTERP").is_none(),
+            "nested PT_INTERP is unsupported"
+        );
+        let layout = file.validate_segments(page_size).expect("invalid ELF interpreter segments");
+        (file, layout)
+    });
+
+    let executable_image = executable.map(page_size, &executable_layout);
+    let interpreter_image = interpreter.as_ref().map(|(file, layout)| file.map(page_size, layout));
+
     // SAFETY: the caller supplies live auxiliary payloads from this process.
     let stack = unsafe {
         stack::build(
@@ -118,15 +148,22 @@ pub unsafe fn exec_elf<'a>(
             page_size,
         )
     };
+
+    // Match kernel execve's `/proc/self/comm` basename update.
+    set_process_name(execfn);
+
     // With PT_INTERP, the interpreter runs first even though AT_ENTRY points
     // at the executable. It uses that value to hand off after linking.
     // Without PT_INTERP, AT_BASE is 0 and the executable's e_entry starts.
     let entry = interpreter_image.as_ref().map_or(executable_image.entry, |image| image.entry);
+
     // File mappings keep their backing storage alive after close. Release
     // only our parsing views and descriptors, then retain the execution maps
     // so Rust destructors cannot unmap code the target is about to use.
     drop(interpreter);
+    drop(interp_fd);
     drop(executable);
+    drop(elf_file);
     executable_image.retain();
     if let Some(image) = interpreter_image {
         image.retain();
@@ -134,6 +171,18 @@ pub unsafe fn exec_elf<'a>(
     // SAFETY: the images and stack are initialized and retained. The caller
     // permits abandoning the current stack and entering the trusted image.
     unsafe { enter(entry, stack) }
+}
+
+/// Sets `/proc/self/comm` via `prctl(PR_SET_NAME)` to the basename of `execfn`
+/// truncated to 15 bytes + NUL.
+fn set_process_name(execfn: CStr<'_, Thin>) {
+    let bytes = execfn.count().as_units();
+    let basename = bytes.rsplit(|&b| b == b'/').next().unwrap_or(bytes);
+    let mut comm = [0_u8; 16];
+    let len = basename.len().min(15);
+    comm[..len].copy_from_slice(&basename[..len]);
+    // SAFETY: `PR_SET_NAME` reads a NUL-terminated buffer of up to 16 bytes.
+    let _ = unsafe { syscalls::syscall!(Sysno::prctl, PR_SET_NAME, comm.as_ptr(), 0, 0, 0) };
 }
 
 // No Rust code may execute after replacing SP. The dynamic interpreter is

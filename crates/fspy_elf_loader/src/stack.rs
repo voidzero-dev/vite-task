@@ -14,7 +14,7 @@
 //! layout. This consumes iterators once without any heap allocator.
 
 use core::{
-    mem::{align_of, size_of},
+    mem::{MaybeUninit, align_of, size_of},
     ptr,
 };
 
@@ -23,20 +23,64 @@ use fspy_nostd::{
     env::AuxEntry,
     mm::{self, MprotectFlags},
 };
-use linux_raw_sys::auxvec as abi;
+use linux_raw_sys::{
+    auxvec as abi,
+    general::{RLIM_INFINITY, RLIMIT_STACK, rlimit64},
+};
+use syscalls::Sysno;
 
 use crate::{
     image::{Image, PHDR_SIZE},
-    mapping::{Mapping, add, sub},
+    mapping::{Mapping, add, align_up, sub},
 };
 
-// Includes startup data and room for the target's downward-growing call stack.
-// This MVP uses a fixed mapping rather than Linux's growable initial stack.
-const CAPACITY: usize = 8 * 1024 * 1024;
+// Clamp target stack capacity derived from `RLIMIT_STACK` to `[8 MiB, 64 MiB]`.
+const MIN_CAPACITY: usize = 8 * 1024 * 1024;
+const MAX_CAPACITY: usize = 64 * 1024 * 1024;
 // Reserve at least 64 KiB below the initial SP above the guard page so a huge
 // argv/envp fails loudly during loading instead of immediately SIGSEGVing at
 // process entry.
 const MIN_STACK_HEADROOM: usize = 64 * 1024;
+
+const RLIM_INFINITY_U64: u64 = (RLIM_INFINITY as i64).cast_unsigned();
+
+/// Computes the target stack capacity from an `RLIMIT_STACK` soft limit,
+/// treating `RLIM_INFINITY` as 64 MiB, rounding up to `page`, and clamping to
+/// `[8 MiB, 64 MiB]`.
+const fn clamp_stack_capacity(rlim_cur: u64, page: usize) -> usize {
+    if rlim_cur == RLIM_INFINITY_U64 {
+        return MAX_CAPACITY;
+    }
+    if rlim_cur >= MAX_CAPACITY as u64 {
+        return MAX_CAPACITY;
+    }
+    #[expect(clippy::cast_possible_truncation, reason = "bounded by MAX_CAPACITY above")]
+    let raw = rlim_cur as usize;
+    if raw <= MIN_CAPACITY {
+        return MIN_CAPACITY;
+    }
+    let aligned = align_up(raw, page);
+    if aligned > MAX_CAPACITY { MAX_CAPACITY } else { aligned }
+}
+
+/// Queries the current process's `RLIMIT_STACK` soft limit via `prlimit64` and
+/// returns the clamped stack capacity, falling back to 8 MiB on error.
+fn query_stack_capacity(page: usize) -> usize {
+    let mut rlim = MaybeUninit::<rlimit64>::zeroed();
+    // SAFETY: `pid = 0` queries the calling process, `new_limit` is NULL, and
+    // `rlim` points to writable `rlimit64` storage.
+    let res = unsafe {
+        syscalls::syscall!(Sysno::prlimit64, 0_usize, RLIMIT_STACK, 0_usize, rlim.as_mut_ptr())
+    };
+    match res {
+        Ok(_) => {
+            // SAFETY: a successful `prlimit64` initialized `rlim`.
+            let rlim = unsafe { rlim.assume_init() };
+            clamp_stack_capacity(rlim.rlim_cur, page)
+        }
+        Err(_) => MIN_CAPACITY,
+    }
+}
 
 struct Builder {
     mapping: Mapping,
@@ -48,8 +92,14 @@ struct Builder {
 
 impl Builder {
     fn new(page: usize) -> Self {
+        let capacity = query_stack_capacity(page);
+        Self::with_capacity(page, capacity)
+    }
+
+    fn with_capacity(page: usize, capacity: usize) -> Self {
         assert!(page.is_multiple_of(align_of::<usize>()), "invalid page size");
-        let mapping = Mapping::reserve(add(CAPACITY, page));
+        assert!(capacity.is_multiple_of(page), "stack capacity must be page-aligned");
+        let mapping = Mapping::reserve(add(capacity, page));
         // Keep the low page inaccessible so an overflow reaching it faults
         // instead of writing into a neighboring mapping.
         // SAFETY: the first page remains a guard; the remaining pages are
@@ -57,7 +107,7 @@ impl Builder {
         unsafe {
             mm::mprotect(
                 mapping.ptr.as_ptr().add(page).cast(),
-                CAPACITY,
+                capacity,
                 MprotectFlags::READ | MprotectFlags::WRITE,
             )
         }
@@ -259,13 +309,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn clamp_stack_capacity_bounds_and_aligns_rlimit_values() {
+        let page = 4096;
+        assert_eq!(clamp_stack_capacity(0, page), MIN_CAPACITY);
+        assert_eq!(clamp_stack_capacity(1024 * 1024, page), MIN_CAPACITY);
+        assert_eq!(clamp_stack_capacity(MIN_CAPACITY as u64, page), MIN_CAPACITY);
+        assert_eq!(clamp_stack_capacity(MIN_CAPACITY as u64 + 1, page), MIN_CAPACITY + page);
+        assert_eq!(clamp_stack_capacity(16 * 1024 * 1024, page), 16 * 1024 * 1024);
+        assert_eq!(clamp_stack_capacity(MAX_CAPACITY as u64, page), MAX_CAPACITY);
+        assert_eq!(clamp_stack_capacity(128 * 1024 * 1024, page), MAX_CAPACITY);
+        assert_eq!(clamp_stack_capacity(RLIM_INFINITY_U64, page), MAX_CAPACITY);
+    }
+
+    #[test]
     fn args_and_envs_are_contiguous_in_forward_order() {
         let args = [c"program", c"", c"\xff", c"longer-argument"];
         let envs = [c"EMPTY=", c"BYTES=\xff", c"A=B=C"];
         let page = fspy_nostd::param::page_size();
         for argc in 0..=args.len() {
             for envc in 0..=envs.len() {
-                let mut builder = Builder::new(page);
+                let mut builder = Builder::with_capacity(page, MIN_CAPACITY);
                 let thin = |value: &'static core::ffi::CStr| {
                     CStr::from_units_with_nul(value.to_bytes_with_nul()).unwrap().as_thin()
                 };
@@ -353,8 +416,8 @@ mod tests {
     #[should_panic(expected = "initial stack exceeds capacity")]
     fn rejects_stack_without_call_headroom() {
         let page = fspy_nostd::param::page_size();
-        let mut builder = Builder::new(page);
-        let huge = std::vec![b'x'; CAPACITY - MIN_STACK_HEADROOM / 2];
+        let mut builder = Builder::with_capacity(page, MIN_CAPACITY);
+        let huge = std::vec![b'x'; MIN_CAPACITY - MIN_STACK_HEADROOM / 2];
         let _ = builder.copy(&huge);
         let _ = builder.finish();
     }
