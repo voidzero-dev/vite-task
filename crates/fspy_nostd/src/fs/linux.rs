@@ -20,14 +20,8 @@ pub(super) const S_IWUSR: ModeBits = linux_raw_sys::general::S_IWUSR;
 pub(super) const S_IFMT: ModeBits = linux_raw_sys::general::S_IFMT;
 pub(super) const S_IFREG: ModeBits = linux_raw_sys::general::S_IFREG;
 
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    reason = "successful Linux syscalls always return a non-negative c_int file descriptor"
-)]
-fn raw_fd_from_syscall(fd: usize) -> RawFd {
-    debug_assert!(i32::try_from(fd).is_ok());
-    fd as RawFd
+fn raw_fd_from_syscall(fd: usize) -> Result<RawFd> {
+    RawFd::try_from(fd).map_err(|_| Error::OVERFLOW)
 }
 
 #[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
@@ -70,7 +64,7 @@ pub(super) fn openat<R>(
     }
     .map_err(Error::from)?;
 
-    let fd = raw_fd_from_syscall(fd);
+    let fd = raw_fd_from_syscall(fd)?;
 
     // SAFETY: a successful `openat` returns a new owned descriptor.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
@@ -121,7 +115,7 @@ pub fn fcntl_dupfd(fd: BorrowedFd<'_>, min_fd: RawFd) -> Result<OwnedFd> {
     }
     .map_err(Error::from)?;
 
-    let dup = raw_fd_from_syscall(dup);
+    let dup = raw_fd_from_syscall(dup)?;
 
     // SAFETY: a successful `F_DUPFD` returns a new owned descriptor.
     Ok(unsafe { OwnedFd::from_raw_fd(dup) })
@@ -145,7 +139,7 @@ pub fn fcntl_dupfd_cloexec(fd: BorrowedFd<'_>, min_fd: RawFd) -> Result<OwnedFd>
     }
     .map_err(Error::from)?;
 
-    let dup = raw_fd_from_syscall(dup);
+    let dup = raw_fd_from_syscall(dup)?;
 
     // SAFETY: a successful `F_DUPFD_CLOEXEC` returns a new owned descriptor.
     Ok(unsafe { OwnedFd::from_raw_fd(dup) })
