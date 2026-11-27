@@ -216,6 +216,11 @@ static OWNER_PID: AtomicI32 = AtomicI32::new(0);
 
 static USER_SIGSYS_ACTION: SeqAction = SeqAction::new_dfl();
 
+/// Returns `true` when the target's virtualized `SIGSYS` disposition is `SIG_IGN`.
+pub fn is_sigsys_ignored() -> bool {
+    USER_SIGSYS_ACTION.read().sa_handler == SIG_IGN_RAW
+}
+
 /// Bit `sig - 1` records whether the target included `SIGSYS` in `sa_mask`
 /// when installing a handler for signal `sig` (`1..=64`, `sig != SIGSYS`).
 static SA_MASK_HAS_SIGSYS: AtomicU64 = AtomicU64::new(0);
@@ -1394,10 +1399,17 @@ fn terminate_with_default_sigsys() -> ! {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
+
+    /// Serializes unit tests that mutate the process-wide `TID_SLOTS` /
+    /// `OCCUPIED_SLOTS` tables.
+    static TID_SLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn blocked_tid_table_tracks_insert_lookup_pending_and_remove() {
+        let _guard = TID_SLOT_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         clear_all_tid_slots();
         let pid = getpid();
         assert_eq!(lookup_tid_flags(pid, 42), 0);
@@ -1432,6 +1444,7 @@ mod tests {
 
     #[test]
     fn discard_all_pending_clears_every_thread_in_pid_only() {
+        let _guard = TID_SLOT_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         clear_all_tid_slots();
         let pid = getpid();
         set_tid_blocked(pid, 10, true).unwrap();
