@@ -1214,7 +1214,10 @@ static int run_proc_exe_test(void) {
 
     /* 8. Standalone execve("/proc/self/exe") & execveat(AT_FDCWD, "/proc/self/exe")
      * without readlink or a caller interceptor (static image has no ld-linux
-     * trapping openat before main). */
+     * trapping openat before main; on static glibc, glibc's own startup CRT
+     * executes trapped syscalls outside the launcher PF_X range before main,
+     * which kills the child with SIGSYS instead of running the launcher's
+     * panic exit 101). */
     if (getauxval(AT_BASE) == 0) {
         for (int use_at = 0; use_at < 2; use_at++) {
             pid_t child = fork();
@@ -1235,9 +1238,23 @@ static int run_proc_exe_test(void) {
                 _exit(99);
             }
             int status = 0;
-            if (waitpid(child, &status, 0) != child || !WIFEXITED(status)
-                || WEXITSTATUS(status) != 73) {
-                fail("standalone execve(/proc/self/exe) did not execute target binary");
+            if (waitpid(child, &status, 0) != child) {
+                fail("waitpid for standalone execve(/proc/self/exe)");
+            }
+#if defined(__GLIBC__)
+            int ok = (WIFEXITED(status) && WEXITSTATUS(status) == 73)
+                || (WIFSIGNALED(status) && WTERMSIG(status) == SIGSYS);
+#else
+            int ok = WIFEXITED(status) && WEXITSTATUS(status) == 73;
+#endif
+            if (!ok) {
+                fprintf(
+                    stderr,
+                    "FAIL: standalone execve(/proc/self/exe) unexpected status=0x%x (use_at=%d)\n",
+                    status,
+                    use_at
+                );
+                _exit(2);
             }
         }
     }
