@@ -18,9 +18,9 @@ use syscalls::Sysno;
 use super::arch::{call_on_stack, syscall6};
 
 /// Minimum size of each private `SIGSYS` handler stack (64 KiB, page-aligned on
-/// 4 KiB, 16 KiB, and 64 KiB kernels). Raised dynamically via [`init`] if the
-/// kernel advertises a larger `AT_MINSIGSTKSZ` (e.g. `AArch64` SVE/SME or AVX-512
-/// / AMX hosts).
+/// 4 KiB, 16 KiB, and 64 KiB kernels). Raised dynamically via [`init_and_warm`]
+/// if the kernel advertises a larger `AT_MINSIGSTKSZ` (e.g. `AArch64` SVE/SME
+/// or AVX-512 / AMX hosts).
 pub const MIN_SIGSYS_STACK_SIZE: usize = 64 * 1024;
 
 /// Number of reusable stacks retained in the lock-free cache.
