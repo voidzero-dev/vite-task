@@ -443,6 +443,87 @@ fn accepts_non_ev_current_ident_and_header_versions() {
     }
 }
 
+#[test]
+fn validate_exec_rejects_et_exec_overlapping_launcher_region_with_eexist() {
+    let page = fspy_nostd::param::page_size();
+    let eexist = Error::from_raw_os_error(linux_raw_sys::errno::EEXIST.cast_signed());
+    let (region_base, region_limit) = crate::LAUNCHER_REGION;
+
+    let make_et_exec = |vaddr: usize, memsz: usize| {
+        let mut bytes = std::vec![0xa5; 2 * page];
+        let vaddr_u64 = u64::try_from(vaddr).unwrap();
+        write_header(&mut bytes, 1, vaddr_u64 + 0x200);
+        bytes[16..18].copy_from_slice(&abi::ET_EXEC.to_le_bytes());
+        Phdr {
+            p_type: abi::PT_LOAD,
+            p_flags: abi::PF_R | abi::PF_X,
+            p_offset: 0,
+            p_vaddr: vaddr_u64,
+            p_filesz: u64::try_from(page).unwrap(),
+            p_memsz: u64::try_from(memsz).unwrap(),
+            p_align: u64::try_from(page).unwrap(),
+        }
+        .write_to(&mut bytes, 0);
+        bytes
+    };
+
+    // 1. Segment strictly inside LAUNCHER_REGION -> EEXIST.
+    let inside = open_bytes(&make_et_exec(region_base + 4 * page, 2 * page));
+    assert_eq!(crate::validate_exec(inside.as_fd()), Err(eexist));
+
+    // 2a. Segment straddling the lower boundary of LAUNCHER_REGION -> EEXIST.
+    let straddle_low = open_bytes(&make_et_exec(region_base - page, 2 * page));
+    assert_eq!(crate::validate_exec(straddle_low.as_fd()), Err(eexist));
+
+    // 2b. Segment straddling the upper boundary of LAUNCHER_REGION -> EEXIST.
+    let straddle_high = open_bytes(&make_et_exec(region_limit - page, 2 * page));
+    assert_eq!(crate::validate_exec(straddle_high.as_fd()), Err(eexist));
+
+    // 3. Segment fully containing LAUNCHER_REGION -> EEXIST.
+    let containing =
+        open_bytes(&make_et_exec(region_base - page, (region_limit - region_base) + 2 * page));
+    assert_eq!(crate::validate_exec(containing.as_fd()), Err(eexist));
+
+    // 4. PIE executable with a fixed-address (ET_EXEC) PT_INTERP overlapping
+    //    LAUNCHER_REGION -> EEXIST.
+    let interp_file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(interp_file.path(), make_et_exec(region_base + 2 * page, page)).unwrap();
+    let interp_path =
+        std::ffi::CString::new(interp_file.path().as_os_str().as_encoded_bytes()).unwrap();
+    let mut pie_with_bad_interp = std::vec![0; 2 * page];
+    write_header(&mut pie_with_bad_interp, 2, 0x200);
+    load(&mut pie_with_bad_interp, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    let pbytes = interp_path.as_bytes_with_nul();
+    let p_off = page - pbytes.len();
+    pie_with_bad_interp[p_off..page].copy_from_slice(pbytes);
+    Phdr {
+        p_type: abi::PT_INTERP,
+        p_flags: abi::PF_R,
+        p_offset: u64::try_from(p_off).unwrap(),
+        p_vaddr: u64::try_from(p_off).unwrap(),
+        p_filesz: u64::try_from(pbytes.len()).unwrap(),
+        p_memsz: u64::try_from(pbytes.len()).unwrap(),
+        p_align: 1,
+    }
+    .write_to(&mut pie_with_bad_interp, 1);
+    let pie_fd = open_bytes(&pie_with_bad_interp);
+    assert_eq!(crate::validate_exec(pie_fd.as_fd()), Err(eexist));
+
+    // 5. Normal ET_EXEC outside LAUNCHER_REGION (and adjacent non-overlapping
+    //    boundaries) -> Ok(()).
+    for (vaddr, memsz) in
+        [(0x40_0000_usize, 2 * page), (region_base - 2 * page, 2 * page), (region_limit, 2 * page)]
+    {
+        let ok_fd = open_bytes(&make_et_exec(vaddr, memsz));
+        assert_eq!(
+            crate::validate_exec(ok_fd.as_fd()),
+            Ok(()),
+            "non-overlapping ET_EXEC at {vaddr:#x}..{:#x} should validate",
+            vaddr + memsz
+        );
+    }
+}
+
 fn fixture(page: usize, memory_size: usize, flags: u32) -> std::vec::Vec<u8> {
     let mut bytes = std::vec![0xa5; 3 * page];
     write_header(&mut bytes, 2, 0x200);
