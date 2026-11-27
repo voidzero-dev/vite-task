@@ -75,6 +75,15 @@ Do not try to close these in this crate unless a real target requires it:
 - **Execute-only (`0111`) binaries.** Userland ELF mapping opens the executable
   with `O_RDONLY` to validate headers and `mmap` segments, so execute-only
   (`chmod 0111`) binaries cannot be mapped and fail with `EACCES`.
+- **Deleted or replaced `/proc/self/exe` targets.** Virtualized `/proc/self/exe`
+  stores the target's path at load time rather than keeping an extra target fd
+  open (which would break clean FD-table invariants):
+  - When the target was a `memfd` or already unlinked at load time, `readlink`
+    still reports the `" (deleted)"` path, while path-following `open`/`stat`/
+    `execve` on `/proc/self/exe` reach the launcher instead.
+  - When a target binary is replaced in place after load (e.g. via `rename`),
+    path-following calls on `/proc/self/exe` follow the saved path to the new
+    file rather than the original unlinked inode.
 - **Launcher path visibility across mount changes.** Every tracked `execve`
   re-enters the materialized freestanding launcher binary on disk. If a tracked
   process tree changes its mount namespace or root (`chroot`, `pivot_root`, or

@@ -706,8 +706,19 @@ mod runtime {
             Ok(_) | Err(syscalls::Errno::ESRCH) => false,
             // Treat any other error (`EPERM`, `EINVAL`, `ENOSYS`, etc.)
             // conservatively as still sharing VM so a live `CLONE_VM` child's
-            // exec scratch is never freed prematurely.
-            Err(_) => true,
+            // exec scratch is never freed prematurely. If a self-probe now
+            // also fails (e.g. because the target installed a seccomp filter
+            // blocking `kcmp` after startup), flip `KCMP_VM_AVAILABLE` off so
+            // subsequent `CLONE_VM` children switch to `set_tid_address`
+            // instead of leaking unboundedly; nodes parked before the target
+            // installed its filter (or just before the flag flipped) stay
+            // boundedly leaked.
+            Err(_) => {
+                if kcmp_vm(my_pid, my_pid).is_err() {
+                    KCMP_VM_AVAILABLE.store(false, Ordering::Relaxed);
+                }
+                true
+            }
         }
     }
 

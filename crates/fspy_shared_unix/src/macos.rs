@@ -101,6 +101,21 @@ impl<'a> EncodedPayload<'a> {
         self.payload.ipc_channel_conf
     }
 
+    /// Injects `DYLD_INSERT_LIBRARIES` and `FSPY_PAYLOAD` into `exec.envs`
+    /// without running path resolution, shebang parsing, or SIP swapping.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NOMEM`] if environment storage cannot be allocated.
+    pub fn inject_env<A: Allocator + Clone>(&self, exec: &mut Exec<A>) -> Result<()> {
+        append_path_env(
+            &mut exec.envs,
+            DYLD_INSERT_LIBRARIES,
+            self.payload.preload_path.as_bytes(),
+        );
+        ensure_env(&mut exec.envs, PAYLOAD_ENV_NAME.as_bytes(), self.encoded_string.as_bytes())
+    }
+
     /// Resolves shebangs, reports every read path, swaps SIP-protected
     /// `/bin`/`/usr/bin` utilities for bundled equivalents, and configures
     /// `DYLD_INSERT_LIBRARIES` + `FSPY_PAYLOAD` on `exec`.
@@ -210,16 +225,7 @@ impl<'a> EncodedPayload<'a> {
         };
 
         if injectable {
-            append_path_env(
-                &mut exec.envs,
-                DYLD_INSERT_LIBRARIES,
-                self.payload.preload_path.as_bytes(),
-            );
-            ensure_env(
-                &mut exec.envs,
-                PAYLOAD_ENV_NAME.as_bytes(),
-                self.encoded_string.as_bytes(),
-            )?;
+            self.inject_env(exec)?;
         } else {
             remove_path_env(
                 &mut exec.envs,
@@ -435,5 +441,63 @@ mod tests {
         };
         payload.prepare_exec(&mut exec, |_| {}).unwrap();
         assert_eq!(exec.program.as_slice(), b"/tmp/fspy_bash");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn inject_env_sets_dyld_and_payload_without_modifying_program() {
+        use allocator_api2::alloc::Global;
+        use fspy_shared::ipc::{IpcStr, channel::channel};
+
+        use super::{DYLD_INSERT_LIBRARIES, EncodedPayload, PAYLOAD_ENV_NAME, Payload};
+        use crate::nostd_exec::{Exec, to_vec_in};
+
+        let receiver = channel(1 << 30, Global).unwrap();
+        let preload = b"/tmp/fspy_preload.dylib";
+        let payload = EncodedPayload::encode(
+            Payload {
+                ipc_channel_conf: receiver.conf(),
+                preload_path: IpcStr::from_bytes(preload),
+                bash_path: IpcStr::from_bytes(b"/tmp/fspy_bash"),
+                coreutils_path: IpcStr::from_bytes(b"/tmp/fspy_coreutils"),
+            },
+            Global,
+        );
+
+        let mut envs = allocator_api2::vec::Vec::new_in(Global);
+        envs.push((to_vec_in(b"CUSTOM_ONLY", Global), Some(to_vec_in(b"1", Global))));
+        let mut exec = Exec {
+            program: to_vec_in(b"./helper", Global),
+            args: allocator_api2::vec::Vec::new_in(Global),
+            envs,
+        };
+        payload.inject_env(&mut exec).unwrap();
+        assert_eq!(exec.program.as_slice(), b"./helper");
+        let find_env = |key: &[u8]| {
+            exec.envs.iter().find(|(k, _)| k.as_slice() == key).and_then(|(_, v)| v.as_deref())
+        };
+        assert_eq!(find_env(b"CUSTOM_ONLY"), Some(b"1".as_slice()));
+        assert_eq!(find_env(DYLD_INSERT_LIBRARIES), Some(preload.as_slice()));
+        assert_eq!(find_env(PAYLOAD_ENV_NAME.as_bytes()), Some(payload.encoded_string.as_bytes()));
+
+        // Existing user `DYLD_INSERT_LIBRARIES` is preserved with ours appended.
+        let mut envs = allocator_api2::vec::Vec::new_in(Global);
+        envs.push((
+            to_vec_in(DYLD_INSERT_LIBRARIES, Global),
+            Some(to_vec_in(b"/tmp/user.dylib", Global)),
+        ));
+        let mut exec = Exec {
+            program: to_vec_in(b"/bin/sh", Global),
+            args: allocator_api2::vec::Vec::new_in(Global),
+            envs,
+        };
+        payload.inject_env(&mut exec).unwrap();
+        assert_eq!(exec.program.as_slice(), b"/bin/sh");
+        let dyld = exec
+            .envs
+            .iter()
+            .find(|(k, _)| k.as_slice() == DYLD_INSERT_LIBRARIES)
+            .and_then(|(_, v)| v.as_deref());
+        assert_eq!(dyld, Some(b"/tmp/user.dylib:/tmp/fspy_preload.dylib".as_slice()));
     }
 }

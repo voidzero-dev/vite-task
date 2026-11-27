@@ -243,6 +243,36 @@ fn append_relative_chdir(key: usize, rel: &[u8]) {
     drop(spare);
 }
 
+fn rekey_spawn_chdir(old_key: usize, new_key: usize) {
+    if old_key == new_key
+        || old_key == 0
+        || new_key == 0
+        || ACTIVE_CHDIRS.load(Ordering::Acquire) == 0
+    {
+        return;
+    }
+    ensure_init();
+    // SAFETY: `SPAWN_CHDIRS.mutex` serializes access to `entries`, and updating
+    // a key in place performs no heap allocation or deallocation.
+    unsafe {
+        libc::pthread_mutex_lock(SPAWN_CHDIRS.mutex.get());
+        let map = &mut *SPAWN_CHDIRS.entries.get();
+        if let Some(entry) = map.iter_mut().find(|(k, _)| *k == old_key) {
+            entry.0 = new_key;
+        }
+        libc::pthread_mutex_unlock(SPAWN_CHDIRS.mutex.get());
+    }
+}
+
+fn read_actions_key(file_actions: *const libc::posix_spawn_file_actions_t) -> usize {
+    if file_actions.is_null() {
+        0
+    } else {
+        // SAFETY: caller passed a non-null `file_actions` pointer.
+        (unsafe { *file_actions }) as usize
+    }
+}
+
 fn remove_spawn_chdir(key: usize) {
     if ACTIVE_CHDIRS.load(Ordering::Acquire) == 0 {
         return;
@@ -264,10 +294,20 @@ fn remove_spawn_chdir(key: usize) {
     drop(removed);
 }
 
+enum ResolvedChdir<A: allocator_api2::alloc::Allocator> {
+    /// No chdir action is registered on `file_actions`.
+    None,
+    /// Resolved absolute working directory for the child.
+    Dir(AllocVec<u8, A>),
+    /// A registered `addfchdir_np(fd)` could not be resolved in the parent
+    /// (for example, when an earlier `addopen` creates `fd` only in the child).
+    Unresolvable,
+}
+
 fn resolve_spawn_chdir_in<A: allocator_api2::alloc::Allocator + Copy>(
     file_actions: *const libc::posix_spawn_file_actions_t,
     allocator: A,
-) -> Option<AllocVec<u8, A>> {
+) -> ResolvedChdir<A> {
     enum SnapshotBase {
         Cwd,
         Abs,
@@ -280,12 +320,12 @@ fn resolve_spawn_chdir_in<A: allocator_api2::alloc::Allocator + Copy>(
     }
 
     if file_actions.is_null() || ACTIVE_CHDIRS.load(Ordering::Acquire) == 0 {
-        return None;
+        return ResolvedChdir::None;
     }
     // SAFETY: caller passed a non-null `file_actions` pointer to `posix_spawn(p)`.
     let key = (unsafe { *file_actions }) as usize;
     if key == 0 {
-        return None;
+        return ResolvedChdir::None;
     }
     ensure_init();
 
@@ -331,7 +371,7 @@ fn resolve_spawn_chdir_in<A: allocator_api2::alloc::Allocator + Copy>(
         };
 
         match status {
-            Status::Missing => return None,
+            Status::Missing => return ResolvedChdir::None,
             Status::Found(base_kind) => break base_kind,
             Status::NeedCap { base, tail } => {
                 base_buf.reserve(base.saturating_sub(base_buf.len()));
@@ -341,17 +381,31 @@ fn resolve_spawn_chdir_in<A: allocator_api2::alloc::Allocator + Copy>(
     };
 
     // Resolve the base anchor outside `SPAWN_CHDIRS.mutex` at `posix_spawn(p)` time.
+    // Note: on current XNU, `PSFA_FCHDIR` resolves `fd` against the parent's
+    // descriptor table before `addopen`/`adddup2` actions run, matching
+    // `fd_path`. If a future kernel executes file actions sequentially and an
+    // earlier `addopen`/`adddup2` reuses a parent-open fd number for a
+    // different directory, `fd_path` would still see the parent's fd instead
+    // of the child's; for a child-only or closed fd, returning `Unresolvable`
+    // avoids resolving relative programs against the parent's CWD and preserves
+    // both env injection and the kernel's `EBADF`.
     match snapshot {
         SnapshotBase::Abs => {}
         SnapshotBase::Fd(fd) => {
-            // SAFETY: `fd` was accepted by `addfchdir_np`; invalid/closed fds yield `Ok(None)`.
-            let borrowed = unsafe { BorrowedFd::try_borrow_raw(fd) }?;
-            let dir = fd_path(allocator, borrowed).ok()??;
+            // SAFETY: `fd` was accepted by `addfchdir_np`; invalid/closed fds yield `None`.
+            let Some(borrowed) = (unsafe { BorrowedFd::try_borrow_raw(fd) }) else {
+                return ResolvedChdir::Unresolvable;
+            };
+            let Ok(Some(dir)) = fd_path(allocator, borrowed) else {
+                return ResolvedChdir::Unresolvable;
+            };
             base_buf.clear();
             base_buf.extend_from_slice(dir.as_units());
         }
         SnapshotBase::Cwd => {
-            let dir = fd_path(allocator, CWD).ok()??;
+            let Ok(Some(dir)) = fd_path(allocator, CWD) else {
+                return ResolvedChdir::None;
+            };
             base_buf.clear();
             base_buf.extend_from_slice(dir.as_units());
         }
@@ -363,7 +417,87 @@ fn resolve_spawn_chdir_in<A: allocator_api2::alloc::Allocator + Copy>(
         }
         base_buf.extend_from_slice(&tail_buf);
     }
-    Some(base_buf)
+    ResolvedChdir::Dir(base_buf)
+}
+
+intercept!(posix_spawn_file_actions_addopen: unsafe extern "C" fn(
+    file_actions: *mut libc::posix_spawn_file_actions_t,
+    filedes: c_int,
+    path: *const c_char,
+    oflag: c_int,
+    mode: libc::mode_t,
+) -> c_int);
+unsafe extern "C" fn posix_spawn_file_actions_addopen(
+    file_actions: *mut libc::posix_spawn_file_actions_t,
+    filedes: c_int,
+    path: *const c_char,
+    oflag: c_int,
+    mode: libc::mode_t,
+) -> c_int {
+    let old_key = read_actions_key(file_actions);
+    // SAFETY: forwarding caller arguments to the original libc function.
+    let ret = unsafe {
+        posix_spawn_file_actions_addopen::original()(file_actions, filedes, path, oflag, mode)
+    };
+    if ret == 0 {
+        // libsystem may `realloc` `*file_actions` as the action list grows.
+        rekey_spawn_chdir(old_key, read_actions_key(file_actions));
+    }
+    ret
+}
+
+intercept!(posix_spawn_file_actions_addclose: unsafe extern "C" fn(
+    file_actions: *mut libc::posix_spawn_file_actions_t,
+    filedes: c_int,
+) -> c_int);
+unsafe extern "C" fn posix_spawn_file_actions_addclose(
+    file_actions: *mut libc::posix_spawn_file_actions_t,
+    filedes: c_int,
+) -> c_int {
+    let old_key = read_actions_key(file_actions);
+    // SAFETY: forwarding caller arguments to the original libc function.
+    let ret = unsafe { posix_spawn_file_actions_addclose::original()(file_actions, filedes) };
+    if ret == 0 {
+        rekey_spawn_chdir(old_key, read_actions_key(file_actions));
+    }
+    ret
+}
+
+intercept!(posix_spawn_file_actions_adddup2: unsafe extern "C" fn(
+    file_actions: *mut libc::posix_spawn_file_actions_t,
+    filedes: c_int,
+    newfiledes: c_int,
+) -> c_int);
+unsafe extern "C" fn posix_spawn_file_actions_adddup2(
+    file_actions: *mut libc::posix_spawn_file_actions_t,
+    filedes: c_int,
+    newfiledes: c_int,
+) -> c_int {
+    let old_key = read_actions_key(file_actions);
+    // SAFETY: forwarding caller arguments to the original libc function.
+    let ret =
+        unsafe { posix_spawn_file_actions_adddup2::original()(file_actions, filedes, newfiledes) };
+    if ret == 0 {
+        rekey_spawn_chdir(old_key, read_actions_key(file_actions));
+    }
+    ret
+}
+
+intercept!(posix_spawn_file_actions_addinherit_np: unsafe extern "C" fn(
+    file_actions: *mut libc::posix_spawn_file_actions_t,
+    filedes: c_int,
+) -> c_int);
+unsafe extern "C" fn posix_spawn_file_actions_addinherit_np(
+    file_actions: *mut libc::posix_spawn_file_actions_t,
+    filedes: c_int,
+) -> c_int {
+    let old_key = read_actions_key(file_actions);
+    // SAFETY: forwarding caller arguments to the original libc function.
+    let ret = unsafe { posix_spawn_file_actions_addinherit_np::original()(file_actions, filedes) };
+    if ret == 0 {
+        rekey_spawn_chdir(old_key, read_actions_key(file_actions));
+    }
+    ret
 }
 
 intercept!(posix_spawn_file_actions_addchdir_np: unsafe extern "C" fn(
@@ -374,11 +508,12 @@ unsafe extern "C" fn posix_spawn_file_actions_addchdir_np(
     file_actions: *mut libc::posix_spawn_file_actions_t,
     path: *const c_char,
 ) -> c_int {
+    let old_key = read_actions_key(file_actions);
     // SAFETY: forwarding caller arguments to the original libc function.
     let ret = unsafe { posix_spawn_file_actions_addchdir_np::original()(file_actions, path) };
     if ret == 0 && !file_actions.is_null() && !path.is_null() {
-        // SAFETY: `original` succeeded on non-null `file_actions`.
-        let key = (unsafe { *file_actions }) as usize;
+        let key = read_actions_key(file_actions);
+        rekey_spawn_chdir(old_key, key);
         if key != 0 {
             // SAFETY: non-null `path` is a valid NUL-terminated C string.
             let c_path = unsafe { CStr::<Thin>::from_ptr(path.cast()) };
@@ -404,11 +539,12 @@ unsafe extern "C" fn posix_spawn_file_actions_addfchdir_np(
     file_actions: *mut libc::posix_spawn_file_actions_t,
     fd: c_int,
 ) -> c_int {
+    let old_key = read_actions_key(file_actions);
     // SAFETY: forwarding caller arguments to the original libc function.
     let ret = unsafe { posix_spawn_file_actions_addfchdir_np::original()(file_actions, fd) };
     if ret == 0 && !file_actions.is_null() {
-        // SAFETY: `original` succeeded on non-null `file_actions`.
-        let key = (unsafe { *file_actions }) as usize;
+        let key = read_actions_key(file_actions);
+        rekey_spawn_chdir(old_key, key);
         if key != 0 {
             set_spawn_chdir(key, SpawnChdir { base: ChdirBase::Fd(fd), tail: Box::from([]) });
         }
@@ -453,18 +589,38 @@ unsafe fn handle_posix_spawn(
         .expect("posix_spawn(p) unexpectedly called before client initialized in ctor");
 
     let arena = fspy_nostd_alloc::pooled_bump();
-    let spawn_cwd = resolve_spawn_chdir_in(file_actions, &arena);
-    // SAFETY: file, argv, and envp are valid pointers forwarded from posix_spawn(p).
-    let raw_command = match unsafe {
-        client.handle_exec_in_dir(
-            search_path,
-            spawn_cwd.as_deref(),
-            RawExec { prog: file, argv: argv.cast(), envp: envp.cast() },
-            &arena,
-        )
-    } {
-        Ok(raw) => raw,
-        Err(err) => return err.raw_os_error(),
+    let raw_in = RawExec { prog: file, argv: argv.cast(), envp: envp.cast() };
+    let raw_command = match resolve_spawn_chdir_in(file_actions, &arena) {
+        ResolvedChdir::Unresolvable
+            if file.addr() >= 4096 && {
+                // SAFETY: `file` is non-null and outside page 0, forwarded from `posix_spawn(p)`.
+                let file_bytes = unsafe { CStr::<Thin>::from_ptr(file.cast()) }.count().as_units();
+                !file_bytes.starts_with(b"/") && (!search_path || file_bytes.contains(&b'/'))
+            } =>
+        {
+            // SAFETY: file, argv, and envp are valid pointers forwarded from posix_spawn(p).
+            let mut exec = match unsafe { raw_in.to_exec(&arena) } {
+                Ok(exec) => exec,
+                Err(err) => return err.raw_os_error(),
+            };
+            if let Err(err) = client.inject_env(&mut exec) {
+                return err.raw_os_error();
+            }
+            RawExec::from_exec(exec)
+        }
+        resolved => {
+            let spawn_cwd = match resolved {
+                ResolvedChdir::Dir(dir) => Some(dir),
+                ResolvedChdir::None | ResolvedChdir::Unresolvable => None,
+            };
+            // SAFETY: file, argv, and envp are valid pointers forwarded from posix_spawn(p).
+            match unsafe {
+                client.handle_exec_in_dir(search_path, spawn_cwd.as_deref(), raw_in, &arena)
+            } {
+                Ok(raw) => raw,
+                Err(err) => return err.raw_os_error(),
+            }
+        }
     };
     // SAFETY: caller's pointers are forwarded unchanged, and `raw_command`'s
     // strings and arrays live in `arena`, which outlives this call.

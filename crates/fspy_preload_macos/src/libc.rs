@@ -67,4 +67,9 @@ unsafe extern "C" {
         file_actions: *mut posix_spawn_file_actions_t,
         fd: c_int,
     ) -> c_int;
+
+    pub unsafe fn posix_spawn_file_actions_addinherit_np(
+        file_actions: *mut posix_spawn_file_actions_t,
+        filedes: c_int,
+    ) -> c_int;
 }

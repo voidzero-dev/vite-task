@@ -5,7 +5,7 @@ use bstr::BStr;
 use fspy_nostd::{BorrowedFd, CStr, CWD, Error, Result, Thin};
 use fspy_nostd_alloc::fs::{fd_path, resolve_path_at};
 use fspy_shared::ipc::{AccessMode, IpcPath, channel::Sender};
-use fspy_shared_unix::{RawExec, macos::EncodedPayload};
+use fspy_shared_unix::{Exec, RawExec, macos::EncodedPayload};
 use libc::{c_char, c_int};
 
 use crate::which;
@@ -96,6 +96,16 @@ impl Client<'_> {
             self.send_path(AccessMode::Read, path);
         })?;
         Ok(RawExec::from_exec(exec))
+    }
+
+    /// Injects `DYLD_INSERT_LIBRARIES` and `FSPY_PAYLOAD` into `exec.envs`
+    /// without path resolution, shebang parsing, or SIP swapping.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NOMEM`] if environment storage cannot be allocated.
+    pub fn inject_env<A: Allocator + Clone>(&self, exec: &mut Exec<A>) -> Result<()> {
+        self.encoded_payload.inject_env(exec)
     }
 }
 

@@ -739,3 +739,192 @@ async fn posix_spawn_defers_relative_addchdir_and_addfchdir_resolution_to_spawn_
 
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn posix_spawn_addfchdir_np_child_only_fd_and_realloc_actions() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+    let sub = root.join("child_only_fd_dir");
+    fs::create_dir(&sub)?;
+
+    let marker = sub.join("marker_child_only_fd");
+    fs::write(&marker, "ok")?;
+
+    // Build a non-SIP relative `./helper` executable in `sub` by symlinking the
+    // test binary and passing `command_for_fn!`'s dispatch args.
+    let helper_cmd =
+        test_utils::command_for_fn!(marker.to_str().unwrap().to_owned(), |marker_path: String| {
+            assert_eq!(std::env::var("CUSTOM_ONLY").as_deref(), Ok("1"));
+            assert_eq!(fs::read(&marker_path).unwrap(), b"ok");
+        });
+    let helper_link = sub.join("helper");
+    std::os::unix::fs::symlink(&helper_cmd.program, &helper_link)?;
+    let helper_args: Vec<String> =
+        helper_cmd.args.into_iter().map(|s| s.into_string().unwrap()).collect();
+
+    // Place a decoy `./helper` in `root` (the parent's CWD) that fails if run,
+    // so we prove `ResolvedChdir::Unresolvable` never falls back to parent CWD.
+    write_executable(&root.join("helper"), "#!/bin/sh\nexit 99\n")?;
+
+    let args = (root.to_str().unwrap().to_owned(), sub.to_str().unwrap().to_owned(), helper_args);
+    let accesses =
+        track_fn!(args, |(root_dir, sub_dir, helper_args): (String, String, Vec<String>)| {
+            unsafe extern "C" {
+                fn posix_spawn_file_actions_addchdir_np(
+                    file_actions: *mut libc::posix_spawn_file_actions_t,
+                    path: *const libc::c_char,
+                ) -> libc::c_int;
+                fn posix_spawn_file_actions_addfchdir_np(
+                    file_actions: *mut libc::posix_spawn_file_actions_t,
+                    fd: libc::c_int,
+                ) -> libc::c_int;
+            }
+
+            std::env::set_current_dir(&root_dir).unwrap();
+
+            // Pick an fd number that is not open in the parent so `addopen`
+            // creates it exclusively in the spawned child.
+            let child_fd = (40..200)
+                // SAFETY: `F_GETFD` on a candidate fd only queries descriptor state.
+                .find(|&fd| unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1)
+                .expect("no unused fd in 40..200");
+
+            let sub_c = CString::new(sub_dir.as_str()).unwrap();
+            let prog = c"./helper";
+            let c_args: Vec<CString> =
+                helper_args.iter().map(|s| CString::new(s.as_str()).unwrap()).collect();
+            let mut argv: Vec<*mut libc::c_char> = Vec::with_capacity(c_args.len() + 2);
+            argv.push(prog.as_ptr().cast_mut());
+            for arg in &c_args {
+                argv.push(arg.as_ptr().cast_mut());
+            }
+            argv.push(std::ptr::null_mut());
+
+            // Explicit custom `envp` without inheriting `environ` (no `DYLD_INSERT_LIBRARIES`
+            // or `FSPY_PAYLOAD`); `fspy_preload_macos` must inject both into it.
+            let custom_env = c"CUSTOM_ONLY=1";
+            let envp = [custom_env.as_ptr().cast_mut(), std::ptr::null_mut()];
+
+            // 1. `addopen(child_fd, sub)` + `addfchdir_np(child_fd)` + `addclose(child_fd)`.
+            //    On current XNU, `PSFA_FCHDIR` checks the parent's fd table before
+            //    `addopen` runs and returns `EBADF`; on a POSIX.1-2024 sequential
+            //    kernel it succeeds in `sub`. Either way, fspy must not fail with
+            //    spurious `ENOENT` or execute the decoy `./helper` in `root_dir`.
+            let mut actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+            // SAFETY: valid uninitialized handle and NUL-terminated directory path.
+            unsafe {
+                assert_eq!(libc::posix_spawn_file_actions_init(&raw mut actions), 0);
+                assert_eq!(
+                    libc::posix_spawn_file_actions_addopen(
+                        &raw mut actions,
+                        child_fd,
+                        sub_c.as_ptr(),
+                        libc::O_RDONLY | libc::O_DIRECTORY,
+                        0,
+                    ),
+                    0
+                );
+                assert_eq!(posix_spawn_file_actions_addfchdir_np(&raw mut actions, child_fd), 0);
+                assert_eq!(libc::posix_spawn_file_actions_addclose(&raw mut actions, child_fd), 0);
+            }
+
+            let mut child: libc::pid_t = 0;
+            // SAFETY: all pointers are valid C strings/arrays and `actions` is initialized.
+            let rc = unsafe {
+                libc::posix_spawn(
+                    &raw mut child,
+                    prog.as_ptr(),
+                    &raw const actions,
+                    std::ptr::null(),
+                    argv.as_ptr(),
+                    envp.as_ptr(),
+                )
+            };
+            // SAFETY: destroying initialized `actions`.
+            unsafe { assert_eq!(libc::posix_spawn_file_actions_destroy(&raw mut actions), 0) };
+            if rc == 0 {
+                let mut status: libc::c_int = 0;
+                // SAFETY: `child` is our child and `status` is writable.
+                assert_eq!(unsafe { libc::waitpid(child, &raw mut status, 0) }, child);
+                assert!(
+                    libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                    "child failed with raw status {status:#x}"
+                );
+            } else {
+                assert_eq!(
+                    rc,
+                    libc::EBADF,
+                    "expected EBADF from XNU (or 0 on sequential kernels), not spurious errno {rc}"
+                );
+            }
+
+            // 2. `addchdir_np(sub)` followed by multiple file actions that force
+            //    libsystem to `realloc` `*file_actions`, with explicit custom `envp`:
+            //    verifies rekeying survives reallocation and child access is tracked.
+            let mut realloc_actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+            // SAFETY: valid uninitialized handle and NUL-terminated paths.
+            unsafe {
+                assert_eq!(libc::posix_spawn_file_actions_init(&raw mut realloc_actions), 0);
+                assert_eq!(
+                    posix_spawn_file_actions_addchdir_np(&raw mut realloc_actions, sub_c.as_ptr()),
+                    0
+                );
+                assert_eq!(
+                    libc::posix_spawn_file_actions_addopen(
+                        &raw mut realloc_actions,
+                        child_fd,
+                        c"/dev/null".as_ptr(),
+                        libc::O_RDONLY,
+                        0,
+                    ),
+                    0
+                );
+                assert_eq!(
+                    libc::posix_spawn_file_actions_adddup2(
+                        &raw mut realloc_actions,
+                        child_fd,
+                        child_fd + 1,
+                    ),
+                    0
+                );
+                assert_eq!(
+                    libc::posix_spawn_file_actions_addclose(&raw mut realloc_actions, child_fd),
+                    0
+                );
+                assert_eq!(
+                    libc::posix_spawn_file_actions_addclose(&raw mut realloc_actions, child_fd + 1),
+                    0
+                );
+            }
+            let mut child2: libc::pid_t = 0;
+            // SAFETY: all pointers are valid C strings/arrays and `realloc_actions` is initialized.
+            let rc2 = unsafe {
+                libc::posix_spawn(
+                    &raw mut child2,
+                    prog.as_ptr(),
+                    &raw const realloc_actions,
+                    std::ptr::null(),
+                    argv.as_ptr(),
+                    envp.as_ptr(),
+                )
+            };
+            // SAFETY: destroying initialized `realloc_actions`.
+            unsafe {
+                assert_eq!(libc::posix_spawn_file_actions_destroy(&raw mut realloc_actions), 0);
+            }
+            assert_eq!(rc2, 0, "posix_spawn(./helper) after file_actions realloc failed: {rc2}");
+
+            let mut status2: libc::c_int = 0;
+            // SAFETY: `child2` is our child and `status2` is writable.
+            assert_eq!(unsafe { libc::waitpid(child2, &raw mut status2, 0) }, child2);
+            assert!(
+                libc::WIFEXITED(status2) && libc::WEXITSTATUS(status2) == 0,
+                "child2 failed with raw status {status2:#x}"
+            );
+        })
+        .await?;
+
+    assert_contains(&accesses, &marker, PathAccess::Read);
+
+    Ok(())
+}
