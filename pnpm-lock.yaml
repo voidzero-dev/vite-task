@@ -90,6 +90,9 @@ catalogs:
     sharp:
       specifier: 0.35.5
       version: 0.35.5
+    tailwindcss:
+      specifier: 4.3.5
+      version: 4.3.5
     tsdown:
       specifier: 0.23.3
       version: 0.23.3
@@ -227,6 +230,9 @@ importers:
       sharp:
         specifier: 'catalog:'
         version: 0.35.5(@types/node@25.0.3)
+      tailwindcss:
+        specifier: 'catalog:'
+        version: 4.3.5
       tsdown:
         specifier: 'catalog:'
         version: 0.23.3(tsx@4.23.15)(typescript@7.1.0-dev.20261001.1)

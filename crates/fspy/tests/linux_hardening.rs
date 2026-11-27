@@ -272,7 +272,25 @@ async fn memfd_execveat_empty_path_tracks_child_accesses() -> anyhow::Result<()>
 
 #[test(tokio::test)]
 async fn deep_exec_chain_preserves_fd_env_and_seccomp_filter_hygiene() -> anyhow::Result<()> {
-    let cmd = vt_subprocess_test::command_for_fn!((), |()| {
+    // Capture any ambient non-CLOEXEC FDs inherited by the test runner itself
+    // (e.g. CI runner or jobserver descriptors) so we strictly assert zero
+    // leaked FDs introduced by `fspy` across the exec chain.
+    let mut inherited_fds: Vec<i32> = std::fs::read_dir("/proc/self/fd")
+        .unwrap()
+        .filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok())
+        .collect();
+    inherited_fds.retain(|&fd| {
+        if fd <= 2 {
+            return false;
+        }
+        // SAFETY: `F_GETFD` only queries flags and returns `-1` for the
+        // already-closed `read_dir("/proc/self/fd")` descriptor.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        flags >= 0 && (flags & libc::FD_CLOEXEC) == 0
+    });
+    inherited_fds.sort_unstable();
+
+    let cmd = vt_subprocess_test::command_for_fn!(inherited_fds, |inherited_fds: Vec<i32>| {
         use std::{ffi::CString, os::unix::ffi::OsStrExt as _};
 
         fn seccomp_filters() -> usize {
@@ -291,6 +309,9 @@ async fn deep_exec_chain_preserves_fd_env_and_seccomp_filter_hygiene() -> anyhow
             "__FSPY_BOOTSTRAP leaked into child environment"
         );
 
+        let depth: usize =
+            std::env::var("FSPY_TEST_EXEC_DEPTH").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+
         let cur_filters = seccomp_filters();
         assert!(cur_filters >= 1, "expected at least one seccomp filter");
 
@@ -302,20 +323,28 @@ async fn deep_exec_chain_preserves_fd_env_and_seccomp_filter_hygiene() -> anyhow
             );
         }
 
-        // Verify no unexpected high FDs leaked from launcher handoff (allow
-        // stdin/stdout/stderr and the `/proc/self/fd` directory handle itself).
+        // Verify no FDs leaked from the launcher handoff or across execs
+        // (ignoring stdin/stdout/stderr, the already-closed `/proc/self/fd`
+        // directory handle, and ambient non-CLOEXEC FDs inherited from the
+        // parent test runner).
         let open_fds: Vec<i32> = std::fs::read_dir("/proc/self/fd")
             .unwrap()
             .filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok())
             .collect();
-        let extra_fds: Vec<i32> = open_fds.into_iter().filter(|&fd| fd > 2).collect();
+        let leaked_fds: Vec<i32> = open_fds
+            .into_iter()
+            .filter(|&fd| fd > 2 && !inherited_fds.contains(&fd))
+            .filter(|&fd| {
+                // SAFETY: `F_GETFD` only queries descriptor flags and returns
+                // `-1` for the now-closed `read_dir("/proc/self/fd")` handle.
+                unsafe { libc::fcntl(fd, libc::F_GETFD) >= 0 }
+            })
+            .collect();
         assert!(
-            extra_fds.len() <= 2,
-            "unexpected leaked open FDs across exec chain: {extra_fds:?}"
+            leaked_fds.is_empty(),
+            "unexpected leaked open FDs at depth {depth} (inherited={inherited_fds:?}): {leaked_fds:?}"
         );
 
-        let depth: usize =
-            std::env::var("FSPY_TEST_EXEC_DEPTH").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
         if depth >= 5 {
             return;
         }

@@ -40,6 +40,7 @@
     "react-dom": "catalog:",
     "sass-embedded": "catalog:",
     "sharp": "catalog:",
+    "tailwindcss": "catalog:",
     "tsdown": "catalog:",
     "tsx": "catalog:",
     "typescript": "7.1.0-dev.20261001.1",

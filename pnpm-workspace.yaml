@@ -53,6 +53,7 @@ catalog:
   react-dom: 19.3.1
   sass-embedded: 1.108.2
   sharp: 0.35.5
+  tailwindcss: 4.3.5
   tsdown: 0.23.3
   tsx: 4.23.15
   typescript: ^6.0.3

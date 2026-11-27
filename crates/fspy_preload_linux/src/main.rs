@@ -156,9 +156,6 @@ mod runtime {
         Sysno::symlinkat,
         Sysno::execve,
         Sysno::execveat,
-        // Disable `io_uring` so runtimes such as libuv / Node.js fall back to
-        // standard filesystem syscalls instead of bypassing tracking via rings.
-        Sysno::io_uring_setup,
     ];
 
     #[cfg(target_arch = "aarch64")]
@@ -177,9 +174,6 @@ mod runtime {
         Sysno::symlinkat,
         Sysno::execve,
         Sysno::execveat,
-        // Disable `io_uring` so runtimes such as libuv / Node.js fall back to
-        // standard filesystem syscalls instead of bypassing tracking via rings.
-        Sysno::io_uring_setup,
     ];
 
     static INTERCEPTOR: SyscallInterceptor =
@@ -496,7 +490,6 @@ mod runtime {
         let borrow_dirfd = |raw: usize| unsafe { BorrowedFd::try_borrow_raw(arg_i32(raw)) };
 
         match call.sysno {
-            Sysno::io_uring_setup => Err(Error::NOSYS),
             Sysno::execve => handle_exec(
                 Some(CWD),
                 call.args[0],
@@ -960,18 +953,23 @@ mod runtime {
             // live until `cleanup_exec_slot` or post-detach reclamation drops it.
             let arena: &'static PageBump = unsafe { (*slot.arena.get()).as_ref().unwrap() };
 
+            if is_shared_vm_child {
+                let child_pid = getpid();
+                slot.active_tid.store(child_pid, Ordering::Release);
+                // Publish parked state and arm `set_tid_address` BEFORE
+                // `prepare_exec_in` so `SIGKILL` at any point (including during
+                // path resolution or ELF validation) leaves the slot reclaimable
+                // once the kernel's `mm_release()` clears `active_tid`.
+                slot.state.store(park_state(child_pid), Ordering::Release);
+                set_tid_address(&raw const slot.active_tid);
+            }
+
             match prepare_exec_in(dirfd, prog_ptr, argv_ptr, envp_ptr, flags, sigmask, arena) {
                 Ok((raw_out, duped_fd)) => {
-                    // SAFETY: Exclusive `SLOT_BUSY` ownership before publishing.
+                    // SAFETY: While this thread is alive and attached to the VM
+                    // (`active_tid != 0` for `CLONE_VM` children, or `SLOT_BUSY`
+                    // otherwise), no reclaimer can claim `slot`.
                     unsafe { *slot.duped_fd.get() = duped_fd };
-                    if is_shared_vm_child {
-                        let child_pid = getpid();
-                        slot.active_tid.store(child_pid, Ordering::Release);
-                        // Publish parked state BEFORE arming `set_tid_address` so
-                        // `SIGKILL` at any point leaves the slot reclaimable.
-                        slot.state.store(park_state(child_pid), Ordering::Release);
-                        set_tid_address(&raw const slot.active_tid);
-                    }
                     return Ok(SyscallAction::Execve {
                         prog: raw_out.prog.cast(),
                         argv: raw_out.argv.cast(),
@@ -980,7 +978,7 @@ mod runtime {
                     });
                 }
                 Err(err) => {
-                    // SAFETY: `slot` is exclusively owned; release it on error.
+                    // SAFETY: `slot` is still owned by this live thread; release it on error.
                     unsafe { cleanup_exec_slot(ptr::from_ref(slot).cast_mut().cast()) };
                     return Err(err);
                 }
@@ -999,27 +997,27 @@ mod runtime {
                 next: AtomicPtr::new(ptr::null_mut()),
                 active_tid: AtomicI32::new(child_pid),
                 child_pid,
-                parked: false,
+                parked: is_shared_vm_child,
                 arena: UnsafeCell::new(Some(page_bump())),
                 duped_fd: UnsafeCell::new(-1),
             });
+            if is_shared_vm_child {
+                // Publish onto `OVERFLOW_PARKED_HEAD` and arm `set_tid_address`
+                // BEFORE `prepare_exec_in` so `SIGKILL` at any point leaves the
+                // overflow scratch node reclaimable once `mm_release()` clears
+                // `active_tid`.
+                push_overflow_parked(ptr.as_ptr());
+                set_tid_address(&raw const (*ptr.as_ptr()).active_tid);
+            }
         }
         // SAFETY: `ptr` remains live until `cleanup_overflow_scratch` or post-detach sweep.
         let arena: &'static PageBump = unsafe { (*(*ptr.as_ptr()).arena.get()).as_ref().unwrap() };
         match prepare_exec_in(dirfd, prog_ptr, argv_ptr, envp_ptr, flags, sigmask, arena) {
             Ok((raw_out, duped_fd)) => {
-                // SAFETY: Exclusive ownership of `ptr` before publishing.
-                unsafe {
-                    *(*ptr.as_ptr()).duped_fd.get() = duped_fd;
-                    if is_shared_vm_child {
-                        (*ptr.as_ptr()).parked = true;
-                        // Publish onto `OVERFLOW_PARKED_HEAD` BEFORE arming
-                        // `set_tid_address` so `SIGKILL` at any point leaves
-                        // the overflow scratch node reclaimable.
-                        push_overflow_parked(ptr.as_ptr());
-                        set_tid_address(&raw const (*ptr.as_ptr()).active_tid);
-                    }
-                }
+                // SAFETY: While this thread is alive and attached (`active_tid != 0`
+                // for `CLONE_VM` children, or unparked otherwise), no reclaimer
+                // touches `duped_fd`.
+                unsafe { *(*ptr.as_ptr()).duped_fd.get() = duped_fd };
                 Ok(SyscallAction::Execve {
                     prog: raw_out.prog.cast(),
                     argv: raw_out.argv.cast(),
@@ -1028,7 +1026,7 @@ mod runtime {
                 })
             }
             Err(err) => {
-                // SAFETY: Not parked; release overflow scratch on resolution/validation failure.
+                // SAFETY: `ptr` is still owned by this live thread; release it on error.
                 unsafe { cleanup_overflow_scratch(ptr.as_ptr().cast()) };
                 Err(err)
             }
