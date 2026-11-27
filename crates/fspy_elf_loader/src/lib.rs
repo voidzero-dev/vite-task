@@ -212,8 +212,9 @@ pub unsafe fn copy_user_value<T: Copy>(addr: usize) -> Result<T> {
 /// # Errors
 ///
 /// Returns [`fspy_nostd::Error::NOEXEC`] for malformed or unsupported ELF
-/// images (such as wrong architecture or non-ELF64), or the underlying OS
-/// error if `fd` or its `PT_INTERP` cannot be inspected or opened.
+/// images (such as wrong architecture or non-ELF64), `EEXIST` if a fixed-address
+/// (`ET_EXEC`) executable or interpreter overlaps [`LAUNCHER_REGION`], or the
+/// underlying OS error if `fd` or its `PT_INTERP` cannot be inspected or opened.
 #[cfg(any(target_os = "linux", target_os = "none"))]
 pub fn validate_exec(fd: BorrowedFd<'_>) -> Result<()> {
     image::validate_exec_fd(fd, fspy_nostd::param::page_size())
