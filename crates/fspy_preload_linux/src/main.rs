@@ -417,8 +417,8 @@ mod runtime {
         }
     }
 
-    /// Reports a path-based syscall to the IPC channel without risking a
-    /// `SIGSEGV` if `path_ptr` is unreadable.
+    /// Reports a path-based syscall to the IPC channel. `path_ptr` is the
+    /// trapped syscall's own argument, which `fspy_elf_loader` assumes valid.
     fn report_path_at(
         call: &Syscall<'_>,
         dirfd: Option<BorrowedFd<'_>>,
@@ -436,7 +436,9 @@ mod runtime {
         let raw: &[u8] = if let Some(cached) = call.cached_cstr(path_ptr) {
             cached
         } else {
-            let Ok(Some(bytes)) = fspy_elf_loader::copy_user_cstr(path_ptr, &mut buf) else {
+            // SAFETY: `path_ptr` is the trapped syscall's path argument.
+            let Ok(Some(bytes)) = (unsafe { fspy_elf_loader::copy_user_cstr(path_ptr, &mut buf) })
+            else {
                 return;
             };
             bytes
@@ -603,7 +605,7 @@ mod runtime {
             return;
         }
         // SAFETY: `open_how` is a `#[repr(C)]` struct of `u64` fields valid for
-        // any bit pattern.
+        // any bit pattern, and `how_ptr` is the trapped syscall's argument.
         let Ok(how) = (unsafe { fspy_elf_loader::copy_user_value::<open_how>(how_ptr) }) else {
             return;
         };
@@ -615,8 +617,8 @@ mod runtime {
         report_path_at(call, dirfd, path_ptr, mode, false);
     }
 
-    /// Fault-safe copy of an arbitrarily long NUL-terminated user string into
-    /// `allocator`.
+    /// Copies an arbitrarily long NUL-terminated string from a trapped
+    /// syscall's argument into `allocator`.
     fn copy_user_cstr_vec<A: Allocator>(addr: usize, allocator: A) -> Result<Vec<u8, A>> {
         if addr == 0 {
             return Err(Error::FAULT);
@@ -626,7 +628,9 @@ mod runtime {
         let mut offset = 0usize;
         loop {
             let cur = addr.checked_add(offset).ok_or(Error::FAULT)?;
-            if let Some(bytes) = fspy_elf_loader::copy_user_cstr(cur, &mut chunk)? {
+            // SAFETY: `addr` is a string pointer from the trapped syscall, and
+            // `cur` stays before its NUL.
+            if let Some(bytes) = unsafe { fspy_elf_loader::copy_user_cstr(cur, &mut chunk) }? {
                 out.try_reserve_exact(bytes.len()).map_err(|_| Error::NOMEM)?;
                 out.extend_from_slice(bytes);
                 return Ok(out);
@@ -655,7 +659,8 @@ mod runtime {
         loop {
             let byte_off = idx.checked_mul(size_of::<usize>()).ok_or(Error::FAULT)?;
             let elem_addr = arr_ptr.checked_add(byte_off).ok_or(Error::FAULT)?;
-            // SAFETY: `usize` is valid for any bit pattern.
+            // SAFETY: `usize` is valid for any bit pattern, and `elem_addr` is
+            // inside the trapped syscall's NULL-terminated pointer array.
             let str_ptr = unsafe { fspy_elf_loader::copy_user_value::<usize>(elem_addr) }?;
             if str_ptr == 0 {
                 return Ok(out);

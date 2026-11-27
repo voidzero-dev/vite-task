@@ -31,7 +31,10 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
-      provider: playwright(),
+      // Playwright passes `--no-sandbox` by default. Keep Chromium's sandbox
+      // on, as in a desktop browser, so tracking runs alongside the
+      // sandboxed renderer's own seccomp filter on Linux.
+      provider: playwright({ launchOptions: { chromiumSandbox: true } }),
       instances: [{ browser: 'chromium' }],
     },
   },
