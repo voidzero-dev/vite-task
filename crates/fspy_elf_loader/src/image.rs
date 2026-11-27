@@ -229,6 +229,9 @@ impl<'fd> File<'fd> {
         if span == 0 || isize::try_from(span).is_err() {
             return Err(Error::NOEXEC);
         }
+        if self.header.e_type == abi::ET_EXEC && low == 0 {
+            return Err(Error::NOEXEC);
+        }
         if self.header.e_type == abi::ET_DYN {
             let reserved = span.checked_add(alignment).ok_or(Error::NOEXEC)?;
             if isize::try_from(reserved).is_err() {
