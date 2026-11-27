@@ -824,8 +824,8 @@ mod imp {
     /// in the upper half of `altstack_top` so the `vfork`/`posix_spawn` child
     /// can install its `sigaltstack` and return via `SYS_rt_sigreturn`
     /// (preserving `x16`, `pstate`, FP/SIMD state, and ARM64 BTI compliance
-    /// via `eret`). Frames with an `EXTRA_MAGIC` record past `__reserved` (live
-    /// SME `ZA` state) are not supported here.
+    /// via `eret`). Frames with an `EXTRA_MAGIC` record past `__reserved`
+    /// (live Scalable Matrix Extension `ZA` state) are not supported here.
     ///
     /// Returns the `sp` value (`&child_rt_sigframe`) to pass to `SYS_clone`
     /// and `SYS_rt_sigreturn`, or `None` if `altstack_size` is too small.
