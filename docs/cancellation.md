@@ -9,6 +9,7 @@ When the user presses Ctrl-C:
 1. The OS delivers SIGINT (Unix) or CTRL_C_EVENT (Windows) directly to all processes in the terminal's foreground process group — both the runner and child tasks. This is standard OS behavior, not something `vp run` implements.
 2. No new tasks are scheduled after the signal.
 3. Results of in-flight tasks are **not cached**, even if a task handles the signal gracefully and exits 0. The output may be incomplete, so caching it would risk false cache hits on subsequent runs.
+4. Tasks that exit non zero after Ctrl+C don't trigger [fast-fail](#fast-fail), so other tasks can finish shutting down.
 
 ## Fast-fail
 

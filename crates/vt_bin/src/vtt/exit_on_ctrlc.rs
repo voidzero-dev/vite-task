@@ -4,7 +4,10 @@ use std::sync::Arc;
 ///
 /// Sets up a Ctrl+C handler, emits a "ready" milestone, then waits.
 /// When Ctrl+C is received, prints "ctrl-c received" and exits.
-pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let cleanup_ms: u64 = args.first().map(|s| s.parse()).transpose()?.unwrap_or(0);
+    let exit_code: i32 = args.get(1).map(|s| s.parse()).transpose()?.unwrap_or(0);
+
     // On Windows, an ancestor process (e.g. cargo, the test harness) may have
     // been created with CREATE_NEW_PROCESS_GROUP, which implicitly calls
     // SetConsoleCtrlHandler(NULL, TRUE) and sets CONSOLE_IGNORE_CTRL_C in the
@@ -40,5 +43,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     ctrlc_once_lock.wait();
     println!("ctrl-c received");
-    Ok(())
+    if cleanup_ms > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(cleanup_ms));
+        println!("cleanup done");
+    }
+    std::process::exit(exit_code);
 }

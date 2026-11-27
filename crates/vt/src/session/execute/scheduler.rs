@@ -271,7 +271,7 @@ impl ExecutionContext<'_> {
             }
         };
         tracing::debug!(failed, elapsed = ?start.elapsed(), "finished the task item");
-        if failed {
+        if failed && !self.cancel_token.is_cancelled() {
             self.fast_fail_token.cancel();
         }
     }
