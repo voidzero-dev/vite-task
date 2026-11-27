@@ -39,7 +39,9 @@ mod freestanding {
     unsafe fn test_handle(call: &Syscall<'_>) -> Result<SyscallAction> {
         let check_rewritten_path = |path_ptr: usize| -> Result<SyscallAction> {
             let mut buf = [MaybeUninit::<u8>::uninit(); PATH_MAX];
-            let Ok(Some(path)) = fspy_elf_loader::copy_user_cstr(path_ptr, &mut buf) else {
+            // SAFETY: `path_ptr` is the trapped syscall's path argument.
+            let Ok(Some(path)) = (unsafe { fspy_elf_loader::copy_user_cstr(path_ptr, &mut buf) })
+            else {
                 return Err(Error::NOENT);
             };
             if path.starts_with(b"/") && !path.starts_with(b"/proc/") {

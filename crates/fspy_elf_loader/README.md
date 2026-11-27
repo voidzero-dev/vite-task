@@ -52,7 +52,7 @@ reserved ranges.
 - `SIGSYS` signal, `/proc/*/exe`, and custom `SyscallInterceptor` virtualization
   with a private pooled `SIGSYS` stack, virtualized `rt_sigaction` /
   `rt_sigprocmask` / `rt_sigpending` / masked waits / `fork` / `vfork`, and
-  fault-safe user memory copies.
+  direct user memory copies that assume valid pointers.
 - Wired into `fspy` via `fspy_preload_linux` as the sole Linux tracking backend.
 - [`fspy_elf_loader_tests`](../fspy_elf_loader_tests/README.md): dynamic and
   static PIE/`ET_EXEC` runtimes, overlap rejection, malformed images, and

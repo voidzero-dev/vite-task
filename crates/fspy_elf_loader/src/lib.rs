@@ -75,9 +75,9 @@ impl<'a> Syscall<'a> {
         sigsys::is_shared_vm_child()
     }
 
-    /// Returns the already fault-safely-copied C-string bytes (excluding the
-    /// terminating NUL) if `addr` was prefetched by the loader's `/proc/*/exe`
-    /// check during this trap, avoiding a second `process_vm_readv`.
+    /// Returns the already copied C-string bytes (excluding the terminating
+    /// NUL) if `addr` was prefetched by the loader's `/proc/*/exe` check during
+    /// this trap, avoiding a second copy.
     #[must_use]
     pub fn cached_cstr(&self, addr: usize) -> Option<&'a [u8]> {
         self.cached_path.and_then(|(cached_addr, bytes)| (cached_addr == addr).then_some(bytes))
@@ -129,36 +129,42 @@ pub struct SyscallInterceptor {
     pub handle: unsafe fn(&Syscall<'_>) -> Result<SyscallAction>,
 }
 
-/// Fault-safe copy of a NUL-terminated C string from a trapped syscall's user
-/// pointer into `buf`, returning `Err(Error::FAULT)` instead of crashing if the
-/// address is unreadable.
+/// Copies a NUL-terminated C string from a trapped syscall's user pointer into
+/// `buf`.
 ///
 /// Returns `Ok(None)` if no NUL byte is found within `buf.len()` bytes (all
 /// `buf.len()` bytes of `buf` are initialized on `Ok(None)`).
 ///
 /// # Errors
 ///
-/// Returns [`fspy_nostd::Error::FAULT`] if `addr` is unreadable before a NUL
-/// byte is reached.
-pub fn copy_user_cstr(
-    addr: usize,
-    buf: &mut [core::mem::MaybeUninit<u8>],
-) -> Result<Option<&[u8]>> {
-    sigsys::copy_user_cstr(addr, buf)
-}
-
-/// Fault-safe copy of a `Copy` value from a trapped syscall's user pointer,
-/// returning `Err(Error::FAULT)` instead of crashing if the address is
-/// unreadable.
-///
-/// # Errors
-///
-/// Returns [`fspy_nostd::Error::FAULT`] if `addr..addr + size_of::<T>()` is
-/// unreadable.
+/// Returns [`fspy_nostd::Error::FAULT`] if `addr` is in the first page (such as
+/// `NULL`).
 ///
 /// # Safety
 ///
-/// `T` must be valid for any bit pattern.
+/// Any other `addr` must point to a readable NUL-terminated string (or at
+/// least `buf.len()` readable bytes). Like the macOS and Windows preloads, the
+/// runtime assumes the pointers programs pass to syscalls are valid; a bad one
+/// crashes the process instead of failing with `EFAULT`.
+pub unsafe fn copy_user_cstr(
+    addr: usize,
+    buf: &mut [core::mem::MaybeUninit<u8>],
+) -> Result<Option<&[u8]>> {
+    // SAFETY: forwarded from caller contract.
+    unsafe { sigsys::copy_user_cstr(addr, buf) }
+}
+
+/// Copies a `Copy` value from a trapped syscall's user pointer.
+///
+/// # Errors
+///
+/// Returns [`fspy_nostd::Error::FAULT`] if `addr` is in the first page (such as
+/// `NULL`).
+///
+/// # Safety
+///
+/// `T` must be valid for any bit pattern, and any other `addr` must be
+/// readable for `size_of::<T>()` bytes (see [`copy_user_cstr`]).
 pub unsafe fn copy_user_value<T: Copy>(addr: usize) -> Result<T> {
     // SAFETY: forwarded from caller contract.
     unsafe { sigsys::copy_user_value(addr) }
