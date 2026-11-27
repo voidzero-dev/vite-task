@@ -42,14 +42,13 @@ const LAUNCHER_REGION: (usize, usize) = (0x0002_0000_0000, 0x0005_0000_0000);
 
 /// Decoded syscall invocation passed to a [`SyscallInterceptor`].
 #[derive(Clone, Copy, Debug)]
-pub struct Syscall<'a> {
+pub struct Syscall {
     pub sysno: Sysno,
     pub args: [usize; 6],
     raw_uc_sigmask: u64,
-    cached_path: Option<(usize, &'a [u8])>,
 }
 
-impl<'a> Syscall<'a> {
+impl Syscall {
     /// Returns the calling thread's virtualized signal mask prior to this
     /// syscall (including the virtualized `SIGSYS` bit).
     ///
@@ -73,14 +72,6 @@ impl<'a> Syscall<'a> {
     #[expect(clippy::unused_self, reason = "scopes the query to an active SIGSYS trap")]
     pub fn is_shared_vm_child(&self) -> bool {
         sigsys::is_shared_vm_child()
-    }
-
-    /// Returns the already copied C-string bytes (excluding the terminating
-    /// NUL) if `addr` was prefetched by the loader's `/proc/*/exe` check during
-    /// this trap, avoiding a second copy.
-    #[must_use]
-    pub fn cached_cstr(&self, addr: usize) -> Option<&'a [u8]> {
-        self.cached_path.and_then(|(cached_addr, bytes)| (cached_addr == addr).then_some(bytes))
     }
 }
 
@@ -126,14 +117,11 @@ pub enum SyscallAction {
 #[derive(Clone, Copy)]
 pub struct SyscallInterceptor {
     pub syscalls: &'static [Sysno],
-    pub handle: unsafe fn(&Syscall<'_>) -> Result<SyscallAction>,
+    pub handle: unsafe fn(&Syscall) -> Result<SyscallAction>,
 }
 
-/// Copies a NUL-terminated C string from a trapped syscall's user pointer into
-/// `buf`.
-///
-/// Returns `Ok(None)` if no NUL byte is found within `buf.len()` bytes (all
-/// `buf.len()` bytes of `buf` are initialized on `Ok(None)`).
+/// Borrows a NUL-terminated C string directly from a trapped syscall's user
+/// pointer.
 ///
 /// # Errors
 ///
@@ -142,16 +130,13 @@ pub struct SyscallInterceptor {
 ///
 /// # Safety
 ///
-/// Any other `addr` must point to a readable NUL-terminated string (or at
-/// least `buf.len()` readable bytes). Like the macOS and Windows preloads, the
-/// runtime assumes the pointers programs pass to syscalls are valid; a bad one
-/// crashes the process instead of failing with `EFAULT`.
-pub unsafe fn copy_user_cstr(
-    addr: usize,
-    buf: &mut [core::mem::MaybeUninit<u8>],
-) -> Result<Option<&[u8]>> {
+/// Any other `addr` must point to a readable NUL-terminated string valid for
+/// `'a`. Like the macOS and Windows preloads, the runtime assumes the pointers
+/// programs pass to syscalls are valid; a bad one crashes the process instead
+/// of failing with `EFAULT`.
+pub unsafe fn user_cstr<'a>(addr: usize) -> Result<CStr<'a, Thin>> {
     // SAFETY: forwarded from caller contract.
-    unsafe { sigsys::copy_user_cstr(addr, buf) }
+    unsafe { sigsys::user_cstr(addr) }
 }
 
 /// Copies a `Copy` value from a trapped syscall's user pointer.
@@ -164,7 +149,7 @@ pub unsafe fn copy_user_cstr(
 /// # Safety
 ///
 /// `T` must be valid for any bit pattern, and any other `addr` must be
-/// readable for `size_of::<T>()` bytes (see [`copy_user_cstr`]).
+/// readable for `size_of::<T>()` bytes (see [`user_cstr`]).
 pub unsafe fn copy_user_value<T: Copy>(addr: usize) -> Result<T> {
     // SAFETY: forwarded from caller contract.
     unsafe { sigsys::copy_user_value(addr) }
