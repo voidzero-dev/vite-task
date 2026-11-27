@@ -5,26 +5,24 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(any(unix, target_os = "none"))'.dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
-anyhow = { workspace = true }
 base64 = { workspace = true }
-wincode = { workspace = true, features = ["derive"] }
-bstr = { workspace = true, features = ["alloc", "std"] }
-fspy_shared = { workspace = true }
-nix = { workspace = true, features = ["fs"] }
+bstr = { workspace = true }
 fspy_nostd = { workspace = true }
 fspy_nostd_alloc = { workspace = true }
+fspy_shared = { workspace = true }
+wincode = { workspace = true, features = ["derive"] }
 
-[dev-dependencies]
-
-[target.'cfg(target_os = "linux")'.dependencies]
-elf = { workspace = true }
-fspy_seccomp_unotify = { workspace = true, features = ["target"] }
-memmap2 = { workspace = true }
+[target.'cfg(any(target_os = "linux", target_os = "none"))'.dependencies]
+bitflags = { workspace = true }
+linux-raw-sys = { workspace = true, features = ["general", "no_std"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 phf = { workspace = true, features = ["macros"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

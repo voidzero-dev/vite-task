@@ -42,9 +42,6 @@ async fn spawn_sh_shebang() -> anyhow::Result<()> {
     Ok(())
 }
 
-// Skipped on musl: fspy tracks only through seccomp there, which doesn't
-// record the interpreter, because the kernel opens it without a syscall.
-#[cfg(not(target_env = "musl"))]
 #[test(tokio::test)]
 async fn spawn_shebang_with_long_interpreter_path() -> anyhow::Result<()> {
     let tmp_dir = tempfile::TempDir::new()?;

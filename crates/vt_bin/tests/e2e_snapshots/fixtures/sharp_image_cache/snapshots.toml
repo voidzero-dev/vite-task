@@ -1,0 +1,43 @@
+[[e2e]]
+name = "sharp_image_cache"
+comment = """
+`sharp` (`libvips-cpp.so` via `$ORIGIN`) renders `src/icon.svg` to a resized PNG `dist/out.png` and records its decoded dimensions and pixel RGBA in `dist/meta.txt`. Editing `src/icon.svg` invalidates the cache.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "first run: cache miss" },
+  [
+    "vtt",
+    "print-file",
+    "dist/meta.txt",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "second run: cache hit" },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/icon.svg",
+    "#ff0000",
+    "#00ff00",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "third run: cache miss after editing src/icon.svg" },
+  [
+    "vtt",
+    "print-file",
+    "dist/meta.txt",
+  ],
+]

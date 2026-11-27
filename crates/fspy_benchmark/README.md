@@ -5,7 +5,7 @@ Measures what fspy costs a process it tracks, and whether a change to fspy moved
 - `launch`: the wall clock of a tracked launch that opens nothing. This is the cost of starting a process under tracking: injection, session setup, and teardown.
 - `access`: how long a batch of opens takes, timed by two threads that each open their own path. This is the cost of interception itself, under the concurrency a tracked process normally has.
 
-Linux measures a dynamically linked target (`LD_PRELOAD`) and a `x86_64-unknown-linux-musl` target (seccomp user notification). macOS measures `DYLD_INSERT_LIBRARIES`. Windows measures Detours injection.
+Linux measures both a dynamically linked target and a static `x86_64-unknown-linux-musl` target through the freestanding ELF/`SIGSYS` tracker. macOS measures `DYLD_INSERT_LIBRARIES`. Windows measures Detours injection.
 
 Run the overhead report locally with:
 

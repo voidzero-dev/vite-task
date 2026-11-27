@@ -1,0 +1,89 @@
+[[e2e]]
+name = "bun_build_bundle"
+comment = """
+`bun build` bundles `src/index.js` and `src/dep.js` into `dist/bundle.js`. Editing `src/dep.js` invalidates the cache.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "bundle",
+  ], comment = "first run: cache miss", redact = { 'bundle\.js\s+\d+(\.\d+)?\s*\w+' = 'bundle.js  <size>' } },
+  [
+    "vtt",
+    "grep-file",
+    "dist/bundle.js",
+    "initial-bun",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "bundle",
+  ], comment = "second run: cache hit", redact = { 'bundle\.js\s+\d+(\.\d+)?\s*\w+' = 'bundle.js  <size>' } },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/dep.js",
+    "initial-bun",
+    "edited-bun",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "bundle",
+  ], comment = "third run: cache miss after editing src/dep.js", redact = { 'bundle\.js\s+\d+(\.\d+)?\s*\w+' = 'bundle.js  <size>' } },
+  [
+    "vtt",
+    "grep-file",
+    "dist/bundle.js",
+    "edited-bun",
+  ],
+]
+
+[[e2e]]
+name = "bun_build_compile"
+comment = """
+`bun build --compile` builds a standalone executable and runs it to read `src/data.txt` and write `dist/out.txt`. Editing `src/data.txt` invalidates the cache.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "compile-and-run",
+  ], comment = "first run: cache miss" },
+  [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "compile-and-run",
+  ], comment = "second run: cache hit" },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/data.txt",
+    "initial-compiled",
+    "edited-compiled",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "compile-and-run",
+  ], comment = "third run: cache miss after editing src/data.txt" },
+  [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ],
+]

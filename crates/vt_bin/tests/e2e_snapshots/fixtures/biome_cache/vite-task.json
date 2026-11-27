@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "check": {
+      "command": "biome check src/index.js",
+      "cache": true
+    }
+  }
+}

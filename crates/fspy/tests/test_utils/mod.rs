@@ -162,8 +162,8 @@ pub async fn spawn_command(cmd: vt_subprocess_test::Command) -> anyhow::Result<P
 ///
 /// # Panics
 ///
-/// Panics if the test binary is not statically linked or cannot be written.
-#[cfg(all(target_os = "linux", not(target_env = "musl")))]
+/// Panics if the test binary cannot be written.
+#[cfg(target_os = "linux")]
 #[expect(
     clippy::allow_attributes,
     reason = "allow attribute required for conditionally-used helper"
@@ -177,22 +177,21 @@ pub fn test_bin_path() -> &'static Path {
         sync::LazyLock,
     };
 
-    use fspy_shared_unix::is_dynamically_linked_to_libc;
-
     const TEST_BIN_CONTENT: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_FSPY_TEST_BIN"));
 
     static TEST_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
-        assert_eq!(
-            is_dynamically_linked_to_libc(TEST_BIN_CONTENT),
-            Ok(false),
-            "Test binary is not a static executable"
-        );
-
-        let test_bin_path = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-            .join(concat!("fspy-test-bin-", env!("CARGO_CRATE_NAME")));
-        fs::write(&test_bin_path, TEST_BIN_CONTENT).expect("failed to write test binary");
-        fs::set_permissions(&test_bin_path, Permissions::from_mode(0o755))
+        let dir =
+            std::env::var_os("CARGO_TARGET_TMPDIR").map_or_else(std::env::temp_dir, PathBuf::from);
+        let test_bin_path = dir.join(concat!("fspy-test-bin-", env!("CARGO_CRATE_NAME")));
+        let tmp_path = dir.join(format!(
+            "fspy-test-bin-{}-{}.tmp",
+            env!("CARGO_CRATE_NAME"),
+            std::process::id()
+        ));
+        fs::write(&tmp_path, TEST_BIN_CONTENT).expect("failed to write test binary");
+        fs::set_permissions(&tmp_path, Permissions::from_mode(0o755))
             .expect("failed to set permissions on test binary");
+        fs::rename(&tmp_path, &test_bin_path).expect("failed to install test binary");
 
         test_bin_path
     });

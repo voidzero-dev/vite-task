@@ -217,24 +217,31 @@ async fn syscall_during_dlopen() {
         // The interposer used to resolve libc's syscall with dlsym, which waits for dlopen,
         // so a second thread calling syscall waited for the first through futex, re-entering
         // the interposer until its stack overflowed.
-        fn call_syscall_during_dlopen(fifo_path: &str) {
-            // This waits for dlopen to open the FIFO, which it reads until writers close.
+        // Hold each FIFO writer open across a barrier so `dlopen` cannot read EOF and close
+        // the FIFO before the other writer calls `open` (which would block forever).
+        fn call_syscall_during_dlopen(fifo_path: &str, barrier: &std::sync::Barrier) {
+            // This waits for dlopen to open the FIFO, which it reads until all writers close.
             let _writer = OpenOptions::new().write(true).open(fifo_path).unwrap();
             // SAFETY: getpid takes no arguments.
             unsafe { libc::syscall(libc::SYS_getpid) };
+            barrier.wait();
         }
         // Opening files and spawning threads can also wait for dlopen, so do both first.
         File::open("/").unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let path = fifo_path.clone();
-        std::thread::spawn(move || {
+        let barrier_clone = std::sync::Arc::clone(&barrier);
+        let worker = std::thread::spawn(move || {
             let c = std::ffi::CString::new(path.as_str()).unwrap();
             // SAFETY: dlopen fails on the FIFO's empty contents.
-            std::thread::spawn(move || unsafe {
+            let loader = std::thread::spawn(move || unsafe {
                 libc::dlopen(c.as_ptr(), libc::RTLD_NOW);
             });
-            call_syscall_during_dlopen(&path);
+            call_syscall_during_dlopen(&path, &barrier_clone);
+            loader.join().unwrap();
         });
-        call_syscall_during_dlopen(&fifo_path);
+        call_syscall_during_dlopen(&fifo_path, &barrier);
+        worker.join().unwrap();
     })
     .await
     .unwrap();

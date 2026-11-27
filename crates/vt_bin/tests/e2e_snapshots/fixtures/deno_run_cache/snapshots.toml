@@ -1,0 +1,63 @@
+[[e2e]]
+name = "deno_run_cache"
+comment = """
+`deno run --no-remote` spawns a child process via `Deno.execPath()` (exercising `/proc/self/exe` virtualization and recursive exec) and a Web Worker reading a separate input file. Editing either input invalidates the cache.
+"""
+# Deno does not distribute musl binaries.
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "first run: cache miss" },
+  [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "second run: cache hit" },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/child-data.txt",
+    "initial-child",
+    "edited-child",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "third run: cache miss after editing child process input" },
+  [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "src/worker-data.txt",
+    "initial-worker",
+    "edited-worker",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "fourth run: cache miss after editing Web Worker input" },
+  [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ],
+]

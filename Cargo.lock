@@ -162,16 +162,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "assertables"
-version = "10.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b3cadd448c7cd878da49dac40adcd0f7248d2911afe5102267f68c352d87882"
-dependencies = [
- "regex",
- "walkdir",
-]
-
-[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1373,28 +1363,32 @@ dependencies = [
  "csv-async",
  "ctor",
  "derive_more",
+ "elf",
  "flate2",
  "fspy_detours_sys",
- "fspy_preload_unix",
+ "fspy_preload_linux",
+ "fspy_preload_macos",
  "fspy_preload_windows",
- "fspy_seccomp_unotify",
  "fspy_shared",
  "fspy_shared_unix",
  "fspy_test_bin",
  "futures-util",
  "libc",
+ "linux-raw-sys 0.12.1",
  "nix 0.31.2",
  "ntapi",
  "ntest",
  "ouroboros",
  "rustc-hash",
  "sha2 0.11.0",
+ "syscalls",
  "tar",
  "tempfile",
  "test-log",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tracing",
  "vt_casefold",
  "vt_materialized_artifact",
  "vt_subprocess_test",
@@ -1429,22 +1423,6 @@ version = "0.0.0"
 [[package]]
 name = "fspy_benchmark_target"
 version = "0.0.0"
-
-[[package]]
-name = "fspy_client_unix"
-version = "0.0.0"
-dependencies = [
- "allocator-api2",
- "anyhow",
- "bstr",
- "fspy_nostd",
- "fspy_nostd_alloc",
- "fspy_shared",
- "fspy_shared_unix",
- "itoa",
- "libc",
- "nix 0.31.2",
-]
 
 [[package]]
 name = "fspy_detours_sys"
@@ -1526,20 +1504,33 @@ dependencies = [
 ]
 
 [[package]]
-name = "fspy_preload_unix"
+name = "fspy_preload_linux"
 version = "0.0.0"
 dependencies = [
  "allocator-api2",
+ "bstr",
+ "fspy_elf_loader",
+ "fspy_nostd",
+ "fspy_nostd_alloc",
+ "fspy_shared",
+ "fspy_shared_unix",
+ "linux-raw-sys 0.12.1",
+ "syscalls",
+]
+
+[[package]]
+name = "fspy_preload_macos"
+version = "0.0.0"
+dependencies = [
+ "allocator-api2",
+ "bstr",
  "ctor",
- "fspy_client_unix",
  "fspy_nostd",
  "fspy_nostd_alloc",
  "fspy_shared",
  "fspy_shared_unix",
  "libc",
- "nix 0.31.2",
  "static_cell",
- "syscalls",
 ]
 
 [[package]]
@@ -1560,24 +1551,6 @@ dependencies = [
  "wincode",
  "windows-sys 0.61.2",
  "winsafe 0.0.27",
-]
-
-[[package]]
-name = "fspy_seccomp_unotify"
-version = "0.1.0"
-dependencies = [
- "assertables",
- "futures-util",
- "libc",
- "nix 0.31.2",
- "passfd",
- "seccompiler",
- "syscalls",
- "tempfile",
- "test-log",
- "tokio",
- "tracing",
- "wincode",
 ]
 
 [[package]]
@@ -1610,17 +1583,15 @@ name = "fspy_shared_unix"
 version = "0.0.0"
 dependencies = [
  "allocator-api2",
- "anyhow",
  "base64 0.22.1",
+ "bitflags 2.13.2",
  "bstr",
- "elf",
  "fspy_nostd",
  "fspy_nostd_alloc",
- "fspy_seccomp_unotify",
  "fspy_shared",
- "memmap2",
- "nix 0.31.2",
+ "linux-raw-sys 0.12.1",
  "phf 0.13.1",
+ "tempfile",
  "wincode",
 ]
 
@@ -2511,15 +2482,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
-name = "memmap2"
-version = "0.9.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "memmem"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2693,7 +2655,6 @@ dependencies = [
  "cfg-if",
  "cfg_aliases 0.2.1",
  "libc",
- "memoffset",
 ]
 
 [[package]]
@@ -3026,16 +2987,6 @@ dependencies = [
  "redox_syscall 0.5.18",
  "smallvec 1.15.1",
  "windows-link",
-]
-
-[[package]]
-name = "passfd"
-version = "0.2.0"
-source = "git+https://github.com/polachok/passfd?rev=d55881752c16aced1a49a75f9c428d38d3767213#d55881752c16aced1a49a75f9c428d38d3767213"
-dependencies = [
- "futures-core",
- "libc",
- "tokio",
 ]
 
 [[package]]
@@ -3855,14 +3806,6 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "seccompiler"
-version = "0.5.0"
-source = "git+https://github.com/rust-vmm/seccompiler?rev=08587106340b8e3cb361c7561411510039436857#08587106340b8e3cb361c7561411510039436857"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "security-framework"

@@ -1,0 +1,45 @@
+[[e2e]]
+name = "miniflare_worker_cache"
+comment = """
+`miniflare` (`workerd`) loads `src/worker.mjs` and its imported module `src/data.mjs`, serves a request, and writes the response to `dist/out.txt`. Editing `src/data.mjs` invalidates the cache.
+"""
+# workerd does not distribute musl binaries.
+cfg = 'not(target_env = "musl")'
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "run",
+  ], comment = "first run: cache miss" },
+  [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "run",
+  ], comment = "second run: cache hit" },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/data.mjs",
+    "initial-worker",
+    "edited-worker",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "run",
+  ], comment = "third run: cache miss after editing src/data.mjs" },
+  [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ],
+]

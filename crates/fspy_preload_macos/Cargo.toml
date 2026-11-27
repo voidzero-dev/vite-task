@@ -1,0 +1,22 @@
+[package]
+name = "fspy_preload_macos"
+edition = "2024"
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+allocator-api2 = { workspace = true, features = ["alloc"] }
+bstr = { workspace = true }
+ctor = { workspace = true }
+fspy_nostd = { workspace = true }
+fspy_nostd_alloc = { workspace = true }
+fspy_shared = { workspace = true }
+fspy_shared_unix = { workspace = true }
+libc = { workspace = true }
+static_cell = { workspace = true }
+
+[lints]
+workspace = true

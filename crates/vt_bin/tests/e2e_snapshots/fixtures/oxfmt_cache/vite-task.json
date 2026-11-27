@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "format-check": {
+      "command": "oxfmt --check src/index.js",
+      "cache": true
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # preexisting_ld_preload
 
-Reproduces #340 and verifies that fspy tolerates a user-supplied `LD_PRELOAD` by appending its shim instead of rejecting the spawn. Appending (not prepending) also preserves symbol-interposition order: the user's preload runs first, so short-circuited calls remain invisible to fspy — what the OS actually executed is what fspy records.
+Reproduces #340 and verifies that fspy preserves a user-supplied `LD_PRELOAD` untouched. Because Linux tracking runs at the kernel syscall boundary via `fspy_preload_linux` (`SIGSYS`), any call short-circuited in userspace by the user's preload never issues a kernel syscall and remains invisible to fspy — what the OS actually executed is what fspy records.
 
 `vt_preload_test_lib` (built as a cdylib artifact dep) intercepts `open`/`openat` and short-circuits any path containing the marker `preload_test_short_circuit`, returning `ENOENT` without forwarding. Every other path is forwarded via `RTLD_NEXT` so fspy still observes the real syscall.
 

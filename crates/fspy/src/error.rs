@@ -16,9 +16,6 @@ pub enum SpawnError {
         cause: which::Error,
     },
 
-    #[error("failed to initialize seccomp_unotify supervisor: {0}")]
-    Supervisor(std::io::Error),
-
     #[error("failed to create IPC channel: {0}")]
     ChannelCreation(std::io::Error),
 

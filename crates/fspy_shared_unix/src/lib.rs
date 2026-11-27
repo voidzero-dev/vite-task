@@ -1,12 +1,11 @@
-#![cfg(unix)]
+#![cfg(any(unix, target_os = "none"))]
+#![cfg_attr(not(test), no_std)]
 
-pub mod exec;
-pub(crate) mod open_exec;
-pub mod payload;
-pub mod spawn;
+mod codec;
+#[cfg(any(target_os = "linux", target_os = "none"))]
+pub mod linux;
+#[cfg(target_os = "macos")]
+pub mod macos;
+mod nostd_exec;
 
-#[cfg(target_os = "linux")]
-mod elf;
-
-#[cfg(target_os = "linux")] // exposed for verifying static executables in fspy tests
-pub use elf::is_dynamically_linked_to_libc;
+pub use nostd_exec::{Env, Exec, RawExec};

@@ -30,7 +30,7 @@ const STATX_BASIC_STATS: libc::c_uint = 0x7ff;
 #[repr(C, align(8))]
 struct StatxBuf([u8; 256]);
 
-/// Calls `statx` through `syscall`, which fspy intercepts on glibc.
+/// Calls `statx` directly through `syscall(2)`.
 ///
 /// The libc `statx` wrapper is not called directly: glibc added it in 2.28,
 /// so a test built for an older glibc fails to link.
@@ -55,8 +55,7 @@ fn syscall_statx(
     }
 }
 
-/// Calls the glibc `statx` wrapper, resolved at run time. With `LD_PRELOAD`,
-/// the lookup finds the fspy interposer first.
+/// Calls the glibc `statx` wrapper, resolved at run time.
 ///
 /// # Panics
 ///

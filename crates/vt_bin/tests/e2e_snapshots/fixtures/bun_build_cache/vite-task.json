@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "bundle": {
+      "command": "bun build src/index.js --outfile dist/bundle.js",
+      "cache": true
+    },
+    "compile-and-run": {
+      "command": "bun run scripts/compile-and-run.js",
+      "cache": true
+    }
+  }
+}

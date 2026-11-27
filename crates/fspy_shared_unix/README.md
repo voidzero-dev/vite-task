@@ -1,3 +1,4 @@
 # fspy_shared_unix
 
-Common code shared by `fspy` (run in the supervisor process) and `fspy_preload_unix` (run in target processes, macOS/Linux only).
+`no_std` Unix exec-resolution and payload/bootstrap serialization shared by
+`fspy`, `fspy_preload_linux`, and `fspy_preload_macos`.

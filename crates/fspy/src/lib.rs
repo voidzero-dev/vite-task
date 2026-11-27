@@ -2,15 +2,19 @@ pub mod error;
 
 mod ipc;
 
-#[cfg(unix)]
-#[path = "./unix/mod.rs"]
+#[cfg(target_os = "linux")]
+#[path = "./linux/mod.rs"]
+mod os_impl;
+
+#[cfg(target_os = "macos")]
+#[path = "./macos/mod.rs"]
 mod os_impl;
 
 #[cfg(target_os = "windows")]
 #[path = "./windows/mod.rs"]
 mod os_impl;
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 mod arena;
 mod command;
 

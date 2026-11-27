@@ -7,44 +7,45 @@ publish = false
 
 [dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
-wincode = { workspace = true }
-bumpalo = { workspace = true, features = ["allocator-api2", "collections"] }
 derive_more = { workspace = true, features = ["debug"] }
-vt_materialized_artifact = { workspace = true }
 fspy_shared = { workspace = true }
 futures-util = { workspace = true }
 libc = { workspace = true }
-ouroboros = { workspace = true }
 rustc-hash = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "process", "io-util", "sync", "rt"] }
 tokio-util = { workspace = true }
 vt_casefold = { workspace = true }
+vt_materialized_artifact = { workspace = true }
 which = { workspace = true, features = ["tracing"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-fspy_seccomp_unotify = { workspace = true, features = ["supervisor"] }
-nix = { workspace = true, features = ["uio"] }
-tokio = { workspace = true, features = ["bytes"] }
+wincode = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
+bumpalo = { workspace = true, features = ["allocator-api2", "collections"] }
 fspy_shared_unix = { workspace = true }
-nix = { workspace = true, features = ["fs", "process", "socket", "feature"] }
 
 # The preload artifact deps live under `[dependencies]` — not
 # `[build-dependencies]`, where Cargo would compile them with the
 # build-override profile (opt-level 0 in release; see
 # https://github.com/rust-lang/cargo/issues/16719) — so they get the normal
 # profile, in this workspace and downstream ones, with no per-package profile
-# overrides. Cargo provides `CARGO_CDYLIB_FILE_*` while compiling this crate
-# for `artifact!` to embed. Each dep is scoped to the targets whose code
-# embeds it, so other targets (e.g. musl, which never dynamically links a
-# preload) don't build a useless empty cdylib. Scoping artifact deps under
-# `[target.cfg…]` is only safe for normal deps: the same shape under
-# `[target.cfg….build-dependencies]` panics cargo's resolver on cross-compile.
-[target.'cfg(all(unix, not(target_env = "musl")))'.dependencies]
-fspy_preload_unix = { workspace = true }
+# overrides. Cargo provides `CARGO_BIN_FILE_*` / `CARGO_CDYLIB_FILE_*` while
+# compiling this crate for `artifact!` to embed.
+[target.'cfg(target_os = "linux")'.dependencies]
+linux-raw-sys = { workspace = true, features = ["general", "prctl", "ptrace"] }
+syscalls = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+fspy_preload_linux = { path = "../fspy_preload_linux", artifact = "bin", target = "x86_64-unknown-none" }
+
+[target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dependencies]
+fspy_preload_linux = { path = "../fspy_preload_linux", artifact = "bin", target = "aarch64-unknown-none-softfloat" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+fspy_preload_macos = { workspace = true }
+ouroboros = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 fspy_detours_sys = { workspace = true }
@@ -53,17 +54,20 @@ ntapi = { workspace = true }
 winapi = { workspace = true, features = ["winbase", "securitybaseapi", "handleapi"] }
 winsafe = { workspace = true, features = ["kernel"] }
 
-[target.'cfg(target_os = "macos")'.dev-dependencies]
-tempfile = { workspace = true }
-
 [dev-dependencies]
 anyhow = { workspace = true }
 csv-async = { workspace = true, features = ["tokio"] }
 ctor = { workspace = true }
 ntest = { workspace = true }
-vt_subprocess_test = { workspace = true, features = ["fspy"] }
 test-log = { workspace = true, features = ["trace"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "io-std"] }
+vt_subprocess_test = { workspace = true, features = ["fspy"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["fs"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+elf = { workspace = true }
 
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dev-dependencies]
 fspy_test_bin = { path = "../fspy_test_bin", artifact = "bin", target = "aarch64-unknown-linux-musl" }
@@ -84,4 +88,10 @@ workspace = true
 doctest = false
 
 [package.metadata.cargo-shear]
-ignored = ["ctor", "fspy_test_bin", "fspy_preload_unix", "fspy_preload_windows"]
+ignored = [
+  "ctor",
+  "fspy_test_bin",
+  "fspy_preload_linux",
+  "fspy_preload_macos",
+  "fspy_preload_windows",
+]

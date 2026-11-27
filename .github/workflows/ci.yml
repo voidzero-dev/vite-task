@@ -67,8 +67,8 @@ jobs:
       # --locked: verify Cargo.lock is up to date (replaces the removed `cargo check --locked`)
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: |
-          cargo clippy --locked -p fspy_elf_loader -p fspy_elf_loader_test_launcher --target x86_64-unknown-none -- -D warnings
-          cargo clippy --locked -p fspy_elf_loader -p fspy_elf_loader_test_launcher --target aarch64-unknown-none-softfloat -- -D warnings
+          cargo clippy --locked -p fspy_elf_loader -p fspy_elf_loader_test_launcher -p fspy_preload_linux --target x86_64-unknown-none -- -D warnings
+          cargo clippy --locked -p fspy_elf_loader -p fspy_elf_loader_test_launcher -p fspy_preload_linux --target aarch64-unknown-none-softfloat -- -D warnings
 
   # fspy builds only on Windows, macOS, and Linux, but vp must still build
   # without it on other platforms. Cross-building `vt_bin` for FreeBSD catches

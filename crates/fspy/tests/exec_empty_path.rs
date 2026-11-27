@@ -94,10 +94,6 @@ async fn exec_empty_path_fails_like_untraced() -> anyhow::Result<()> {
         assert_eq!(exec_empty_path(), untraced);
     })
     .await?;
-    // Seccomp tracking, used on musl, reports the directory an empty path
-    // is relative to.
-    if cfg!(not(target_env = "musl")) {
-        assert_not_contains(&accesses, &current_dir()?);
-    }
+    assert_not_contains(&accesses, &current_dir()?);
     Ok(())
 }

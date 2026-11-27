@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "run": {
+      "command": "tsx src/parent.ts",
+      "cache": true
+    }
+  }
+}

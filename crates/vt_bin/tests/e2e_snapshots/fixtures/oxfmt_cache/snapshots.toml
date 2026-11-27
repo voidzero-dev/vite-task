@@ -1,0 +1,33 @@
+[[e2e]]
+name = "oxfmt_cache"
+comment = """
+`oxfmt --check` formats-checks `src/index.js`. Editing `src/index.js` invalidates the cache.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "format-check",
+  ], comment = "first run: cache miss", redact = { 'using \d+ threads?' = 'using <n> threads' } },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "format-check",
+  ], comment = "second run: cache hit", redact = { 'using \d+ threads?' = 'using <n> threads' } },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/index.js",
+    "initial-oxfmt",
+    "edited-oxfmt",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "format-check",
+  ], comment = "third run: cache miss after editing src/index.js", redact = { 'using \d+ threads?' = 'using <n> threads' } },
+]

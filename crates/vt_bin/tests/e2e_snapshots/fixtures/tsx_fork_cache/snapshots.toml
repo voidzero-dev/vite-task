@@ -1,0 +1,43 @@
+[[e2e]]
+name = "tsx_fork_cache"
+comment = """
+`tsx` executes `src/parent.ts`, which spawns `src/child.ts` via `child_process.fork()` (inheriting `NODE_CHANNEL_FD` and tsx's `--import` loader). The child reads `src/data.txt` and sends its content over IPC so the parent writes `dist/out.txt`. Editing `src/data.txt` invalidates the cache.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "run",
+  ], comment = "first run: cache miss" },
+  [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "run",
+  ], comment = "second run: cache hit" },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/data.txt",
+    "initial-tsx-ipc",
+    "edited-tsx-ipc",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "run",
+  ], comment = "third run: cache miss after editing src/data.txt" },
+  [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ],
+]
