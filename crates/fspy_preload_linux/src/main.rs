@@ -12,7 +12,7 @@ mod runtime {
         ffi::c_void,
         mem::size_of,
         ptr::{self, NonNull},
-        sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering},
+        sync::atomic::{AtomicI32, AtomicPtr, Ordering},
     };
 
     use allocator_api2::{alloc::Allocator, vec::Vec};
@@ -33,15 +33,14 @@ mod runtime {
         channel::{ChannelConf, Sender},
     };
     use fspy_shared_unix::{
-        Env, Exec, RawExec,
+        Exec, RawExec,
         linux::{
             BOOTSTRAP_ENV_NAME, Bootstrap, ExecAtFlags, Target, encode_bootstrap,
             ensure_bootstrap_env, resolve_exec,
         },
     };
-    use linux_raw_sys::{
-        errno::{E2BIG, ENOSYS, EPERM, ESRCH},
-        general::{AT_EMPTY_PATH, O_ACCMODE, O_RDWR, O_WRONLY, SIG_SETMASK, open_how},
+    use linux_raw_sys::general::{
+        AT_EMPTY_PATH, O_ACCMODE, O_RDWR, O_WRONLY, SIG_SETMASK, open_how,
     };
     use syscalls::Sysno;
 
@@ -51,19 +50,6 @@ mod runtime {
     /// Linux 6.14+ `execveat(2)` flag that checks executability without replacing
     /// the process image.
     const AT_EXECVE_CHECK: u32 = 0x10000;
-
-    /// Linux `kcmp(2)` resource type comparing virtual memory (`mm_struct`).
-    const KCMP_VM: usize = 1;
-
-    /// Upper bound on a single `argv`/`envp` string copied from user memory
-    /// (matches Linux `MAX_ARG_STRLEN` up to 64 KiB pages).
-    const MAX_EXEC_STRING_LEN: usize = 2 * 1024 * 1024;
-
-    /// Number of reusable exec scratch slots for reclaiming `CLONE_VM`
-    /// (`vfork` / `posix_spawn`) exec buffers once the child detaches.
-    const MAX_EXEC_SLOTS: usize = 64;
-    const SLOT_FREE: u64 = 0;
-    const SLOT_BUSY: u64 = 1;
 
     struct SyncCell<T>(UnsafeCell<T>);
 
@@ -78,61 +64,32 @@ mod runtime {
         sender: Option<Sender>,
     }
 
-    struct ExecSlot {
-        /// `0` = free, `1` = exclusively owned in-flight/reclaiming,
-        /// `(gen << 32) | child_pid` (`gen >= 1`) = parked by a `CLONE_VM`
-        /// child calling `execve`.
-        state: AtomicU64,
-        /// Registered with `set_tid_address` right before `SYS_execve` in a
-        /// `CLONE_VM` child: the Linux kernel's `mm_release()` atomically writes
-        /// `0` here the instant `execve` detaches the child's `mm_struct` (or
-        /// if the child dies), allowing zero-syscall reclamation even when
-        /// `kcmp` is denied by Docker/seccomp and without PID-reuse hazards.
-        active_tid: AtomicI32,
-        arena: UnsafeCell<Option<PageBump>>,
-        duped_fd: UnsafeCell<RawFd>,
-    }
-
-    // SAFETY: Access to `arena` and `duped_fd` is serialized via `state` CAS
-    // transitions (`SLOT_FREE -> SLOT_BUSY` and `parked(gen, pid) -> SLOT_BUSY`).
-    unsafe impl Sync for ExecSlot {}
-
-    impl ExecSlot {
-        const fn new() -> Self {
-            Self {
-                state: AtomicU64::new(SLOT_FREE),
-                active_tid: AtomicI32::new(0),
-                arena: UnsafeCell::new(None),
-                duped_fd: UnsafeCell::new(-1),
-            }
-        }
-    }
-
-    /// Overflow scratch node used when all [`MAX_EXEC_SLOTS`] fixed slots are
-    /// simultaneously busy. For `CLONE_VM` children, pushed onto
-    /// [`OVERFLOW_PARKED_HEAD`] and reclaimed once `active_tid` becomes `0`
-    /// (written by the kernel's `mm_release()` on exec/exit, or by failure
-    /// cleanup) or `kcmp` reports VM detachment.
-    struct OverflowScratch {
+    /// Scratch memory for one `execve` re-routed through the launcher: the
+    /// arena holding the rewritten `argv`/`envp`, and any descriptor kept open
+    /// for the new image.
+    ///
+    /// A successful exec in a `CLONE_VM` child (`vfork` / `posix_spawn`)
+    /// leaves the node in its parent's memory, so such nodes are pushed onto
+    /// [`PARKED_EXEC_SCRATCH`] with `active_tid` registered through
+    /// `set_tid_address`. The kernel clears it once the child execs or exits,
+    /// and a later exec trap frees the node.
+    struct ExecScratch {
         next: AtomicPtr<Self>,
         active_tid: AtomicI32,
-        child_pid: i32,
         parked: bool,
         arena: UnsafeCell<Option<PageBump>>,
         duped_fd: UnsafeCell<RawFd>,
     }
 
-    // SAFETY: `arena` and `duped_fd` are mutated exclusively by the owning
-    // thread before `active_tid` transitions to `0` (`Release`), and only
-    // dropped by a reclaimer that observes `active_tid == 0` (`Acquire`) or
-    // kernel VM detachment after detaching the node from `OVERFLOW_PARKED_HEAD`.
-    unsafe impl Sync for OverflowScratch {}
+    // SAFETY: `arena` and `duped_fd` are mutated only by the exec'ing thread
+    // before `active_tid` becomes `0` (`Release`), and dropped by a reclaimer
+    // only after it observes `0` (`Acquire`) on a node it detached from
+    // `PARKED_EXEC_SCRATCH`.
+    unsafe impl Sync for ExecScratch {}
 
     static STARTUP_BUMP: SyncCell<PageBump> = SyncCell(UnsafeCell::new(page_bump()));
     static RUNTIME: SyncCell<Option<Runtime>> = SyncCell(UnsafeCell::new(None));
-    static EXEC_SLOTS: [ExecSlot; MAX_EXEC_SLOTS] = [const { ExecSlot::new() }; MAX_EXEC_SLOTS];
-    static PARK_GEN: AtomicU64 = AtomicU64::new(1);
-    static OVERFLOW_PARKED_HEAD: AtomicPtr<OverflowScratch> = AtomicPtr::new(ptr::null_mut());
+    static PARKED_EXEC_SCRATCH: AtomicPtr<ExecScratch> = AtomicPtr::new(ptr::null_mut());
 
     #[cfg(target_arch = "x86_64")]
     const TRACKED_SYSCALLS: &[Sysno] = &[
@@ -379,12 +336,6 @@ mod runtime {
         }
     }
 
-    #[expect(clippy::cast_possible_truncation, reason = "Linux pid_t is i32")]
-    fn getpid() -> i32 {
-        // SAFETY: `getpid` takes no arguments and cannot fail.
-        unsafe { syscalls::raw::syscall0(Sysno::getpid as usize).cast_signed() as i32 }
-    }
-
     fn send_path(mode: AccessMode, path: &BStr) {
         let bytes: &[u8] = path.as_ref();
         if bytes.starts_with(b"/dev/")
@@ -593,83 +544,6 @@ mod runtime {
         report_path_at(dirfd, path_ptr, mode, false);
     }
 
-    /// Copies an arbitrarily long NUL-terminated string from a trapped
-    /// syscall's argument into `allocator`.
-    fn copy_user_cstr_vec<A: Allocator>(addr: usize, allocator: A) -> Result<Vec<u8, A>> {
-        // SAFETY: `addr` is a NUL-terminated string pointer from the trapped syscall.
-        let cstr = unsafe { fspy_elf_loader::user_cstr(addr) }?;
-        let bytes = cstr.count().as_units();
-        if bytes.len() > MAX_EXEC_STRING_LEN {
-            return Err(Error::from_raw_os_error(E2BIG.cast_signed()));
-        }
-        let mut out = Vec::new_in(allocator);
-        out.try_reserve_exact(bytes.len()).map_err(|_| Error::NOMEM)?;
-        out.extend_from_slice(bytes);
-        Ok(out)
-    }
-
-    fn copy_user_cstr_array<T, A: Allocator + Clone>(
-        arr_ptr: usize,
-        allocator: A,
-        mut map_fn: impl FnMut(Vec<u8, A>) -> T,
-    ) -> Result<Vec<T, A>> {
-        if arr_ptr == 0 {
-            return Ok(Vec::new_in(allocator));
-        }
-        let mut out = Vec::new_in(allocator.clone());
-        let mut idx = 0usize;
-        loop {
-            let byte_off = idx.checked_mul(size_of::<usize>()).ok_or(Error::FAULT)?;
-            let elem_addr = arr_ptr.checked_add(byte_off).ok_or(Error::FAULT)?;
-            // SAFETY: `usize` is valid for any bit pattern, and `elem_addr` is
-            // inside the trapped syscall's NULL-terminated pointer array.
-            let str_ptr = unsafe { fspy_elf_loader::copy_user_value::<usize>(elem_addr) }?;
-            if str_ptr == 0 {
-                return Ok(out);
-            }
-            let bytes = copy_user_cstr_vec(str_ptr, allocator.clone())?;
-            out.try_reserve(1).map_err(|_| Error::NOMEM)?;
-            out.push(map_fn(bytes));
-            idx += 1;
-        }
-    }
-
-    fn copy_user_exec<A: Allocator + Clone>(
-        prog_ptr: usize,
-        argv_ptr: usize,
-        envp_ptr: usize,
-        allocator: A,
-    ) -> Result<Exec<A>> {
-        let program = copy_user_cstr_vec(prog_ptr, allocator.clone())?;
-        let args = copy_user_cstr_array(argv_ptr, allocator.clone(), |arg| arg)?;
-        let envs: Vec<Env<A>, A> = copy_user_cstr_array(envp_ptr, allocator.clone(), |mut env| {
-            if let Some(eq_pos) = env.iter().position(|&b| b == b'=') {
-                let value = copy_bytes(&env[eq_pos + 1..], allocator.clone());
-                env.truncate(eq_pos);
-                (env, Some(value))
-            } else {
-                (env, None)
-            }
-        })?;
-        Ok(Exec { program, args, envs })
-    }
-
-    #[inline]
-    fn park_state(pid: i32) -> u64 {
-        loop {
-            let generation = PARK_GEN.fetch_add(1, Ordering::Relaxed) & 0xffff_ffff;
-            if generation != 0 {
-                return (generation << 32) | u64::from(pid.cast_unsigned());
-            }
-        }
-    }
-
-    #[inline]
-    #[expect(clippy::cast_possible_truncation, reason = "Linux pid_t fits in lower 32 bits")]
-    const fn parked_pid(state: u64) -> i32 {
-        (state as u32).cast_signed()
-    }
-
     #[inline]
     fn set_tid_address(addr: *const AtomicI32) {
         // SAFETY: `addr` is either null or points to a live `AtomicI32` that
@@ -678,59 +552,12 @@ mod runtime {
         let _ = unsafe { syscalls::raw::syscall1(Sysno::set_tid_address as usize, addr.addr()) };
     }
 
-    /// Returns `true` if `child_pid` no longer shares our virtual memory
-    /// (`mm_struct`) or has exited, so its parked `CLONE_VM` exec scratch
-    /// mapping is guaranteed unreachable and safe to `munmap`.
-    fn is_vm_detached(my_pid: i32, child_pid: i32) -> bool {
-        if child_pid <= 0 || child_pid == my_pid {
-            return false;
-        }
-        // SAFETY: `kcmp(my_pid, child_pid, KCMP_VM, 0, 0)` compares the two
-        // processes' `mm_struct` pointers (`0` = same VM, `> 0` = different VM).
-        let rc = unsafe {
-            syscalls::raw::syscall5(
-                Sysno::kcmp as usize,
-                my_pid.cast_unsigned() as usize,
-                child_pid.cast_unsigned() as usize,
-                KCMP_VM,
-                0,
-                0,
-            )
-            .cast_signed()
-        };
-        if rc == 0 {
-            return false;
-        }
-        if rc > 0 {
-            return true;
-        }
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "Linux negative syscall errno fits in u32"
-        )]
-        let errno = (-rc).cast_unsigned() as u32;
-        if errno == ESRCH {
-            return true;
-        }
-        if errno == EPERM || errno == ENOSYS {
-            // Fallback if `kcmp` is denied and `clear_child_tid` was not yet
-            // cleared (e.g. child killed before `set_tid_address`): probe liveness.
-            // SAFETY: `kill(child_pid, 0)` probes liveness without sending a signal.
-            let krc = unsafe {
-                syscalls::raw::syscall2(Sysno::kill as usize, child_pid.cast_unsigned() as usize, 0)
-                    .cast_signed()
-            };
-            return krc == -(ESRCH.cast_signed() as isize);
-        }
-        false
-    }
-
-    unsafe fn push_overflow_parked(node: *mut OverflowScratch) {
-        let mut head = OVERFLOW_PARKED_HEAD.load(Ordering::Acquire);
+    unsafe fn push_parked_exec_scratch(node: *mut ExecScratch) {
+        let mut head = PARKED_EXEC_SCRATCH.load(Ordering::Acquire);
         loop {
             // SAFETY: Caller owns `node` exclusively until CAS publishes it.
             unsafe { (*node).next.store(head, Ordering::Relaxed) };
-            match OVERFLOW_PARKED_HEAD.compare_exchange_weak(
+            match PARKED_EXEC_SCRATCH.compare_exchange_weak(
                 head,
                 node,
                 Ordering::AcqRel,
@@ -742,155 +569,65 @@ mod runtime {
         }
     }
 
-    fn reclaim_overflow_scratch(my_pid: &mut i32) {
-        if OVERFLOW_PARKED_HEAD.load(Ordering::Acquire).is_null() {
+    /// Drops `node`'s arena and returns its page to the allocator.
+    ///
+    /// # Safety
+    ///
+    /// `node` must be a live `ExecScratch` that nothing else references.
+    unsafe fn free_exec_scratch(node: *mut ExecScratch) {
+        // SAFETY: forwarded from the caller contract.
+        unsafe {
+            ptr::drop_in_place(node);
+            PageAllocator
+                .deallocate(NonNull::new_unchecked(node).cast(), Layout::new::<ExecScratch>());
+        }
+    }
+
+    /// Frees parked `CLONE_VM` exec scratch whose child has exec'd or exited,
+    /// keeping parent memory bounded across any number of `vfork` /
+    /// `posix_spawn` children.
+    fn reclaim_exec_scratch() {
+        if PARKED_EXEC_SCRATCH.load(Ordering::Acquire).is_null() {
             return;
         }
-        let mut cur = OVERFLOW_PARKED_HEAD.swap(ptr::null_mut(), Ordering::AcqRel);
+        let mut cur = PARKED_EXEC_SCRATCH.swap(ptr::null_mut(), Ordering::AcqRel);
         while !cur.is_null() {
             // SAFETY: `swap(null)` transferred exclusive ownership of this chain.
             let next = unsafe { (*cur).next.load(Ordering::Relaxed) };
-            // SAFETY: `cur` is a live `OverflowScratch` node.
-            let active_tid = unsafe { (*cur).active_tid.load(Ordering::Acquire) };
-            // SAFETY: `child_pid` is immutable after initialization.
-            let child_pid = unsafe { (*cur).child_pid };
-            let detached = if active_tid == 0 {
-                true
+            // SAFETY: `cur` is a live node of the detached chain.
+            if unsafe { (*cur).active_tid.load(Ordering::Acquire) } == 0 {
+                // SAFETY: The child left this memory (or failure cleanup
+                // released the node), so nothing references `cur`. Its
+                // `duped_fd` belonged to the child's descriptor table.
+                unsafe { free_exec_scratch(cur) };
             } else {
-                if *my_pid == 0 {
-                    *my_pid = getpid();
-                }
-                is_vm_detached(*my_pid, child_pid)
-            };
-            if detached {
-                // SAFETY: Child detached (`mm_release` cleared `active_tid` or
-                // `kcmp` confirmed detachment) or failure cleanup already
-                // detached `set_tid_address` and cleared `active_tid`.
-                unsafe {
-                    *(*cur).duped_fd.get() = -1;
-                    *(*cur).arena.get() = None;
-                    ptr::drop_in_place(cur);
-                    PageAllocator.deallocate(
-                        NonNull::new_unchecked(cur).cast(),
-                        Layout::new::<OverflowScratch>(),
-                    );
-                }
-            } else {
-                // SAFETY: `cur` is still attached; return it to the parked list.
-                unsafe { push_overflow_parked(cur) };
+                // SAFETY: `cur` is still in use by its child; park it again.
+                unsafe { push_parked_exec_scratch(cur) };
             }
             cur = next;
         }
     }
 
-    /// Reclaims any parked `CLONE_VM` exec scratch slots and overflow nodes
-    /// whose child has already detached (`execve` succeeded) or exited, keeping
-    /// parent RSS bounded across arbitrarily many `vfork`/`posix_spawn` spawns
-    /// even when `kcmp` is denied or more than 64 children are live at once.
-    fn reclaim_detached_exec_slots() {
-        let mut my_pid = 0_i32;
-        for slot in &EXEC_SLOTS {
-            let state = slot.state.load(Ordering::Acquire);
-            if state <= SLOT_BUSY {
-                continue;
-            }
-            let detached = if slot.active_tid.load(Ordering::Acquire) == 0
-                && slot.state.load(Ordering::Acquire) == state
-            {
-                true
-            } else {
-                if my_pid == 0 {
-                    my_pid = getpid();
-                }
-                is_vm_detached(my_pid, parked_pid(state))
-            };
-            if !detached {
-                continue;
-            }
-            if slot
-                .state
-                .compare_exchange(state, SLOT_BUSY, Ordering::AcqRel, Ordering::Relaxed)
-                .is_ok()
-            {
-                // SAFETY: Exclusive ownership via `SLOT_BUSY` and `child_pid`
-                // has detached from our VM. Do NOT close `duped_fd` — it
-                // belonged to the child's fd table.
-                unsafe {
-                    *slot.duped_fd.get() = -1;
-                    *slot.arena.get() = None;
-                }
-                slot.active_tid.store(0, Ordering::Release);
-                slot.state.store(SLOT_FREE, Ordering::Release);
-            }
-        }
-        reclaim_overflow_scratch(&mut my_pid);
-    }
-
-    fn acquire_exec_slot() -> Option<&'static ExecSlot> {
-        EXEC_SLOTS.iter().find(|slot| {
-            slot.state
-                .compare_exchange(SLOT_FREE, SLOT_BUSY, Ordering::AcqRel, Ordering::Relaxed)
-                .is_ok()
-        })
-    }
-
     /// Failure cleanup invoked by `fspy_elf_loader` when `SYS_execve` returns
-    /// an error on a pooled [`ExecSlot`].
-    unsafe fn cleanup_exec_slot(raw: *mut c_void) {
-        // SAFETY: `raw` is a `&'static ExecSlot` owned by this failed `execve`.
-        let slot = unsafe { &*(raw.cast::<ExecSlot>()) };
-        // Detach `clear_child_tid` FIRST while `active_tid != 0` and our thread
-        // is still attached to the VM (so no reclaimer can claim this slot).
-        if slot.state.load(Ordering::Acquire) > SLOT_BUSY {
-            set_tid_address(ptr::null());
-        }
-        slot.state.store(SLOT_BUSY, Ordering::Release);
-        // SAFETY: Exclusive ownership of `slot` in the same process that opened
-        // `duped_fd` and allocated `arena`.
+    /// an error.
+    unsafe fn cleanup_exec_scratch(raw: *mut c_void) {
+        let node = raw.cast::<ExecScratch>();
+        // SAFETY: `node` is the scratch of this failed exec, still owned by
+        // the calling thread, and `duped_fd` is open in its descriptor table.
         unsafe {
-            let fd = *slot.duped_fd.get();
-            *slot.duped_fd.get() = -1;
+            let fd = *(*node).duped_fd.get();
+            *(*node).duped_fd.get() = -1;
             if fd >= 0 {
                 drop(OwnedFd::from_raw_fd(fd));
             }
-            *slot.arena.get() = None;
-        }
-        slot.active_tid.store(0, Ordering::Release);
-        slot.state.store(SLOT_FREE, Ordering::Release);
-    }
-
-    /// Failure cleanup invoked by `fspy_elf_loader` when `SYS_execve` returns
-    /// an error on an [`OverflowScratch`] allocation.
-    unsafe fn cleanup_overflow_scratch(raw: *mut c_void) {
-        let Some(ptr) = NonNull::new(raw.cast::<OverflowScratch>()) else {
-            return;
-        };
-        // SAFETY: `ptr` is valid and still live because either it was never
-        // parked, or our thread is still attached to the VM with `active_tid != 0`.
-        let parked = unsafe { (*ptr.as_ptr()).parked };
-        if parked {
-            set_tid_address(ptr::null());
-            // SAFETY: No reclaimer accesses `duped_fd`/`arena` while `active_tid != 0`.
-            unsafe {
-                let fd = *(*ptr.as_ptr()).duped_fd.get();
-                *(*ptr.as_ptr()).duped_fd.get() = -1;
-                if fd >= 0 {
-                    drop(OwnedFd::from_raw_fd(fd));
-                }
-                *(*ptr.as_ptr()).arena.get() = None;
-                (*ptr.as_ptr()).active_tid.store(0, Ordering::Release);
-            }
-            let mut my_pid = 0;
-            reclaim_overflow_scratch(&mut my_pid);
-        } else {
-            // SAFETY: Not pushed onto `OVERFLOW_PARKED_HEAD`; exclusively owned.
-            unsafe {
-                let fd = *(*ptr.as_ptr()).duped_fd.get();
-                if fd >= 0 {
-                    drop(OwnedFd::from_raw_fd(fd));
-                }
-                ptr::drop_in_place(ptr.as_ptr());
-                PageAllocator.deallocate(ptr.cast(), Layout::new::<OverflowScratch>());
+            if (*node).parked {
+                // Already published: release its arena and let a later
+                // reclaim free the node.
+                set_tid_address(ptr::null());
+                *(*node).arena.get() = None;
+                (*node).active_tid.store(0, Ordering::Release);
+            } else {
+                free_exec_scratch(node);
             }
         }
     }
@@ -908,96 +645,47 @@ mod runtime {
         sigmask: u64,
         is_shared_vm_child: bool,
     ) -> Result<SyscallAction> {
-        reclaim_detached_exec_slots();
+        reclaim_exec_scratch();
 
-        if let Some(slot) = acquire_exec_slot() {
-            // SAFETY: We hold exclusive `SLOT_BUSY` ownership of `slot`.
-            unsafe {
-                *slot.duped_fd.get() = -1;
-                *slot.arena.get() = Some(page_bump());
-            }
-            // SAFETY: `slot.arena` was just initialized to `Some` and stays
-            // live until `cleanup_exec_slot` or post-detach reclamation drops it.
-            let arena: &'static PageBump = unsafe { (*slot.arena.get()).as_ref().unwrap() };
-
-            if is_shared_vm_child {
-                let child_pid = getpid();
-                slot.active_tid.store(child_pid, Ordering::Release);
-                // Publish parked state and arm `set_tid_address` BEFORE
-                // `prepare_exec_in` so `SIGKILL` at any point (including during
-                // path resolution or ELF validation) leaves the slot reclaimable
-                // once the kernel's `mm_release()` clears `active_tid`.
-                slot.state.store(park_state(child_pid), Ordering::Release);
-                set_tid_address(&raw const slot.active_tid);
-            }
-
-            match prepare_exec_in(dirfd, prog_ptr, argv_ptr, envp_ptr, flags, sigmask, arena) {
-                Ok((raw_out, duped_fd)) => {
-                    // SAFETY: While this thread is alive and attached to the VM
-                    // (`active_tid != 0` for `CLONE_VM` children, or `SLOT_BUSY`
-                    // otherwise), no reclaimer can claim `slot`.
-                    unsafe { *slot.duped_fd.get() = duped_fd };
-                    return Ok(SyscallAction::Execve {
-                        prog: raw_out.prog.cast(),
-                        argv: raw_out.argv.cast(),
-                        envp: raw_out.envp.cast(),
-                        cleanup: Some((cleanup_exec_slot, ptr::from_ref(slot).cast_mut().cast())),
-                    });
-                }
-                Err(err) => {
-                    // SAFETY: `slot` is still owned by this live thread; release it on error.
-                    unsafe { cleanup_exec_slot(ptr::from_ref(slot).cast_mut().cast()) };
-                    return Err(err);
-                }
-            }
-        }
-
-        // Overflow fallback when more than `MAX_EXEC_SLOTS` concurrent `vfork`
-        // children are mid-exec simultaneously.
-        let layout = Layout::new::<OverflowScratch>();
-        let mem = PageAllocator.allocate(layout).map_err(|_| Error::NOMEM)?;
-        let ptr: NonNull<OverflowScratch> = mem.cast();
-        let child_pid = if is_shared_vm_child { getpid() } else { 0 };
-        // SAFETY: `ptr` is freshly page-allocated with `Layout::new::<OverflowScratch>()`.
+        let mem = PageAllocator.allocate(Layout::new::<ExecScratch>()).map_err(|_| Error::NOMEM)?;
+        let node = mem.cast::<ExecScratch>().as_ptr();
+        // SAFETY: `node` is freshly page-allocated for an `ExecScratch`.
         unsafe {
-            ptr.as_ptr().write(OverflowScratch {
+            node.write(ExecScratch {
                 next: AtomicPtr::new(ptr::null_mut()),
-                active_tid: AtomicI32::new(child_pid),
-                child_pid,
-                parked: is_shared_vm_child,
+                active_tid: AtomicI32::new(0),
+                parked: false,
                 arena: UnsafeCell::new(Some(page_bump())),
                 duped_fd: UnsafeCell::new(-1),
             });
+        }
+        // SAFETY: `arena` was just set and lives until the node is freed.
+        let arena: &'static PageBump = unsafe { (*(*node).arena.get()).as_ref().unwrap() };
+        let (raw_out, duped_fd) =
+            match prepare_exec_in(dirfd, prog_ptr, argv_ptr, envp_ptr, flags, sigmask, arena) {
+                Ok(prepared) => prepared,
+                Err(err) => {
+                    // SAFETY: the node was never published.
+                    unsafe { free_exec_scratch(node) };
+                    return Err(err);
+                }
+            };
+        // SAFETY: the node is owned by this thread until published below.
+        unsafe {
+            *(*node).duped_fd.get() = duped_fd;
             if is_shared_vm_child {
-                // Publish onto `OVERFLOW_PARKED_HEAD` and arm `set_tid_address`
-                // BEFORE `prepare_exec_in` so `SIGKILL` at any point leaves the
-                // overflow scratch node reclaimable once `mm_release()` clears
-                // `active_tid`.
-                push_overflow_parked(ptr.as_ptr());
-                set_tid_address(&raw const (*ptr.as_ptr()).active_tid);
+                (*node).parked = true;
+                (*node).active_tid.store(1, Ordering::Release);
+                push_parked_exec_scratch(node);
+                set_tid_address(&raw const (*node).active_tid);
             }
         }
-        // SAFETY: `ptr` remains live until `cleanup_overflow_scratch` or post-detach sweep.
-        let arena: &'static PageBump = unsafe { (*(*ptr.as_ptr()).arena.get()).as_ref().unwrap() };
-        match prepare_exec_in(dirfd, prog_ptr, argv_ptr, envp_ptr, flags, sigmask, arena) {
-            Ok((raw_out, duped_fd)) => {
-                // SAFETY: While this thread is alive and attached (`active_tid != 0`
-                // for `CLONE_VM` children, or unparked otherwise), no reclaimer
-                // touches `duped_fd`.
-                unsafe { *(*ptr.as_ptr()).duped_fd.get() = duped_fd };
-                Ok(SyscallAction::Execve {
-                    prog: raw_out.prog.cast(),
-                    argv: raw_out.argv.cast(),
-                    envp: raw_out.envp.cast(),
-                    cleanup: Some((cleanup_overflow_scratch, ptr.as_ptr().cast())),
-                })
-            }
-            Err(err) => {
-                // SAFETY: `ptr` is still owned by this live thread; release it on error.
-                unsafe { cleanup_overflow_scratch(ptr.as_ptr().cast()) };
-                Err(err)
-            }
-        }
+        Ok(SyscallAction::Execve {
+            prog: raw_out.prog.cast(),
+            argv: raw_out.argv.cast(),
+            envp: raw_out.envp.cast(),
+            cleanup: Some((cleanup_exec_scratch, node.cast())),
+        })
     }
 
     fn prepare_exec_in(
@@ -1009,7 +697,13 @@ mod runtime {
         sigmask: u64,
         arena: &'static PageBump,
     ) -> Result<(RawExec, RawFd)> {
-        let mut exec = copy_user_exec(prog_ptr, argv_ptr, envp_ptr, arena)?;
+        let raw = RawExec {
+            prog: ptr::with_exposed_provenance(prog_ptr),
+            argv: ptr::with_exposed_provenance(argv_ptr),
+            envp: ptr::with_exposed_provenance(envp_ptr),
+        };
+        // SAFETY: the pointers are the trapped syscall's own `execve` arguments.
+        let mut exec = unsafe { raw.to_exec(arena) }?;
         let resolved = resolve_exec(&mut exec, dirfd, flags, |p| send_path(AccessMode::Read, p))?;
         fspy_elf_loader::validate_exec(resolved.file.as_fd())?;
 

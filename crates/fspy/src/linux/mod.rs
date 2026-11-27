@@ -1,13 +1,9 @@
 use std::{
-    env,
     ffi::CString,
-    fs, io,
+    io,
     os::{
         fd::{AsRawFd as _, FromRawFd as _, OwnedFd},
-        unix::{
-            ffi::OsStrExt as _,
-            fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _},
-        },
+        unix::ffi::OsStrExt as _,
     },
     path::{Path, PathBuf},
 };
@@ -33,25 +29,25 @@ const PRELOAD_LINUX: Artifact = artifact!("fspy_preload", "CARGO_BIN_FILE_FSPY_P
 
 #[derive(Debug)]
 pub struct SpyImpl {
-    /// Materialized executable path to `fspy_preload_linux`, or `None` when no
-    /// writable directory permits executing files (e.g. `noexec` mounts), in
-    /// which case `spawn` falls back to untracked execution.
+    /// Materialized executable path to `fspy_preload_linux`, or `None` when the
+    /// temp directory does not permit executing files (e.g. a `noexec` mount),
+    /// in which case `spawn` falls back to untracked execution.
     preload_path: Option<Box<IpcStr>>,
     seccomp_available: bool,
 }
 
 impl SpyImpl {
-    /// Materializes `fspy_preload_linux` into a writable, executable directory
-    /// (falling back past `noexec` temp mounts) and probes whether this
-    /// environment permits installing a seccomp filter.
+    /// Materializes `fspy_preload_linux` into the user's temp directory and
+    /// probes whether this environment permits installing a seccomp filter.
     pub fn init() -> io::Result<Self> {
         let seccomp_available = probe_seccomp_available()?;
         let preload_path = if seccomp_available {
             let materialized = materialize_executable_preload().map(|p| p.as_path().into());
             if materialized.is_none() {
                 tracing::warn!(
-                    "no writable executable directory found for Linux task tracking; \
-                     falling back to untracked execution (caching disabled)"
+                    "the temp directory does not allow executing files, so Linux task \
+                     tracking is off and caching is disabled; set TMPDIR to a directory \
+                     on a filesystem without `noexec` to enable it"
                 );
             }
             materialized
@@ -196,76 +192,13 @@ fn spawn_untracked(
     })
 }
 
-/// Materializes `fspy_preload_linux` into the first candidate user directory
-/// whose filesystem allows executing binaries, skipping `noexec` mounts (such
-/// as CIS-hardened `/tmp`). Returns `None` if no writable executable directory
-/// is available so `SpyImpl::spawn` can fall back cleanly to untracked execution.
+/// Materializes `fspy_preload_linux` into the user's temp directory, or
+/// returns `None` when that directory cannot hold it or sits on a `noexec`
+/// mount (such as a CIS-hardened `/tmp`), so `SpyImpl::spawn` falls back to
+/// untracked execution.
 fn materialize_executable_preload() -> Option<PathBuf> {
-    if let Ok(path) = PRELOAD_LINUX.materialize().executable().at_user_temp_dir("vp_run")
-        && is_path_executable(&path)
-    {
-        return Some(path);
-    }
-
-    let mut fallback_bases = Vec::new();
-    if let Some(dir) = env::var_os("XDG_RUNTIME_DIR")
-        && !dir.is_empty()
-    {
-        fallback_bases.push(PathBuf::from(dir));
-    }
-    if let Some(dir) = env::var_os("XDG_CACHE_HOME")
-        && !dir.is_empty()
-    {
-        fallback_bases.push(PathBuf::from(dir));
-    } else if let Some(home) = env::var_os("HOME")
-        && !home.is_empty()
-    {
-        fallback_bases.push(PathBuf::from(home).join(".cache"));
-    }
-    fallback_bases.push(PathBuf::from("/var/tmp"));
-
-    materialize_in_candidates(&fallback_bases, is_path_executable)
-}
-
-fn materialize_in_candidates(
-    bases: &[PathBuf],
-    is_executable: impl Fn(&Path) -> bool,
-) -> Option<PathBuf> {
-    for base in bases {
-        let Ok(user_dir) = ensure_private_user_dir(base, "vp_run") else {
-            continue;
-        };
-        let Ok(path) = PRELOAD_LINUX.materialize().executable().at(&user_dir) else {
-            continue;
-        };
-        if is_executable(&path) {
-            return Some(path);
-        }
-    }
-    None
-}
-
-/// Creates (if needed) and validates a `0o700` directory `{base}/{prefix}-{uid}`
-/// owned solely by the current user, matching `vt_materialized_artifact`.
-fn ensure_private_user_dir(base: &Path, prefix: &str) -> io::Result<PathBuf> {
-    if !base.exists() {
-        fs::create_dir_all(base)?;
-    }
-    // SAFETY: `geteuid` has no preconditions and always succeeds.
-    let uid = unsafe { libc::geteuid() };
-    let dir = base.join(format!("{prefix}-{uid}"));
-    match fs::DirBuilder::new().mode(0o700).create(&dir) {
-        Err(err) if err.kind() != io::ErrorKind::AlreadyExists => return Err(err),
-        _ => {}
-    }
-    let metadata = fs::symlink_metadata(&dir)?;
-    if !metadata.is_dir() || metadata.uid() != uid || metadata.permissions().mode() & 0o022 != 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!("{} is not a private user-owned directory", dir.display()),
-        ));
-    }
-    Ok(dir)
+    let path = PRELOAD_LINUX.materialize().executable().at_user_temp_dir("vp_run").ok()?;
+    is_path_executable(&path).then_some(path)
 }
 
 /// Returns `true` when `path` is executable (`access(X_OK) == 0`) and not on a
@@ -401,21 +334,5 @@ mod tests {
                 && image.ehdr.e_entry < ph.p_vaddr + ph.p_memsz
         }));
         assert!(image.dynamic().unwrap().is_none());
-    }
-
-    #[test]
-    fn materialize_in_candidates_skips_non_executable_mount_and_falls_back() {
-        let dir1 = tempfile::tempdir().unwrap();
-        let dir2 = tempfile::tempdir().unwrap();
-        let bases = [dir1.path().to_path_buf(), dir2.path().to_path_buf()];
-
-        // Simulate `dir1` mounted `noexec`: candidate search must fall back to `dir2`.
-        let chosen = super::materialize_in_candidates(&bases, |p| p.starts_with(dir2.path()))
-            .expect("expected fallback to second candidate dir");
-        assert!(chosen.starts_with(dir2.path()));
-        assert!(super::is_path_executable(&chosen));
-
-        // When no candidate permits execution, return `None` so spawn falls back to untracked.
-        assert!(super::materialize_in_candidates(&bases, |_| false).is_none());
     }
 }
