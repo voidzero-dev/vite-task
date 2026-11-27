@@ -157,7 +157,12 @@ impl SpyImpl {
                     Some(new_path) if new_path.as_bytes() == preload_path.as_bytes() => {
                         tokio_command.spawn().map_err(SpawnError::OsSpawn)?
                     }
-                    _ => return Err(SpawnError::OsSpawn(err)),
+                    _ => {
+                        return Err(SpawnError::OsSpawn(io::Error::other(format!(
+                            "fspy launcher vanished during spawn and could not be rematerialized at {}: {err}",
+                            preload_path.as_os_str().to_string_lossy()
+                        ))));
+                    }
                 }
             }
             Err(err) => return Err(SpawnError::OsSpawn(err)),
@@ -332,6 +337,15 @@ fn is_already_tracked_by_fspy() -> bool {
     let n = unsafe {
         libc::process_vm_readv(libc::getpid(), &raw const local, 1, &raw const remote, 1, 0)
     };
+    if n < 0 {
+        // Hardened container seccomp profiles may deny `process_vm_readv`
+        // (`EPERM`/`ENOSYS`). Since `PR_GET_SECCOMP == SECCOMP_MODE_FILTER` and
+        // `mincore` already confirmed `LAUNCHER_REGION.0` is mapped, fail safe
+        // as nested so inner `fspy` falls back to untracked instead of failing
+        // with `EEXIST`.
+        let err = io::Error::last_os_error().raw_os_error();
+        return matches!(err, Some(libc::EPERM | libc::ENOSYS));
+    }
     if n != hdr.len().cast_signed() {
         return false;
     }
