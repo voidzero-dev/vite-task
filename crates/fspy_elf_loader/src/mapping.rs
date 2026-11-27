@@ -58,6 +58,7 @@ impl Mapping {
 
     pub fn reserve_at(address: usize, len: usize) -> Self {
         Self::check_len(len);
+        assert!(address != 0, "cannot reserve fixed ELF address range at address zero");
         // Reserve the complete fixed-address image before replacing any of
         // its pages. A collision with the loader, stack, or another mapping
         // must fail without changing that mapping.
@@ -93,13 +94,7 @@ impl Mapping {
         // caller keeps the file unchanged while this view is used.
         let ptr =
             unsafe { mm::mmap(ptr::null_mut(), len, ProtFlags::READ, MapFlags::PRIVATE, fd, 0) }?;
-        let Some(ptr) = NonNull::new(ptr.cast()) else {
-            // SAFETY: this successful mapping is owned here, but address zero
-            // cannot back Rust references, so release it before failing.
-            let _ = unsafe { mm::munmap(ptr, len) };
-            return Err(Error::NOMEM);
-        };
-        Ok(Self { ptr, len })
+        Ok(Self::new(ptr.cast(), len))
     }
 
     fn check_len(len: usize) {
@@ -107,12 +102,10 @@ impl Mapping {
     }
 
     fn new(ptr: *mut u8, len: usize) -> Self {
-        let Some(ptr) = NonNull::new(ptr) else {
-            // SAFETY: this successful mapping is owned here, but address zero
-            // cannot back Rust references, so release it before failing.
-            let _ = unsafe { mm::munmap(ptr.cast(), len) };
-            panic!("mapping returned address zero");
-        };
+        debug_assert!(!ptr.is_null(), "mmap returned address zero");
+        // SAFETY: Linux never returns address 0 from a non-`MAP_FIXED` `mmap`
+        // (or a non-zero `MAP_FIXED_NOREPLACE` request) when `vm.mmap_min_addr > 0`.
+        let ptr = unsafe { NonNull::new_unchecked(ptr) };
         Self { ptr, len }
     }
 

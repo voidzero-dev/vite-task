@@ -1492,6 +1492,7 @@ name = "fspy_elf_loader_tests"
 version = "0.0.0"
 dependencies = [
  "elf",
+ "fspy_elf_loader",
  "fspy_elf_loader_test_launcher",
  "libc",
  "ntest",
