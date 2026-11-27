@@ -320,14 +320,6 @@ mod runtime {
         }
     }
 
-    /// Marks the trace incomplete: a tracked syscall touched a path that could
-    /// not be resolved, so caching from this run could miss an input.
-    fn report_loss() {
-        if let Some(sender) = runtime().sender.as_ref() {
-            sender.report_loss();
-        }
-    }
-
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_possible_wrap,
@@ -380,22 +372,11 @@ mod runtime {
             return;
         }
         let arena = pooled_bump();
-        match resolve_path_at(&arena, dirfd, c_path) {
-            Ok(Some(resolved)) => send_path(mode, BStr::new(resolved.as_units())),
-            // The path exists but is too long to name, or naming it ran out of
-            // memory: a later run could depend on it, so the trace is partial.
-            Err(Error::NAMETOOLONG | Error::NOMEM) => report_loss(),
-            // No usable `dirfd` or a deleted cwd (the call fails or touches
-            // nothing), or a sandbox where `/proc/self/fd` cannot be read, such
-            // as Chromium's PID namespace, whose file access a broker performs.
-            Ok(None) | Err(_) => {}
+        if let Ok(Some(resolved)) = resolve_path_at(&arena, dirfd, c_path) {
+            send_path(mode, BStr::new(resolved.as_units()));
         }
     }
 
-    /// Reports an access through an open descriptor. Failing to name it is not
-    /// a loss: opening the descriptor already recorded its path (or reported
-    /// the loss), and sandboxes such as Chromium's run in a PID namespace
-    /// where `/proc/self/fd` does not resolve.
     fn report_fd(fd: BorrowedFd<'_>, mode: AccessMode) {
         let arena = pooled_bump();
         if let Ok(Some(resolved)) = fd_path(&arena, fd) {

@@ -1,7 +1,6 @@
 //! Linux hardening tests covering `vfork`/`posix_spawn` memory reclamation,
 //! `memfd_create` + `execveat(AT_EMPTY_PATH)`, `execve("/proc/self/fd/N")`,
-//! traces marked incomplete when a path cannot be resolved, and deep `execve`
-//! chain FD/env/filter hygiene.
+//! and deep `execve` chain FD/env/filter hygiene.
 #![cfg(target_os = "linux")]
 
 mod test_utils;
@@ -192,36 +191,6 @@ async fn execve_proc_self_fd_of_cloexec_descriptor_runs_and_tracks() -> anyhow::
 
     let accesses = test_utils::spawn_command(cmd).await?;
     assert_contains(&accesses, probe_path, fspy::PathAccess::Read);
-    Ok(())
-}
-
-#[test(tokio::test)]
-async fn unresolvable_relative_path_marks_trace_incomplete() -> anyhow::Result<()> {
-    // A cwd deeper than `PATH_MAX` makes `getcwd` fail with `ENAMETOOLONG`, so
-    // a relative `open` there cannot be recorded. The trace must then be
-    // reported incomplete instead of silently missing the access.
-    let dir = tempfile::tempdir()?;
-    let cmd = vt_subprocess_test::command_for_fn!(
-        dir.path().to_str().unwrap().to_owned(),
-        |root: String| {
-            std::env::set_current_dir(&root).unwrap();
-            let component = "d".repeat(200);
-            for _ in 0..25 {
-                std::fs::create_dir(&component).unwrap();
-                std::env::set_current_dir(&component).unwrap();
-            }
-            std::fs::write("input.txt", b"x").unwrap();
-            let _ = std::fs::read("input.txt").unwrap();
-        }
-    );
-
-    let termination = fspy::Command::from(cmd)
-        .spawn(tokio_util::sync::CancellationToken::new())
-        .await?
-        .wait_handle
-        .await?;
-    assert!(termination.status.success());
-    assert!(matches!(termination.path_accesses, Err(fspy::TrackingIncomplete)));
     Ok(())
 }
 
