@@ -223,6 +223,45 @@ pub fn append_path_env<A: Allocator + Clone>(envs: &mut Vec<Env<A>, A>, name: &[
     }
 }
 
+/// Removes all colon-separated occurrences of `value` from env var `name`,
+/// removing the variable itself when no entries remain.
+#[cfg_attr(
+    not(any(target_os = "macos", test)),
+    expect(dead_code, reason = "used by macOS DYLD_INSERT_LIBRARIES cleanup")
+)]
+pub fn remove_path_env<A: Allocator + Clone>(envs: &mut Vec<Env<A>, A>, name: &[u8], value: &[u8]) {
+    let allocator = envs.allocator().clone();
+    let mut i = 0;
+    while i < envs.len() {
+        if envs[i].0.as_bstr() != name {
+            i += 1;
+            continue;
+        }
+        let Some(existing) = envs[i].1.as_deref() else {
+            i += 1;
+            continue;
+        };
+        if !existing.split(|&b| b == b':').any(|part| part == value) {
+            i += 1;
+            continue;
+        }
+        let mut new_value = Vec::with_capacity_in(existing.len(), allocator.clone());
+        for part in existing.split(|&b| b == b':').filter(|&part| part != value && !part.is_empty())
+        {
+            if !new_value.is_empty() {
+                new_value.push(b':');
+            }
+            new_value.extend_from_slice(part);
+        }
+        if new_value.is_empty() {
+            envs.remove(i);
+        } else {
+            envs[i].1 = Some(new_value);
+            i += 1;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::ptr;
@@ -286,5 +325,25 @@ mod tests {
 
         append_path_env(&mut envs, b"DYLD_INSERT_LIBRARIES", b"/a.dylib");
         assert_eq!(envs[0].1.as_deref(), Some(b"/user.dylib:/a.dylib".as_slice()));
+    }
+
+    #[test]
+    fn remove_path_env_strips_only_target_entry() {
+        let mut envs: Vec<Env<Global>, Global> = Vec::new_in(Global);
+        append_path_env(&mut envs, b"DYLD_INSERT_LIBRARIES", b"/ours.dylib");
+        remove_path_env(&mut envs, b"DYLD_INSERT_LIBRARIES", b"/ours.dylib");
+        assert!(envs.is_empty());
+
+        envs.push((
+            to_vec_in(b"DYLD_INSERT_LIBRARIES", Global),
+            Some(to_vec_in(b"/user1.dylib:/ours.dylib:/user2.dylib", Global)),
+        ));
+        remove_path_env(&mut envs, b"DYLD_INSERT_LIBRARIES", b"/ours.dylib");
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].1.as_deref(), Some(b"/user1.dylib:/user2.dylib".as_slice()));
+
+        // Untouched when the target entry is absent.
+        remove_path_env(&mut envs, b"DYLD_INSERT_LIBRARIES", b"/ours.dylib");
+        assert_eq!(envs[0].1.as_deref(), Some(b"/user1.dylib:/user2.dylib".as_slice()));
     }
 }

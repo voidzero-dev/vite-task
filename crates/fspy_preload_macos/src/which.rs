@@ -32,6 +32,7 @@ fn getenv_path() -> &'static [u8] {
 /// `execvp` / musl `execvp`.
 pub fn resolve_in_path<A: Allocator + Clone>(
     file: &[u8],
+    cwd: Option<&[u8]>,
     allocator: A,
     mut on_path_read: impl FnMut(&BStr),
 ) -> Result<Vec<u8, A>> {
@@ -54,8 +55,14 @@ pub fn resolve_in_path<A: Allocator + Clone>(
 
     for dir in path_env.split(|&ch| ch == b':') {
         candidate.clear();
+        if let Some(base) = cwd.filter(|_| !dir.starts_with(b"/")) {
+            candidate.extend_from_slice(base);
+            if candidate.last() != Some(&b'/') {
+                candidate.push(b'/');
+            }
+        }
         candidate.extend_from_slice(dir);
-        if !dir.is_empty() {
+        if !dir.is_empty() && candidate.last() != Some(&b'/') {
             candidate.push(b'/');
         }
         candidate.extend_from_slice(file);
@@ -68,8 +75,28 @@ pub fn resolve_in_path<A: Allocator + Clone>(
 
         match faccessat(CWD, c_candidate.as_thin(), AccessFlags::X_OK) {
             Ok(()) => {
-                candidate.pop(); // strip trailing NUL
-                return Ok(candidate);
+                let mut st = core::mem::MaybeUninit::<::libc::stat>::zeroed();
+                // SAFETY: `c_candidate` is NUL-terminated and `st` is writable storage.
+                if unsafe { ::libc::stat(c_candidate.as_ptr().cast(), st.as_mut_ptr()) } == 0 {
+                    // SAFETY: `stat` succeeded and initialized `st`.
+                    let st = unsafe { st.assume_init() };
+                    if (st.st_mode & ::libc::S_IFMT) == ::libc::S_IFREG {
+                        candidate.pop(); // strip trailing NUL
+                        return Ok(candidate);
+                    }
+                    seen_eacces = true;
+                    last_err = Error::ACCES;
+                } else {
+                    match Error::last_os_error() {
+                        err @ (Error::ACCES | Error::NOENT | Error::NOTDIR) => {
+                            if err == Error::ACCES {
+                                seen_eacces = true;
+                            }
+                            last_err = err;
+                        }
+                        other => return Err(other),
+                    }
+                }
             }
             Err(err @ (Error::ACCES | Error::NOENT | Error::NOTDIR)) => {
                 if err == Error::ACCES {

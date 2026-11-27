@@ -13,7 +13,8 @@ use crate::{
     codec::{decode_b64, encode_b64},
     nostd_exec::{
         Exec, append_path_env, ensure_env,
-        open::{absolute_relative, open_executable, pread_header},
+        open::{absolute_relative, join_relative_to_base, open_executable, pread_header},
+        remove_path_env,
         shebang::{
             MACOS_MAX_LINE_LEN, MACOS_MAX_RECURSION, ParseShebangOptions, apply_shebang,
             parse_shebang_bytes,
@@ -113,37 +114,52 @@ impl<'a> EncodedPayload<'a> {
     pub fn prepare_exec<A: Allocator + Clone>(
         &self,
         exec: &mut Exec<A>,
+        on_path_read: impl FnMut(&BStr),
+    ) -> Result<()> {
+        self.prepare_exec_in_dir(exec, None, on_path_read)
+    }
+
+    /// Like [`Self::prepare_exec`], resolving relative program paths against
+    /// `cwd` (when `Some`, e.g. from `posix_spawn_file_actions_addchdir_np`)
+    /// instead of the current working directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same OS-compatible `errno` values as [`Self::prepare_exec`].
+    pub fn prepare_exec_in_dir<A: Allocator + Clone>(
+        &self,
+        exec: &mut Exec<A>,
+        cwd: Option<&[u8]>,
         mut on_path_read: impl FnMut(&BStr),
     ) -> Result<()> {
-        if exec.program.is_empty() {
-            return Err(Error::NOENT);
-        }
-
         let allocator = exec.allocator().clone();
         let mut peek_buf = [0u8; MACOS_MAX_LINE_LEN];
         let mut depth = 0usize;
 
-        loop {
+        let final_file = loop {
             if exec.program.is_empty() {
                 return Err(Error::NOENT);
             }
-            if exec.program.starts_with(b"/") {
+            let open_path = if exec.program.starts_with(b"/") {
                 on_path_read(BStr::new(&exec.program));
+                None
             } else {
-                let abs = absolute_relative(&exec.program, allocator.clone())?;
+                let abs = resolve_relative(&exec.program, cwd, allocator.clone())?;
                 on_path_read(BStr::new(&abs));
-            }
+                cwd.is_some().then_some(abs)
+            };
 
-            let c_path = bytes_to_cstring(&exec.program, allocator.clone())?;
+            let c_path =
+                bytes_to_cstring(open_path.as_deref().unwrap_or(&exec.program), allocator.clone())?;
             let file = open_executable(CWD, c_path.as_c_str().as_thin(), false)?;
             let n = pread_header(file.as_fd(), &mut peek_buf)?;
-            drop(file);
 
             if let Some(shebang) = parse_shebang_bytes(
                 &peek_buf[..n],
                 ParseShebangOptions::macos(),
                 allocator.clone(),
             )? {
+                drop(file);
                 depth += 1;
                 if depth > MACOS_MAX_RECURSION {
                     return Err(Error::NOEXEC);
@@ -152,19 +168,39 @@ impl<'a> EncodedPayload<'a> {
                 apply_shebang(exec, shebang, script_arg);
                 continue;
             }
-            break;
-        }
+            break file;
+        };
 
         if !exec.program.starts_with(b"/") {
-            exec.program = absolute_relative(&exec.program, allocator.clone())?;
+            exec.program = resolve_relative(&exec.program, cwd, allocator.clone())?;
         }
 
-        let injectable = match sip_bin_file_name(&exec.program) {
+        let canonical_path =
+            fspy_nostd_alloc::fs::fcntl_getpath(allocator.clone(), final_file.as_fd())
+                .ok()
+                .map(CString::count);
+        drop(final_file);
+        let sip_check_path =
+            canonical_path.as_ref().map_or(exec.program.as_slice(), CString::as_units);
+
+        let injectable = match sip_bin_file_name(sip_check_path) {
             Some(file_name) => {
                 if matches!(file_name, b"sh" | b"bash") {
                     exec.program = to_vec_in(self.payload.bash_path.as_bytes(), allocator);
                     true
-                } else if COREUTILS_FUNCTIONS_FOR_TEST.contains(file_name) {
+                } else if COREUTILS_FUNCTIONS.contains(file_name) {
+                    let argv0_matches = exec.args.first().is_some_and(|arg0| {
+                        let base = arg0.rsplit(|&b| b == b'/').next().unwrap_or(arg0);
+                        base == file_name
+                    });
+                    if !argv0_matches {
+                        let name_vec = to_vec_in(file_name, allocator.clone());
+                        if let Some(arg0) = exec.args.first_mut() {
+                            *arg0 = name_vec;
+                        } else {
+                            exec.args.push(name_vec);
+                        }
+                    }
                     exec.program = to_vec_in(self.payload.coreutils_path.as_bytes(), allocator);
                     true
                 } else {
@@ -186,13 +222,26 @@ impl<'a> EncodedPayload<'a> {
                 self.encoded_string.as_bytes(),
             )?;
         } else {
-            exec.envs.retain(|(name, _)| {
-                name.as_slice() != DYLD_INSERT_LIBRARIES
-                    && name.as_slice() != PAYLOAD_ENV_NAME.as_bytes()
-            });
+            remove_path_env(
+                &mut exec.envs,
+                DYLD_INSERT_LIBRARIES,
+                self.payload.preload_path.as_bytes(),
+            );
+            exec.envs.retain(|(name, _)| name.as_slice() != PAYLOAD_ENV_NAME.as_bytes());
         }
 
         Ok(())
+    }
+}
+
+fn resolve_relative<A: Allocator>(
+    path: &[u8],
+    cwd: Option<&[u8]>,
+    allocator: A,
+) -> Result<Vec<u8, A>> {
+    match cwd {
+        Some(base) => join_relative_to_base(base, path, allocator),
+        None => absolute_relative(path, allocator),
     }
 }
 
@@ -208,24 +257,34 @@ fn bytes_to_cstring<A: Allocator>(
 }
 
 /// Returns the file name of an absolute `path` directly inside `/bin` or
-/// `/usr/bin`. Like `Path::parent`, empty and `.` components are ignored,
-/// while `..` is kept as written.
+/// `/usr/bin`, normalizing empty, `.`, and `..` components lexically.
 fn sip_bin_file_name(path: &[u8]) -> Option<&[u8]> {
     let rest = path.strip_prefix(b"/")?;
     let mut parts: [&[u8]; 3] = [&[]; 3];
-    let mut count = 0;
-    for part in rest.split(|&b| b == b'/').filter(|part| !matches!(*part, b"" | b".")) {
-        *parts.get_mut(count)? = part;
-        count += 1;
+    let mut depth = 0usize;
+    for part in rest.split(|&b| b == b'/') {
+        match part {
+            b"" | b"." => {}
+            b".." => depth = depth.saturating_sub(1),
+            _ => {
+                if depth < parts.len() {
+                    parts[depth] = part;
+                }
+                depth += 1;
+            }
+        }
     }
-    match parts[..count] {
+    if depth > parts.len() {
+        return None;
+    }
+    match parts[..depth] {
         [b"bin", file_name] | [b"usr", b"bin", file_name] => Some(file_name),
         _ => None,
     }
 }
 
-#[doc(hidden)]
-pub static COREUTILS_FUNCTIONS_FOR_TEST: Set<&'static [u8]> = phf_set! {
+/// Coreutils applets provided by the bundled uutils `coreutils` binary.
+pub static COREUTILS_FUNCTIONS: Set<&'static [u8]> = phf_set! {
     b"[", b"arch", b"b2sum", b"base32", b"base64", b"basename", b"basenc", b"cat",
     b"chgrp", b"chmod", b"chown", b"chroot", b"cksum", b"comm", b"cp", b"csplit",
     b"cut", b"date", b"dd", b"df", b"dir", b"dircolors", b"dirname", b"du", b"echo",
@@ -254,7 +313,9 @@ mod tests {
             (b"/bin//sh", Some(b"sh")),
             (b"/bin/./sh", Some(b"sh")),
             (b"/./usr/bin/./cat/", Some(b"cat")),
-            (b"/bin/../bin/sh", None),
+            (b"/bin/../bin/sh", Some(b"sh")),
+            (b"/usr/bin/sub/a/b/../../../cat", Some(b"cat")),
+            (b"/../../bin/sh", Some(b"sh")),
             (b"/usr/local/bin/sh", None),
             (b"/foo", None),
             (b"/", None),
@@ -302,5 +363,78 @@ mod tests {
             envs: allocator_api2::vec::Vec::new_in(Global),
         };
         assert_eq!(payload.prepare_exec(&mut exec, |_| {}).unwrap_err(), fspy_nostd::Error::NOEXEC);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn non_injectable_sip_binary_strips_only_our_preload_and_resolves_symlinks() {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        use allocator_api2::alloc::Global;
+        use fspy_shared::ipc::{IpcStr, channel::channel};
+
+        use super::{DYLD_INSERT_LIBRARIES, EncodedPayload, PAYLOAD_ENV_NAME, Payload};
+        use crate::nostd_exec::{Exec, to_vec_in};
+
+        let receiver = channel(1 << 30, Global).unwrap();
+        let preload = b"/tmp/fspy_preload.dylib";
+        let payload = EncodedPayload::encode(
+            Payload {
+                ipc_channel_conf: receiver.conf(),
+                preload_path: IpcStr::from_bytes(preload),
+                bash_path: IpcStr::from_bytes(b"/tmp/fspy_bash"),
+                coreutils_path: IpcStr::from_bytes(b"/tmp/fspy_coreutils"),
+            },
+            Global,
+        );
+
+        // 1. Non-injectable SIP binary with both a user preload and ours: keeps user preload.
+        let mut envs = allocator_api2::vec::Vec::new_in(Global);
+        envs.push((
+            to_vec_in(DYLD_INSERT_LIBRARIES, Global),
+            Some(to_vec_in(b"/tmp/user.dylib:/tmp/fspy_preload.dylib", Global)),
+        ));
+        envs.push((
+            to_vec_in(PAYLOAD_ENV_NAME.as_bytes(), Global),
+            Some(to_vec_in(payload.encoded_string.as_bytes(), Global)),
+        ));
+        let mut exec = Exec {
+            program: to_vec_in(b"/usr/bin/sed", Global),
+            args: allocator_api2::vec::Vec::new_in(Global),
+            envs,
+        };
+        payload.prepare_exec(&mut exec, |_| {}).unwrap();
+        let dyld = exec
+            .envs
+            .iter()
+            .find(|(k, _)| k.as_slice() == DYLD_INSERT_LIBRARIES)
+            .and_then(|(_, v)| v.as_deref());
+        assert_eq!(dyld, Some(b"/tmp/user.dylib".as_slice()));
+        assert!(!exec.envs.iter().any(|(k, _)| k.as_slice() == PAYLOAD_ENV_NAME.as_bytes()));
+
+        // 2. Non-injectable SIP binary via symlink with only our preload: removes env var entirely.
+        let dir = tempfile::tempdir().unwrap();
+        let sed_link = dir.path().join("my_sed");
+        std::os::unix::fs::symlink("/usr/bin/sed", &sed_link).unwrap();
+        let mut envs = allocator_api2::vec::Vec::new_in(Global);
+        envs.push((to_vec_in(DYLD_INSERT_LIBRARIES, Global), Some(to_vec_in(preload, Global))));
+        let mut exec = Exec {
+            program: to_vec_in(sed_link.as_os_str().as_bytes(), Global),
+            args: allocator_api2::vec::Vec::new_in(Global),
+            envs,
+        };
+        payload.prepare_exec(&mut exec, |_| {}).unwrap();
+        assert!(!exec.envs.iter().any(|(k, _)| k.as_slice() == DYLD_INSERT_LIBRARIES));
+
+        // 3. Symlink to `/bin/sh` resolves via F_GETPATH and swaps to bash_path.
+        let sh_link = dir.path().join("my_sh");
+        std::os::unix::fs::symlink("/bin/sh", &sh_link).unwrap();
+        let mut exec = Exec {
+            program: to_vec_in(sh_link.as_os_str().as_bytes(), Global),
+            args: allocator_api2::vec::Vec::new_in(Global),
+            envs: allocator_api2::vec::Vec::new_in(Global),
+        };
+        payload.prepare_exec(&mut exec, |_| {}).unwrap();
+        assert_eq!(exec.program.as_slice(), b"/tmp/fspy_bash");
     }
 }

@@ -74,11 +74,6 @@ unsafe extern "C" fn execve(
 
 intercept!(execl(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
 unsafe extern "C" fn execl(path: *const c_char, arg: *const c_char, mut valist: ...) -> c_int {
-    #[expect(
-        clippy::no_effect_underscore_binding,
-        reason = "suppresses unused warning on *::original"
-    )]
-    let _unused = execl::original;
     let arena = fspy_nostd_alloc::pooled_bump();
     // SAFETY: valist holds execl's NULL-terminated argument list after arg.
     let (argv, envp) = unsafe { (collect_argv(&arena, arg, &mut valist), environ()) };
@@ -87,11 +82,6 @@ unsafe extern "C" fn execl(path: *const c_char, arg: *const c_char, mut valist: 
 
 intercept!(execlp(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
 unsafe extern "C" fn execlp(path: *const c_char, arg: *const c_char, mut valist: ...) -> c_int {
-    #[expect(
-        clippy::no_effect_underscore_binding,
-        reason = "suppresses unused warning on *::original"
-    )]
-    let _unused = execlp::original;
     let arena = fspy_nostd_alloc::pooled_bump();
     // SAFETY: valist holds execlp's NULL-terminated argument list after arg.
     let (argv, envp) = unsafe { (collect_argv(&arena, arg, &mut valist), environ()) };
@@ -100,11 +90,6 @@ unsafe extern "C" fn execlp(path: *const c_char, arg: *const c_char, mut valist:
 
 intercept!(execle(64): unsafe extern "C" fn(path: *const c_char, arg0: *const c_char, ...) -> c_int);
 unsafe extern "C" fn execle(path: *const c_char, arg: *const c_char, mut valist: ...) -> c_int {
-    #[expect(
-        clippy::no_effect_underscore_binding,
-        reason = "suppresses unused warning on *::original"
-    )]
-    let _unused = execle::original;
     let arena = fspy_nostd_alloc::pooled_bump();
     // SAFETY: valist holds execle's NULL-terminated argument list followed by envp.
     let (argv, envp) = unsafe {
@@ -116,11 +101,6 @@ unsafe extern "C" fn execle(path: *const c_char, arg: *const c_char, mut valist:
 
 intercept!(execv(64): unsafe extern "C" fn(path: *const c_char, argv: *const *const c_char) -> c_int);
 unsafe extern "C" fn execv(path: *const c_char, argv: *const *const c_char) -> c_int {
-    #[expect(
-        clippy::no_effect_underscore_binding,
-        reason = "suppresses unused warning on *::original"
-    )]
-    let _unused = execv::original;
     // SAFETY: `environ()` returns the valid process environment pointer.
     handle_exec(fspy_nostd_alloc::pooled_bump(), false, path, argv, unsafe { environ() })
 }
@@ -130,11 +110,6 @@ intercept!(execvp(64): unsafe extern "C" fn(
     argv: *const *const c_char,
 ) -> c_int);
 unsafe extern "C" fn execvp(prog: *const c_char, argv: *const *const c_char) -> c_int {
-    #[expect(
-        clippy::no_effect_underscore_binding,
-        reason = "suppresses unused warning on *::original"
-    )]
-    let _unused = execvp::original;
     // SAFETY: `environ()` returns the valid process environment pointer.
     handle_exec(fspy_nostd_alloc::pooled_bump(), true, prog, argv, unsafe { environ() })
 }

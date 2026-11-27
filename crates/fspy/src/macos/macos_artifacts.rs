@@ -7,7 +7,7 @@ pub const OILS_BINARY: Artifact = artifact!("oils_for_unix", "FSPY_MACOS_ARTIFAC
 mod tests {
     use std::{process::Command, str::from_utf8};
 
-    use fspy_shared_unix::macos::COREUTILS_FUNCTIONS_FOR_TEST;
+    use fspy_shared_unix::macos::COREUTILS_FUNCTIONS;
 
     use super::*;
 
@@ -25,7 +25,7 @@ mod tests {
             })
             .collect();
         let mut actual_functions: Vec<&str> =
-            COREUTILS_FUNCTIONS_FOR_TEST.iter().copied().map(|f| from_utf8(f).unwrap()).collect();
+            COREUTILS_FUNCTIONS.iter().copied().map(|f| from_utf8(f).unwrap()).collect();
 
         expected_functions.sort_unstable();
         actual_functions.sort_unstable();

@@ -18,6 +18,8 @@ macro_rules! intercept {
             #[expect(clippy::allow_attributes, reason = "macro-generated: imports may or may not be used depending on expansion context")]
             #[allow(unused_imports, reason = "macro-generated: imports may or may not be used depending on expansion context")]
             use super::*;
+            #[expect(clippy::allow_attributes, reason = "macro-generated: some interposers delegate to another original symbol")]
+            #[allow(dead_code, reason = "macro-generated: some interposers delegate to another original symbol")]
             pub fn original() -> $fn_sig {
                 $crate::libc::$name
             }

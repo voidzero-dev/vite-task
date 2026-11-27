@@ -62,13 +62,37 @@ impl Client<'_> {
         allocator: &A,
     ) -> Result<RawExec> {
         // SAFETY: caller upholds `RawExec::to_exec`'s pointer contract.
+        unsafe { self.handle_exec_in_dir(search_path, None, raw_exec, allocator) }
+    }
+
+    /// Resolves and prepares an exec call, resolving relative paths against
+    /// `cwd` (when `Some`, e.g. from `posix_spawn_file_actions_addchdir_np`)
+    /// instead of the current working directory.
+    ///
+    /// # Safety
+    ///
+    /// `raw_exec` must contain valid pointers satisfying [`RawExec::to_exec`].
+    /// The returned [`RawExec`] borrows from `allocator`.
+    ///
+    /// # Errors
+    ///
+    /// Returns OS-compatible `errno` values from `PATH` lookup or exec
+    /// preparation.
+    pub unsafe fn handle_exec_in_dir<A: Allocator>(
+        &self,
+        search_path: bool,
+        cwd: Option<&[u8]>,
+        raw_exec: RawExec,
+        allocator: &A,
+    ) -> Result<RawExec> {
+        // SAFETY: caller upholds `RawExec::to_exec`'s pointer contract.
         let mut exec = unsafe { raw_exec.to_exec(allocator) }?;
         if search_path {
-            exec.program = which::resolve_in_path(&exec.program, allocator, |candidate| {
+            exec.program = which::resolve_in_path(&exec.program, cwd, allocator, |candidate| {
                 self.send_path(AccessMode::Read, candidate);
             })?;
         }
-        self.encoded_payload.prepare_exec(&mut exec, |path| {
+        self.encoded_payload.prepare_exec_in_dir(&mut exec, cwd, |path| {
             self.send_path(AccessMode::Read, path);
         })?;
         Ok(RawExec::from_exec(exec))
@@ -90,6 +114,7 @@ pub const fn open_flags_mode(flags: c_int) -> AccessMode {
     match flags & ::libc::O_ACCMODE {
         ::libc::O_RDWR => AccessMode::ReadWrite,
         ::libc::O_WRONLY => AccessMode::Write,
+        _ if flags & (::libc::O_CREAT | ::libc::O_TRUNC) != 0 => AccessMode::ReadWrite,
         _ => AccessMode::Read,
     }
 }
@@ -98,16 +123,19 @@ pub const fn open_flags_mode(flags: c_int) -> AccessMode {
 ///
 /// # Safety
 ///
-/// `mode` must be a valid NUL-terminated C string.
+/// `mode` must be null or point to a valid NUL-terminated C string.
 pub unsafe fn mode_str_to_access_mode(mode: *const c_char) -> AccessMode {
-    // SAFETY: caller guarantees `mode` points to a valid NUL-terminated string.
+    if mode.is_null() {
+        return AccessMode::Read;
+    }
+    // SAFETY: caller guarantees non-null `mode` points to a valid NUL-terminated string.
     let mode_bytes = unsafe { CStr::<Thin>::from_ptr(mode.cast()) }.count().as_units();
-    let has_read = mode_bytes.contains(&b'r');
-    let has_write = mode_bytes.contains(&b'w') || mode_bytes.contains(&b'a');
-    match (has_read, has_write) {
-        (false, true) => AccessMode::Write,
-        (true, true) => AccessMode::ReadWrite,
-        _ => AccessMode::Read,
+    if mode_bytes.contains(&b'+') {
+        AccessMode::ReadWrite
+    } else if mode_bytes.contains(&b'w') || mode_bytes.contains(&b'a') {
+        AccessMode::Write
+    } else {
+        AccessMode::Read
     }
 }
 
@@ -134,11 +162,14 @@ pub unsafe fn handle_open_at(dirfd: c_int, path: *const c_char, mode: AccessMode
     if path.is_null() {
         return;
     }
+    // SAFETY: non-null `path` is NUL-terminated for the duration of this call.
+    let c_path = unsafe { CStr::<Thin>::from_ptr(path.cast()) };
+    if c_path.count().as_units().is_empty() {
+        return;
+    }
     let arena = fspy_nostd_alloc::pooled_bump();
     // SAFETY: `dirfd` is `-1` or open, and `path` is a non-null C string.
     let dirfd = unsafe { BorrowedFd::try_borrow_raw(dirfd) };
-    // SAFETY: non-null `path` is NUL-terminated for the duration of this call.
-    let c_path = unsafe { CStr::<Thin>::from_ptr(path.cast()) };
     if let Ok(Some(resolved)) = resolve_path_at(&arena, dirfd, c_path) {
         client.send_path(mode, BStr::new(resolved.as_units()));
     }

@@ -16,6 +16,8 @@
 //! [`RuntimeState::loadInsertedLibraries`]: https://github.com/apple-oss-distributions/dyld/blob/fd8d0c4d52320ebf64db34f3cb280310d905c5ae/dyld/DyldRuntimeState.cpp#L676-L680
 //! [`normalizeImageIndex`]: https://github.com/apple-oss-distributions/dyld/blob/fd8d0c4d52320ebf64db34f3cb280310d905c5ae/dyld/DyldAPIs.cpp#L238-L253
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use crate::{
     libc::{c_char, intptr_t, mach_header},
     macros::intercept,
@@ -24,24 +26,46 @@ use crate::{
 /// `MH_EXECUTE` from `<mach-o/loader.h>`.
 const MH_EXECUTE: u32 = 0x2;
 
-/// Maps an index in the presented order to dyld's actual index.
-///
-/// The main executable is looked up on every call rather than cached: its
-/// index stays fixed only because of undocumented dyld behavior.
-fn actual_image_index(image_index: u32) -> u32 {
+/// Sentinel indicating the main executable's dyld image index is not yet cached.
+const UNSET_INDEX: u32 = u32::MAX;
+
+/// Cached dyld index of the `MH_EXECUTE` image. Verified in O(1) on every call
+/// so we never rely on dyld keeping the index fixed across image mutations,
+/// while avoiding an O(N) linear scan per query.
+static MAIN_IMAGE_INDEX: AtomicU32 = AtomicU32::new(UNSET_INDEX);
+
+fn find_main_image_index() -> Option<u32> {
+    let cached = MAIN_IMAGE_INDEX.load(Ordering::Relaxed);
+    if cached != UNSET_INDEX {
+        // SAFETY: dyld returns null for out-of-range indices.
+        let header = unsafe { _dyld_get_image_header::original()(cached) };
+        // SAFETY: a non-null header points to the loaded image's mach header.
+        if !header.is_null() && unsafe { (*header).filetype } == MH_EXECUTE {
+            return Some(cached);
+        }
+    }
+
     let mut main_index = 0;
     loop {
         // SAFETY: dyld returns null for out-of-range indices.
         let header = unsafe { _dyld_get_image_header::original()(main_index) };
         if header.is_null() {
-            return image_index;
+            return None;
         }
         // SAFETY: a non-null header points to the loaded image's mach header.
         if unsafe { (*header).filetype } == MH_EXECUTE {
-            break;
+            MAIN_IMAGE_INDEX.store(main_index, Ordering::Relaxed);
+            return Some(main_index);
         }
         main_index += 1;
     }
+}
+
+/// Maps an index in the presented order to dyld's actual index.
+fn actual_image_index(image_index: u32) -> u32 {
+    let Some(main_index) = find_main_image_index() else {
+        return image_index;
+    };
     match image_index {
         0 => main_index,
         index if index <= main_index => index - 1,

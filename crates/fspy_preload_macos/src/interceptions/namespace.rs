@@ -53,6 +53,10 @@ unsafe extern "C" fn renamex_np(
     new: *const c_char,
     flags: libc::c_uint,
 ) -> c_int {
+    if flags & libc::RENAME_SWAP != 0 {
+        // SAFETY: old is a valid C string pointer provided by the caller.
+        unsafe { handle_open_path(old, AccessMode::RenameTarget) };
+    }
     // SAFETY: new is a valid C string pointer provided by the caller.
     unsafe { handle_open_path(new, AccessMode::RenameTarget) };
     // SAFETY: calling the original libc renamex_np() with forwarded arguments.
@@ -67,6 +71,10 @@ unsafe extern "C" fn renameatx_np(
     new: *const c_char,
     flags: libc::c_uint,
 ) -> c_int {
+    if flags & libc::RENAME_SWAP != 0 {
+        // SAFETY: olddirfd is -1 or valid, and old is a valid C string.
+        unsafe { handle_open_at(olddirfd, old, AccessMode::RenameTarget) };
+    }
     // SAFETY: newdirfd is -1 or valid, and new is a valid C string.
     unsafe { handle_open_at(newdirfd, new, AccessMode::RenameTarget) };
     // SAFETY: calling the original libc renameatx_np() with forwarded arguments.

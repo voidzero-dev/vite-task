@@ -80,9 +80,7 @@ impl SpyImpl {
             .prepare_exec(&mut exec, |path| {
                 exec_resolve_accesses.add(PathAccess::Read(IpcPath::from_bytes(path.as_ref())));
             })
-            .map_err(|err| {
-                SpawnError::Injection(io::Error::from_raw_os_error(err.raw_os_error()))
-            })?;
+            .map_err(|err| SpawnError::OsSpawn(io::Error::from_raw_os_error(err.raw_os_error())))?;
         command.set_exec(exec);
         command.env("FSPY", "1");
 

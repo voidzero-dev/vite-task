@@ -57,4 +57,14 @@ unsafe extern "C" {
     pub unsafe fn _dyld_get_image_vmaddr_slide(image_index: u32) -> intptr_t;
 
     pub unsafe fn _dyld_get_image_name(image_index: u32) -> *const c_char;
+
+    pub unsafe fn posix_spawn_file_actions_addchdir_np(
+        file_actions: *mut posix_spawn_file_actions_t,
+        path: *const c_char,
+    ) -> c_int;
+
+    pub unsafe fn posix_spawn_file_actions_addfchdir_np(
+        file_actions: *mut posix_spawn_file_actions_t,
+        fd: c_int,
+    ) -> c_int;
 }
