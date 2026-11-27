@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dev-dependencies]
 elf = { workspace = true }
+fspy_elf_loader = { path = "../fspy_elf_loader" }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 libc = { workspace = true }

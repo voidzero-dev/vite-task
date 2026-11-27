@@ -268,8 +268,8 @@ impl<'fd> File<'fd> {
             (mapping, bias)
         };
         // Like Linux, AT_PHDR is the table's address in the LOAD whose file
-        // bytes contain `e_phoff`, or the load bias when no LOAD does. This
-        // also works when the ELF has no explicit PT_PHDR header.
+        // bytes contain the program-header table, or the load bias when no LOAD
+        // does. This also works when the ELF has no explicit PT_PHDR header.
         let mut phdr = bias;
         // All segments share one bias, preserving their relative addresses.
         // The executable and interpreter each get their own reservation/bias.
@@ -277,8 +277,9 @@ impl<'fd> File<'fd> {
             self.segments().iter().filter(|ph| ph.p_type == abi::PT_LOAD && ph.p_memsz != 0)
         {
             let file_start = word(segment.p_offset);
-            if self.headers.start >= file_start
-                && self.headers.start < add(file_start, word(segment.p_filesz))
+            if let Some(file_end) = file_start.checked_add(word(segment.p_filesz))
+                && self.headers.start >= file_start
+                && self.headers.end <= file_end
             {
                 phdr = add(
                     bias.wrapping_add(word(segment.p_vaddr)),
@@ -352,7 +353,8 @@ impl<'fd> File<'fd> {
                 for other in self.segments().iter() {
                     if other.p_type == abi::PT_LOAD && other.p_memsz != 0 {
                         let other_start = bias.wrapping_add(word(other.p_vaddr));
-                        if other_start >= end && other_start < zero_end {
+                        if other_start > start && other_start >= file_end && other_start < zero_end
+                        {
                             zero_end = other_start;
                         }
                     }

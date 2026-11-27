@@ -85,14 +85,21 @@ impl IpcStr {
         OsStr::from_bytes(&self.data)
     }
 
+    /// Decodes this IPC string as an [`OsString`] of native-endian UTF-16 code
+    /// units.
+    ///
+    /// Uses a zero-copy cast when aligned and even-length; otherwise decodes
+    /// complete 2-byte pairs and ignores any trailing odd byte without
+    /// panicking.
     #[cfg(windows)]
     #[must_use]
     pub fn to_os_string(&self) -> OsString {
-        use bytemuck::{allocation::pod_collect_to_vec, try_cast_slice};
+        use bytemuck::try_cast_slice;
 
         try_cast_slice::<u8, u16>(&self.data).map_or_else(
             |_| {
-                let wide = pod_collect_to_vec::<u8, u16>(&self.data);
+                let (pairs, _) = self.data.as_chunks::<2>();
+                let wide: Vec<u16> = pairs.iter().copied().map(u16::from_ne_bytes).collect();
                 OsString::from_wide(&wide)
             },
             OsString::from_wide,
@@ -272,5 +279,18 @@ mod tests {
         let decoded: &IpcStr = wincode::deserialize(&encoded[1..]).unwrap();
         let decoded_wide = decoded.to_os_string().encode_wide().collect::<Vec<u16>>();
         assert_eq!(decoded_wide, wide_str);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_to_os_string_odd_byte_length_does_not_panic() {
+        use std::os::windows::ffi::OsStrExt;
+
+        let odd = IpcStr::wrap_ref(&[b'a', 0, b'b']);
+        let decoded_wide: Vec<u16> = odd.to_os_string().encode_wide().collect();
+        assert_eq!(decoded_wide, [u16::from(b'a')]);
+
+        let single = IpcStr::wrap_ref(&[0xFF]);
+        assert!(single.to_os_string().is_empty());
     }
 }

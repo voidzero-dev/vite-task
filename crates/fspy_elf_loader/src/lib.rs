@@ -14,34 +14,55 @@
 //! after the kernel has already executed our freestanding launcher. We leave
 //! its mappings and signal handlers in place. Calling another kernel exec here
 //! would discard them.
-#![cfg(any(target_os = "linux", target_os = "none"))]
 #![no_std]
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 extern crate std;
 
+mod launcher_region;
+pub use launcher_region::{LAUNCHER_REGION_AARCH64, LAUNCHER_REGION_X86_64};
+
+/// Reserved fixed-address region `(base, limit)` for the current architecture's
+/// freestanding launcher.
+#[cfg(all(any(target_os = "linux", target_os = "none"), target_arch = "x86_64"))]
+#[expect(clippy::cast_possible_truncation, reason = "x86_64 has 64-bit usize")]
+pub const LAUNCHER_REGION: (usize, usize) =
+    (LAUNCHER_REGION_X86_64.0 as usize, LAUNCHER_REGION_X86_64.1 as usize);
+
+/// Reserved fixed-address region `(base, limit)` for the current architecture's
+/// freestanding launcher.
+#[cfg(all(any(target_os = "linux", target_os = "none"), target_arch = "aarch64"))]
+#[expect(clippy::cast_possible_truncation, reason = "aarch64 has 64-bit usize")]
+pub const LAUNCHER_REGION: (usize, usize) =
+    (LAUNCHER_REGION_AARCH64.0 as usize, LAUNCHER_REGION_AARCH64.1 as usize);
+
+#[cfg(any(target_os = "linux", target_os = "none"))]
 use core::{convert::Infallible, ptr, slice};
 
+#[cfg(any(target_os = "linux", target_os = "none"))]
 use elf::{abi, endian::LittleEndian, file::Class, segment::SegmentTable};
+#[cfg(any(target_os = "linux", target_os = "none"))]
 use fspy_nostd::{BorrowedFd, CStr, Error, OwnedFd, Result, Thin, env::AuxEntry};
+#[cfg(any(target_os = "linux", target_os = "none"))]
 use linux_raw_sys::{
-    auxvec::{AT_NULL, AT_PAGESZ, AT_PHDR, AT_PHENT, AT_PHNUM},
+    auxvec::{AT_MINSIGSTKSZ, AT_NULL, AT_PAGESZ, AT_PHDR, AT_PHENT, AT_PHNUM},
     errno::EEXIST,
     prctl::PR_SET_NAME,
 };
+#[cfg(any(target_os = "linux", target_os = "none"))]
 use syscalls::Sysno;
 
+#[cfg(any(target_os = "linux", target_os = "none"))]
 mod image;
+#[cfg(any(target_os = "linux", target_os = "none"))]
 mod mapping;
+#[cfg(any(target_os = "linux", target_os = "none"))]
 mod sigsys;
+#[cfg(any(target_os = "linux", target_os = "none"))]
 mod stack;
 
-#[cfg(target_arch = "x86_64")]
-const LAUNCHER_REGION: (usize, usize) = (0x5500_0000_0000, 0x5a00_0000_0000);
-#[cfg(target_arch = "aarch64")]
-const LAUNCHER_REGION: (usize, usize) = (0x0002_0000_0000, 0x0005_0000_0000);
-
 /// Decoded syscall invocation passed to a [`SyscallInterceptor`].
+#[cfg(any(target_os = "linux", target_os = "none"))]
 #[derive(Clone, Copy, Debug)]
 pub struct Syscall {
     pub sysno: Sysno,
@@ -49,6 +70,7 @@ pub struct Syscall {
     raw_uc_sigmask: u64,
 }
 
+#[cfg(any(target_os = "linux", target_os = "none"))]
 impl Syscall {
     /// Returns the calling thread's virtualized signal mask prior to this
     /// syscall (including the virtualized `SIGSYS` bit).
@@ -78,11 +100,13 @@ impl Syscall {
 
 /// Failure-cleanup callback and context pointer attached to
 /// [`SyscallAction::Execve`].
+#[cfg(any(target_os = "linux", target_os = "none"))]
 pub type ExecveCleanup = (unsafe fn(*mut core::ffi::c_void), *mut core::ffi::c_void);
 
 /// Action returned by a [`SyscallInterceptor`] to tell the `SIGSYS` dispatcher
 /// how to complete the trapped syscall after releasing the private `SIGSYS`
 /// stack.
+#[cfg(any(target_os = "linux", target_os = "none"))]
 #[derive(Clone, Copy, Debug)]
 pub enum SyscallAction {
     /// Replay the (possibly `/proc/*/exe`-rewritten) trapped syscall.
@@ -115,6 +139,7 @@ pub enum SyscallAction {
 /// before executing the replacement `SYS_execve`; returning `Err(error)`
 /// short-circuits the syscall and returns `-error.raw_os_error()` directly to
 /// the caller.
+#[cfg(any(target_os = "linux", target_os = "none"))]
 #[derive(Clone, Copy)]
 pub struct SyscallInterceptor {
     pub syscalls: &'static [Sysno],
@@ -143,6 +168,7 @@ pub struct SyscallInterceptor {
 /// `'a`. Like the macOS and Windows preloads, the runtime assumes the pointers
 /// programs pass to syscalls are valid; a bad one crashes the process instead
 /// of failing with `EFAULT`.
+#[cfg(any(target_os = "linux", target_os = "none"))]
 pub unsafe fn user_cstr<'a>(addr: usize) -> Result<CStr<'a, Thin>> {
     // SAFETY: forwarded from caller contract.
     unsafe { sigsys::user_cstr(addr) }
@@ -159,6 +185,7 @@ pub unsafe fn user_cstr<'a>(addr: usize) -> Result<CStr<'a, Thin>> {
 ///
 /// `T` must be valid for any bit pattern, and any other `addr` must be
 /// readable for `size_of::<T>()` bytes (see [`user_cstr`]).
+#[cfg(any(target_os = "linux", target_os = "none"))]
 pub unsafe fn copy_user_value<T: Copy>(addr: usize) -> Result<T> {
     // SAFETY: forwarded from caller contract.
     unsafe { sigsys::copy_user_value(addr) }
@@ -173,6 +200,7 @@ pub unsafe fn copy_user_value<T: Copy>(addr: usize) -> Result<T> {
 /// Returns [`fspy_nostd::Error::NOEXEC`] for malformed or unsupported ELF
 /// images (such as wrong architecture or non-ELF64), or the underlying OS
 /// error if `fd` or its `PT_INTERP` cannot be inspected or opened.
+#[cfg(any(target_os = "linux", target_os = "none"))]
 pub fn validate_exec(fd: BorrowedFd<'_>) -> Result<()> {
     image::validate_exec_fd(fd, fspy_nostd::param::page_size())
 }
@@ -203,6 +231,7 @@ pub fn validate_exec(fd: BorrowedFd<'_>) -> Result<()> {
 /// Panics only if the launcher image itself violates its fixed-address `PF_X`
 /// link invariants or an installed interceptor function pointer lies outside
 /// the launcher's `PF_X` range.
+#[cfg(any(target_os = "linux", target_os = "none"))]
 pub unsafe fn try_exec_elf<'a, F: FnOnce()>(
     elf_file: OwnedFd,
     execfn: CStr<'a, Thin>,
@@ -288,7 +317,7 @@ pub unsafe fn try_exec_elf<'a, F: FnOnce()>(
     // is still open so `/proc/self/fd/<fd>` resolves the canonical target path.
     let min_sigstksz = inherited_auxv
         .iter()
-        .find(|entry| entry.key == 51) // AT_MINSIGSTKSZ
+        .find(|entry| entry.key == usize::try_from(AT_MINSIGSTKSZ).unwrap())
         .map_or(0, |entry| entry.value);
     // SAFETY: fresh single-threaded launcher with validated resident `code_range`.
     unsafe {
@@ -360,6 +389,7 @@ pub unsafe fn try_exec_elf<'a, F: FnOnce()>(
 /// invariants, `AT_PAGESZ` is missing or invalid, loading detects an
 /// unsupported or malformed image, runs out of stack capacity, fails to map or
 /// open a file, or fails to install the `SIGSYS`/seccomp runtime.
+#[cfg(any(target_os = "linux", target_os = "none"))]
 pub unsafe fn exec_elf<'a>(
     elf_file: OwnedFd,
     execfn: CStr<'a, Thin>,
@@ -386,6 +416,7 @@ pub unsafe fn exec_elf<'a>(
 ///
 /// `inherited_auxv` must be the live kernel auxiliary vector for the current
 /// process.
+#[cfg(any(target_os = "linux", target_os = "none"))]
 unsafe fn locate_launcher_code_range(inherited_auxv: &[AuxEntry]) -> (u64, u64) {
     let mut phdr_addr = None;
     let mut phent = None;
@@ -465,6 +496,7 @@ unsafe fn locate_launcher_code_range(inherited_auxv: &[AuxEntry]) -> (u64, u64) 
 
 /// Sets `/proc/self/comm` via `prctl(PR_SET_NAME)` to the basename of `execfn`
 /// truncated to 15 bytes + NUL.
+#[cfg(any(target_os = "linux", target_os = "none"))]
 fn set_process_name(execfn: CStr<'_, Thin>) {
     let bytes = execfn.count().as_units();
     let basename = bytes.rsplit(|&b| b == b'/').next().unwrap_or(bytes);
@@ -480,7 +512,7 @@ fn set_process_name(execfn: CStr<'_, Thin>) {
 // #[naked] prevents a compiler-generated stack frame. Each stub starts with
 // C function arguments in registers, installs the process-entry stack, and
 // jumps. A normal call would put an unwanted return address on x86-64's stack.
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(any(target_os = "linux", target_os = "none"), target_arch = "aarch64"))]
 #[unsafe(naked)]
 unsafe extern "C" fn enter(_entry: usize, _stack: *mut usize) -> ! {
     // X0 holds entry and X1 holds the new SP. Match Linux start_thread by
@@ -522,7 +554,7 @@ unsafe extern "C" fn enter(_entry: usize, _stack: *mut usize) -> ! {
     );
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(any(target_os = "linux", target_os = "none"), target_arch = "x86_64"))]
 #[unsafe(naked)]
 unsafe extern "C" fn enter(_entry: usize, _stack: *mut usize) -> ! {
     // RDI holds entry and RSI holds the new RSP. RDX is the optional

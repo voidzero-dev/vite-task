@@ -3,8 +3,10 @@
  *
  * Protocol: argv[0]="custom-argv-zero", argv[1]="", argv[2]=0xff,
  * EMPTY="", BYTES=0xff, FIXTURE_IMAGE=AT_EXECFN, stdout "runtime-ok\n",
- * exit 37. Set EXPECT_INTERPRETER=1 when PT_INTERP is present (AT_BASE != 0)
- * and EXPECT_FIXED_ADDRESS=1 for ET_EXEC images (load bias == 0).
+ * exit 37. Set EXPECT_INTERPRETER=1 when PT_INTERP is present (AT_BASE != 0),
+ * EXPECT_FIXED_ADDRESS=1 for ET_EXEC images (load bias == 0),
+ * EXPECT_ALIGNED_RANDOM=1 when AT_RANDOM must be 16-byte aligned (exec_elf),
+ * and EXPECT_EXEC_STACK=1 when /proc/self/maps must show an rwxp stack.
  */
 
 #define _GNU_SOURCE
@@ -13,6 +15,7 @@
 #include <elf.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,7 +75,7 @@ static unsigned long load_bias(unsigned long at_phdr, unsigned long phnum, const
     return 0;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv, char **envp) {
     unsigned long i;
     pthread_t thread;
     int started = 0;
@@ -97,6 +100,24 @@ int main(int argc, char **argv) {
     }
     if ((unsigned char)argv[2][0] != 0xff || argv[2][1] != '\0') {
         fail("argv2");
+    }
+    {
+        /* Verify Linux's ascending, contiguous argv + envp string layout. */
+        const char *prev_end = NULL;
+        int arg_i;
+        size_t env_i;
+        for (arg_i = 0; arg_i < argc; arg_i++) {
+            if (prev_end != NULL && argv[arg_i] != prev_end) {
+                fail("argv contiguity");
+            }
+            prev_end = argv[arg_i] + strlen(argv[arg_i]) + 1;
+        }
+        for (env_i = 0; envp[env_i] != NULL; env_i++) {
+            if (prev_end != NULL && envp[env_i] != prev_end) {
+                fail("envp contiguity");
+            }
+            prev_end = envp[env_i] + strlen(envp[env_i]) + 1;
+        }
     }
     if (getenv("EMPTY") == NULL || getenv("EMPTY")[0] != '\0') {
         fail("EMPTY");
@@ -193,6 +214,9 @@ int main(int argc, char **argv) {
         if (random == NULL) {
             fail("AT_RANDOM");
         }
+        if (getenv("EXPECT_ALIGNED_RANDOM") != NULL && ((uintptr_t)random % 16) != 0) {
+            fail("AT_RANDOM alignment");
+        }
         for (i = 0; i < 16; i++) {
             if (random[i] != 0) {
                 nonzero = 1;
@@ -200,6 +224,64 @@ int main(int argc, char **argv) {
         }
         if (!nonzero) {
             fail("AT_RANDOM zero");
+        }
+    }
+    {
+        const char *platform = (const char *)getauxval(AT_PLATFORM);
+        if (platform != NULL) {
+#if defined(__x86_64__)
+            if (strcmp(platform, "x86_64") != 0) {
+                fail("AT_PLATFORM");
+            }
+#elif defined(__aarch64__)
+            if (strcmp(platform, "aarch64") != 0) {
+                fail("AT_PLATFORM");
+            }
+#else
+            if (platform[0] == '\0') {
+                fail("AT_PLATFORM empty");
+            }
+#endif
+        }
+    }
+#ifdef AT_BASE_PLATFORM
+    {
+        const char *base_platform = (const char *)getauxval(AT_BASE_PLATFORM);
+        if (base_platform != NULL && base_platform[0] == '\0') {
+            fail("AT_BASE_PLATFORM empty");
+        }
+    }
+#endif
+    if (getenv("EXPECT_EXEC_STACK") != NULL) {
+        volatile int stack_marker = 0;
+        unsigned long stack_addr = (unsigned long)(uintptr_t)&stack_marker;
+        FILE *maps = fopen("/proc/self/maps", "r");
+        char line[512];
+        int found_stack = 0;
+        if (maps == NULL) {
+            fail("fopen /proc/self/maps");
+        }
+        while (fgets(line, sizeof line, maps) != NULL) {
+            unsigned long start = 0;
+            unsigned long end = 0;
+            char perms[8];
+            if (sscanf(line, "%lx-%lx %7s", &start, &end, perms) == 3) {
+                if (stack_addr >= start && stack_addr < end) {
+                    if (strcmp(perms, "rwxp") != 0) {
+                        fail("stack not rwxp");
+                    }
+                    found_stack = 1;
+                    break;
+                }
+            }
+            if (strchr(line, '\n') == NULL) {
+                int ch;
+                while ((ch = fgetc(maps)) != '\n' && ch != EOF) {}
+            }
+        }
+        fclose(maps);
+        if (!found_stack) {
+            fail("stack mapping not found");
         }
     }
 

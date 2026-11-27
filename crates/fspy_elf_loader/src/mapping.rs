@@ -57,11 +57,14 @@ impl Mapping {
         let ptr = unsafe {
             mm::mmap_anonymous(ptr::null_mut(), len, ProtFlags::empty(), MapFlags::PRIVATE)
         }?;
-        Self::try_new(ptr.cast(), len)
+        Ok(Self::new(ptr.cast(), len))
     }
 
     pub fn try_reserve_at(address: usize, len: usize) -> Result<Self> {
         Self::try_check_len(len)?;
+        if address == 0 {
+            return Err(Error::INVAL);
+        }
         // Reserve the complete fixed-address image before replacing any of
         // its pages. A collision with the loader, stack, or another mapping
         // must fail without changing that mapping.
@@ -75,7 +78,7 @@ impl Mapping {
                 MapFlags::PRIVATE | MapFlags::FIXED_NOREPLACE,
             )
         }?;
-        let mapping = Self::try_new(ptr.cast(), len)?;
+        let mapping = Self::new(ptr.cast(), len);
         // Older kernels can ignore FIXED_NOREPLACE and choose another address.
         // Release that reservation before failing; MAP_FIXED below must never
         // run unless we own the exact requested range.
@@ -96,7 +99,7 @@ impl Mapping {
         // caller keeps the file unchanged while this view is used.
         let ptr =
             unsafe { mm::mmap(ptr::null_mut(), len, ProtFlags::READ, MapFlags::PRIVATE, fd, 0) }?;
-        Self::try_new(ptr.cast(), len)
+        Ok(Self::new(ptr.cast(), len))
     }
 
     fn try_check_len(len: usize) -> Result<()> {
@@ -106,14 +109,12 @@ impl Mapping {
         Ok(())
     }
 
-    fn try_new(ptr: *mut u8, len: usize) -> Result<Self> {
-        let Some(ptr) = NonNull::new(ptr) else {
-            // SAFETY: this successful mapping is owned here, but address zero
-            // cannot back Rust references, so release it before failing.
-            let _ = unsafe { mm::munmap(ptr.cast(), len) };
-            return Err(Error::NOMEM);
-        };
-        Ok(Self { ptr, len })
+    fn new(ptr: *mut u8, len: usize) -> Self {
+        debug_assert!(!ptr.is_null(), "mmap returned address zero");
+        // SAFETY: Linux never returns address 0 from a non-`MAP_FIXED` `mmap`
+        // (or a non-zero `MAP_FIXED_NOREPLACE` request) when `vm.mmap_min_addr > 0`.
+        let ptr = unsafe { NonNull::new_unchecked(ptr) };
+        Self { ptr, len }
     }
 
     /// Only called on immutable, fully readable file mappings.

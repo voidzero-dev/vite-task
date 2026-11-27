@@ -26,7 +26,7 @@ use fspy_nostd::{
 use linux_raw_sys::{
     auxvec as abi,
     errno::E2BIG,
-    general::{RLIM_INFINITY, RLIMIT_STACK, rlimit64},
+    general::{RLIMIT_STACK, rlimit64},
 };
 use syscalls::Sysno;
 
@@ -45,13 +45,16 @@ const MAX_CAPACITY: usize = 64 * 1024 * 1024;
 // process entry.
 const MIN_STACK_HEADROOM: usize = 64 * 1024;
 
-const RLIM_INFINITY_U64: u64 = (RLIM_INFINITY as i64).cast_unsigned();
+// Linux `RLIM64_INFINITY` (`~0ULL`) for `rlimit64::rlim_cur`.
+// `linux_raw_sys::general::RLIM_INFINITY` is typed as `i32 = -1`, so use
+// `u64::MAX` directly without relying on sign-extension casts.
+const RLIM64_INFINITY_U64: u64 = u64::MAX;
 
 /// Computes the target stack capacity from an `RLIMIT_STACK` soft limit,
-/// treating `RLIM_INFINITY` as 64 MiB, rounding up to `page`, and clamping to
+/// treating `RLIM64_INFINITY` as 64 MiB, rounding up to `page`, and clamping to
 /// `[8 MiB, 64 MiB]`.
 const fn clamp_stack_capacity(rlim_cur: u64, page: usize) -> usize {
-    if rlim_cur == RLIM_INFINITY_U64 {
+    if rlim_cur == RLIM64_INFINITY_U64 {
         return MAX_CAPACITY;
     }
     if rlim_cur >= MAX_CAPACITY as u64 {
@@ -364,7 +367,7 @@ mod tests {
         assert_eq!(clamp_stack_capacity(16 * 1024 * 1024, page), 16 * 1024 * 1024);
         assert_eq!(clamp_stack_capacity(MAX_CAPACITY as u64, page), MAX_CAPACITY);
         assert_eq!(clamp_stack_capacity(128 * 1024 * 1024, page), MAX_CAPACITY);
-        assert_eq!(clamp_stack_capacity(RLIM_INFINITY_U64, page), MAX_CAPACITY);
+        assert_eq!(clamp_stack_capacity(RLIM64_INFINITY_U64, page), MAX_CAPACITY);
     }
 
     #[test]

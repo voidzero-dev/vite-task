@@ -1,4 +1,4 @@
-use core::{mem::MaybeUninit, slice};
+use core::mem::MaybeUninit;
 
 use crate::{
     BorrowedFd, CStr, CWD, Error, Fat, OwnedFd, Result, Thin,
@@ -15,7 +15,6 @@ pub(super) const O_EXCL: u32 = libc::O_EXCL.cast_unsigned();
 pub(super) const O_NOFOLLOW: u32 = libc::O_NOFOLLOW.cast_unsigned();
 pub(super) const O_NONBLOCK: u32 = libc::O_NONBLOCK.cast_unsigned();
 pub(super) const O_CLOEXEC: u32 = libc::O_CLOEXEC.cast_unsigned();
-pub(super) const AT_REMOVEDIR: u32 = libc::AT_REMOVEDIR.cast_unsigned();
 pub(super) const X_OK: u32 = libc::X_OK.cast_unsigned();
 pub(super) type ModeBits = libc::mode_t;
 pub(super) const S_IRUSR: ModeBits = libc::S_IRUSR;
@@ -124,27 +123,11 @@ pub fn fcntl_getpath<'buf>(
 }
 
 pub(super) fn getcwd(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
-    let (chunks, remainder) = buf.as_chunks_mut::<PATH_MAX>();
+    let (chunks, _) = buf.as_chunks_mut::<PATH_MAX>();
     let Some(full) = chunks.first_mut() else {
-        return getcwd_small(remainder);
+        return Err(Error::RANGE);
     };
     getcwd_full(full)
-}
-
-// Keep the `PATH_MAX` scratch storage in a separate stack frame so the
-// large-buffer path does not reserve it. `inline(never)` preserves that
-// conditional stack allocation after optimization.
-#[inline(never)]
-fn getcwd_small(buf: &mut [MaybeUninit<u8>]) -> Result<CStr<'_, Fat>> {
-    let mut scratch = [MaybeUninit::uninit(); PATH_MAX];
-    let initialized = getcwd_full(&mut scratch)?.len_with_nul();
-    let buf = buf.get_mut(..initialized).ok_or(Error::RANGE)?;
-
-    buf.copy_from_slice(&scratch[..initialized]);
-    // SAFETY: `getcwd_full` initialized this copied C string prefix.
-    let bytes = unsafe { slice::from_raw_parts(buf.as_ptr().cast(), buf.len()) };
-    // SAFETY: upheld by the initialized prefix above.
-    Ok(unsafe { CStr::from_units_with_nul_unchecked(bytes) })
 }
 
 /// The allocation-free fast path from Apple's [`getcwd`]: ask an open `.`
