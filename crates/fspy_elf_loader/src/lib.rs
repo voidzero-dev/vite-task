@@ -10,22 +10,159 @@
 //! executable and enters its `e_entry`. `AT_BASE` is 0. Static-PIE images are
 //! `ET_DYN` without an interpreter; their CRT applies `RELATIVE` relocations.
 //!
-//! We implement the mapping, stack, and entry steps after the kernel has
-//! already executed our freestanding loader. We leave its mappings and signal
-//! handlers in place. Calling another kernel exec here would discard them.
+//! We implement the mapping, stack, `SIGSYS` virtualization, and entry steps
+//! after the kernel has already executed our freestanding launcher. We leave
+//! its mappings and signal handlers in place. Calling another kernel exec here
+//! would discard them.
 #![cfg(any(target_os = "linux", target_os = "none"))]
 #![no_std]
 
 #[cfg(test)]
 extern crate std;
 
+use core::{ptr, slice};
+
+use elf::{abi, endian::LittleEndian, file::Class, segment::SegmentTable};
 use fspy_nostd::{BorrowedFd, CStr, OwnedFd, Result, Thin, env::AuxEntry};
-use linux_raw_sys::{auxvec::AT_PAGESZ, prctl::PR_SET_NAME};
+use linux_raw_sys::{
+    auxvec::{AT_NULL, AT_PAGESZ, AT_PHDR, AT_PHENT, AT_PHNUM},
+    prctl::PR_SET_NAME,
+};
 use syscalls::Sysno;
 
 mod image;
 mod mapping;
+mod sigsys;
 mod stack;
+
+#[cfg(target_arch = "x86_64")]
+const LAUNCHER_REGION: (usize, usize) = (0x5500_0000_0000, 0x5a00_0000_0000);
+#[cfg(target_arch = "aarch64")]
+const LAUNCHER_REGION: (usize, usize) = (0x0002_0000_0000, 0x0005_0000_0000);
+
+/// Decoded syscall invocation passed to a [`SyscallInterceptor`].
+#[derive(Clone, Copy, Debug)]
+pub struct Syscall<'a> {
+    pub sysno: Sysno,
+    pub args: [usize; 6],
+    raw_uc_sigmask: u64,
+    cached_path: Option<(usize, &'a [u8])>,
+}
+
+impl<'a> Syscall<'a> {
+    /// Returns the calling thread's virtualized signal mask prior to this
+    /// syscall (including the virtualized `SIGSYS` bit).
+    ///
+    /// Computed lazily because only `execve`/`execveat` interceptors typically
+    /// need it; avoids a `gettid` syscall on hot filesystem traps.
+    ///
+    /// Because the `SIGSYS` dispatcher masks asynchronous signals while running
+    /// the interceptor, an interceptor returning [`SyscallAction::Execve`] must
+    /// propagate or restore this mask in the new image.
+    #[must_use]
+    pub fn sigmask(&self) -> u64 {
+        sigsys::virtual_sigmask_from(self.raw_uc_sigmask)
+    }
+
+    /// Returns `true` when executing inside a `CLONE_VM` (`vfork` /
+    /// `posix_spawn`) child that still shares its address space with the parent
+    /// process.
+    ///
+    /// Computed lazily to avoid a `getpid` syscall on hot filesystem traps.
+    #[must_use]
+    #[expect(clippy::unused_self, reason = "scopes the query to an active SIGSYS trap")]
+    pub fn is_shared_vm_child(&self) -> bool {
+        sigsys::is_shared_vm_child()
+    }
+
+    /// Returns the already fault-safely-copied C-string bytes (excluding the
+    /// terminating NUL) if `addr` was prefetched by the loader's `/proc/*/exe`
+    /// check during this trap, avoiding a second `process_vm_readv`.
+    #[must_use]
+    pub fn cached_cstr(&self, addr: usize) -> Option<&'a [u8]> {
+        self.cached_path.and_then(|(cached_addr, bytes)| (cached_addr == addr).then_some(bytes))
+    }
+}
+
+/// Failure-cleanup callback and context pointer attached to
+/// [`SyscallAction::Execve`].
+pub type ExecveCleanup = (unsafe fn(*mut core::ffi::c_void), *mut core::ffi::c_void);
+
+/// Action returned by a [`SyscallInterceptor`] to tell the `SIGSYS` dispatcher
+/// how to complete the trapped syscall after releasing the private `SIGSYS`
+/// stack.
+#[derive(Clone, Copy, Debug)]
+pub enum SyscallAction {
+    /// Replay the (possibly `/proc/*/exe`-rewritten) trapped syscall.
+    Replay,
+    /// Execute a replacement `SYS_execve(prog, argv, envp)` on the entry stack
+    /// after releasing the private `SIGSYS` stack and clearing the calling
+    /// thread's virtual `SIGSYS` mask entry.
+    ///
+    /// If `SYS_execve` fails, `cleanup` (when `Some`) is invoked with its
+    /// context pointer before returning `-errno` to the caller.
+    Execve {
+        prog: *const u8,
+        argv: *const *const u8,
+        envp: *const *const u8,
+        cleanup: Option<ExecveCleanup>,
+    },
+}
+
+/// Optional caller-supplied syscall interceptor invoked from the loader's
+/// `SIGSYS` dispatcher.
+///
+/// The listed `syscalls` are merged into the seccomp-BPF filter alongside the
+/// loader's own virtualization syscalls. Signal-virtualization syscalls and
+/// `/proc/*/exe` `readlink` calls are handled directly by the loader; for
+/// path-following syscalls targeting `/proc/*/exe`, `handle` observes the
+/// already-rewritten target executable path.
+///
+/// Returning `Ok(SyscallAction::Replay)` replays the syscall; returning
+/// `Ok(SyscallAction::Execve { .. })` releases the private `SIGSYS` stack
+/// before executing the replacement `SYS_execve`; returning `Err(error)`
+/// short-circuits the syscall and returns `-error.raw_os_error()` directly to
+/// the caller.
+#[derive(Clone, Copy)]
+pub struct SyscallInterceptor {
+    pub syscalls: &'static [Sysno],
+    pub handle: unsafe fn(&Syscall<'_>) -> Result<SyscallAction>,
+}
+
+/// Fault-safe copy of a NUL-terminated C string from a trapped syscall's user
+/// pointer into `buf`, returning `Err(Error::FAULT)` instead of crashing if the
+/// address is unreadable.
+///
+/// Returns `Ok(None)` if no NUL byte is found within `buf.len()` bytes (all
+/// `buf.len()` bytes of `buf` are initialized on `Ok(None)`).
+///
+/// # Errors
+///
+/// Returns [`fspy_nostd::Error::FAULT`] if `addr` is unreadable before a NUL
+/// byte is reached.
+pub fn copy_user_cstr(
+    addr: usize,
+    buf: &mut [core::mem::MaybeUninit<u8>],
+) -> Result<Option<&[u8]>> {
+    sigsys::copy_user_cstr(addr, buf)
+}
+
+/// Fault-safe copy of a `Copy` value from a trapped syscall's user pointer,
+/// returning `Err(Error::FAULT)` instead of crashing if the address is
+/// unreadable.
+///
+/// # Errors
+///
+/// Returns [`fspy_nostd::Error::FAULT`] if `addr..addr + size_of::<T>()` is
+/// unreadable.
+///
+/// # Safety
+///
+/// `T` must be valid for any bit pattern.
+pub unsafe fn copy_user_value<T: Copy>(addr: usize) -> Result<T> {
+    // SAFETY: forwarded from caller contract.
+    unsafe { sigsys::copy_user_value(addr) }
+}
 
 /// Validates that `fd` refers to a loadable ELF64 executable (and, if present,
 /// a valid `PT_INTERP` dynamic interpreter) without mapping execution segments,
@@ -41,61 +178,48 @@ pub fn validate_exec(fd: BorrowedFd<'_>) -> Result<()> {
     image::validate_exec_fd(fd, fspy_nostd::param::page_size())
 }
 
-/// Loads an ELF executable into the current process and enters it.
+/// Loads an ELF executable into the current process, installs `SIGSYS`
+/// virtualization (plus any optional `interceptor`), and enters it.
 ///
 /// Takes ownership of a private executable descriptor and closes it after
 /// mapping. Loads the executable and, when present, its `PT_INTERP`. Sets the
 /// process name (`PR_SET_NAME`) to the basename of `execfn`, sizes the new
-/// stack from `RLIMIT_STACK` (clamped to `[8 MiB, 64 MiB]`), builds an initial
-/// stack, and transfers control to the interpreter, or to the executable when
-/// there is no interpreter.
+/// stack from `RLIMIT_STACK` (clamped to `[8 MiB, 64 MiB]`), installs the
+/// `SIGSYS` + `/proc/*/exe` + seccomp-BPF runtime, builds the initial stack,
+/// and transfers control to the interpreter (or directly to the executable when
+/// there is no interpreter).
 ///
 /// `execfn` is the original execution name used for `AT_EXECFN` and
 /// `PR_SET_NAME`; it need not match `argv[0]`. Arguments and environment
 /// entries are copied to the new stack. `inherited_auxv` borrows entries from
-/// the loader's original kernel stack, excluding `AT_NULL`. Its `AT_PAGESZ`
-/// supplies the page size used for mapping. Image-specific entries are
-/// replaced, reusable entries are preserved, and referenced data is copied
-/// where needed. The resulting vector ends with `AT_NULL`.
-///
-/// Path resolution, shebang handling, and execution-policy checks belong to
-/// the caller. This function does not perform kernel exec cleanup: installed
-/// signal handlers and their resident code and state must remain usable.
-/// Loading failures terminate the process; they cannot return to the program
-/// that executed the loader.
-///
-/// Currently supports native little-endian ELF64 executables on `AArch64` and
-/// x86-64, with a non-executable stack. Both PIE (`ET_DYN`) and fixed-address
-/// (`ET_EXEC`) images are supported, with or without `PT_INTERP`.
-/// Fixed-address images must not overlap any existing process mappings.
-/// Existing loader mappings, the old stack, and kernel process metadata
-/// (including `/proc` identity and `brk`) are retained. This does not emulate
-/// a complete exec. Processor-specific GNU properties are not applied.
+/// the launcher's original kernel stack, excluding `AT_NULL`.
 ///
 /// # Safety
 ///
-/// Call only from a fresh, single-threaded loader process. The executable and
-/// interpreter must be trusted to run with the process's current privileges.
-/// Their backing files must remain unchanged throughout loading. The loader
-/// must not have initialized libc or thread-local runtime state.
-/// Auxiliary entries must describe this process; any referenced memory must
-/// remain readable and unchanged until copied or retained for the target.
-/// The caller must permit execution to abandon its stack without running
-/// destructors. Any retained handlers, mappings, or other process state must
-/// remain valid while the target runs.
+/// Call only from a fresh, single-threaded freestanding launcher process linked
+/// with this crate's `link_args` metadata (`--no-pie` at the high fixed base
+/// address). The executable and interpreter must be trusted to run with the
+/// process's current privileges. Their backing files must remain unchanged
+/// throughout loading. The launcher must not have initialized libc or
+/// thread-local runtime state. Auxiliary entries must describe this process;
+/// any referenced memory must remain readable and unchanged until copied or
+/// retained for the target. The caller must permit execution to abandon its
+/// stack without running destructors. Any installed `interceptor.handle` must
+/// be async-signal-safe and live inside the launcher's `PF_X` code segment.
 ///
 /// # Panics
 ///
-/// Panics when `AT_PAGESZ` is missing or invalid, loading detects an unsupported
-/// or malformed image, runs out of stack capacity, or fails to map or open a
-/// file. The freestanding panic handler must terminate the process. Faults
-/// after entering the interpreter or executable are not converted into panics.
+/// Panics when the launcher image violates its high fixed-address `PF_X`
+/// invariants, `AT_PAGESZ` is missing or invalid, loading detects an
+/// unsupported or malformed image, runs out of stack capacity, fails to map or
+/// open a file, or fails to install the `SIGSYS`/seccomp runtime.
 pub unsafe fn exec_elf<'a>(
     elf_file: OwnedFd,
     execfn: CStr<'a, Thin>,
     argv: impl Iterator<Item = CStr<'a, Thin>>,
     envp: impl Iterator<Item = CStr<'a, Thin>>,
     inherited_auxv: &[AuxEntry],
+    interceptor: Option<SyscallInterceptor>,
 ) -> ! {
     let page_size = inherited_auxv
         .iter()
@@ -103,6 +227,18 @@ pub unsafe fn exec_elf<'a>(
         .expect("missing AT_PAGESZ")
         .value;
     assert!(page_size.is_power_of_two(), "invalid AT_PAGESZ");
+
+    // Verify the launcher's own fixed-address ELF layout and locate its `PF_X`
+    // `PT_LOAD` range `[code_start, code_end)` for seccomp IP allowlisting.
+    // SAFETY: caller supplies the kernel auxiliary vector for this process.
+    let code_range = unsafe { locate_launcher_code_range(inherited_auxv) };
+    if let Some(ref ic) = interceptor {
+        let handle_addr = (ic.handle as *const ()).addr() as u64;
+        assert!(
+            code_range.0 <= handle_addr && handle_addr < code_range.1,
+            "SyscallInterceptor::handle outside launcher PF_X range"
+        );
+    }
 
     let executable = image::File::open(elf_file.as_fd()).expect("invalid ELF executable");
     let executable_layout =
@@ -152,6 +288,18 @@ pub unsafe fn exec_elf<'a>(
     // Match kernel execve's `/proc/self/comm` basename update.
     set_process_name(execfn);
 
+    // Install SIGSYS + /proc/*/exe + seccomp virtualization while `elf_file`
+    // is still open so `/proc/self/fd/<fd>` resolves the canonical target path.
+    let min_sigstksz = inherited_auxv
+        .iter()
+        .find(|entry| entry.key == 51) // AT_MINSIGSTKSZ
+        .map_or(0, |entry| entry.value);
+    // SAFETY: fresh single-threaded launcher with validated resident `code_range`.
+    unsafe {
+        sigsys::install(code_range, elf_file.as_fd(), execfn, min_sigstksz, page_size, interceptor)
+    }
+    .expect("cannot install SIGSYS virtualization runtime");
+
     // With PT_INTERP, the interpreter runs first even though AT_ENTRY points
     // at the executable. It uses that value to hand off after linking.
     // Without PT_INTERP, AT_BASE is 0 and the executable's e_entry starts.
@@ -171,6 +319,90 @@ pub unsafe fn exec_elf<'a>(
     // SAFETY: the images and stack are initialized and retained. The caller
     // permits abandoning the current stack and entering the trusted image.
     unsafe { enter(entry, stack) }
+}
+
+/// Parses `inherited_auxv` (`AT_PHDR`, `AT_PHENT`, `AT_PHNUM`) to locate and
+/// validate the launcher's own `PF_X` `PT_LOAD` range `[code_start, code_end)`.
+///
+/// # Safety
+///
+/// `inherited_auxv` must be the live kernel auxiliary vector for the current
+/// process.
+unsafe fn locate_launcher_code_range(inherited_auxv: &[AuxEntry]) -> (u64, u64) {
+    let mut phdr_addr = None;
+    let mut phent = None;
+    let mut phnum = None;
+    for entry in inherited_auxv {
+        let Ok(key) = u32::try_from(entry.key) else {
+            continue;
+        };
+        match key {
+            AT_NULL => break,
+            AT_PHDR => phdr_addr = Some(entry.value),
+            AT_PHENT => phent = Some(entry.value),
+            AT_PHNUM => phnum = Some(entry.value),
+            _ => {}
+        }
+    }
+
+    let phdr_addr = phdr_addr.expect("missing AT_PHDR");
+    let phent = phent.expect("missing AT_PHENT");
+    let phnum = phnum.expect("missing AT_PHNUM");
+    assert_eq!(phent, image::PHDR_SIZE, "unexpected launcher AT_PHENT");
+    assert!(phnum > 0, "empty launcher AT_PHNUM");
+
+    let (region_base, region_limit) = LAUNCHER_REGION;
+    assert!(
+        phdr_addr >= region_base && phdr_addr < region_limit,
+        "launcher AT_PHDR outside expected high fixed region"
+    );
+    let table_len = phnum.checked_mul(phent).expect("launcher program-header table overflow");
+    // SAFETY: `AT_PHDR` points to `AT_PHNUM` contiguous `Elf64_Phdr` entries
+    // mapped into this process by the kernel.
+    let raw_phdrs =
+        unsafe { slice::from_raw_parts(ptr::with_exposed_provenance::<u8>(phdr_addr), table_len) };
+    let segments = SegmentTable::new(LittleEndian, Class::ELF64, raw_phdrs);
+
+    let mut code_range: Option<(usize, usize)> = None;
+    for seg in segments.iter() {
+        assert!(
+            !matches!(seg.p_type, abi::PT_INTERP | abi::PT_DYNAMIC | abi::PT_TLS),
+            "launcher must not contain PT_INTERP, PT_DYNAMIC, or PT_TLS"
+        );
+        if seg.p_type == abi::PT_PHDR {
+            assert_eq!(
+                usize::try_from(seg.p_vaddr).ok(),
+                Some(phdr_addr),
+                "launcher must be loaded without relocation bias"
+            );
+        }
+        if seg.p_type == abi::PT_LOAD && seg.p_memsz != 0 {
+            let start = usize::try_from(seg.p_vaddr).expect("launcher PT_LOAD vaddr overflow");
+            let memsz = usize::try_from(seg.p_memsz).expect("launcher PT_LOAD memsz overflow");
+            let end = start.checked_add(memsz).expect("launcher PT_LOAD end overflow");
+            assert!(
+                start >= region_base && end <= region_limit,
+                "launcher PT_LOAD outside expected high fixed region"
+            );
+            if (seg.p_flags & abi::PF_X) != 0 {
+                assert!(code_range.is_none(), "launcher must have a single executable PT_LOAD");
+                code_range = Some((start, end));
+            }
+        }
+    }
+
+    let (code_start, code_end) = code_range.expect("launcher missing executable PT_LOAD");
+    let enter_addr = (enter as *const ()).addr();
+    let handler_addr = sigsys::handler_addr();
+    assert!(
+        code_start <= enter_addr && enter_addr < code_end,
+        "exec_elf entry stub outside launcher PF_X range"
+    );
+    assert!(
+        code_start <= handler_addr && handler_addr < code_end,
+        "SIGSYS handler outside launcher PF_X range"
+    );
+    (code_start as u64, code_end as u64)
 }
 
 /// Sets `/proc/self/comm` via `prctl(PR_SET_NAME)` to the basename of `execfn`

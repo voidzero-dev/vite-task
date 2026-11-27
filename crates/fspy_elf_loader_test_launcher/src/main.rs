@@ -6,31 +6,116 @@ const fn main() {}
 
 #[cfg(target_os = "none")]
 mod freestanding {
+    use core::mem::MaybeUninit;
+
+    use fspy_elf_loader::{Syscall, SyscallAction, SyscallInterceptor};
     use fspy_nostd::{
-        CWD,
-        fs::{Mode, OFlags, openat},
+        CWD, Error, Result,
+        fs::{Mode, OFlags, PATH_MAX, openat},
     };
+    use syscalls::Sysno;
 
     fspy_nostd::main!(run);
     fspy_nostd::no_global_alloc!();
+
+    const INTERCEPTOR_SHORT_CIRCUIT_ARG: usize = 0xdead_beef;
+    const INTERCEPTOR_REWRITE_PROBE_MODE: usize = 0x7777;
+    const INTERCEPTOR_EXEC_PROBE_ARGV: usize = 0x5555_1234;
+
+    static TEST_INTERCEPTOR: SyscallInterceptor = SyscallInterceptor {
+        syscalls: &[Sysno::getegid, Sysno::faccessat, Sysno::execve, Sysno::execveat],
+        handle: test_handle,
+    };
+
+    /// Test interceptor exercising:
+    /// - `getegid(0xdead_beef)` -> short-circuits with `Err(Error::ACCES)`
+    /// - `getegid(_)` -> replays normally (`Ok(SyscallAction::Replay)`)
+    /// - `faccessat(_, path, 0x7777)` -> checks `/proc/self/exe` was rewritten
+    ///   to an absolute non-`/proc/` path, returning `Err(Error::LOOP)` on
+    ///   match or `Err(Error::NOENT)` on mismatch
+    /// - `execve(path, 0x5555_1234, _)` / `execveat(dirfd, path, 0x5555_1234, _, _)`
+    ///   -> checks `/proc/self/exe` was rewritten to an absolute non-`/proc/`
+    ///   path (and `dirfd == AT_FDCWD` for `execveat`)
+    unsafe fn test_handle(call: &Syscall<'_>) -> Result<SyscallAction> {
+        let check_rewritten_path = |path_ptr: usize| -> Result<SyscallAction> {
+            let mut buf = [MaybeUninit::<u8>::uninit(); PATH_MAX];
+            let Ok(Some(path)) = fspy_elf_loader::copy_user_cstr(path_ptr, &mut buf) else {
+                return Err(Error::NOENT);
+            };
+            if path.starts_with(b"/") && !path.starts_with(b"/proc/") {
+                Err(Error::LOOP)
+            } else {
+                Err(Error::NOENT)
+            }
+        };
+
+        match call.sysno {
+            Sysno::getegid => {
+                if call.args[0] == INTERCEPTOR_SHORT_CIRCUIT_ARG {
+                    return Err(Error::ACCES);
+                }
+                Ok(SyscallAction::Replay)
+            }
+            Sysno::faccessat => {
+                if call.args[2] == INTERCEPTOR_REWRITE_PROBE_MODE {
+                    return check_rewritten_path(call.args[1]);
+                }
+                Ok(SyscallAction::Replay)
+            }
+            Sysno::execve => {
+                if call.args[1] == INTERCEPTOR_EXEC_PROBE_ARGV {
+                    return check_rewritten_path(call.args[0]);
+                }
+                Ok(SyscallAction::Replay)
+            }
+            Sysno::execveat => {
+                if call.args[2] == INTERCEPTOR_EXEC_PROBE_ARGV {
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        clippy::cast_possible_wrap,
+                        reason = "Linux dirfd lives in low 32 bits"
+                    )]
+                    let dirfd = call.args[0] as i32;
+                    if dirfd != CWD.as_raw_fd() {
+                        return Err(Error::NOENT);
+                    }
+                    return check_rewritten_path(call.args[1]);
+                }
+                Ok(SyscallAction::Replay)
+            }
+            _ => Ok(SyscallAction::Replay),
+        }
+    }
 
     // The kernel enters with argc, argv, envp, and auxv on the initial stack.
     // Consume those views before exec_elf replaces the stack.
     #[expect(clippy::needless_pass_by_value, reason = "signature required by main!")]
     fn run(stack: fspy_nostd::env::InitialStack<'_>) -> ! {
-        // Invocation: launcher ELF_PATH TARGET_ARGV0 [TARGET_ARGS...].
+        // Invocation: launcher [--test-interceptor] ELF_PATH TARGET_ARGV0 [TARGET_ARGS...].
         // The kernel supplied this stack for the launcher; exec_elf will build
-        // another one for the target, with the first two arguments removed.
+        // another one for the target, with the launcher arguments removed.
         let mut args = stack.args().iter().copied();
         let _launcher = args.next().expect("missing launcher argv[0]");
-        let path = args.next().expect("missing target path");
+        let first = args.next().expect("missing target path");
+        let (interceptor, path) = if first.count().as_units() == b"--test-interceptor" {
+            (Some(TEST_INTERCEPTOR), args.next().expect("missing target path"))
+        } else {
+            (None, first)
+        };
         let file = openat(CWD, path, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty())
             .expect("cannot open target");
         // SAFETY: this is a fresh single-threaded freestanding process. The
         // parent selects a trusted fixture and kernel auxv references stay
         // valid until copied. There is no runtime requiring stack cleanup.
         unsafe {
-            fspy_elf_loader::exec_elf(file, path, args, stack.envs().iter().copied(), stack.auxv())
+            fspy_elf_loader::exec_elf(
+                file,
+                path,
+                args,
+                stack.envs().iter().copied(),
+                stack.auxv(),
+                interceptor,
+            )
         }
     }
 }
