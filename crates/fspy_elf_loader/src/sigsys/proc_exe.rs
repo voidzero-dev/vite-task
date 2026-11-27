@@ -16,7 +16,7 @@
 //!   `AT_SYMLINK_NOFOLLOW`, and `openat2` resolve flags.
 
 use core::{
-    mem::{MaybeUninit, size_of},
+    mem::size_of,
     ptr,
     sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
 };
@@ -24,7 +24,7 @@ use core::{
 use allocator_api2::{alloc::Allocator, vec::Vec};
 use fspy_nostd::{
     BorrowedFd, CStr, CWD, Error, Result, Thin,
-    fs::{AccessFlags, PATH_MAX, faccessat},
+    fs::{AccessFlags, faccessat},
 };
 use linux_raw_sys::{
     errno::{EFAULT, EINVAL},
@@ -172,134 +172,107 @@ pub unsafe fn try_handle_readlink(
     Some(copy_len.cast_signed())
 }
 
-/// Path and `open_how` values already copied while inspecting a trapped
-/// syscall for `/proc/*/exe` rewriting, reused by the caller's
-/// [`crate::SyscallInterceptor`] and unmasked-replay check to avoid copying
-/// them again on the hot path.
-pub struct Prefetched<'a> {
-    pub path: Option<(usize, &'a [u8])>,
-    pub open_how: Option<open_how>,
-}
-
 /// Rewrites `/proc/*/exe` path arguments in `inv` in place to the permanent
 /// target executable path for path-following syscalls, returning any
-/// already-copied path bytes (post-rewrite if rewritten) and `open_how` value.
+/// already-read `open_how` value for `openat2`.
 ///
 /// # Safety
 ///
 /// `inv` must contain the arguments from a trapped syscall matching `sysno`.
-pub unsafe fn rewrite_path_arg<'a>(
-    inv: &mut SyscallInvocation,
-    sysno: Sysno,
-    path_buf: &'a mut [MaybeUninit<u8>; PATH_MAX],
-) -> Prefetched<'a> {
-    let Some((exe_ptr, exe_len)) = target_exe() else {
-        return Prefetched { path: None, open_how: None };
-    };
+pub unsafe fn rewrite_path_arg(inv: &mut SyscallInvocation, sysno: Sysno) -> Option<open_how> {
+    let (exe_ptr, _) = target_exe()?;
 
     // SAFETY: All helpers inspect user pointers according to the kernel ABI for
     // `sysno` and only replace arguments with the permanent `exe_ptr` / `AT_FDCWD`.
     unsafe {
         match sysno {
-            Sysno::openat => Prefetched {
-                path: rewrite_open(inv, exe_ptr, exe_len, Some(0), 1, 2, path_buf),
-                open_how: None,
-            },
-            Sysno::openat2 => rewrite_openat2(inv, exe_ptr, exe_len, path_buf),
+            Sysno::openat => {
+                rewrite_open(inv, exe_ptr, Some(0), 1, 2);
+                None
+            }
+            Sysno::openat2 => rewrite_openat2(inv, exe_ptr),
             #[cfg(target_arch = "x86_64")]
-            Sysno::open => Prefetched {
-                path: rewrite_open(inv, exe_ptr, exe_len, None, 0, 1, path_buf),
-                open_how: None,
-            },
+            Sysno::open => {
+                rewrite_open(inv, exe_ptr, None, 0, 1);
+                None
+            }
             #[cfg(target_arch = "x86_64")]
-            Sysno::newfstatat => Prefetched {
-                path: rewrite_at_follow(inv, exe_ptr, exe_len, Some(0), 1, Some(3), path_buf),
-                open_how: None,
-            },
+            Sysno::newfstatat => {
+                rewrite_at_follow(inv, exe_ptr, Some(0), 1, Some(3));
+                None
+            }
             #[cfg(target_arch = "aarch64")]
-            Sysno::fstatat => Prefetched {
-                path: rewrite_at_follow(inv, exe_ptr, exe_len, Some(0), 1, Some(3), path_buf),
-                open_how: None,
-            },
-            Sysno::statx => Prefetched {
-                path: rewrite_at_follow(inv, exe_ptr, exe_len, Some(0), 1, Some(2), path_buf),
-                open_how: None,
-            },
-            Sysno::faccessat => Prefetched {
-                path: rewrite_at_follow(inv, exe_ptr, exe_len, Some(0), 1, None, path_buf),
-                open_how: None,
-            },
-            Sysno::faccessat2 => Prefetched {
-                path: rewrite_at_follow(inv, exe_ptr, exe_len, Some(0), 1, Some(3), path_buf),
-                open_how: None,
-            },
+            Sysno::fstatat => {
+                rewrite_at_follow(inv, exe_ptr, Some(0), 1, Some(3));
+                None
+            }
+            Sysno::statx => {
+                rewrite_at_follow(inv, exe_ptr, Some(0), 1, Some(2));
+                None
+            }
+            Sysno::faccessat => {
+                rewrite_at_follow(inv, exe_ptr, Some(0), 1, None);
+                None
+            }
+            Sysno::faccessat2 => {
+                rewrite_at_follow(inv, exe_ptr, Some(0), 1, Some(3));
+                None
+            }
             #[cfg(target_arch = "x86_64")]
-            Sysno::stat | Sysno::access => Prefetched {
-                path: rewrite_at_follow(inv, exe_ptr, exe_len, None, 0, None, path_buf),
-                open_how: None,
-            },
-            Sysno::execve => Prefetched {
-                path: rewrite_at_follow(inv, exe_ptr, exe_len, None, 0, None, path_buf),
-                open_how: None,
-            },
-            Sysno::execveat => Prefetched {
-                path: rewrite_at_follow(inv, exe_ptr, exe_len, Some(0), 1, Some(4), path_buf),
-                open_how: None,
-            },
-            _ => Prefetched { path: None, open_how: None },
+            Sysno::stat | Sysno::access => {
+                rewrite_at_follow(inv, exe_ptr, None, 0, None);
+                None
+            }
+            Sysno::execve => {
+                rewrite_at_follow(inv, exe_ptr, None, 0, None);
+                None
+            }
+            Sysno::execveat => {
+                rewrite_at_follow(inv, exe_ptr, Some(0), 1, Some(4));
+                None
+            }
+            _ => None,
         }
     }
 }
 
 #[expect(clippy::cast_possible_truncation, reason = "Linux open flags are u32")]
-unsafe fn rewrite_open<'a>(
+unsafe fn rewrite_open(
     inv: &mut SyscallInvocation,
     exe_ptr: *const u8,
-    exe_len: usize,
     dirfd_idx: Option<usize>,
     path_idx: usize,
     flags_idx: usize,
-    path_buf: &'a mut [MaybeUninit<u8>; PATH_MAX],
-) -> Option<(usize, &'a [u8])> {
+) {
     let flags = inv.args[flags_idx] as u32;
     // Preserve symlink semantics for `O_NOFOLLOW` (fails with ELOOP, or opens
     // the symlink itself with `O_PATH | O_NOFOLLOW`).
     if (flags & O_NOFOLLOW) != 0 {
-        return None;
+        return;
     }
     let dirfd = dirfd_idx.map_or(AT_FDCWD, |idx| arg_i32(inv.args[idx]));
     let path_ptr = inv.args[path_idx];
-    // SAFETY: Inspects user path pointer up to `PATH_MAX` bytes.
-    let (matched, copied) = unsafe { inspect_proc_self_exe(dirfd, path_ptr, path_buf) };
-    if !matched {
-        return copied.map(|bytes| (path_ptr, bytes));
+    // SAFETY: `path_ptr` is the trapped syscall's path argument.
+    if !unsafe { is_proc_self_exe(dirfd, path_ptr) } {
+        return;
     }
     if let Some(idx) = dirfd_idx {
         inv.args[idx] = AT_FDCWD.cast_unsigned() as usize;
     }
     inv.args[path_idx] = exe_ptr.addr();
-    // SAFETY: `exe_ptr` is permanently retained for `exe_len` bytes.
-    Some((exe_ptr.addr(), unsafe { core::slice::from_raw_parts(exe_ptr, exe_len) }))
 }
 
-unsafe fn rewrite_openat2<'a>(
-    inv: &mut SyscallInvocation,
-    exe_ptr: *const u8,
-    exe_len: usize,
-    path_buf: &'a mut [MaybeUninit<u8>; PATH_MAX],
-) -> Prefetched<'a> {
+unsafe fn rewrite_openat2(inv: &mut SyscallInvocation, exe_ptr: *const u8) -> Option<open_how> {
     let dirfd = arg_i32(inv.args[0]);
     let path_ptr = inv.args[1];
     let how_ptr = inv.args[2];
     let size = inv.args[3];
 
     if how_ptr == 0 || size < size_of::<open_how>() {
-        return Prefetched { path: None, open_how: None };
+        return None;
     }
     // SAFETY: `open_how` is a plain `#[repr(C)]` struct of `u64` fields.
-    let Ok(how) = (unsafe { usermem::read_user::<open_how>(how_ptr) }) else {
-        return Prefetched { path: None, open_how: None };
-    };
+    let how = unsafe { usermem::read_user::<open_how>(how_ptr) }.ok()?;
     let restricted_resolve = u64::from(
         RESOLVE_NO_SYMLINKS
             | RESOLVE_NO_MAGICLINKS
@@ -308,50 +281,41 @@ unsafe fn rewrite_openat2<'a>(
             | RESOLVE_NO_XDEV,
     );
     if (how.flags & u64::from(O_NOFOLLOW)) != 0 || (how.resolve & restricted_resolve) != 0 {
-        return Prefetched { path: None, open_how: Some(how) };
+        return Some(how);
     }
-    // SAFETY: Inspects user path pointer up to `PATH_MAX` bytes.
-    let (matched, copied) = unsafe { inspect_proc_self_exe(dirfd, path_ptr, path_buf) };
-    if !matched {
-        return Prefetched { path: copied.map(|bytes| (path_ptr, bytes)), open_how: Some(how) };
+    // SAFETY: `path_ptr` is the trapped syscall's path argument.
+    if unsafe { is_proc_self_exe(dirfd, path_ptr) } {
+        inv.args[0] = AT_FDCWD.cast_unsigned() as usize;
+        inv.args[1] = exe_ptr.addr();
     }
-    inv.args[0] = AT_FDCWD.cast_unsigned() as usize;
-    inv.args[1] = exe_ptr.addr();
-    // SAFETY: `exe_ptr` is permanently retained for `exe_len` bytes.
-    let exe_bytes = unsafe { core::slice::from_raw_parts(exe_ptr, exe_len) };
-    Prefetched { path: Some((exe_ptr.addr(), exe_bytes)), open_how: Some(how) }
+    Some(how)
 }
 
 #[expect(clippy::cast_possible_truncation, reason = "Linux dirfd/flags are 32-bit")]
-unsafe fn rewrite_at_follow<'a>(
+unsafe fn rewrite_at_follow(
     inv: &mut SyscallInvocation,
     exe_ptr: *const u8,
-    exe_len: usize,
     dirfd_idx: Option<usize>,
     path_idx: usize,
     flags_idx: Option<usize>,
-    path_buf: &'a mut [MaybeUninit<u8>; PATH_MAX],
-) -> Option<(usize, &'a [u8])> {
+) {
     if let Some(idx) = flags_idx
         && ((inv.args[idx] as u32) & AT_SYMLINK_NOFOLLOW) != 0
     {
         // Do not rewrite no-follow queries: `/proc/self/exe` must remain a
         // symlink (`S_IFLNK`) so `lstat` and `realpath` follow it via `readlink`.
-        return None;
+        return;
     }
     let dirfd = dirfd_idx.map_or(AT_FDCWD, |idx| arg_i32(inv.args[idx]));
     let path_ptr = inv.args[path_idx];
-    // SAFETY: Inspects user path pointer up to `PATH_MAX` bytes.
-    let (matched, copied) = unsafe { inspect_proc_self_exe(dirfd, path_ptr, path_buf) };
-    if !matched {
-        return copied.map(|bytes| (path_ptr, bytes));
+    // SAFETY: `path_ptr` is the trapped syscall's path argument.
+    if !unsafe { is_proc_self_exe(dirfd, path_ptr) } {
+        return;
     }
     if let Some(idx) = dirfd_idx {
         inv.args[idx] = AT_FDCWD.cast_unsigned() as usize;
     }
     inv.args[path_idx] = exe_ptr.addr();
-    // SAFETY: `exe_ptr` is permanently retained for `exe_len` bytes.
-    Some((exe_ptr.addr(), unsafe { core::slice::from_raw_parts(exe_ptr, exe_len) }))
 }
 
 /// Checks whether `(dirfd, path_ptr)` refers to the current process's
@@ -359,34 +323,19 @@ unsafe fn rewrite_at_follow<'a>(
 ///
 /// # Safety
 ///
-/// `path_ptr` must be null or point to a readable NUL-terminated user string.
+/// `path_ptr` must be null, in the first page, or point to a readable
+/// NUL-terminated user string.
 unsafe fn is_proc_self_exe(dirfd: i32, path_ptr: usize) -> bool {
-    let mut stack_buf = [MaybeUninit::<u8>::uninit(); PATH_MAX];
-    // SAFETY: delegates to `inspect_proc_self_exe` with a local `PATH_MAX` buffer.
-    unsafe { inspect_proc_self_exe(dirfd, path_ptr, &mut stack_buf).0 }
-}
-
-/// Reads `path_ptr` into `stack_buf` once, returning
-/// `(matches_proc_exe, copied_bytes)` so non-matching callers can reuse the
-/// already-copied bytes without copying them again.
-///
-/// # Safety
-///
-/// `path_ptr` must be a user pointer from a trapped syscall.
-unsafe fn inspect_proc_self_exe(
-    dirfd: i32,
-    path_ptr: usize,
-    stack_buf: &mut [MaybeUninit<u8>; PATH_MAX],
-) -> (bool, Option<&[u8]>) {
     // SAFETY: forwarded from the caller contract.
-    let Ok(Some(raw)) = (unsafe { usermem::read_user_cstr(path_ptr, stack_buf) }) else {
-        return (false, None);
+    let Ok(cstr) = (unsafe { usermem::user_cstr(path_ptr) }) else {
+        return false;
     };
+    let raw = cstr.count().as_units();
     // Fast rejection for 99.99% of paths: any path naming `/proc/.../exe`
     // (without a trailing `/`, which is ENOTDIR on a regular-file symlink)
     // must end with the component `exe`.
     if !ends_with_exe_component(raw) {
-        return (false, Some(raw));
+        return false;
     }
 
     let pid = getpid();
@@ -394,7 +343,7 @@ unsafe fn inspect_proc_self_exe(
 
     if raw.starts_with(b"/") {
         // Fast path for exact canonical forms without allocating.
-        let matched = if !raw.contains(&b'.') && !raw.windows(2).any(|w| w == b"//") {
+        return if !raw.contains(&b'.') && !raw.windows(2).any(|w| w == b"//") {
             match_normalized_proc_exe(raw, pid, tid, task_dir_exists)
         } else {
             let bump = fspy_nostd_alloc::pooled_bump();
@@ -402,7 +351,6 @@ unsafe fn inspect_proc_self_exe(
             normalize_abs_path(raw, &mut normalized)
                 && match_normalized_proc_exe(&normalized, pid, tid, task_dir_exists)
         };
-        return (matched, Some(raw));
     }
 
     // Relative path ending in `exe`: resolve `dirfd` (or `cwd` for `AT_FDCWD`)
@@ -411,29 +359,28 @@ unsafe fn inspect_proc_self_exe(
     // SAFETY: `dirfd` comes from the trapped syscall; `-1` yields `None`, and
     // any invalid fd cleanly returns `Ok(None)` from `fd_path`.
     let Some(borrowed_dirfd) = (unsafe { BorrowedFd::try_borrow_raw(dirfd) }) else {
-        return (false, Some(raw));
+        return false;
     };
     let bump = fspy_nostd_alloc::pooled_bump();
     let Ok(Some(base)) = fspy_nostd_alloc::fs::fd_path(&bump, borrowed_dirfd) else {
-        return (false, Some(raw));
+        return false;
     };
     let base_bytes = base.as_units();
     if !base_bytes.starts_with(b"/") {
-        return (false, Some(raw));
+        return false;
     }
 
     let mut joined = Vec::new_in(&bump);
     if joined.try_reserve_exact(base_bytes.len() + 1 + raw.len()).is_err() {
-        return (false, Some(raw));
+        return false;
     }
     joined.extend_from_slice(base_bytes);
     joined.push(b'/');
     joined.extend_from_slice(raw);
 
     let mut normalized = Vec::new_in(&bump);
-    let matched = normalize_abs_path(&joined, &mut normalized)
-        && match_normalized_proc_exe(&normalized, pid, tid, task_dir_exists);
-    (matched, Some(raw))
+    normalize_abs_path(&joined, &mut normalized)
+        && match_normalized_proc_exe(&normalized, pid, tid, task_dir_exists)
 }
 
 fn ends_with_exe_component(path: &[u8]) -> bool {

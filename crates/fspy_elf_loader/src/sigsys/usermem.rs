@@ -14,12 +14,9 @@
 //! cost two syscalls per copy and trip target filters that trap it, such as
 //! Chromium's sandbox.
 
-use core::{
-    mem::{MaybeUninit, size_of},
-    ptr, slice,
-};
+use core::{mem::size_of, ptr, slice};
 
-use fspy_nostd::{Error, Result};
+use fspy_nostd::{CStr, Error, Result, Thin};
 
 /// Minimum valid user-space address (page 0 is never mapped on Linux).
 const MIN_USER_ADDR: usize = 4096;
@@ -81,31 +78,18 @@ pub unsafe fn write_user_bytes(addr: usize, src: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Reads a NUL-terminated C string from user address `addr` into `buf`,
-/// returning the byte slice excluding the NUL terminator.
-///
-/// Returns `Ok(None)` if no NUL byte is found within `buf.len()` bytes (all
-/// `buf.len()` bytes have been populated in `buf`), or `Err(Error::FAULT)` if
-/// `addr` is in the first page.
+/// Borrows a NUL-terminated C string directly from user address `addr`,
+/// returning [`Error::FAULT`] if `addr` is in the first page (such as `NULL`).
 ///
 /// # Safety
 ///
-/// `addr` must be null, in the first page, or point to a readable
-/// NUL-terminated string (or at least `buf.len()` readable bytes).
-pub unsafe fn read_user_cstr(addr: usize, buf: &mut [MaybeUninit<u8>]) -> Result<Option<&[u8]>> {
+/// Any other `addr` must point to a readable NUL-terminated C string that
+/// remains valid and unmodified for `'a`.
+pub unsafe fn user_cstr<'a>(addr: usize) -> Result<CStr<'a, Thin>> {
     if addr < MIN_USER_ADDR {
         return Err(Error::FAULT);
     }
-    for (i, slot) in buf.iter_mut().enumerate() {
-        let cur = addr.checked_add(i).ok_or(Error::FAULT)?;
-        // SAFETY: the caller guarantees bytes up to the NUL (or `buf.len()`)
-        // are readable, and reading stops at the NUL.
-        let b = unsafe { ptr::with_exposed_provenance::<u8>(cur).read() };
-        if b == 0 {
-            // SAFETY: `buf[..i]` has been initialized.
-            return Ok(Some(unsafe { slice::from_raw_parts(buf.as_ptr().cast::<u8>(), i) }));
-        }
-        slot.write(b);
-    }
-    Ok(None)
+    // SAFETY: caller guarantees `addr` points to a readable NUL-terminated C
+    // string valid for `'a`.
+    Ok(unsafe { CStr::<Thin>::from_ptr(ptr::with_exposed_provenance(addr)) })
 }

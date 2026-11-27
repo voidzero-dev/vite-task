@@ -50,17 +50,14 @@ pub fn handler_addr() -> usize {
     (sigsys_trampoline as *const ()).addr()
 }
 
-/// Copies a user C string into `buf`.
+/// Borrows a user C string directly from `addr`.
 ///
 /// # Safety
 ///
-/// See [`usermem::read_user_cstr`].
-pub unsafe fn copy_user_cstr(
-    addr: usize,
-    buf: &mut [core::mem::MaybeUninit<u8>],
-) -> Result<Option<&[u8]>> {
+/// See [`usermem::user_cstr`].
+pub unsafe fn user_cstr<'a>(addr: usize) -> Result<CStr<'a, Thin>> {
     // SAFETY: forwarded from caller contract.
-    unsafe { usermem::read_user_cstr(addr, buf) }
+    unsafe { usermem::user_cstr(addr) }
 }
 
 /// Copies a user `Copy` value.
@@ -585,27 +582,18 @@ unsafe fn dispatch_phase1(
     }
 
     // 3. Path-following syscalls -> rewrite `/proc/*/exe` in place in `inv`,
-    //    retaining any prefetched path bytes and `open_how` on the private
-    //    stack so the interceptor and unmasked-replay check avoid copying
-    //    them again.
-    let mut path_buf = [core::mem::MaybeUninit::<u8>::uninit(); fspy_nostd::fs::PATH_MAX];
+    //    retaining any already-read `open_how` for the unmasked-replay check.
     // SAFETY: Arguments come from the trapped syscall for `sysno`.
-    let prefetched = unsafe { proc_exe::rewrite_path_arg(&mut inv, sysno, &mut path_buf) };
+    let prefetched_open_how = unsafe { proc_exe::rewrite_path_arg(&mut inv, sysno) };
 
     // 4. Optional caller interceptor (sees `/proc/*/exe`-rewritten `inv`, with
-    //    lazy access to virtualized `sigmask`, `is_shared_vm_child`, and any
-    //    prefetched path bytes).
+    //    lazy access to virtualized `sigmask` and `is_shared_vm_child`).
     if INTERCEPTOR_INSTALLED.load(Ordering::Acquire) {
         // SAFETY: `INTERCEPTOR` was written once before `Release` store.
         if let Some(interceptor) = unsafe { *INTERCEPTOR.0.get() }
             && interceptor.syscalls.contains(&sysno)
         {
-            let call = Syscall {
-                sysno,
-                args: inv.args,
-                raw_uc_sigmask: ucontext.uc_sigmask,
-                cached_path: prefetched.path,
-            };
+            let call = Syscall { sysno, args: inv.args, raw_uc_sigmask: ucontext.uc_sigmask };
             // SAFETY: `call` holds the live (and rewritten) trapped arguments.
             match unsafe { (interceptor.handle)(&call) } {
                 Ok(SyscallAction::Replay) => {}
@@ -638,7 +626,7 @@ unsafe fn dispatch_phase1(
     //    maskable signals were already blocked by the caller.
     packet.inv = inv;
     // SAFETY: Inspects `openat2`'s `open_how` safely via `usermem` if not already prefetched.
-    if unsafe { needs_unmasked_replay(sysno, &inv, prefetched.open_how) } {
+    if unsafe { needs_unmasked_replay(sysno, &inv, prefetched_open_how) } {
         let orig_mask = ucontext.uc_sigmask & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
         if orig_mask != HANDLER_BLOCK_MASK {
             #[expect(clippy::cast_possible_truncation, reason = "64-bit Linux usize == u64")]

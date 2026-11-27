@@ -6,12 +6,10 @@ const fn main() {}
 
 #[cfg(target_os = "none")]
 mod freestanding {
-    use core::mem::MaybeUninit;
-
     use fspy_elf_loader::{Syscall, SyscallAction, SyscallInterceptor};
     use fspy_nostd::{
         CWD, Error, Result,
-        fs::{Mode, OFlags, PATH_MAX, openat},
+        fs::{Mode, OFlags, openat},
     };
     use syscalls::Sysno;
 
@@ -36,14 +34,13 @@ mod freestanding {
     /// - `execve(path, 0x5555_1234, _)` / `execveat(dirfd, path, 0x5555_1234, _, _)`
     ///   -> checks `/proc/self/exe` was rewritten to an absolute non-`/proc/`
     ///   path (and `dirfd == AT_FDCWD` for `execveat`)
-    unsafe fn test_handle(call: &Syscall<'_>) -> Result<SyscallAction> {
+    unsafe fn test_handle(call: &Syscall) -> Result<SyscallAction> {
         let check_rewritten_path = |path_ptr: usize| -> Result<SyscallAction> {
-            let mut buf = [MaybeUninit::<u8>::uninit(); PATH_MAX];
             // SAFETY: `path_ptr` is the trapped syscall's path argument.
-            let Ok(Some(path)) = (unsafe { fspy_elf_loader::copy_user_cstr(path_ptr, &mut buf) })
-            else {
+            let Ok(cstr) = (unsafe { fspy_elf_loader::user_cstr(path_ptr) }) else {
                 return Err(Error::NOENT);
             };
+            let path = cstr.count().as_units();
             if path.starts_with(b"/") && !path.starts_with(b"/proc/") {
                 Err(Error::LOOP)
             } else {
