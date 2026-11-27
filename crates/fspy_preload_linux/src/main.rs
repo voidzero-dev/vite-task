@@ -408,8 +408,16 @@ mod runtime {
             Sysno::execveat => {
                 let raw_flags = arg_u32(call.args[4]);
                 // Linux 6.14+ `AT_EXECVE_CHECK` validates executability without
-                // replacing the process image; let the kernel answer directly.
+                // replacing the process image; record the path lookup like
+                // `faccessat2` and let the kernel answer directly.
                 if (raw_flags & AT_EXECVE_CHECK) != 0 {
+                    let empty_ok = (raw_flags & AT_EMPTY_PATH) != 0;
+                    report_path_at(
+                        borrow_dirfd(call.args[0]),
+                        call.args[1],
+                        AccessMode::Read,
+                        empty_ok,
+                    );
                     return Ok(SyscallAction::Replay);
                 }
                 let Some(flags) = ExecAtFlags::from_bits(raw_flags) else {

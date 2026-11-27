@@ -72,6 +72,8 @@ impl SpyImpl {
             .map_err(SpawnError::ChannelCreation)?;
 
         let (read_end, write_end) = create_error_pipe().map_err(SpawnError::OsSpawn)?;
+        let mut pipe_reader = tokio::net::unix::pipe::Receiver::from_owned_fd(read_end)
+            .map_err(SpawnError::OsSpawn)?;
         let write_raw_fd = write_end.as_raw_fd();
 
         let target_path: &IpcStr = command.target_program().into();
@@ -104,8 +106,6 @@ impl SpyImpl {
         // `fspy_preload_linux` terminates before writing a status code.
         drop(write_end);
 
-        let mut pipe_reader = tokio::net::unix::pipe::Receiver::from_owned_fd(read_end)
-            .map_err(SpawnError::OsSpawn)?;
         let mut buf = [0u8; 4];
         let mut filled = 0usize;
         let mut cancelled = false;
