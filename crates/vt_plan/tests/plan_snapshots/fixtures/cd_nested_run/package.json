@@ -1,0 +1,8 @@
+{
+  "name": "root",
+  "private": true,
+  "scripts": {
+    "hello": "echo ROOT",
+    "plain": "cd ui && vpr hello"
+  }
+}

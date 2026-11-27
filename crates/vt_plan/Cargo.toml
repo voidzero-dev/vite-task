@@ -32,6 +32,7 @@ vt_powershell = { workspace = true }
 vt_shell = { workspace = true }
 vt_str = { workspace = true }
 vt_graph = { workspace = true }
+vt_workspace = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
@@ -46,7 +47,6 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 toml = { workspace = true }
 vt = { workspace = true }
 vt_bin = { workspace = true }
-vt_workspace = { workspace = true }
 
 [[test]]
 name = "plan_snapshots"
