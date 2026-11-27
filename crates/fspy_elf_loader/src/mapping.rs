@@ -44,20 +44,24 @@ pub struct Mapping {
 }
 
 impl Mapping {
+    #[cfg(test)]
     pub fn reserve(len: usize) -> Self {
-        Self::check_len(len);
+        Self::try_reserve(len).expect("cannot reserve address space")
+    }
+
+    pub fn try_reserve(len: usize) -> Result<Self> {
+        Self::try_check_len(len)?;
         // PROT_NONE reserves addresses but permits no access. Image segments
         // later replace its pages; the stack makes its usable pages writable.
         // SAFETY: no fixed address is requested and no references exist yet.
         let ptr = unsafe {
             mm::mmap_anonymous(ptr::null_mut(), len, ProtFlags::empty(), MapFlags::PRIVATE)
-        }
-        .expect("cannot reserve address space");
-        Self::new(ptr.cast(), len)
+        }?;
+        Self::try_new(ptr.cast(), len)
     }
 
-    pub fn reserve_at(address: usize, len: usize) -> Self {
-        Self::check_len(len);
+    pub fn try_reserve_at(address: usize, len: usize) -> Result<Self> {
+        Self::try_check_len(len)?;
         // Reserve the complete fixed-address image before replacing any of
         // its pages. A collision with the loader, stack, or another mapping
         // must fail without changing that mapping.
@@ -70,17 +74,16 @@ impl Mapping {
                 ProtFlags::empty(),
                 MapFlags::PRIVATE | MapFlags::FIXED_NOREPLACE,
             )
-        }
-        .expect("cannot reserve fixed ELF address range");
-        let mapping = Self::new(ptr.cast(), len);
+        }?;
+        let mapping = Self::try_new(ptr.cast(), len)?;
         // Older kernels can ignore FIXED_NOREPLACE and choose another address.
         // Release that reservation before failing; MAP_FIXED below must never
         // run unless we own the exact requested range.
         if mapping.ptr.as_ptr().addr() != address {
             drop(mapping);
-            panic!("cannot reserve fixed ELF address range at the requested address");
+            return Err(Error::from_raw_os_error(linux_raw_sys::errno::EEXIST.cast_signed()));
         }
-        mapping
+        Ok(mapping)
     }
 
     pub fn try_file(fd: BorrowedFd<'_>, len: usize) -> Result<Self> {
@@ -93,27 +96,24 @@ impl Mapping {
         // caller keeps the file unchanged while this view is used.
         let ptr =
             unsafe { mm::mmap(ptr::null_mut(), len, ProtFlags::READ, MapFlags::PRIVATE, fd, 0) }?;
-        let Some(ptr) = NonNull::new(ptr.cast()) else {
-            // SAFETY: this successful mapping is owned here, but address zero
-            // cannot back Rust references, so release it before failing.
-            let _ = unsafe { mm::munmap(ptr, len) };
-            return Err(Error::NOMEM);
-        };
-        Ok(Self { ptr, len })
+        Self::try_new(ptr.cast(), len)
     }
 
-    fn check_len(len: usize) {
-        assert!(len != 0 && isize::try_from(len).is_ok(), "invalid mapping length");
+    fn try_check_len(len: usize) -> Result<()> {
+        if len == 0 || isize::try_from(len).is_err() {
+            return Err(Error::INVAL);
+        }
+        Ok(())
     }
 
-    fn new(ptr: *mut u8, len: usize) -> Self {
+    fn try_new(ptr: *mut u8, len: usize) -> Result<Self> {
         let Some(ptr) = NonNull::new(ptr) else {
             // SAFETY: this successful mapping is owned here, but address zero
             // cannot back Rust references, so release it before failing.
             let _ = unsafe { mm::munmap(ptr.cast(), len) };
-            panic!("mapping returned address zero");
+            return Err(Error::NOMEM);
         };
-        Self { ptr, len }
+        Ok(Self { ptr, len })
     }
 
     /// Only called on immutable, fully readable file mappings.

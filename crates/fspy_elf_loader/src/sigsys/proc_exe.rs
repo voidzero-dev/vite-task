@@ -18,13 +18,13 @@
 use core::{
     mem::size_of,
     ptr,
-    sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering},
 };
 
 use allocator_api2::{alloc::Allocator, vec::Vec};
 use fspy_nostd::{
     BorrowedFd, CStr, CWD, Error, Result, Thin,
-    fs::{AccessFlags, faccessat},
+    fs::{AccessFlags, PATH_MAX, faccessat},
 };
 use linux_raw_sys::{
     errno::{EFAULT, EINVAL},
@@ -40,10 +40,16 @@ use super::{
     usermem,
 };
 
+const DELETED_SUFFIX: &[u8] = b" (deleted)";
+
 /// Permanently retained pointer to the NUL-terminated target executable path.
 static EXE_PTR: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
 /// Byte length of the target executable path, excluding its terminating NUL.
 static EXE_LEN: AtomicUsize = AtomicUsize::new(0);
+/// `true` when the resolved executable path ends with `" (deleted)"` (e.g.
+/// memfd or unlinked binary): `readlink` still reports it to match Linux, while
+/// path-following syscalls skip rewriting to the nonexistent literal path.
+static EXE_DELETED: AtomicBool = AtomicBool::new(false);
 
 /// Stores the target executable path in permanent page-backed storage.
 ///
@@ -66,9 +72,26 @@ pub fn init(exe_path: &[u8]) -> Result<()> {
     // Retain the permanent mapping for the lifetime of the process.
     core::mem::forget(owned);
     core::mem::forget(bump);
+    EXE_DELETED.store(is_deleted_exe_path(exe_path), Ordering::Release);
     EXE_PTR.store(ptr, Ordering::Release);
     EXE_LEN.store(exe_path.len(), Ordering::Release);
     Ok(())
+}
+
+const fn is_deleted_exe_path(exe_path: &[u8]) -> bool {
+    let suffix_len = DELETED_SUFFIX.len();
+    if exe_path.len() < suffix_len {
+        return false;
+    }
+    let start = exe_path.len() - suffix_len;
+    let mut i = 0;
+    while i < suffix_len {
+        if exe_path[start + i] != DELETED_SUFFIX[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 /// Resolves the canonical path of an already-opened executable `fd` via
@@ -176,10 +199,20 @@ pub unsafe fn try_handle_readlink(
 /// target executable path for path-following syscalls, returning any
 /// already-read `open_how` value for `openat2`.
 ///
+/// When the target executable's resolved `/proc/self/fd/<fd>` path ends with
+/// `" (deleted)"` (for example a `memfd` or an already-unlinked binary),
+/// `readlink("/proc/self/exe")` still returns that string to match Linux, while
+/// this function skips rewriting path-following syscalls so we neither rewrite
+/// to a guaranteed-`ENOENT` literal `" (deleted)"` path nor leak a retained
+/// descriptor into the target.
+///
 /// # Safety
 ///
 /// `inv` must contain the arguments from a trapped syscall matching `sysno`.
 pub unsafe fn rewrite_path_arg(inv: &mut SyscallInvocation, sysno: Sysno) -> Option<open_how> {
+    if EXE_DELETED.load(Ordering::Acquire) {
+        return None;
+    }
     let (exe_ptr, _) = target_exe()?;
 
     // SAFETY: All helpers inspect user pointers according to the kernel ABI for
@@ -326,11 +359,10 @@ unsafe fn rewrite_at_follow(
 /// `path_ptr` must be null, in the first page, or point to a readable
 /// NUL-terminated user string.
 unsafe fn is_proc_self_exe(dirfd: i32, path_ptr: usize) -> bool {
-    // SAFETY: forwarded from the caller contract.
-    let Ok(cstr) = (unsafe { usermem::user_cstr(path_ptr) }) else {
+    // SAFETY: forwarded from the caller contract; scan is bounded at `PATH_MAX`.
+    let Ok(raw) = (unsafe { usermem::user_cstr_bounded(path_ptr, PATH_MAX) }) else {
         return false;
     };
-    let raw = cstr.count().as_units();
     // Fast rejection for 99.99% of paths: any path naming `/proc/.../exe`
     // (without a trailing `/`, which is ENOTDIR on a regular-file symlink)
     // must end with the component `exe`.
@@ -388,8 +420,13 @@ fn ends_with_exe_component(path: &[u8]) -> bool {
     path == b"exe" || path.ends_with(b"/exe")
 }
 
-/// Lexically normalizes an absolute path (`path` starts with `b'/'`), resolving
-/// redundant slashes, `.`, and `..`.
+/// Normalizes an absolute path (`path` starts with `b'/'`), collapsing
+/// redundant slashes and `.` segments without lexically resolving `..`.
+///
+/// Collapsing `..` lexically is unsound across symlinks or nonexistent
+/// components (for example `/proc/self/cwd/../exe` or
+/// `/proc/nonexistent/../self/exe`), so `..` segments are preserved verbatim
+/// and never match `/proc/*/exe`.
 fn normalize_abs_path<A: Allocator>(path: &[u8], out: &mut Vec<u8, A>) -> bool {
     if !path.starts_with(b"/") {
         return false;
@@ -401,13 +438,6 @@ fn normalize_abs_path<A: Allocator>(path: &[u8], out: &mut Vec<u8, A>) -> bool {
     for segment in path.split(|&b| b == b'/') {
         match segment {
             b"" | b"." => {}
-            b".." => {
-                while let Some(byte) = out.pop() {
-                    if byte == b'/' {
-                        break;
-                    }
-                }
-            }
             seg => {
                 out.push(b'/');
                 out.extend_from_slice(seg);
@@ -541,13 +571,27 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_slashes_dot_and_dotdot() {
+    fn normalizes_slashes_and_dot_without_collapsing_dotdot() {
         assert_eq!(normalize(b"/proc/self/exe"), b"/proc/self/exe");
         assert_eq!(normalize(b"//proc///self/./exe"), b"/proc/self/exe");
-        assert_eq!(normalize(b"/proc/123/../self/exe"), b"/proc/self/exe");
-        assert_eq!(normalize(b"/proc/self/task/99/../../exe"), b"/proc/self/exe");
-        assert_eq!(normalize(b"/../../../proc/self/exe"), b"/proc/self/exe");
+        assert_eq!(normalize(b"/proc/./self/./task/./99/./exe"), b"/proc/self/task/99/exe");
+        assert_eq!(normalize(b"/proc/self/cwd/../exe"), b"/proc/self/cwd/../exe");
+        assert_eq!(normalize(b"/proc/nonexistent/../self/exe"), b"/proc/nonexistent/../self/exe");
         assert_eq!(normalize(b"/"), b"/");
+
+        // Paths containing `..` must never match `/proc/*/exe`.
+        let norm_cwd = normalize(b"/proc/self/cwd/../exe");
+        let norm_nonexistent = normalize(b"/proc/nonexistent/../self/exe");
+        assert!(!match_normalized_proc_exe(&norm_cwd, 1000, 1000, |_, _| false));
+        assert!(!match_normalized_proc_exe(&norm_nonexistent, 1000, 1000, |_, _| false));
+    }
+
+    #[test]
+    fn detects_deleted_exe_suffix() {
+        assert!(is_deleted_exe_path(b"/memfd:payload (deleted)"));
+        assert!(is_deleted_exe_path(b"/tmp/foo (deleted)"));
+        assert!(!is_deleted_exe_path(b"/usr/bin/node"));
+        assert!(!is_deleted_exe_path(b" (deleted"));
     }
 
     #[test]

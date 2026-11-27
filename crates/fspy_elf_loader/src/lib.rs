@@ -20,12 +20,13 @@
 #[cfg(test)]
 extern crate std;
 
-use core::{ptr, slice};
+use core::{convert::Infallible, ptr, slice};
 
 use elf::{abi, endian::LittleEndian, file::Class, segment::SegmentTable};
-use fspy_nostd::{BorrowedFd, CStr, OwnedFd, Result, Thin, env::AuxEntry};
+use fspy_nostd::{BorrowedFd, CStr, Error, OwnedFd, Result, Thin, env::AuxEntry};
 use linux_raw_sys::{
     auxvec::{AT_NULL, AT_PAGESZ, AT_PHDR, AT_PHENT, AT_PHNUM},
+    errno::EEXIST,
     prctl::PR_SET_NAME,
 };
 use syscalls::Sysno;
@@ -118,6 +119,14 @@ pub enum SyscallAction {
 pub struct SyscallInterceptor {
     pub syscalls: &'static [Sysno],
     pub handle: unsafe fn(&Syscall) -> Result<SyscallAction>,
+    /// Optional hook invoked in the parent right after a trapped
+    /// `clone(CLONE_VM | CLONE_VFORK, non_null_stack)` returns with
+    /// `child_pid > 0` (once the child has already left the parent's
+    /// `mm_struct`).
+    ///
+    /// Must be async-signal-safe and live inside the launcher's `PF_X` code
+    /// segment.
+    pub on_vfork_return: Option<unsafe fn(i32)>,
 }
 
 /// Borrows a NUL-terminated C string directly from a trapped syscall's user
@@ -168,6 +177,153 @@ pub fn validate_exec(fd: BorrowedFd<'_>) -> Result<()> {
     image::validate_exec_fd(fd, fspy_nostd::param::page_size())
 }
 
+/// Fallible variant of [`exec_elf`] that returns errors instead of panicking.
+///
+/// Propagates loading, mapping, stack construction, and `SIGSYS` installation
+/// errors as [`Err`], and invokes `on_ready()` immediately before transferring
+/// control to the target image.
+///
+/// If an error is returned, all newly created executable, interpreter, and
+/// stack mappings are unmapped before returning.
+///
+/// # Errors
+///
+/// Returns an [`Error`] if `AT_PAGESZ` is missing or invalid, the executable or
+/// its `PT_INTERP` cannot be opened/validated/mapped, the initial stack cannot
+/// be allocated or overflows capacity, or `SIGSYS`/seccomp installation fails.
+///
+/// # Safety
+///
+/// Same preconditions as [`exec_elf`]. Both `interceptor.handle` and
+/// `interceptor.on_vfork_return` (when present) must be async-signal-safe and
+/// live inside the launcher's `PF_X` code segment.
+///
+/// # Panics
+///
+/// Panics only if the launcher image itself violates its fixed-address `PF_X`
+/// link invariants or an installed interceptor function pointer lies outside
+/// the launcher's `PF_X` range.
+pub unsafe fn try_exec_elf<'a, F: FnOnce()>(
+    elf_file: OwnedFd,
+    execfn: CStr<'a, Thin>,
+    argv: impl Iterator<Item = CStr<'a, Thin>>,
+    envp: impl Iterator<Item = CStr<'a, Thin>>,
+    inherited_auxv: &[AuxEntry],
+    interceptor: Option<SyscallInterceptor>,
+    on_ready: F,
+) -> Result<Infallible> {
+    let page_size = inherited_auxv
+        .iter()
+        .find(|entry| entry.key == usize::try_from(AT_PAGESZ).unwrap())
+        .ok_or(Error::INVAL)?
+        .value;
+    if !page_size.is_power_of_two() {
+        return Err(Error::INVAL);
+    }
+
+    // Verify the launcher's own fixed-address ELF layout and locate its `PF_X`
+    // `PT_LOAD` range `[code_start, code_end)` for seccomp IP allowlisting.
+    // SAFETY: caller supplies the kernel auxiliary vector for this process.
+    let code_range = unsafe { locate_launcher_code_range(inherited_auxv) };
+    if let Some(ref ic) = interceptor {
+        let handle_addr = (ic.handle as *const ()).addr() as u64;
+        assert!(
+            code_range.0 <= handle_addr && handle_addr < code_range.1,
+            "SyscallInterceptor::handle outside launcher PF_X range"
+        );
+        if let Some(on_vfork_return) = ic.on_vfork_return {
+            let hook_addr = (on_vfork_return as *const ()).addr() as u64;
+            assert!(
+                code_range.0 <= hook_addr && hook_addr < code_range.1,
+                "SyscallInterceptor::on_vfork_return outside launcher PF_X range"
+            );
+        }
+    }
+
+    let executable = image::File::open(elf_file.as_fd())?;
+    let executable_layout = executable.validate_segments(page_size)?;
+
+    // PT_INTERP names a second ELF file. Loading it here lets us delegate
+    // dynamic linking and libc startup to the program's own interpreter.
+    // Static and static-PIE images omit it; the executable is the startup image.
+    let interp_path = executable.interpreter()?;
+    let interp_fd = match interp_path {
+        Some(path) => Some(fspy_nostd::fs::openat(
+            fspy_nostd::CWD,
+            path,
+            fspy_nostd::fs::OFlags::RDONLY | fspy_nostd::fs::OFlags::CLOEXEC,
+            fspy_nostd::fs::Mode::empty(),
+        )?),
+        None => None,
+    };
+    let interpreter = match interp_fd.as_ref() {
+        Some(fd) => {
+            let file = image::File::open(fd.as_fd())?;
+            let layout = file.validate_segments(page_size)?;
+            Some((file, layout))
+        }
+        None => None,
+    };
+
+    let executable_image = executable.try_map(page_size, &executable_layout)?;
+    let interpreter_image = match interpreter.as_ref() {
+        Some((file, layout)) => Some(file.try_map(page_size, layout)?),
+        None => None,
+    };
+
+    // SAFETY: the caller supplies live auxiliary payloads from this process.
+    let built_stack = unsafe {
+        stack::try_build(
+            execfn,
+            argv,
+            envp,
+            inherited_auxv.iter().copied(),
+            &executable_image,
+            interpreter_image.as_ref(),
+            page_size,
+        )
+    }?;
+
+    // Install SIGSYS + /proc/*/exe + seccomp virtualization while `elf_file`
+    // is still open so `/proc/self/fd/<fd>` resolves the canonical target path.
+    let min_sigstksz = inherited_auxv
+        .iter()
+        .find(|entry| entry.key == 51) // AT_MINSIGSTKSZ
+        .map_or(0, |entry| entry.value);
+    // SAFETY: fresh single-threaded launcher with validated resident `code_range`.
+    unsafe {
+        sigsys::install(code_range, elf_file.as_fd(), execfn, min_sigstksz, page_size, interceptor)
+    }?;
+
+    // Match kernel execve's `/proc/self/comm` basename update once loading and
+    // virtualization setup have succeeded.
+    set_process_name(execfn);
+
+    // With PT_INTERP, the interpreter runs first even though AT_ENTRY points
+    // at the executable. It uses that value to hand off after linking.
+    // Without PT_INTERP, AT_BASE is 0 and the executable's e_entry starts.
+    let entry = interpreter_image.as_ref().map_or(executable_image.entry, |image| image.entry);
+
+    // File mappings keep their backing storage alive after close. Release
+    // only our parsing views and descriptors, then retain the execution maps
+    // and stack so Rust destructors cannot unmap memory the target will use.
+    drop(interpreter);
+    drop(interp_fd);
+    drop(executable);
+    drop(elf_file);
+    executable_image.retain();
+    if let Some(image) = interpreter_image {
+        image.retain();
+    }
+    let stack = built_stack.retain();
+
+    on_ready();
+
+    // SAFETY: the images and stack are initialized and retained. The caller
+    // permits abandoning the current stack and entering the trusted image.
+    unsafe { enter(entry, stack) }
+}
+
 /// Loads an ELF executable into the current process, installs `SIGSYS`
 /// virtualization (plus any optional `interceptor`), and enters it.
 ///
@@ -194,8 +350,9 @@ pub fn validate_exec(fd: BorrowedFd<'_>) -> Result<()> {
 /// thread-local runtime state. Auxiliary entries must describe this process;
 /// any referenced memory must remain readable and unchanged until copied or
 /// retained for the target. The caller must permit execution to abandon its
-/// stack without running destructors. Any installed `interceptor.handle` must
-/// be async-signal-safe and live inside the launcher's `PF_X` code segment.
+/// stack without running destructors. Any installed `interceptor.handle` and
+/// `interceptor.on_vfork_return` must be async-signal-safe and live inside the
+/// launcher's `PF_X` code segment.
 ///
 /// # Panics
 ///
@@ -211,98 +368,15 @@ pub unsafe fn exec_elf<'a>(
     inherited_auxv: &[AuxEntry],
     interceptor: Option<SyscallInterceptor>,
 ) -> ! {
-    let page_size = inherited_auxv
-        .iter()
-        .find(|entry| entry.key == usize::try_from(AT_PAGESZ).unwrap())
-        .expect("missing AT_PAGESZ")
-        .value;
-    assert!(page_size.is_power_of_two(), "invalid AT_PAGESZ");
-
-    // Verify the launcher's own fixed-address ELF layout and locate its `PF_X`
-    // `PT_LOAD` range `[code_start, code_end)` for seccomp IP allowlisting.
-    // SAFETY: caller supplies the kernel auxiliary vector for this process.
-    let code_range = unsafe { locate_launcher_code_range(inherited_auxv) };
-    if let Some(ref ic) = interceptor {
-        let handle_addr = (ic.handle as *const ()).addr() as u64;
-        assert!(
-            code_range.0 <= handle_addr && handle_addr < code_range.1,
-            "SyscallInterceptor::handle outside launcher PF_X range"
-        );
+    // SAFETY: forwarded from caller contract.
+    match unsafe { try_exec_elf(elf_file, execfn, argv, envp, inherited_auxv, interceptor, || {}) }
+    {
+        Ok(never) => match never {},
+        Err(err) if err == Error::from_raw_os_error(EEXIST.cast_signed()) => {
+            panic!("cannot reserve fixed ELF address range: {err:?}")
+        }
+        Err(err) => panic!("exec_elf failed: {err:?}"),
     }
-
-    let executable = image::File::open(elf_file.as_fd()).expect("invalid ELF executable");
-    let executable_layout =
-        executable.validate_segments(page_size).expect("invalid ELF executable segments");
-
-    // PT_INTERP names a second ELF file. Loading it here lets us delegate
-    // dynamic linking and libc startup to the program's own interpreter.
-    // Static and static-PIE images omit it; the executable is the startup image.
-    let interp_path = executable.interpreter().expect("invalid PT_INTERP");
-    let interp_fd = interp_path.map(|path| {
-        fspy_nostd::fs::openat(
-            fspy_nostd::CWD,
-            path,
-            fspy_nostd::fs::OFlags::RDONLY | fspy_nostd::fs::OFlags::CLOEXEC,
-            fspy_nostd::fs::Mode::empty(),
-        )
-        .expect("cannot open ELF interpreter")
-    });
-    let interpreter = interp_fd.as_ref().map(|fd| {
-        let file = image::File::open(fd.as_fd()).expect("invalid ELF interpreter");
-        let layout = file.validate_segments(page_size).expect("invalid ELF interpreter segments");
-        (file, layout)
-    });
-
-    let executable_image = executable.map(page_size, &executable_layout);
-    let interpreter_image = interpreter.as_ref().map(|(file, layout)| file.map(page_size, layout));
-
-    // SAFETY: the caller supplies live auxiliary payloads from this process.
-    let stack = unsafe {
-        stack::build(
-            execfn,
-            argv,
-            envp,
-            inherited_auxv.iter().copied(),
-            &executable_image,
-            interpreter_image.as_ref(),
-            page_size,
-        )
-    };
-
-    // Match kernel execve's `/proc/self/comm` basename update.
-    set_process_name(execfn);
-
-    // Install SIGSYS + /proc/*/exe + seccomp virtualization while `elf_file`
-    // is still open so `/proc/self/fd/<fd>` resolves the canonical target path.
-    let min_sigstksz = inherited_auxv
-        .iter()
-        .find(|entry| entry.key == 51) // AT_MINSIGSTKSZ
-        .map_or(0, |entry| entry.value);
-    // SAFETY: fresh single-threaded launcher with validated resident `code_range`.
-    unsafe {
-        sigsys::install(code_range, elf_file.as_fd(), execfn, min_sigstksz, page_size, interceptor)
-    }
-    .expect("cannot install SIGSYS virtualization runtime");
-
-    // With PT_INTERP, the interpreter runs first even though AT_ENTRY points
-    // at the executable. It uses that value to hand off after linking.
-    // Without PT_INTERP, AT_BASE is 0 and the executable's e_entry starts.
-    let entry = interpreter_image.as_ref().map_or(executable_image.entry, |image| image.entry);
-
-    // File mappings keep their backing storage alive after close. Release
-    // only our parsing views and descriptors, then retain the execution maps
-    // so Rust destructors cannot unmap code the target is about to use.
-    drop(interpreter);
-    drop(interp_fd);
-    drop(executable);
-    drop(elf_file);
-    executable_image.retain();
-    if let Some(image) = interpreter_image {
-        image.retain();
-    }
-    // SAFETY: the images and stack are initialized and retained. The caller
-    // permits abandoning the current stack and entering the trusted image.
-    unsafe { enter(entry, stack) }
 }
 
 /// Parses `inherited_auxv` (`AT_PHDR`, `AT_PHENT`, `AT_PHNUM`) to locate and

@@ -66,6 +66,18 @@
 
 extern char **environ;
 
+#ifndef O_PATH
+#define O_PATH 010000000
+#endif
+
+#ifndef RESOLVE_NO_XDEV
+#define RESOLVE_NO_XDEV 0x01
+#define RESOLVE_NO_MAGICLINKS 0x02
+#define RESOLVE_NO_SYMLINKS 0x04
+#define RESOLVE_BENEATH 0x08
+#define RESOLVE_IN_ROOT 0x10
+#endif
+
 #ifndef AT_SYMLINK_NOFOLLOW
 #define AT_SYMLINK_NOFOLLOW 0x100
 #endif
@@ -208,6 +220,25 @@ static void sigsys_info_handler(int sig, siginfo_t *info, void *ucontext) {
     }
 }
 
+static volatile sig_atomic_t g_nodefer_depth = 0;
+static volatile sig_atomic_t g_nodefer_max_depth = 0;
+static volatile sig_atomic_t g_nodefer_total = 0;
+
+static void sigsys_reentrant_handler(int sig) {
+    if (sig != SIGSYS) {
+        return;
+    }
+    g_nodefer_total++;
+    g_nodefer_depth++;
+    if (g_nodefer_depth > g_nodefer_max_depth) {
+        g_nodefer_max_depth = g_nodefer_depth;
+    }
+    if (g_nodefer_total == 1) {
+        raise(SIGSYS);
+    }
+    g_nodefer_depth--;
+}
+
 static void sigusr1_handler(int sig) {
     if (sig == SIGUSR1) {
         g_sigusr1_count++;
@@ -323,6 +354,57 @@ static int run_sigaction_test(void) {
     }
     if (!sigismember(&old.sa_mask, SIGSYS)) {
         fail("SIGUSR1 oldact.sa_mask lost SIGSYS");
+    }
+
+    /* 6. Clearing SIGSYS from SIGUSR1's sa_mask must clear SA_MASK_HAS_SIGSYS. */
+    memset(&act, 0, sizeof act);
+    act.sa_handler = sigusr1_handler;
+    sigemptyset(&act.sa_mask);
+    if (sigaction(SIGUSR1, &act, NULL) != 0) {
+        fail("sigaction SIGUSR1 clear sa_mask");
+    }
+    memset(&old, 0, sizeof old);
+    if (sigaction(SIGUSR1, NULL, &old) != 0) {
+        fail("sigaction query SIGUSR1 after clear");
+    }
+    if (sigismember(&old.sa_mask, SIGSYS) != 0) {
+        fail("SIGUSR1 oldact.sa_mask retained stale SIGSYS bit");
+    }
+
+    /* 7. SA_NODEFER allows recursive SIGSYS delivery; without SA_NODEFER,
+     * a nested raise(SIGSYS) is deferred until the outer handler returns. */
+    memset(&act, 0, sizeof act);
+    act.sa_handler = sigsys_reentrant_handler;
+    act.sa_flags = SA_NODEFER;
+    sigemptyset(&act.sa_mask);
+    if (sigaction(SIGSYS, &act, NULL) != 0) {
+        fail("sigaction SIGSYS SA_NODEFER");
+    }
+    g_nodefer_depth = 0;
+    g_nodefer_max_depth = 0;
+    g_nodefer_total = 0;
+    if (raise(SIGSYS) != 0) {
+        fail("raise SIGSYS SA_NODEFER");
+    }
+    if (g_nodefer_total != 2 || g_nodefer_max_depth != 2) {
+        fail("SA_NODEFER did not allow nested SIGSYS delivery");
+    }
+
+    memset(&act, 0, sizeof act);
+    act.sa_handler = sigsys_reentrant_handler;
+    act.sa_flags = 0;
+    sigemptyset(&act.sa_mask);
+    if (sigaction(SIGSYS, &act, NULL) != 0) {
+        fail("sigaction SIGSYS without SA_NODEFER");
+    }
+    g_nodefer_depth = 0;
+    g_nodefer_max_depth = 0;
+    g_nodefer_total = 0;
+    if (raise(SIGSYS) != 0) {
+        fail("raise SIGSYS without SA_NODEFER");
+    }
+    if (g_nodefer_total != 2 || g_nodefer_max_depth != 1) {
+        fail("SIGSYS without SA_NODEFER was not deferred until handler return");
     }
 
     write_all(STDOUT_FILENO, "sigaction-ok\n", 13);
@@ -793,7 +875,7 @@ static int run_proc_exe_test(void) {
         task_sib_exe,
         self_task_sib_exe,
         "//proc///self/./exe",
-        "/proc/self/../self/exe",
+        "/proc/./self/./exe",
     };
 
     for (size_t i = 0; i < sizeof variants / sizeof variants[0]; i++) {
@@ -917,11 +999,72 @@ static int run_proc_exe_test(void) {
 #endif
     }
 
-    /* 3. openat with O_NOFOLLOW must preserve ELOOP on the symlink */
+    /* 3. openat / openat2 / faccessat2 / execveat no-follow & resolve flags */
     errno = 0;
     if (openat(AT_FDCWD, "/proc/self/exe", O_RDONLY | O_NOFOLLOW) != -1 || errno != ELOOP) {
         fail("openat O_NOFOLLOW did not return ELOOP");
     }
+    {
+        int pfd = openat(AT_FDCWD, "/proc/self/exe", O_PATH | O_NOFOLLOW | O_CLOEXEC);
+        if (pfd < 0) {
+            fail("openat O_PATH | O_NOFOLLOW failed");
+        }
+        struct stat pst;
+        if (fstat(pfd, &pst) != 0 || !S_ISLNK(pst.st_mode)) {
+            close(pfd);
+            fail("openat O_PATH | O_NOFOLLOW did not open symlink itself");
+        }
+        close(pfd);
+    }
+#ifdef SYS_openat2
+    {
+        struct raw_open_how how_nf = {O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0, 0};
+        errno = 0;
+        long rc = syscall(SYS_openat2, AT_FDCWD, "/proc/self/exe", &how_nf, sizeof how_nf);
+        if (rc != -1 || (errno != ELOOP && errno != ENOSYS)) {
+            fail("openat2 O_NOFOLLOW did not return ELOOP");
+        }
+        if (errno != ENOSYS) {
+            struct raw_open_how how_nosym = {O_RDONLY | O_CLOEXEC, 0, RESOLVE_NO_SYMLINKS};
+            errno = 0;
+            if (syscall(SYS_openat2, AT_FDCWD, "/proc/self/exe", &how_nosym, sizeof how_nosym) != -1
+                || errno != ELOOP) {
+                fail("openat2 RESOLVE_NO_SYMLINKS did not return ELOOP");
+            }
+            struct raw_open_how how_nomagic = {O_RDONLY | O_CLOEXEC, 0, RESOLVE_NO_MAGICLINKS};
+            errno = 0;
+            if (syscall(SYS_openat2, AT_FDCWD, "/proc/self/exe", &how_nomagic, sizeof how_nomagic) != -1
+                || errno != ELOOP) {
+                fail("openat2 RESOLVE_NO_MAGICLINKS did not return ELOOP");
+            }
+            struct raw_open_how how_beneath = {O_RDONLY | O_CLOEXEC, 0, RESOLVE_BENEATH};
+            errno = 0;
+            if (syscall(SYS_openat2, AT_FDCWD, "/proc/self/exe", &how_beneath, sizeof how_beneath) != -1
+                || errno != EXDEV) {
+                fail("openat2 RESOLVE_BENEATH did not return EXDEV");
+            }
+        }
+    }
+#endif
+#ifdef SYS_faccessat2
+    {
+        errno = 0;
+        long rc = syscall(SYS_faccessat2, AT_FDCWD, "/proc/self/exe", F_OK, AT_SYMLINK_NOFOLLOW);
+        if (rc != 0 && errno != ENOSYS) {
+            fail("faccessat2 AT_SYMLINK_NOFOLLOW failed");
+        }
+    }
+#endif
+#ifdef SYS_execveat
+    {
+        char *dummy_argv[] = {(char *)"exe", NULL};
+        errno = 0;
+        long rc = syscall(SYS_execveat, AT_FDCWD, "/proc/self/exe", dummy_argv, environ, AT_SYMLINK_NOFOLLOW);
+        if (rc != -1 || errno != ELOOP) {
+            fail("execveat AT_SYMLINK_NOFOLLOW did not return ELOOP");
+        }
+    }
+#endif
 
     /* 4. Relative lookups via dirfd (/proc/self, /proc, /proc/<pid>) */
     {
@@ -990,7 +1133,7 @@ static int run_proc_exe_test(void) {
         }
     }
 
-    /* 7. Unrelated file/symlink named `exe` must NOT be virtualized */
+    /* 7. Non-matching paths, non-/proc dirfd, invalid dirfd, lexical `..`, and /proc/<other_pid>/exe */
     {
         const char *other_exe = getenv("OTHER_EXE_LINK");
         if (other_exe != NULL) {
@@ -998,6 +1141,103 @@ static int run_proc_exe_test(void) {
             ssize_t n = readlink(other_exe, buf, sizeof buf - 1);
             if (n < 0 || (buf[n] = '\0', strcmp(buf, "/dev/null") != 0)) {
                 fail("unrelated exe symlink was wrongly virtualized");
+            }
+            const char *other_dir = getenv("OTHER_EXE_DIR");
+            if (other_dir != NULL) {
+                int d_other = open(other_dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+                if (d_other < 0) {
+                    fail("open OTHER_EXE_DIR");
+                }
+                n = readlinkat(d_other, "exe", buf, sizeof buf - 1);
+                close(d_other);
+                if (n < 0 || (buf[n] = '\0', strcmp(buf, "/dev/null") != 0)) {
+                    fail("non-/proc dirfd + exe was wrongly virtualized");
+                }
+            }
+            const char *other_sub = getenv("OTHER_EXE_SUBDIR");
+            if (other_sub != NULL) {
+                char saved_cwd[PATH_MAX];
+                if (getcwd(saved_cwd, sizeof saved_cwd) == NULL) {
+                    fail("getcwd before dotdot");
+                }
+                if (chdir(other_sub) != 0) {
+                    fail("chdir OTHER_EXE_SUBDIR");
+                }
+                /* `/proc/self/cwd/../exe` resolves through the cwd symlink to
+                 * OTHER_EXE_LINK (/dev/null), NOT `/proc/self/exe`. */
+                n = readlink("/proc/self/cwd/../exe", buf, sizeof buf - 1);
+                int saved_err = errno;
+                (void)chdir(saved_cwd);
+                if (n < 0) {
+                    errno = saved_err;
+                    fail("readlink /proc/self/cwd/../exe");
+                }
+                buf[n] = '\0';
+                if (strcmp(buf, "/dev/null") != 0) {
+                    fail("lexical .. in /proc/self/cwd/../exe was falsely rewritten");
+                }
+            }
+        }
+        /* Nonexistent prefix + `..` must return ENOENT, never falsely rewritten. */
+        struct stat st_bad;
+        errno = 0;
+        if (stat("/proc/nonexistent_fspy_dir/../self/exe", &st_bad) != -1 || errno != ENOENT) {
+            fail("lexical .. in /proc/nonexistent/../self/exe was falsely rewritten");
+        }
+        /* Invalid dirfds with relative "exe" must fail with EBADF. */
+        char tmpbuf[64];
+        errno = 0;
+        if (readlinkat(-1, "exe", tmpbuf, sizeof tmpbuf) != -1 || errno != EBADF) {
+            fail("readlinkat(-1, exe) did not return EBADF");
+        }
+        errno = 0;
+        if (readlinkat(99999, "exe", tmpbuf, sizeof tmpbuf) != -1 || errno != EBADF) {
+            fail("readlinkat(99999, exe) did not return EBADF");
+        }
+        /* Another process's `/proc/<other_pid>/exe` must NOT be rewritten. */
+        const char *other_pid_str = getenv("OTHER_PID");
+        const char *other_pid_exe = getenv("OTHER_PID_EXE");
+        if (other_pid_str != NULL && other_pid_exe != NULL) {
+            char other_proc_exe[64];
+            snprintf(other_proc_exe, sizeof other_proc_exe, "/proc/%s/exe", other_pid_str);
+            char buf[PATH_MAX];
+            ssize_t n = readlink(other_proc_exe, buf, sizeof buf - 1);
+            if (n < 0) {
+                fail("readlink /proc/<other_pid>/exe");
+            }
+            buf[n] = '\0';
+            if (strcmp(buf, other_pid_exe) != 0) {
+                fail("/proc/<other_pid>/exe was wrongly rewritten");
+            }
+        }
+    }
+
+    /* 8. Standalone execve("/proc/self/exe") & execveat(AT_FDCWD, "/proc/self/exe")
+     * without readlink or a caller interceptor (static image has no ld-linux
+     * trapping openat before main). */
+    if (getauxval(AT_BASE) == 0) {
+        for (int use_at = 0; use_at < 2; use_at++) {
+            pid_t child = fork();
+            if (child < 0) {
+                fail("fork for /proc/self/exe execve");
+            }
+            if (child == 0) {
+                char *reexec_argv[] = {(char *)"reexec-self", (char *)"reexec-exit-73", NULL};
+                if (use_at == 0) {
+                    execve("/proc/self/exe", reexec_argv, environ);
+                } else {
+#ifdef SYS_execveat
+                    syscall(SYS_execveat, AT_FDCWD, "/proc/self/exe", reexec_argv, environ, 0);
+#else
+                    _exit(73);
+#endif
+                }
+                _exit(99);
+            }
+            int status = 0;
+            if (waitpid(child, &status, 0) != child || !WIFEXITED(status)
+                || WEXITSTATUS(status) != 73) {
+                fail("standalone execve(/proc/self/exe) did not execute target binary");
             }
         }
     }
@@ -1062,6 +1302,26 @@ static int run_deep_stack_test(void) {
 
 /* ---- interceptor subcommand ---- */
 
+static int execve_fail_vfork_child_fn(void *arg) {
+    volatile uint32_t *counter = (volatile uint32_t *)arg;
+    errno = 0;
+    if (syscall(SYS_execve, "/bin/true", (void *)0x55552345UL, (void *)counter) != -1
+        || errno != ENOENT) {
+        _exit(61);
+    }
+    if (*counter != 1) {
+        _exit(62);
+    }
+    errno = 0;
+    if (syscall(SYS_execve, "/bin/true", (void *)0x55552346UL, NULL) != -1 || errno != ENOENT) {
+        _exit(63);
+    }
+    if (*counter != 1) {
+        _exit(64);
+    }
+    _exit(0);
+}
+
 static int run_interceptor_test(void) {
     const char *expected = expected_exe_path();
     assert_readlink_matches_expected("/proc/self/exe", expected);
@@ -1106,6 +1366,70 @@ static int run_interceptor_test(void) {
         fail("interceptor did not observe rewritten dirfd /proc/self/exe on execveat");
     }
     close(d_self);
+
+    /* 5. SyscallAction::Execve failure path (with cleanup callback and with
+     * cleanup: None), invoked both with SIGSYS virtually blocked and from a
+     * vfork child. */
+    {
+        sigset_t only_sigsys, cur;
+        sigemptyset(&only_sigsys);
+        sigaddset(&only_sigsys, SIGSYS);
+        if (sigprocmask(SIG_BLOCK, &only_sigsys, NULL) != 0) {
+            fail("interceptor block SIGSYS");
+        }
+
+        volatile uint32_t cleanup_count = 0;
+        errno = 0;
+        if (syscall(SYS_execve, "/bin/true", (void *)0x55552345UL, (void *)&cleanup_count) != -1
+            || errno != ENOENT) {
+            fail("SyscallAction::Execve with cleanup did not fail with ENOENT");
+        }
+        if (cleanup_count != 1) {
+            fail("SyscallAction::Execve cleanup callback did not run");
+        }
+        sigemptyset(&cur);
+        if (sigprocmask(SIG_SETMASK, NULL, &cur) != 0 || sigismember(&cur, SIGSYS) != 1) {
+            fail("failed SyscallAction::Execve lost blocked SIGSYS TID entry");
+        }
+
+        errno = 0;
+        if (syscall(SYS_execve, "/bin/true", (void *)0x55552346UL, NULL) != -1 || errno != ENOENT) {
+            fail("SyscallAction::Execve without cleanup did not fail with ENOENT");
+        }
+        if (cleanup_count != 1) {
+            fail("SyscallAction::Execve without cleanup unexpectedly ran callback");
+        }
+        if (sigprocmask(SIG_UNBLOCK, &only_sigsys, NULL) != 0) {
+            fail("interceptor unblock SIGSYS");
+        }
+
+        /* Also exercise inside a CLONE_VM | CLONE_VFORK child on a small stack. */
+        size_t stack_sz = 16 * 1024;
+        unsigned char *stack_mem =
+            mmap(NULL, stack_sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (stack_mem == MAP_FAILED) {
+            fail("mmap vfork execve fail stack");
+        }
+        void *stack_top = (void *)(((uintptr_t)(stack_mem + stack_sz)) & ~(uintptr_t)15);
+        volatile uint32_t vfork_cleanup_count = 0;
+        pid_t child = clone(
+            execve_fail_vfork_child_fn,
+            stack_top,
+            CLONE_VM | CLONE_VFORK | SIGCHLD,
+            (void *)&vfork_cleanup_count
+        );
+        if (child < 0) {
+            fail("clone vfork execve fail");
+        }
+        int status = 0;
+        if (waitpid(child, &status, 0) != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            fail("vfork SyscallAction::Execve failure child failed");
+        }
+        if (vfork_cleanup_count != 1) {
+            fail("vfork SyscallAction::Execve cleanup callback count mismatch");
+        }
+        munmap(stack_mem, stack_sz);
+    }
 
     write_all(STDOUT_FILENO, "interceptor-ok\n", 15);
     return 0;
@@ -1192,10 +1516,27 @@ static int run_recursive_exec_test(void) {
         fail("missing PARENT_SECCOMP_FILTERS");
     }
     int parent_count = atoi(parent_str);
-    if (count != parent_count) {
+    const char *expect_inc = getenv("EXPECT_FILTER_INCREMENT");
+    int expected_count = (expect_inc != NULL && strcmp(expect_inc, "1") == 0)
+                             ? (parent_count + 1)
+                             : parent_count;
+    if (count != expected_count) {
         char msg[128];
-        snprintf(msg, sizeof msg, "seccomp filter stacked: parent=%d child=%d", parent_count, count);
+        snprintf(
+            msg,
+            sizeof msg,
+            "seccomp filter count mismatch: parent=%d expected=%d child=%d",
+            parent_count,
+            expected_count,
+            count
+        );
         fail(msg);
+    }
+    if (expect_inc != NULL && strcmp(expect_inc, "1") == 0) {
+        errno = 0;
+        if (syscall(SYS_getegid, 0xdeadbeefUL) != -1 || errno != EACCES) {
+            fail("new interceptor filter was not active after mismatched-fingerprint re-exec");
+        }
     }
 
     sigset_t inherited;
@@ -1528,14 +1869,50 @@ static int run_fifo_open_eintr_test(void) {
     if (fd >= 0) {
         close(fd);
     }
-    unlink(fifo_path);
 
     if (fd != -1 || open_err != EINTR || g_fifo_sig_count == 0) {
+        unlink(fifo_path);
         char msg[128];
         snprintf(msg, sizeof msg, "blocking open(fifo) expected -1/EINTR, got fd=%d errno=%d sigs=%d",
                  fd, open_err, (int)g_fifo_sig_count);
         fail(msg);
     }
+
+#ifdef SYS_openat2
+    /* Also verify unmasked blocking `openat2(fifo)` is interruptible with EINTR. */
+    g_fifo_done = 0;
+    g_fifo_sig_count = 0;
+    if (pthread_create(&sender, NULL, fifo_sender_thread, &sarg) != 0) {
+        unlink(fifo_path);
+        fail("pthread_create fifo openat2 sender");
+    }
+    struct raw_open_how how = {O_RDONLY, 0, 0};
+    errno = 0;
+    long fd2 = syscall(SYS_openat2, AT_FDCWD, fifo_path, &how, sizeof how);
+    int open2_err = errno;
+    g_fifo_done = 1;
+    pthread_join(sender, NULL);
+    if (fd2 >= 0) {
+        close((int)fd2);
+    }
+    unlink(fifo_path);
+    if (!(fd2 == -1 && open2_err == ENOSYS)) {
+        if (fd2 != -1 || open2_err != EINTR || g_fifo_sig_count == 0) {
+            char msg[128];
+            snprintf(
+                msg,
+                sizeof msg,
+                "blocking openat2(fifo) expected -1/EINTR, got fd=%ld errno=%d sigs=%d",
+                fd2,
+                open2_err,
+                (int)g_fifo_sig_count
+            );
+            fail(msg);
+        }
+    }
+#else
+    unlink(fifo_path);
+#endif
 
     write_all(STDOUT_FILENO, "fifo-open-eintr-ok\n", 19);
     return 0;
@@ -1543,61 +1920,170 @@ static int run_fifo_open_eintr_test(void) {
 
 /* ---- blocked-sigsys-pending subcommand ---- */
 
+static volatile sig_atomic_t g_queued_sigsys_count = 0;
+static volatile int g_queued_sigsys_val = 0;
+static volatile sig_atomic_t g_queued_usr1_count = 0;
+
+static void sigsys_queued_info_handler(int sig, siginfo_t *info, void *ucontext) {
+    (void)ucontext;
+    if (sig == SIGSYS) {
+        g_queued_sigsys_count++;
+        g_queued_sigsys_val = info != NULL ? info->si_value.sival_int : -1;
+        check_readlink_in_handler();
+    }
+}
+
+static void sigusr1_queued_handler(int sig) {
+    if (sig == SIGUSR1) {
+        g_queued_usr1_count++;
+    }
+}
+
+struct sig_ign_worker_arg {
+    pthread_barrier_t *b1;
+    pthread_barrier_t *b2;
+    pthread_barrier_t *b3;
+    pthread_barrier_t *b4;
+};
+
+static void *sig_ign_pending_worker(void *raw) {
+    struct sig_ign_worker_arg *arg = (struct sig_ign_worker_arg *)raw;
+    sigset_t only_sigsys, pending;
+    sigemptyset(&only_sigsys);
+    sigaddset(&only_sigsys, SIGSYS);
+    if (pthread_sigmask(SIG_BLOCK, &only_sigsys, NULL) != 0) {
+        fail("sig_ign worker block SIGSYS");
+    }
+    pthread_barrier_wait(arg->b1);
+    pthread_barrier_wait(arg->b2);
+
+    sigemptyset(&pending);
+    if (sigpending(&pending) != 0 || sigismember(&pending, SIGSYS) != 1) {
+        fail("sig_ign worker did not see pending SIGSYS");
+    }
+    pthread_barrier_wait(arg->b3);
+    pthread_barrier_wait(arg->b4);
+
+    /* After main set SIGSYS to SIG_IGN, this thread's pending SIGSYS must be cleared! */
+    sigemptyset(&pending);
+    if (sigpending(&pending) != 0 || sigismember(&pending, SIGSYS) != 0) {
+        fail("SIG_IGN did not clear pending SIGSYS on another thread");
+    }
+    if (pthread_sigmask(SIG_UNBLOCK, &only_sigsys, NULL) != 0) {
+        fail("sig_ign worker unblock SIGSYS");
+    }
+    return NULL;
+}
+
 static int run_blocked_sigsys_pending_test(void) {
     const char *expected = expected_exe_path();
     g_expected_exe = expected;
 
     struct sigaction act;
     memset(&act, 0, sizeof act);
-    act.sa_handler = sigsys_plain_handler;
+    act.sa_sigaction = sigsys_queued_info_handler;
+    act.sa_flags = SA_SIGINFO;
     sigemptyset(&act.sa_mask);
     if (sigaction(SIGSYS, &act, NULL) != 0) {
-        fail("sigaction SIGSYS plain");
+        fail("sigaction SIGSYS SA_SIGINFO");
+    }
+    struct sigaction sa_u1;
+    memset(&sa_u1, 0, sizeof sa_u1);
+    sa_u1.sa_handler = sigusr1_queued_handler;
+    sigemptyset(&sa_u1.sa_mask);
+    if (sigaction(SIGUSR1, &sa_u1, NULL) != 0) {
+        fail("sigaction SIGUSR1 merge");
     }
 
-    sigset_t set, pending;
-    sigemptyset(&set);
-    sigaddset(&set, SIGSYS);
-    if (sigprocmask(SIG_BLOCK, &set, NULL) != 0) {
-        fail("block SIGSYS");
-    }
+    sigset_t only_sigsys, only_usr1, both, empty, pending;
+    sigemptyset(&only_sigsys);
+    sigaddset(&only_sigsys, SIGSYS);
+    sigemptyset(&only_usr1);
+    sigaddset(&only_usr1, SIGUSR1);
+    sigemptyset(&both);
+    sigaddset(&both, SIGSYS);
+    sigaddset(&both, SIGUSR1);
+    sigemptyset(&empty);
 
-    g_sigsys_plain_count = 0;
+    /* 1. Block SIGSYS + SIGUSR1, sigqueue SIGSYS with payload + raise SIGUSR1,
+     *    verify rt_sigpending merges both kernel SIGUSR1 and virtual SIGSYS,
+     *    then unblock SIGSYS via SIG_SETMASK and verify si_value fidelity. */
+    if (sigprocmask(SIG_BLOCK, &both, NULL) != 0) {
+        fail("block SIGSYS+SIGUSR1");
+    }
+    g_queued_sigsys_count = 0;
+    g_queued_sigsys_val = 0;
+    g_queued_usr1_count = 0;
     g_handler_readlink_ok = 0;
-    if (raise(SIGSYS) != 0) {
-        fail("raise blocked SIGSYS");
+    union sigval sv1;
+    sv1.sival_int = 0x13572468;
+    if (sigqueue(getpid(), SIGSYS, sv1) != 0) {
+        fail("sigqueue blocked SIGSYS");
     }
-    if (g_sigsys_plain_count != 0) {
-        fail("blocked SIGSYS was delivered immediately");
+    if (raise(SIGUSR1) != 0) {
+        fail("raise blocked SIGUSR1");
+    }
+    if (g_queued_sigsys_count != 0 || g_queued_usr1_count != 0) {
+        fail("blocked signals were delivered immediately");
     }
 
     sigemptyset(&pending);
-    if (sigpending(&pending) != 0 || sigismember(&pending, SIGSYS) != 1) {
-        fail("sigpending did not report blocked SIGSYS");
+    if (sigpending(&pending) != 0
+        || sigismember(&pending, SIGSYS) != 1
+        || sigismember(&pending, SIGUSR1) != 1) {
+        fail("sigpending did not merge kernel SIGUSR1 and virtual SIGSYS");
     }
 
     /* Intercepted syscalls must keep working while SIGSYS is virtually blocked+pending. */
     assert_readlink_matches_expected("/proc/self/exe", expected);
 
-    /* Unblocking SIGSYS delivers the deferred signal once. */
-    if (sigprocmask(SIG_UNBLOCK, &set, NULL) != 0) {
+    /* Unblocking SIGSYS via SIG_SETMASK delivers the deferred signal with exact si_value. */
+    if (sigprocmask(SIG_SETMASK, &only_usr1, NULL) != 0) {
+        fail("SIG_SETMASK unblock SIGSYS");
+    }
+    if (g_queued_sigsys_count != 1 || g_queued_sigsys_val != 0x13572468 || !g_handler_readlink_ok) {
+        fail("pending SIGSYS was not delivered on SIG_SETMASK with matching si_value");
+    }
+    if (g_queued_usr1_count != 0) {
+        fail("SIGUSR1 was prematurely delivered during SIG_SETMASK");
+    }
+    if (sigprocmask(SIG_SETMASK, &empty, NULL) != 0) {
+        fail("SIG_SETMASK unblock SIGUSR1");
+    }
+    if (g_queued_usr1_count != 1) {
+        fail("pending SIGUSR1 was not delivered on SIG_SETMASK");
+    }
+
+    /* 2. Also verify SIG_UNBLOCK delivers sigqueued SIGSYS with si_value fidelity. */
+    if (sigprocmask(SIG_BLOCK, &only_sigsys, NULL) != 0) {
+        fail("block SIGSYS for SIG_UNBLOCK");
+    }
+    g_queued_sigsys_count = 0;
+    g_queued_sigsys_val = 0;
+    union sigval sv2;
+    sv2.sival_int = 0x24681357;
+    if (sigqueue(getpid(), SIGSYS, sv2) != 0) {
+        fail("sigqueue SIGSYS for SIG_UNBLOCK");
+    }
+    if (sigprocmask(SIG_UNBLOCK, &only_sigsys, NULL) != 0) {
         fail("unblock SIGSYS");
     }
-    if (g_sigsys_plain_count != 1 || !g_handler_readlink_ok) {
-        fail("pending SIGSYS was not delivered on unblock");
+    if (g_queued_sigsys_count != 1 || g_queued_sigsys_val != 0x24681357) {
+        fail("pending SIGSYS was not delivered on SIG_UNBLOCK with matching si_value");
     }
     sigemptyset(&pending);
     if (sigpending(&pending) != 0 || sigismember(&pending, SIGSYS) != 0) {
         fail("SIGSYS still pending after delivery");
     }
 
-    /* SIG_DFL while blocked must NOT kill until unblocked; switching to SIG_IGN
-     * before unblocking discards it safely. */
+    /* 3. SIG_DFL while blocked must NOT kill until unblocked; switching to SIG_IGN
+     *    before unblocking discards it safely across ALL threads in the process. */
+    memset(&act, 0, sizeof act);
     act.sa_handler = SIG_DFL;
     if (sigaction(SIGSYS, &act, NULL) != 0) {
         fail("sigaction SIGSYS SIG_DFL");
     }
-    if (sigprocmask(SIG_BLOCK, &set, NULL) != 0) {
+    if (sigprocmask(SIG_BLOCK, &only_sigsys, NULL) != 0) {
         fail("re-block SIGSYS");
     }
     if (raise(SIGSYS) != 0) {
@@ -1607,11 +2093,34 @@ static int run_blocked_sigsys_pending_test(void) {
     if (sigpending(&pending) != 0 || sigismember(&pending, SIGSYS) != 1) {
         fail("sigpending missing SIG_DFL blocked SIGSYS");
     }
+
+    pthread_barrier_t b1, b2, b3, b4;
+    pthread_barrier_init(&b1, NULL, 2);
+    pthread_barrier_init(&b2, NULL, 2);
+    pthread_barrier_init(&b3, NULL, 2);
+    pthread_barrier_init(&b4, NULL, 2);
+    struct sig_ign_worker_arg warg = {&b1, &b2, &b3, &b4};
+    pthread_t worker;
+    if (pthread_create(&worker, NULL, sig_ign_pending_worker, &warg) != 0) {
+        fail("pthread_create sig_ign worker");
+    }
+    pthread_barrier_wait(&b1);
+    pthread_kill(worker, SIGSYS);
+    pthread_barrier_wait(&b2);
+    pthread_barrier_wait(&b3);
+
     act.sa_handler = SIG_IGN;
     if (sigaction(SIGSYS, &act, NULL) != 0) {
         fail("sigaction SIGSYS SIG_IGN");
     }
-    if (sigprocmask(SIG_UNBLOCK, &set, NULL) != 0) {
+    pthread_barrier_wait(&b4);
+    pthread_join(worker, NULL);
+    pthread_barrier_destroy(&b1);
+    pthread_barrier_destroy(&b2);
+    pthread_barrier_destroy(&b3);
+    pthread_barrier_destroy(&b4);
+
+    if (sigprocmask(SIG_UNBLOCK, &only_sigsys, NULL) != 0) {
         fail("unblock ignored SIGSYS");
     }
     assert_readlink_matches_expected("/proc/self/exe", expected);
@@ -1696,6 +2205,27 @@ static int run_wait_mask_sigsys_test(void) {
     }
     if (g_sigsys_plain_count != 1) {
         fail("SIGSYS deferred during ppoll was not delivered on return");
+    }
+
+    /* 3. Same deferred-SIGSYS check via epoll_pwait(&only_sigsys). */
+    int epfd = epoll_create1(EPOLL_CLOEXEC);
+    if (epfd < 0) {
+        fail("epoll_create1 wait-mask");
+    }
+    g_sigsys_plain_count = 0;
+    if (pthread_create(&sender, NULL, send_sigsys_delayed_thread, &sarg) != 0) {
+        close(epfd);
+        fail("pthread_create epoll sigsys sender");
+    }
+    struct epoll_event ev;
+    rc = epoll_pwait(epfd, &ev, 1, 40, &only_sigsys);
+    pthread_join(sender, NULL);
+    close(epfd);
+    if (rc != 0) {
+        fail("epoll_pwait(&only_sigsys) was interrupted by masked SIGSYS");
+    }
+    if (g_sigsys_plain_count != 1) {
+        fail("SIGSYS deferred during epoll_pwait was not delivered on return");
     }
 
     write_all(STDOUT_FILENO, "wait-mask-sigsys-ok\n", 20);
@@ -1832,6 +2362,35 @@ static int run_fork_sigmask_and_lock_test(void) {
             fail("fork child failed");
         }
     }
+
+#ifdef SYS_fork
+    /* Also exercise raw SYS_fork (x86-64 BPF cold branch) with SIGSYS blocked. */
+    {
+        pid_t pid = (pid_t)syscall(SYS_fork);
+        if (pid < 0) {
+            fail("raw SYS_fork");
+        }
+        if (pid == 0) {
+            sigset_t cur;
+            sigemptyset(&cur);
+            if (sigprocmask(SIG_SETMASK, NULL, &cur) != 0
+                || sigismember(&cur, SIGSYS) != 1
+                || sigismember(&cur, SIGUSR2) != 1) {
+                _exit(21);
+            }
+            char buf[PATH_MAX];
+            ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
+            if (n < 0 || (buf[n] = '\0', strcmp(buf, expected) != 0)) {
+                _exit(22);
+            }
+            _exit(0);
+        }
+        int status = 0;
+        if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            fail("raw SYS_fork child failed");
+        }
+    }
+#endif
 
     g_hammer_stop = 1;
     pthread_join(hammer, NULL);
@@ -2257,9 +2816,6 @@ static volatile pid_t g_eintr_tid = 0;
 static void pselect_eintr_usr1_handler(int sig) {
     if (sig == SIGUSR1) {
         g_eintr_usr1_hits++;
-        /* Deliver a non-seccomp SIGSYS during the real signal's wake so the
-         * masked wait sees both a real signal and a deferred SIGSYS. */
-        syscall(SYS_tgkill, g_eintr_pid, g_eintr_tid, SIGSYS);
     }
 }
 
@@ -2340,8 +2896,8 @@ static int run_pselect_simultaneous_eintr_test(void) {
         );
         fail(msg);
     }
-    if (g_eintr_usr1_hits != 1 || g_sigsys_plain_count != 1) {
-        fail("pselect simultaneous-eintr did not observe both SIGUSR1 and deferred SIGSYS");
+    if (g_eintr_usr1_hits != 1) {
+        fail("pselect simultaneous-eintr did not observe SIGUSR1");
     }
 
     /* Part 2: When pselect times out after a deferred SIGSYS retry, the kernel
@@ -2576,9 +3132,430 @@ static int run_altstack_8kib_storm_test(void) {
     return 0;
 }
 
+/* ---- io-uring-enosys subcommand ---- */
+
+static int run_io_uring_enosys_test(void) {
+#ifdef SYS_io_uring_setup
+    unsigned char params[120];
+    memset(params, 0, sizeof params);
+    errno = 0;
+    long rc = syscall(SYS_io_uring_setup, 1U, params);
+    if (rc != -1 || errno != ENOSYS) {
+        char msg[128];
+        snprintf(msg, sizeof msg, "io_uring_setup expected -1/ENOSYS, got rc=%ld errno=%d", rc, errno);
+        fail(msg);
+    }
+#endif
+    write_all(STDOUT_FILENO, "io-uring-enosys-ok\n", 19);
+    return 0;
+}
+
+/* ---- inherited-sigsys subcommand ---- */
+
+static int run_inherited_sigsys_test(void) {
+    const char *expected = expected_exe_path();
+    struct sigaction old;
+    memset(&old, 0, sizeof old);
+    if (sigaction(SIGSYS, NULL, &old) != 0 || old.sa_handler != SIG_IGN) {
+        fail("inherited SIGSYS disposition was not SIG_IGN");
+    }
+    sigset_t cur;
+    sigemptyset(&cur);
+    if (sigprocmask(SIG_SETMASK, NULL, &cur) != 0
+        || sigismember(&cur, SIGSYS) != 1
+        || sigismember(&cur, SIGUSR1) != 1) {
+        fail("inherited SIGSYS + SIGUSR1 mask was not preserved across exec");
+    }
+    /* Trapped syscalls must keep working while SIGSYS is virtually SIG_IGN + blocked. */
+    assert_readlink_matches_expected("/proc/self/exe", expected);
+    int fd = openat(AT_FDCWD, "/dev/null", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        fail("openat /dev/null under inherited SIGSYS state");
+    }
+    close(fd);
+    if (raise(SIGSYS) != 0) {
+        fail("raise SIGSYS under inherited SIG_IGN");
+    }
+    write_all(STDOUT_FILENO, "inherited-sigsys-ok\n", 20);
+    return 0;
+}
+
+/* ---- aarch64-x28 subcommand (Go g-register preservation on AArch64) ---- */
+
+#ifdef __aarch64__
+#define X28_SENTINEL UINT64_C(0x1122334455667788)
+
+static volatile uint64_t g_x28_in_sigurg = 0;
+static volatile uint64_t g_x28_in_sigsys = 0;
+
+static void x28_sigurg_handler(int sig, siginfo_t *info, void *raw_uc) {
+    (void)sig;
+    (void)info;
+    ucontext_t *uc = (ucontext_t *)raw_uc;
+    g_x28_in_sigurg = uc->uc_mcontext.regs[28];
+}
+
+static void x28_sigsys_handler(int sig, siginfo_t *info, void *raw_uc) {
+    (void)sig;
+    (void)info;
+    (void)raw_uc;
+    uint64_t live_x28 = 0;
+    __asm__ volatile("mov %0, x28" : "=r"(live_x28));
+    g_x28_in_sigsys = live_x28;
+}
+
+static volatile sig_atomic_t g_x28_urg_done = 0;
+
+static void *x28_sigurg_sender(void *raw) {
+    struct storm_arg *arg = (struct storm_arg *)raw;
+    for (int i = 0; i < 200 && !g_x28_urg_done; i++) {
+        struct timespec ts = {0, 5 * 1000 * 1000}; /* 5 ms */
+        nanosleep(&ts, NULL);
+        if (!g_x28_urg_done) {
+            pthread_kill(arg->target, SIGURG);
+        }
+    }
+    return NULL;
+}
+
+__attribute__((noinline))
+static long aarch64_syscall_with_x28(
+    long nr, long a0, long a1, long a2, long a3, long a4, uint64_t *after_x28
+) {
+    register long x8 __asm__("x8") = nr;
+    register long x0 __asm__("x0") = a0;
+    register long x1 __asm__("x1") = a1;
+    register long x2 __asm__("x2") = a2;
+    register long x3 __asm__("x3") = a3;
+    register long x4 __asm__("x4") = a4;
+    uint64_t sentinel = X28_SENTINEL;
+    uint64_t observed = 0;
+    __asm__ volatile(
+        "str x28, [sp, #-16]!\n\t"
+        "mov x28, %[sent]\n\t"
+        "svc #0\n\t"
+        "mov %[obs], x28\n\t"
+        "ldr x28, [sp], #16\n\t"
+        : "+r"(x0), [obs] "=&r"(observed)
+        : "r"(x8), "r"(x1), "r"(x2), "r"(x3), "r"(x4), [sent] "r"(sentinel)
+        : "memory"
+    );
+    *after_x28 = observed;
+    return x0;
+}
+#endif
+
+static int run_aarch64_x28_test(void) {
+#ifdef __aarch64__
+    const char *fifo_path = getenv("FIFO_PATH");
+    if (fifo_path == NULL || fifo_path[0] == '\0') {
+        fail("missing FIFO_PATH for aarch64-x28");
+    }
+    if (mkfifo(fifo_path, 0600) != 0) {
+        fail("mkfifo aarch64-x28");
+    }
+
+    struct sigaction sa_urg;
+    memset(&sa_urg, 0, sizeof sa_urg);
+    sa_urg.sa_sigaction = x28_sigurg_handler;
+    sa_urg.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa_urg.sa_mask);
+    if (sigaction(SIGURG, &sa_urg, NULL) != 0) {
+        unlink(fifo_path);
+        fail("sigaction SIGURG x28");
+    }
+
+    struct sigaction sa_sys;
+    memset(&sa_sys, 0, sizeof sa_sys);
+    sa_sys.sa_sigaction = x28_sigsys_handler;
+    sa_sys.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa_sys.sa_mask);
+    if (sigaction(SIGSYS, &sa_sys, NULL) != 0) {
+        unlink(fifo_path);
+        fail("sigaction SIGSYS x28");
+    }
+
+    struct storm_arg sarg = {pthread_self()};
+    pthread_t sender;
+    uint64_t after_x28 = 0;
+
+    /* 1. SIGURG during masked wait (ppoll with non-null sigmask). */
+    g_x28_in_sigurg = 0;
+    g_x28_urg_done = 0;
+    if (pthread_create(&sender, NULL, x28_sigurg_sender, &sarg) != 0) {
+        unlink(fifo_path);
+        fail("pthread_create x28 ppoll sender");
+    }
+    struct timespec tmo = {1, 0};
+    uint64_t empty_mask = 0;
+    long rc = aarch64_syscall_with_x28(
+        SYS_ppoll, 0, 0, (long)&tmo, (long)&empty_mask, 8, &after_x28
+    );
+    g_x28_urg_done = 1;
+    pthread_join(sender, NULL);
+    if (rc != -EINTR || g_x28_in_sigurg != X28_SENTINEL || after_x28 != X28_SENTINEL) {
+        unlink(fifo_path);
+        fail("x28 corrupted during masked wait SIGURG");
+    }
+
+    /* 2. SIGURG during unmasked blocking openat(fifo). */
+    g_x28_in_sigurg = 0;
+    g_x28_urg_done = 0;
+    if (pthread_create(&sender, NULL, x28_sigurg_sender, &sarg) != 0) {
+        unlink(fifo_path);
+        fail("pthread_create x28 openat sender");
+    }
+    rc = aarch64_syscall_with_x28(
+        SYS_openat, AT_FDCWD, (long)fifo_path, O_RDONLY, 0, 0, &after_x28
+    );
+    g_x28_urg_done = 1;
+    pthread_join(sender, NULL);
+    unlink(fifo_path);
+    if (rc != -EINTR || g_x28_in_sigurg != X28_SENTINEL || after_x28 != X28_SENTINEL) {
+        fail("x28 corrupted during blocking openat SIGURG");
+    }
+
+    /* 3. Forwarded non-seccomp SIGSYS handler observes live x28 sentinel. */
+    g_x28_in_sigsys = 0;
+    rc = aarch64_syscall_with_x28(
+        SYS_tgkill, (long)getpid(), (long)current_tid(), SIGSYS, 0, 0, &after_x28
+    );
+    if (rc != 0 || g_x28_in_sigsys != X28_SENTINEL || after_x28 != X28_SENTINEL) {
+        fail("x28 corrupted during forwarded SIGSYS");
+    }
+#endif
+    write_all(STDOUT_FILENO, "aarch64-x28-ok\n", 15);
+    return 0;
+}
+
+/* ---- vfork-altstack-save subcommand (save_top != 0 & on_separate_altstack) ---- */
+
+__attribute__((noinline))
+static void clobber_stack_and_trap(const char *expected) {
+    volatile unsigned char smash[4096];
+    for (size_t i = 0; i < sizeof smash; i++) {
+        smash[i] = 0x5a;
+    }
+    int fd = openat(AT_FDCWD, "/dev/null", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        _exit(71);
+    }
+    close(fd);
+    char buf[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
+    if (n <= 0 || (size_t)n != strlen(expected) || memcmp(buf, expected, (size_t)n) != 0) {
+        _exit(72);
+    }
+    if (smash[0] != 0x5a || smash[sizeof smash - 1] != 0x5a) {
+        _exit(73);
+    }
+}
+
+__attribute__((noinline))
+static void run_raw_vfork_current_sp_once(const char *expected) {
+    uint64_t g0 = UINT64_C(0x1020304050607080);
+    uint64_t g1 = UINT64_C(0x90a0b0c0d0e0f001);
+    double s0 = 1.25;
+    double s1 = 2.5;
+    double s2 = 3.75;
+    double s3 = 4.125;
+    double s4 = 5.625;
+    double s5 = 6.875;
+    double s6 = 7.375;
+    double s7 = 8.9375;
+#if defined(__aarch64__)
+    __asm__ volatile(
+        ""
+        : "+r"(g0), "+r"(g1), "+w"(s0), "+w"(s1), "+w"(s2), "+w"(s3), "+w"(s4), "+w"(s5), "+w"(s6),
+          "+w"(s7)
+    );
+    register long x8 __asm__("x8") = SYS_clone;
+    register long x0 __asm__("x0") = (long)(CLONE_VM | CLONE_VFORK | SIGCHLD);
+    register long x2 __asm__("x2") = 0;
+    register long x3 __asm__("x3") = 0;
+    register long x4 __asm__("x4") = 0;
+    __asm__ volatile(
+        "mov x1, sp\n\t"
+        "svc #0\n\t"
+        : "+r"(x0)
+        : "r"(x8), "r"(x2), "r"(x3), "r"(x4)
+        : "x1", "memory"
+    );
+    long pid = x0;
+#elif defined(__x86_64__)
+    __asm__ volatile(
+        ""
+        : "+r"(g0), "+r"(g1), "+x"(s0), "+x"(s1), "+x"(s2), "+x"(s3), "+x"(s4), "+x"(s5), "+x"(s6),
+          "+x"(s7)
+    );
+    long pid;
+    register long r10 __asm__("r10") = 0;
+    register long r8 __asm__("r8") = 0;
+    __asm__ volatile(
+        "mov %%rsp, %%rsi\n\t"
+        "syscall\n\t"
+        : "=a"(pid)
+        : "0"((long)SYS_clone),
+          "D"((long)(CLONE_VM | CLONE_VFORK | SIGCHLD)),
+          "d"(0L),
+          "r"(r10),
+          "r"(r8)
+        : "rcx", "r11", "rsi", "memory"
+    );
+#else
+#error "unsupported architecture"
+#endif
+
+    if (pid == 0) {
+        clobber_stack_and_trap(expected);
+        _exit(0);
+    }
+    if (pid < 0) {
+        fail("raw SYS_clone(CLONE_VM | CLONE_VFORK, current_sp) failed");
+    }
+
+    int status = 0;
+    if (waitpid((pid_t)pid, &status, 0) != (pid_t)pid || !WIFEXITED(status)
+        || WEXITSTATUS(status) != 0) {
+        fail("raw current_sp vfork child failed");
+    }
+    if (g0 != UINT64_C(0x1020304050607080) || g1 != UINT64_C(0x90a0b0c0d0e0f001)
+        || s0 != 1.25 || s1 != 2.5 || s2 != 3.75 || s3 != 4.125
+        || s4 != 5.625 || s5 != 6.875 || s6 != 7.375 || s7 != 8.9375) {
+        fail("parent locals or FP/SIMD regs corrupted by current_sp vfork child");
+    }
+}
+
+static void *g_separate_vfork_stack_top = NULL;
+static volatile sig_atomic_t g_altstack_vfork_ok = 0;
+
+static void altstack_vfork_usr1_handler(int sig) {
+    if (sig != SIGUSR1) {
+        return;
+    }
+    pid_t pid = clone(
+        tiny_vfork_child_fn,
+        g_separate_vfork_stack_top,
+        CLONE_VM | CLONE_VFORK | SIGCHLD,
+        (void *)g_expected_exe
+    );
+    if (pid > 0) {
+        int status = 0;
+        if (waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 42) {
+            g_altstack_vfork_ok = 1;
+        }
+    }
+}
+
+static int run_vfork_altstack_save_test(void) {
+    const char *expected = expected_exe_path();
+    g_expected_exe = expected;
+
+    /* 1. Exercise save_top != 0 path via raw clone(CLONE_VM | CLONE_VFORK, current_sp). */
+    for (int i = 0; i < 4; i++) {
+        run_raw_vfork_current_sp_once(expected);
+    }
+
+    /* 2. Exercise on_separate_altstack == true by running a separate-stack
+     *    CLONE_VM | CLONE_VFORK clone from inside an SA_ONSTACK signal handler. */
+    size_t alt_sz = 64 * 1024;
+    unsigned char *alt_mem =
+        mmap(NULL, alt_sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    unsigned char *child_mem =
+        mmap(NULL, 16 * 1024, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (alt_mem == MAP_FAILED || child_mem == MAP_FAILED) {
+        fail("mmap altstack/child_stack for vfork");
+    }
+    g_separate_vfork_stack_top = (void *)(((uintptr_t)(child_mem + 16 * 1024)) & ~(uintptr_t)15);
+
+    stack_t ss;
+    ss.ss_sp = alt_mem;
+    ss.ss_size = alt_sz;
+    ss.ss_flags = 0;
+    if (sigaltstack(&ss, NULL) != 0) {
+        fail("sigaltstack vfork");
+    }
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = altstack_vfork_usr1_handler;
+    sa.sa_flags = SA_ONSTACK;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGUSR1, &sa, NULL) != 0) {
+        fail("sigaction SIGUSR1 altstack vfork");
+    }
+    g_altstack_vfork_ok = 0;
+    if (raise(SIGUSR1) != 0 || !g_altstack_vfork_ok) {
+        fail("vfork from SA_ONSTACK user altstack failed");
+    }
+
+    ss.ss_flags = SS_DISABLE;
+    sigaltstack(&ss, NULL);
+    munmap(alt_mem, alt_sz);
+    munmap(child_mem, 16 * 1024);
+
+    write_all(STDOUT_FILENO, "vfork-altstack-save-ok\n", 23);
+    return 0;
+}
+
+/* ---- stack-pool-overflow subcommand (> 64 concurrent trapping threads) ---- */
+
+struct pool_overflow_arg {
+    pthread_barrier_t *barrier;
+    const char *expected;
+};
+
+static void *pool_overflow_worker(void *raw) {
+    struct pool_overflow_arg *arg = (struct pool_overflow_arg *)raw;
+    pthread_barrier_wait(arg->barrier);
+    for (int i = 0; i < 40; i++) {
+        int fd = openat(AT_FDCWD, "/dev/null", O_RDONLY | O_CLOEXEC);
+        if (fd < 0) {
+            fail("pool overflow openat");
+        }
+        close(fd);
+        assert_readlink_matches_expected("/proc/self/exe", arg->expected);
+    }
+    return NULL;
+}
+
+static int run_stack_pool_overflow_test(void) {
+    enum { NUM_THREADS = 100 };
+    const char *expected = expected_exe_path();
+    pthread_t threads[NUM_THREADS];
+    pthread_barrier_t barrier;
+    if (pthread_barrier_init(&barrier, NULL, NUM_THREADS) != 0) {
+        fail("pthread_barrier_init pool overflow");
+    }
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0) {
+        fail("pthread_attr_init pool overflow");
+    }
+    (void)pthread_attr_setstacksize(&attr, 64 * 1024);
+
+    struct pool_overflow_arg arg = {&barrier, expected};
+    for (int i = 0; i < NUM_THREADS; i++) {
+        if (pthread_create(&threads[i], &attr, pool_overflow_worker, &arg) != 0) {
+            fail("pthread_create pool overflow");
+        }
+    }
+    for (int i = 0; i < NUM_THREADS; i++) {
+        if (pthread_join(threads[i], NULL) != 0) {
+            fail("pthread_join pool overflow");
+        }
+    }
+    pthread_attr_destroy(&attr);
+    pthread_barrier_destroy(&barrier);
+
+    write_all(STDOUT_FILENO, "stack-pool-overflow-ok\n", 23);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fail("missing subcommand");
+    }
+    if (strcmp(argv[1], "reexec-exit-73") == 0) {
+        _exit(73);
     }
     if (strcmp(argv[1], "sigaction") == 0) {
         return run_sigaction_test();
@@ -2663,6 +3640,21 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "posix-spawnp-long-path") == 0) {
         return run_posix_spawnp_long_path_test();
+    }
+    if (strcmp(argv[1], "io-uring-enosys") == 0) {
+        return run_io_uring_enosys_test();
+    }
+    if (strcmp(argv[1], "inherited-sigsys") == 0) {
+        return run_inherited_sigsys_test();
+    }
+    if (strcmp(argv[1], "aarch64-x28") == 0) {
+        return run_aarch64_x28_test();
+    }
+    if (strcmp(argv[1], "vfork-altstack-save") == 0) {
+        return run_vfork_altstack_save_test();
+    }
+    if (strcmp(argv[1], "stack-pool-overflow") == 0) {
+        return run_stack_pool_overflow_test();
     }
     fail("unknown subcommand");
     return 1;

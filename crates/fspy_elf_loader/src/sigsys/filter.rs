@@ -134,6 +134,8 @@ pub const BASE_TRAPPED_SYSCALLS: &[u32] = &[
     Sysno::access as u32,
     Sysno::faccessat as u32,
     Sysno::faccessat2 as u32,
+    Sysno::execve as u32,
+    Sysno::execveat as u32,
 ];
 
 /// Loader-owned syscalls trapped unconditionally on `AArch64` for `SIGSYS` and
@@ -153,6 +155,8 @@ pub const BASE_TRAPPED_SYSCALLS: &[u32] = &[
     Sysno::statx as u32,
     Sysno::faccessat as u32,
     Sysno::faccessat2 as u32,
+    Sysno::execve as u32,
+    Sysno::execveat as u32,
 ];
 
 /// Fixed-capacity cBPF program buffer requiring no heap allocation.
@@ -299,8 +303,10 @@ pub const fn build_filter(
 
     // 1. Native architecture gate: allow foreign/compat architectures untouched.
     prog.push(LD_W_ABS, 0, 0, OFF_ARCH);
-    prog.push(JMP_JEQ_K, 1, 0, arch);
+    let j_arch = prog.push(JMP_JEQ_K, 0, 0, arch);
     prog.push(RET_K, 0, 0, SECCOMP_RET_ALLOW);
+    let after_arch = prog.len;
+    prog.patch_jt(j_arch, after_arch);
 
     // 2. Idempotency probe (runs BEFORE the PF_X IP allowlist):
     //    `getpid(PROBE_MAGIC, fingerprint)` -> `SECCOMP_RET_ERRNO | EOWNERDEAD`.
@@ -310,16 +316,22 @@ pub const fn build_filter(
     let fp_hi = (fingerprint >> 32) as u32;
 
     prog.push(LD_W_ABS, 0, 0, OFF_NR);
-    prog.push(JMP_JEQ_K, 0, 9, Sysno::getpid as u32);
+    let j_probe_nr = prog.push(JMP_JEQ_K, 0, 0, Sysno::getpid as u32);
     prog.push(LD_W_ABS, 0, 0, OFF_ARG0_LO);
-    prog.push(JMP_JEQ_K, 0, 7, magic_lo);
+    let j_probe_a0_lo = prog.push(JMP_JEQ_K, 0, 0, magic_lo);
     prog.push(LD_W_ABS, 0, 0, OFF_ARG0_HI);
-    prog.push(JMP_JEQ_K, 0, 5, magic_hi);
+    let j_probe_a0_hi = prog.push(JMP_JEQ_K, 0, 0, magic_hi);
     prog.push(LD_W_ABS, 0, 0, OFF_ARG1_LO);
-    prog.push(JMP_JEQ_K, 0, 3, fp_lo);
+    let j_probe_a1_lo = prog.push(JMP_JEQ_K, 0, 0, fp_lo);
     prog.push(LD_W_ABS, 0, 0, OFF_ARG1_HI);
-    prog.push(JMP_JEQ_K, 0, 1, fp_hi);
+    let j_probe_a1_hi = prog.push(JMP_JEQ_K, 0, 0, fp_hi);
     prog.push(RET_K, 0, 0, SECCOMP_RET_PROBE);
+    let after_probe = prog.len;
+    prog.patch_jf(j_probe_nr, after_probe);
+    prog.patch_jf(j_probe_a0_lo, after_probe);
+    prog.patch_jf(j_probe_a0_hi, after_probe);
+    prog.patch_jf(j_probe_a1_lo, after_probe);
+    prog.patch_jf(j_probe_a1_hi, after_probe);
 
     // 3. Reject `clone3` and `io_uring_setup` with `ENOSYS`:
     //    - `clone3` callers using `CLONE_CLEAR_SIGHAND` would reset our
@@ -330,9 +342,12 @@ pub const fn build_filter(
     //      syscalls where `/proc/*/exe` virtualization and caller interceptors
     //      observe them.
     prog.push(LD_W_ABS, 0, 0, OFF_NR);
-    prog.push(JMP_JEQ_K, 1, 0, Sysno::clone3 as u32);
-    prog.push(JMP_JEQ_K, 0, 1, Sysno::io_uring_setup as u32);
-    prog.push(RET_K, 0, 0, SECCOMP_RET_ENOSYS);
+    let j_clone3 = prog.push(JMP_JEQ_K, 0, 0, Sysno::clone3 as u32);
+    let j_io_uring = prog.push(JMP_JEQ_K, 0, 0, Sysno::io_uring_setup as u32);
+    let ret_enosys = prog.push(RET_K, 0, 0, SECCOMP_RET_ENOSYS);
+    let after_enosys = prog.len;
+    prog.patch_jt(j_clone3, ret_enosys);
+    prog.patch_jf(j_io_uring, after_enosys);
 
     // Collect indices of jumps that must target `ip_check_idx`.
     let mut on_true_to_ip = [0_usize; MAX_TRAPPED_SYSCALLS + 16];
@@ -344,7 +359,7 @@ pub const fn build_filter(
     //     - Always trap new-address-space `clone` where `(args[0] & CLONE_VM) == 0`
     //       (regardless of whether `child_stack` is NULL or non-NULL) so
     //       `on_fork_child` refreshes `OWNER_PID`, drops parent TID slots, and
-    //       clears `ACTION_LOCK` in every forked process.
+    //       resets the action seqlock in every forked process.
     //     - Also trap `CLONE_VM | CLONE_VFORK` ONLY when `child_stack != 0`
     //       (separate child stack such as musl's 5 KiB `posix_spawn` stack,
     //       where AArch64 or AVX-512/AMX `rt_sigframe`s would overflow, or
@@ -359,8 +374,10 @@ pub const fn build_filter(
     on_false_to_ip[false_to_ip_count] = j_not_clone_vm;
     false_to_ip_count += 1;
     // `CLONE_VM` is set; only trap if `CLONE_VFORK` is also set AND `child_stack != 0`.
-    prog.push(JMP_JSET_K, 1, 0, CLONE_VFORK);
+    let j_vfork = prog.push(JMP_JSET_K, 0, 0, CLONE_VFORK);
     prog.push(RET_K, 0, 0, SECCOMP_RET_ALLOW);
+    let check_vfork_stack = prog.len;
+    prog.patch_jt(j_vfork, check_vfork_stack);
     prog.push(LD_W_ABS, 0, 0, OFF_ARG1_LO);
     let j_stack_lo_nz = prog.push(JMP_JEQ_K, 0, 0, 0);
     on_false_to_ip[false_to_ip_count] = j_stack_lo_nz;
@@ -434,22 +451,17 @@ pub const fn build_filter(
     let end_lo = end_inclusive as u32;
     let end_hi = (end_inclusive >> 32) as u32;
 
-    if start_hi == end_hi {
-        prog.push(JMP_JEQ_K, 0, 4, start_hi);
-        prog.push(LD_W_ABS, 0, 0, OFF_IP_LO);
-        prog.push(JMP_JGE_K, 0, 2, start_lo);
-    } else {
-        prog.push(JMP_JGE_K, 0, 8, start_hi);
-        prog.push(JMP_JGT_K, 7, 0, end_hi);
-        prog.push(JMP_JEQ_K, 0, 2, start_hi);
-        prog.push(LD_W_ABS, 0, 0, OFF_IP_LO);
-        prog.push(JMP_JGE_K, 3, 4, start_lo);
-        prog.push(JMP_JEQ_K, 0, 2, end_hi);
-        prog.push(LD_W_ABS, 0, 0, OFF_IP_LO);
-    }
-    prog.push(JMP_JGT_K, 1, 0, end_lo);
+    assert!(start_hi == end_hi, "launcher PF_X code range must not cross a 4 GiB boundary");
+
+    let j_ip_hi = prog.push(JMP_JEQ_K, 0, 0, start_hi);
+    prog.push(LD_W_ABS, 0, 0, OFF_IP_LO);
+    let j_ip_ge_start = prog.push(JMP_JGE_K, 0, 0, start_lo);
+    let j_ip_gt_end = prog.push(JMP_JGT_K, 0, 0, end_lo);
     prog.push(RET_K, 0, 0, SECCOMP_RET_ALLOW);
-    prog.push(RET_K, 0, 0, SECCOMP_RET_TAGGED_TRAP);
+    let ret_trap = prog.push(RET_K, 0, 0, SECCOMP_RET_TAGGED_TRAP);
+    prog.patch_jf(j_ip_hi, ret_trap);
+    prog.patch_jf(j_ip_ge_start, ret_trap);
+    prog.patch_jt(j_ip_gt_end, ret_trap);
 
     prog
 }
@@ -784,44 +796,21 @@ mod tests {
     }
 
     #[test]
-    fn filter_handles_pf_x_crossing_4gib_boundary() {
+    #[should_panic(expected = "4 GiB")]
+    fn filter_rejects_pf_x_crossing_4gib_boundary() {
         let code_start = 0x0000_0001_ffff_fffe_u64;
         let code_end = 0x0000_0003_0000_0003_u64;
         let trapped = &[Sysno::openat as u32];
         let fp = compute_fingerprint(code_start, code_end, trapped);
-        let prog = build_filter(AUDIT_ARCH_NATIVE, code_start, code_end, fp, trapped);
-        let insns = prog.as_slice();
-
-        for ip in [
-            code_start,
-            0x0000_0001_ffff_ffff,
-            0x0000_0002_0000_0000,
-            0x0000_0002_8000_0000,
-            0x0000_0003_0000_0000,
-            code_end - 1,
-        ] {
-            assert_eq!(
-                eval_bpf(insns, &make_data(AUDIT_ARCH_NATIVE, ip, trapped[0], [0; 6])),
-                SECCOMP_RET_ALLOW,
-                "expected ALLOW for ip={ip:#x}"
-            );
-        }
-
-        for ip in [0, 0x0000_0000_ffff_ffff, code_start - 1, code_end, 0x0000_0004_0000_0000] {
-            assert_eq!(
-                eval_bpf(insns, &make_data(AUDIT_ARCH_NATIVE, ip, trapped[0], [0; 6])),
-                SECCOMP_RET_TAGGED_TRAP,
-                "expected tagged TRAP for ip={ip:#x}"
-            );
-        }
+        let _ = build_filter(AUDIT_ARCH_NATIVE, code_start, code_end, fp, trapped);
     }
 
     #[test]
     fn collect_deduplicates_sorts_and_fingerprints_deterministically() {
         let (a, len_a) =
-            collect_trapped_syscalls(&[Sysno::execve, Sysno::openat, Sysno::execveat]).unwrap();
+            collect_trapped_syscalls(&[Sysno::getegid, Sysno::openat, Sysno::unlinkat]).unwrap();
         let (b, len_b) =
-            collect_trapped_syscalls(&[Sysno::execveat, Sysno::execve, Sysno::execve]).unwrap();
+            collect_trapped_syscalls(&[Sysno::unlinkat, Sysno::getegid, Sysno::getegid]).unwrap();
         assert_eq!(len_a, len_b);
         assert_eq!(&a[..len_a], &b[..len_b]);
         assert!(a[..len_a].windows(2).all(|w| w[0] < w[1]));

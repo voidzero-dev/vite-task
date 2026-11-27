@@ -241,31 +241,30 @@ impl<'fd> File<'fd> {
         Ok(ValidatedLayout { low, span, alignment, exec_stack })
     }
 
-    pub fn map(&self, page: usize, layout: &ValidatedLayout) -> Image {
+    pub fn try_map(&self, page: usize, layout: &ValidatedLayout) -> Result<Image> {
         // Reserve the whole image, including holes, before replacing pages
         // with MAP_FIXED. That flag discards existing mappings at its address;
         // restricting it to our reservation protects the loader and old stack.
         let (mapping, bias) = if self.header.e_type == abi::ET_EXEC {
             // Fixed-address executables cannot move. Refuse collisions rather
             // than replacing resident loader code or other process state.
-            (Mapping::reserve_at(layout.low, layout.span), 0)
+            (Mapping::try_reserve_at(layout.low, layout.span)?, 0)
         } else {
             // Extra space aligns the load bias even when `p_align` exceeds a
             // page or `layout.low > base`. Compute `mapped_low` inside the
             // reservation with `mapped_low % alignment == layout.low % alignment`
             // so `bias = mapped_low.wrapping_sub(layout.low)` is aligned to
             // `layout.alignment` and never underflows.
-            let mapping = Mapping::reserve(add(layout.span, layout.alignment));
+            let mapping = Mapping::try_reserve(add(layout.span, layout.alignment))?;
             let base = mapping.ptr.as_ptr().expose_provenance();
             let desired_mod = layout.low % layout.alignment;
             let cur_mod = base % layout.alignment;
             let delta = (desired_mod + layout.alignment - cur_mod) % layout.alignment;
             let mapped_low = add(base, delta);
             let bias = mapped_low.wrapping_sub(layout.low);
-            assert!(
-                add(mapped_low, layout.span) <= add(base, mapping.len),
-                "ELF exceeds reservation"
-            );
+            if add(mapped_low, layout.span) > add(base, mapping.len) {
+                return Err(Error::NOEXEC);
+            }
             (mapping, bias)
         };
         // Like Linux, AT_PHDR is the table's address in the LOAD whose file
@@ -288,19 +287,19 @@ impl<'fd> File<'fd> {
             }
             // SAFETY: validation and reservation cover every page this
             // segment replaces. No references to those pages exist yet.
-            unsafe { self.map_segment(segment, bias, page) };
+            unsafe { self.map_segment(segment, bias, page) }?;
         }
-        Image {
+        Ok(Image {
             mapping,
             bias,
             entry: bias.wrapping_add(word(self.header.e_entry)),
             phdr,
             phnum: usize::from(self.header.e_phnum),
             exec_stack: layout.exec_stack,
-        }
+        })
     }
 
-    unsafe fn map_segment(&self, segment: ProgramHeader, bias: usize, page: usize) {
+    unsafe fn map_segment(&self, segment: ProgramHeader, bias: usize, page: usize) -> Result<()> {
         let start = bias.wrapping_add(word(segment.p_vaddr));
         let end = add(start, word(segment.p_memsz));
         let file_end = add(start, word(segment.p_filesz));
@@ -336,8 +335,7 @@ impl<'fd> File<'fd> {
                     self.fd,
                     segment.p_offset & !u64::try_from(sub(page, 1)).unwrap(),
                 )
-            }
-            .expect("cannot map ELF segment");
+            }?;
             // Zero through the page boundary (Linux padzero) when the segment
             // has BSS (memsz > filesz) or is writable (glibc's early allocator
             // reads spare bytes after the interpreter's _end even when
@@ -372,8 +370,7 @@ impl<'fd> File<'fd> {
                                 ptr::with_exposed_provenance_mut(tail_page),
                                 page,
                                 MprotectFlags::READ | MprotectFlags::WRITE,
-                            )
-                            .expect("cannot zero ELF BSS");
+                            )?;
                         }
                         ptr::write_bytes(
                             ptr::with_exposed_provenance_mut::<u8>(file_end),
@@ -385,8 +382,7 @@ impl<'fd> File<'fd> {
                                 ptr::with_exposed_provenance_mut(tail_page),
                                 page,
                                 MprotectFlags::from_bits_retain(protection.bits()),
-                            )
-                            .expect("cannot restore ELF protection");
+                            )?;
                         }
                     }
                 }
@@ -405,9 +401,9 @@ impl<'fd> File<'fd> {
                     protection,
                     fixed,
                 )
-            }
-            .expect("cannot map ELF BSS");
+            }?;
         }
+        Ok(())
     }
 }
 

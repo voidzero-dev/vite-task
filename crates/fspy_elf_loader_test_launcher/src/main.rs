@@ -19,10 +19,24 @@ mod freestanding {
     const INTERCEPTOR_SHORT_CIRCUIT_ARG: usize = 0xdead_beef;
     const INTERCEPTOR_REWRITE_PROBE_MODE: usize = 0x7777;
     const INTERCEPTOR_EXEC_PROBE_ARGV: usize = 0x5555_1234;
+    const INTERCEPTOR_EXEC_FAIL_CLEANUP_ARGV: usize = 0x5555_2345;
+    const INTERCEPTOR_EXEC_FAIL_NO_CLEANUP_ARGV: usize = 0x5555_2346;
+
+    static NONEXISTENT_EXEC_PATH: &[u8] = b"/nonexistent_fspy_execve_action_probe\0";
+    static EMPTY_EXEC_PTRS: [usize; 1] = [0];
+
+    unsafe fn test_execve_cleanup(ctx: *mut core::ffi::c_void) {
+        let counter = ctx.cast::<u32>();
+        if !counter.is_null() {
+            // SAFETY: test passes a valid `*mut u32` counter in `envp` (`args[2]`).
+            unsafe { counter.write_volatile(counter.read_volatile().wrapping_add(1)) };
+        }
+    }
 
     static TEST_INTERCEPTOR: SyscallInterceptor = SyscallInterceptor {
         syscalls: &[Sysno::getegid, Sysno::faccessat, Sysno::execve, Sysno::execveat],
         handle: test_handle,
+        on_vfork_return: None,
     };
 
     /// Test interceptor exercising:
@@ -34,6 +48,11 @@ mod freestanding {
     /// - `execve(path, 0x5555_1234, _)` / `execveat(dirfd, path, 0x5555_1234, _, _)`
     ///   -> checks `/proc/self/exe` was rewritten to an absolute non-`/proc/`
     ///   path (and `dirfd == AT_FDCWD` for `execveat`)
+    /// - `execve(_, 0x5555_2345, counter_ptr)` -> returns
+    ///   `SyscallAction::Execve` to a nonexistent path with a cleanup callback
+    ///   that increments `*counter_ptr`
+    /// - `execve(_, 0x5555_2346, _)` -> returns `SyscallAction::Execve` to a
+    ///   nonexistent path with `cleanup: None`
     unsafe fn test_handle(call: &Syscall) -> Result<SyscallAction> {
         let check_rewritten_path = |path_ptr: usize| -> Result<SyscallAction> {
             // SAFETY: `path_ptr` is the trapped syscall's path argument.
@@ -64,6 +83,25 @@ mod freestanding {
             Sysno::execve => {
                 if call.args[1] == INTERCEPTOR_EXEC_PROBE_ARGV {
                     return check_rewritten_path(call.args[0]);
+                }
+                if call.args[1] == INTERCEPTOR_EXEC_FAIL_CLEANUP_ARGV {
+                    return Ok(SyscallAction::Execve {
+                        prog: NONEXISTENT_EXEC_PATH.as_ptr(),
+                        argv: EMPTY_EXEC_PTRS.as_ptr().cast(),
+                        envp: EMPTY_EXEC_PTRS.as_ptr().cast(),
+                        cleanup: Some((
+                            test_execve_cleanup,
+                            core::ptr::with_exposed_provenance_mut(call.args[2]),
+                        )),
+                    });
+                }
+                if call.args[1] == INTERCEPTOR_EXEC_FAIL_NO_CLEANUP_ARGV {
+                    return Ok(SyscallAction::Execve {
+                        prog: NONEXISTENT_EXEC_PATH.as_ptr(),
+                        argv: EMPTY_EXEC_PTRS.as_ptr().cast(),
+                        envp: EMPTY_EXEC_PTRS.as_ptr().cast(),
+                        cleanup: None,
+                    });
                 }
                 Ok(SyscallAction::Replay)
             }
