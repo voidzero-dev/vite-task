@@ -10,9 +10,8 @@ mod runtime {
         alloc::Layout,
         cell::UnsafeCell,
         ffi::c_void,
-        mem::{MaybeUninit, size_of},
+        mem::size_of,
         ptr::{self, NonNull},
-        slice,
         sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering},
     };
 
@@ -22,9 +21,13 @@ mod runtime {
     use fspy_nostd::{
         BorrowedFd, CStr, CWD, Error, OwnedFd, RawFd, Result, Thin,
         env::InitialStack,
-        fs::{Mode, OFlags, PATH_MAX, fcntl_dupfd, openat},
+        fs::{Mode, OFlags, fcntl_dupfd, openat},
     };
-    use fspy_nostd_alloc::{PageAllocator, PageBump, fs::fd_path, page_bump, pooled_bump};
+    use fspy_nostd_alloc::{
+        PageAllocator, PageBump,
+        fs::{fd_path, resolve_path_at},
+        page_bump, pooled_bump,
+    };
     use fspy_shared::ipc::{
         AccessMode, IpcPath, IpcStr,
         channel::{ChannelConf, Sender},
@@ -420,7 +423,6 @@ mod runtime {
     /// Reports a path-based syscall to the IPC channel. `path_ptr` is the
     /// trapped syscall's own argument, which `fspy_elf_loader` assumes valid.
     fn report_path_at(
-        call: &Syscall<'_>,
         dirfd: Option<BorrowedFd<'_>>,
         path_ptr: usize,
         mode: AccessMode,
@@ -432,17 +434,11 @@ mod runtime {
             }
             return;
         }
-        let mut buf = [MaybeUninit::<u8>::uninit(); PATH_MAX];
-        let raw: &[u8] = if let Some(cached) = call.cached_cstr(path_ptr) {
-            cached
-        } else {
-            // SAFETY: `path_ptr` is the trapped syscall's path argument.
-            let Ok(Some(bytes)) = (unsafe { fspy_elf_loader::copy_user_cstr(path_ptr, &mut buf) })
-            else {
-                return;
-            };
-            bytes
+        // SAFETY: `path_ptr` is the trapped syscall's path argument.
+        let Ok(c_path) = (unsafe { fspy_elf_loader::user_cstr(path_ptr) }) else {
+            return;
         };
+        let raw = c_path.count().as_units();
         if raw.is_empty() {
             if allow_empty_path && let Some(fd) = dirfd {
                 report_fd(fd, mode);
@@ -453,24 +449,10 @@ mod runtime {
             send_path(mode, BStr::new(raw));
             return;
         }
-        let Some(dirfd) = dirfd else {
-            return;
-        };
         let arena = pooled_bump();
-        let Ok(Some(base)) = fd_path(&arena, dirfd) else {
-            return;
-        };
-        let base_bytes = base.as_units();
-        let mut joined = Vec::new_in(&arena);
-        if joined.try_reserve_exact(base_bytes.len() + 1 + raw.len()).is_err() {
-            return;
+        if let Ok(Some(resolved)) = resolve_path_at(&arena, dirfd, c_path) {
+            send_path(mode, BStr::new(resolved.as_units()));
         }
-        joined.extend_from_slice(base_bytes);
-        if !base_bytes.ends_with(b"/") {
-            joined.push(b'/');
-        }
-        joined.extend_from_slice(raw);
-        send_path(mode, BStr::new(&joined));
     }
 
     fn report_fd(fd: BorrowedFd<'_>, mode: AccessMode) {
@@ -486,7 +468,7 @@ mod runtime {
     ///
     /// `call` holds the live (and `/proc/*/exe`-rewritten) arguments of a
     /// trapped syscall listed in [`TRACKED_SYSCALLS`].
-    unsafe fn handle_syscall(call: &Syscall<'_>) -> Result<SyscallAction> {
+    unsafe fn handle_syscall(call: &Syscall) -> Result<SyscallAction> {
         // SAFETY: `dirfd` arguments come directly from the trapped syscall; `-1`
         // maps to `None` and invalid fds return `Ok(None)` from `fd_path`.
         let borrow_dirfd = |raw: usize| unsafe { BorrowedFd::try_borrow_raw(arg_i32(raw)) };
@@ -529,7 +511,7 @@ mod runtime {
     }
 
     /// Reports a tracked filesystem syscall to the IPC channel.
-    fn handle_fs_syscall(call: &Syscall<'_>) {
+    fn handle_fs_syscall(call: &Syscall) {
         // SAFETY: `dirfd` arguments come directly from the trapped syscall; `-1`
         // maps to `None` and invalid fds return `Ok(None)` from `fd_path`.
         let dirfd = |idx: usize| unsafe { BorrowedFd::try_borrow_raw(arg_i32(call.args[idx])) };
@@ -537,9 +519,9 @@ mod runtime {
 
         match call.sysno {
             #[cfg(target_arch = "x86_64")]
-            Sysno::open => report_path_at(call, Some(CWD), a[0], open_mode(arg_u32(a[1])), false),
-            Sysno::openat => report_path_at(call, dirfd(0), a[1], open_mode(arg_u32(a[2])), false),
-            Sysno::openat2 => report_openat2(call, dirfd(0), a[1], a[2], a[3]),
+            Sysno::open => report_path_at(Some(CWD), a[0], open_mode(arg_u32(a[1])), false),
+            Sysno::openat => report_path_at(dirfd(0), a[1], open_mode(arg_u32(a[2])), false),
+            Sysno::openat2 => report_openat2(dirfd(0), a[1], a[2], a[3]),
             #[cfg(target_arch = "x86_64")]
             Sysno::getdents => {
                 if let Some(fd) = dirfd(0) {
@@ -553,54 +535,48 @@ mod runtime {
             }
             #[cfg(target_arch = "x86_64")]
             Sysno::stat | Sysno::lstat | Sysno::access => {
-                report_path_at(call, Some(CWD), a[0], AccessMode::Read, false);
+                report_path_at(Some(CWD), a[0], AccessMode::Read, false);
             }
             #[cfg(target_arch = "x86_64")]
             Sysno::newfstatat => {
                 let empty_ok = (arg_u32(a[3]) & AT_EMPTY_PATH) != 0;
-                report_path_at(call, dirfd(0), a[1], AccessMode::Read, empty_ok);
+                report_path_at(dirfd(0), a[1], AccessMode::Read, empty_ok);
             }
             #[cfg(target_arch = "aarch64")]
             Sysno::fstatat => {
                 let empty_ok = (arg_u32(a[3]) & AT_EMPTY_PATH) != 0;
-                report_path_at(call, dirfd(0), a[1], AccessMode::Read, empty_ok);
+                report_path_at(dirfd(0), a[1], AccessMode::Read, empty_ok);
             }
             Sysno::statx => {
                 let empty_ok = (arg_u32(a[2]) & AT_EMPTY_PATH) != 0;
-                report_path_at(call, dirfd(0), a[1], AccessMode::Read, empty_ok);
+                report_path_at(dirfd(0), a[1], AccessMode::Read, empty_ok);
             }
             Sysno::faccessat => {
-                report_path_at(call, dirfd(0), a[1], AccessMode::Read, false);
+                report_path_at(dirfd(0), a[1], AccessMode::Read, false);
             }
             Sysno::faccessat2 => {
                 let empty_ok = (arg_u32(a[3]) & AT_EMPTY_PATH) != 0;
-                report_path_at(call, dirfd(0), a[1], AccessMode::Read, empty_ok);
+                report_path_at(dirfd(0), a[1], AccessMode::Read, empty_ok);
             }
             #[cfg(target_arch = "x86_64")]
-            Sysno::mkdir => report_path_at(call, Some(CWD), a[0], AccessMode::Mkdir, false),
-            Sysno::mkdirat => report_path_at(call, dirfd(0), a[1], AccessMode::Mkdir, false),
+            Sysno::mkdir => report_path_at(Some(CWD), a[0], AccessMode::Mkdir, false),
+            Sysno::mkdirat => report_path_at(dirfd(0), a[1], AccessMode::Mkdir, false),
             #[cfg(target_arch = "x86_64")]
-            Sysno::rename => report_path_at(call, Some(CWD), a[1], AccessMode::RenameTarget, false),
+            Sysno::rename => report_path_at(Some(CWD), a[1], AccessMode::RenameTarget, false),
             Sysno::renameat | Sysno::renameat2 => {
-                report_path_at(call, dirfd(2), a[3], AccessMode::RenameTarget, false);
+                report_path_at(dirfd(2), a[3], AccessMode::RenameTarget, false);
             }
             #[cfg(target_arch = "x86_64")]
             Sysno::link | Sysno::symlink => {
-                report_path_at(call, Some(CWD), a[1], AccessMode::Write, false);
+                report_path_at(Some(CWD), a[1], AccessMode::Write, false);
             }
-            Sysno::linkat => report_path_at(call, dirfd(2), a[3], AccessMode::Write, false),
-            Sysno::symlinkat => report_path_at(call, dirfd(1), a[2], AccessMode::Write, false),
+            Sysno::linkat => report_path_at(dirfd(2), a[3], AccessMode::Write, false),
+            Sysno::symlinkat => report_path_at(dirfd(1), a[2], AccessMode::Write, false),
             _ => {}
         }
     }
 
-    fn report_openat2(
-        call: &Syscall<'_>,
-        dirfd: Option<BorrowedFd<'_>>,
-        path_ptr: usize,
-        how_ptr: usize,
-        size: usize,
-    ) {
+    fn report_openat2(dirfd: Option<BorrowedFd<'_>>, path_ptr: usize, how_ptr: usize, size: usize) {
         if how_ptr == 0 || size < size_of::<open_how>() {
             return;
         }
@@ -614,36 +590,22 @@ mod runtime {
             reason = "O_ACCMODE bits live in low 32 bits of open_how.flags"
         )]
         let mode = open_mode(how.flags as u32);
-        report_path_at(call, dirfd, path_ptr, mode, false);
+        report_path_at(dirfd, path_ptr, mode, false);
     }
 
     /// Copies an arbitrarily long NUL-terminated string from a trapped
     /// syscall's argument into `allocator`.
     fn copy_user_cstr_vec<A: Allocator>(addr: usize, allocator: A) -> Result<Vec<u8, A>> {
-        if addr == 0 {
-            return Err(Error::FAULT);
+        // SAFETY: `addr` is a NUL-terminated string pointer from the trapped syscall.
+        let cstr = unsafe { fspy_elf_loader::user_cstr(addr) }?;
+        let bytes = cstr.count().as_units();
+        if bytes.len() > MAX_EXEC_STRING_LEN {
+            return Err(Error::from_raw_os_error(E2BIG.cast_signed()));
         }
         let mut out = Vec::new_in(allocator);
-        let mut chunk = [MaybeUninit::<u8>::uninit(); 4096];
-        let mut offset = 0usize;
-        loop {
-            let cur = addr.checked_add(offset).ok_or(Error::FAULT)?;
-            // SAFETY: `addr` is a string pointer from the trapped syscall, and
-            // `cur` stays before its NUL.
-            if let Some(bytes) = unsafe { fspy_elf_loader::copy_user_cstr(cur, &mut chunk) }? {
-                out.try_reserve_exact(bytes.len()).map_err(|_| Error::NOMEM)?;
-                out.extend_from_slice(bytes);
-                return Ok(out);
-            }
-            // SAFETY: `copy_user_cstr` initialized all `chunk.len()` bytes on `Ok(None)`.
-            let filled = unsafe { slice::from_raw_parts(chunk.as_ptr().cast::<u8>(), chunk.len()) };
-            out.try_reserve(filled.len()).map_err(|_| Error::NOMEM)?;
-            out.extend_from_slice(filled);
-            offset = offset.checked_add(chunk.len()).ok_or(Error::FAULT)?;
-            if offset > MAX_EXEC_STRING_LEN {
-                return Err(Error::from_raw_os_error(E2BIG.cast_signed()));
-            }
-        }
+        out.try_reserve_exact(bytes.len()).map_err(|_| Error::NOMEM)?;
+        out.extend_from_slice(bytes);
+        Ok(out)
     }
 
     fn copy_user_cstr_array<T, A: Allocator + Clone>(
