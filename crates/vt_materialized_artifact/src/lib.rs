@@ -164,9 +164,10 @@ impl MountFlags for i32 {
     }
 }
 
-/// Returns `Ok(false)` if `path` resides on a filesystem mounted `noexec`,
-/// `Ok(true)` if execution is allowed (or the OS does not expose a `noexec`
-/// mount flag), or `Err` if querying the path fails.
+/// Returns `Ok(false)` if `path` resides on a filesystem mounted `noexec` (or
+/// if the OS/filesystem rejects the mount-flag query with `ENOSYS` or
+/// `EOPNOTSUPP`), `Ok(true)` if execution is allowed, or `Err` if querying the
+/// path fails for another reason.
 #[cfg(unix)]
 fn is_dir_executable(path: &Path) -> io::Result<bool> {
     #[cfg(any(
@@ -183,7 +184,7 @@ fn is_dir_executable(path: &Path) -> io::Result<bool> {
         if unsafe { libc::statvfs(cpath.as_ptr(), stat.as_mut_ptr()) } != 0 {
             let err = io::Error::last_os_error();
             if matches!(err.raw_os_error(), Some(libc::ENOSYS | libc::EOPNOTSUPP)) {
-                return Ok(true);
+                return Ok(false);
             }
             return Err(err);
         }
@@ -206,7 +207,7 @@ fn is_dir_executable(path: &Path) -> io::Result<bool> {
         if unsafe { libc::statfs(cpath.as_ptr(), stat.as_mut_ptr()) } != 0 {
             let err = io::Error::last_os_error();
             if matches!(err.raw_os_error(), Some(libc::ENOSYS | libc::EOPNOTSUPP)) {
-                return Ok(true);
+                return Ok(false);
             }
             return Err(err);
         }
@@ -263,9 +264,10 @@ where
     }
 }
 
-/// Returns `Ok(true)` if the current process has execute permission on `path`
-/// via `access(2)` with `X_OK`, `Ok(false)` on permission denied (including
-/// `noexec` mounts or stripped execute bits), or `Err` on other OS errors.
+/// Returns `Ok(true)` if the current process has execute permission bits on
+/// `path` via `access(2)` with `X_OK`, `Ok(false)` on permission denied, or
+/// `Err` on other OS errors. Mount-level `noexec` enforcement is checked
+/// separately via [`is_dir_executable`].
 #[cfg(unix)]
 fn is_file_executable(path: &Path) -> io::Result<bool> {
     let cpath = path_to_cstring(path)?;
@@ -465,19 +467,37 @@ impl Materialize<'_> {
         // separate mount point (or `base` was just created above).
         check_dir_executable(&user_dir, &user_dir, is_dir_executable)?;
 
-        let path = self.at(&user_dir).map_err(|err| CandidateFailure::io(&user_dir, err))?;
+        let (path, created_by_us) =
+            self.at_inner(&user_dir).map_err(|err| CandidateFailure::io(&user_dir, err))?;
 
-        match is_file_executable(&path) {
+        let check = match is_file_executable(&path) {
+            Ok(true) => Ok(true),
+            Ok(false) if !created_by_us => {
+                // An earlier non-executable materialization of the same content
+                // may exist without `+x` in this user-owned directory. Restore
+                // `0o755` without ever unlinking a shared pre-existing file.
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o755));
+                is_file_executable(&path)
+            }
+            other => other,
+        };
+
+        match check {
             Ok(true) => Ok(path),
             Ok(false) => {
-                let _ = fs::remove_file(&path);
+                if created_by_us {
+                    let _ = fs::remove_file(&path);
+                }
                 Err(CandidateFailure::Noexec(format!(
                     "{}: materialized file is not executable",
                     path.display()
                 )))
             }
             Err(err) => {
-                let _ = fs::remove_file(&path);
+                if created_by_us {
+                    let _ = fs::remove_file(&path);
+                }
                 Err(CandidateFailure::io(&path, err))
             }
         }
@@ -562,7 +582,10 @@ impl Materialize<'_> {
     /// fails for any reason other than not-found, or the temp-file rename
     /// fails and the destination still doesn't exist.
     pub fn at(self, dir: impl AsRef<Path>) -> io::Result<PathBuf> {
-        let dir = dir.as_ref();
+        self.at_inner(dir.as_ref()).map(|(path, _)| path)
+    }
+
+    fn at_inner(self, dir: &Path) -> io::Result<(PathBuf, bool)> {
         let path =
             dir.join(format!("{}_{}{}", self.artifact.name, self.artifact.hash, self.suffix));
 
@@ -570,7 +593,7 @@ impl Materialize<'_> {
         // filename, so existence is all there is to check. Any stat failure
         // other than not-found (permission denied, I/O error, etc.) propagates.
         if fs::exists(&path)? {
-            return Ok(path);
+            return Ok((path, false));
         }
 
         // Slow path: write to a unique temp file in the same directory, then
@@ -589,6 +612,14 @@ impl Materialize<'_> {
         }
         let mut tmp = builder.tempfile_in(dir)?;
         tmp.as_file_mut().write_all(self.artifact.content)?;
+        #[cfg(unix)]
+        if self.executable {
+            use std::os::unix::fs::PermissionsExt;
+            // `open(2)` masks `Builder::permissions` by the process umask;
+            // `fchmod` on the temp file before publishing ensures `+x` even
+            // under restrictive umasks (e.g. `0o177`).
+            tmp.as_file().set_permissions(fs::Permissions::from_mode(0o755))?;
+        }
 
         // `persist_noclobber` (link+unlink on Unix, MoveFileExW without
         // REPLACE_EXISTING on Windows) fails atomically if the destination
@@ -601,8 +632,9 @@ impl Materialize<'_> {
             if !fs::exists(&path)? {
                 return Err(err.error);
             }
+            return Ok((path, false));
         }
-        Ok(path)
+        Ok((path, true))
     }
 }
 
@@ -943,5 +975,40 @@ mod tests {
         let non_exec_artifact = Artifact::__new("data", b"hello", "cafebabe");
         let non_exec_path = non_exec_artifact.materialize().at(temp.path()).unwrap();
         assert!(!is_file_executable(&non_exec_path).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_check_failure_never_unlinks_preexisting_shared_file() {
+        let root = tempfile::tempdir().unwrap();
+        let primary = root.path().join("primary");
+        let fallback = root.path().join("fallback");
+        fs::create_dir(&primary).unwrap();
+        fs::create_dir(&fallback).unwrap();
+
+        let primary_user_dir = user_dir_in(&primary, "vp_test").unwrap();
+        let preexisting =
+            TEST_EXEC_ARTIFACT.materialize().executable().at(&primary_user_dir).unwrap();
+        assert!(preexisting.exists());
+
+        let candidates = vec![
+            CandidateBase { path: primary.clone(), create_if_missing: false },
+            CandidateBase { path: fallback.clone(), create_if_missing: false },
+        ];
+
+        let path = TEST_EXEC_ARTIFACT
+            .materialize()
+            .executable()
+            .materialize_executable_in_candidates(
+                "vp_test",
+                &candidates,
+                |_| Ok(true),
+                |p| Ok(!p.starts_with(&primary)),
+            )
+            .unwrap();
+
+        assert!(path.starts_with(&fallback));
+        // Pre-existing shared file in `primary` MUST remain intact.
+        assert!(preexisting.exists());
     }
 }
