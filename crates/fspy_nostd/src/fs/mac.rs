@@ -2,7 +2,7 @@ use core::{mem::MaybeUninit, slice};
 
 use crate::{
     BorrowedFd, CStr, CWD, Error, Fat, OwnedFd, Result, Thin,
-    fs::{AtFlags, Mode, OFlags, Stat},
+    fs::{AccessFlags, AtFlags, Mode, OFlags, Stat},
 };
 
 // Darwin UAPI `MAXPATHLEN`.
@@ -12,11 +12,30 @@ pub(super) const O_RDONLY: u32 = libc::O_RDONLY.cast_unsigned();
 pub(super) const O_RDWR: u32 = libc::O_RDWR.cast_unsigned();
 pub(super) const O_CREAT: u32 = libc::O_CREAT.cast_unsigned();
 pub(super) const O_EXCL: u32 = libc::O_EXCL.cast_unsigned();
+pub(super) const O_NOFOLLOW: u32 = libc::O_NOFOLLOW.cast_unsigned();
+pub(super) const O_NONBLOCK: u32 = libc::O_NONBLOCK.cast_unsigned();
 pub(super) const O_CLOEXEC: u32 = libc::O_CLOEXEC.cast_unsigned();
 pub(super) const AT_REMOVEDIR: u32 = libc::AT_REMOVEDIR.cast_unsigned();
+pub(super) const X_OK: u32 = libc::X_OK.cast_unsigned();
 pub(super) type ModeBits = libc::mode_t;
 pub(super) const S_IRUSR: ModeBits = libc::S_IRUSR;
 pub(super) const S_IWUSR: ModeBits = libc::S_IWUSR;
+pub(super) const S_IFMT: ModeBits = libc::S_IFMT;
+pub(super) const S_IFREG: ModeBits = libc::S_IFREG;
+
+#[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
+pub(super) fn faccessat<R>(
+    dirfd: BorrowedFd<'_>,
+    path: CStr<'_, R>,
+    mode: AccessFlags,
+) -> Result<()> {
+    // SAFETY: `dirfd` remains borrowed and `path` is NUL-terminated for the
+    // call.
+    let result = unsafe {
+        libc::faccessat(dirfd.as_raw_fd(), path.as_ptr().cast(), mode.bits().cast_signed(), 0)
+    };
+    if result == -1 { Err(Error::last_os_error()) } else { Ok(()) }
+}
 
 #[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
 pub(super) fn openat<R>(
@@ -61,7 +80,7 @@ pub(super) fn fstat(fd: BorrowedFd<'_>) -> Result<Stat> {
     }
     // SAFETY: a successful `fstat` initialized the complete structure.
     let raw = unsafe { raw.assume_init() };
-    Ok(Stat { st_size: raw.st_size })
+    Ok(Stat { st_size: raw.st_size, st_mode: raw.st_mode })
 }
 
 pub(super) fn ftruncate(fd: BorrowedFd<'_>, len: u64) -> Result<()> {

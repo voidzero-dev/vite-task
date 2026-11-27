@@ -23,11 +23,9 @@ mod pool;
 #[cfg(windows)]
 mod virtual_alloc;
 
-use allocator_api2::alloc::Allocator;
-/// The bump interface [`pooled_bump`] returns, re-exported so callers can
-/// name the bound and call its methods without a direct bump-scope
-/// dependency.
-pub use bump_scope::traits::BumpAllocator;
+use core::{alloc::Layout, ptr::NonNull};
+
+use allocator_api2::alloc::{AllocError, Allocator};
 use bump_scope::{
     Bump,
     alloc::compat::AllocatorApi2V02Compat,
@@ -112,6 +110,75 @@ pub const fn page_bump() -> PageBump {
     Bump::unallocated()
 }
 
+type RawPooledBump = Bump<
+    AllocatorApi2V02Compat<&'static ChunkPool<PageAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS>>,
+    PooledBumpSettings,
+>;
+
+/// A bump allocator backed by the process-wide chunk pool, created by
+/// [`pooled_bump`].
+///
+/// Wraps `bump_scope::Bump` so that in unoptimized (`debug_assertions`) builds
+/// the `Allocator` methods are kept out of line (`inline(never)`): `bump-scope`
+/// marks its allocation helpers `#[inline(always)]`, which without LLVM stack
+/// slot coloring duplicates multi-KiB stack frames into every `Vec` caller and
+/// would overflow tight `SIGSYS` / `sigaltstack` / `vfork` stacks. Release
+/// builds inline normally.
+pub struct PooledBump(RawPooledBump);
+
+// SAFETY: Every method delegates directly to `bump_scope::Bump`'s `Allocator`
+// implementation without altering returned pointers, layouts, or lifetimes.
+unsafe impl Allocator for PooledBump {
+    #[cfg_attr(debug_assertions, inline(never))]
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        self.0.allocate(layout)
+    }
+
+    #[cfg_attr(debug_assertions, inline(never))]
+    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        self.0.allocate_zeroed(layout)
+    }
+
+    #[cfg_attr(debug_assertions, inline(never))]
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded directly from caller's `Allocator::deallocate` contract.
+        unsafe { self.0.deallocate(ptr, layout) }
+    }
+
+    #[cfg_attr(debug_assertions, inline(never))]
+    unsafe fn grow(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        // SAFETY: forwarded directly from caller's `Allocator::grow` contract.
+        unsafe { self.0.grow(ptr, old_layout, new_layout) }
+    }
+
+    #[cfg_attr(debug_assertions, inline(never))]
+    unsafe fn grow_zeroed(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        // SAFETY: forwarded directly from caller's `Allocator::grow_zeroed` contract.
+        unsafe { self.0.grow_zeroed(ptr, old_layout, new_layout) }
+    }
+
+    #[cfg_attr(debug_assertions, inline(never))]
+    unsafe fn shrink(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        // SAFETY: forwarded directly from caller's `Allocator::shrink` contract.
+        unsafe { self.0.shrink(ptr, old_layout, new_layout) }
+    }
+}
+
 /// Creates a fresh bump backed by the process-wide chunk pool.
 ///
 /// Creating the bump allocates nothing; the first allocation grabs a whole
@@ -126,11 +193,8 @@ pub const fn page_bump() -> PageBump {
 /// (see `ChunkPool` and the platform page allocators in this crate's source
 /// for why).
 #[must_use]
-pub fn pooled_bump() -> impl BumpAllocator + Allocator {
-    Bump::<
-        AllocatorApi2V02Compat<&'static ChunkPool<PageAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOTS>>,
-        PooledBumpSettings,
-    >::unallocated()
+pub const fn pooled_bump() -> PooledBump {
+    PooledBump(RawPooledBump::unallocated())
 }
 
 #[cfg(test)]

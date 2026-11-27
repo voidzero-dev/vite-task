@@ -5,7 +5,7 @@ use bitflags::bitflags;
 #[cfg(any(target_os = "linux", target_os = "none"))]
 use super::linux as imp;
 #[cfg(any(target_os = "linux", target_os = "none"))]
-pub use super::linux::readlinkat;
+pub use super::linux::{fcntl_dupfd, fcntl_dupfd_cloexec, fcntl_is_cloexec, readlinkat};
 #[cfg(target_os = "macos")]
 use super::mac as imp;
 #[cfg(target_os = "macos")]
@@ -26,6 +26,10 @@ bitflags! {
         const CREATE = imp::O_CREAT;
         /// Fail when creating a file that already exists.
         const EXCL = imp::O_EXCL;
+        /// Do not follow a trailing symbolic link.
+        const NOFOLLOW = imp::O_NOFOLLOW;
+        /// Open in non-blocking mode.
+        const NONBLOCK = imp::O_NONBLOCK;
         /// Close the descriptor across `exec`.
         const CLOEXEC = imp::O_CLOEXEC;
     }
@@ -45,16 +49,43 @@ bitflags! {
         /// Remove a directory rather than a non-directory entry.
         const REMOVEDIR = imp::AT_REMOVEDIR;
     }
+
+    /// Mode bits accepted by [`faccessat`].
+    ///
+    /// An empty flag set checks file existence (`F_OK`).
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct AccessFlags: u32 {
+        /// Check execute permission.
+        const X_OK = imp::X_OK;
+    }
 }
 
-/// Metadata used by fspy's shared-memory backing files.
+/// Metadata for an open file descriptor.
 #[derive(Clone, Copy, Debug)]
 pub struct Stat {
     pub st_size: i64,
+    pub(super) st_mode: ModeBits,
+}
+
+impl Stat {
+    /// Returns `true` when the file is a regular file (`S_ISREG`).
+    #[must_use]
+    pub const fn is_regular_file(&self) -> bool {
+        (self.st_mode & imp::S_IFMT) == imp::S_IFREG
+    }
 }
 
 /// The platform's maximum pathname size, including the terminating NUL.
 pub const PATH_MAX: usize = imp::PATH_MAX;
+
+/// Checks accessibility of `path` relative to `dirfd`.
+///
+/// # Errors
+///
+/// Returns the error reported by `faccessat`.
+pub fn faccessat<R>(dirfd: BorrowedFd<'_>, path: CStr<'_, R>, mode: AccessFlags) -> Result<()> {
+    imp::faccessat(dirfd, path, mode)
+}
 
 /// Opens `path` relative to `dirfd` and returns its owned descriptor.
 ///

@@ -1,8 +1,8 @@
 use core::{mem::MaybeUninit, slice};
 
 use crate::{
-    BorrowedFd, CStr, Error, Fat, OwnedFd, Result, Thin,
-    fs::{AtFlags, Mode, OFlags, Stat},
+    BorrowedFd, CStr, Error, Fat, OwnedFd, RawFd, Result, Thin,
+    fs::{AccessFlags, AtFlags, Mode, OFlags, Stat},
 };
 
 // Linux UAPI `PATH_MAX`.
@@ -11,11 +11,36 @@ pub(super) const O_RDONLY: u32 = linux_raw_sys::general::O_RDONLY;
 pub(super) const O_RDWR: u32 = linux_raw_sys::general::O_RDWR;
 pub(super) const O_CREAT: u32 = linux_raw_sys::general::O_CREAT;
 pub(super) const O_EXCL: u32 = linux_raw_sys::general::O_EXCL;
+pub(super) const O_NOFOLLOW: u32 = linux_raw_sys::general::O_NOFOLLOW;
+pub(super) const O_NONBLOCK: u32 = linux_raw_sys::general::O_NONBLOCK;
 pub(super) const O_CLOEXEC: u32 = linux_raw_sys::general::O_CLOEXEC;
 pub(super) const AT_REMOVEDIR: u32 = linux_raw_sys::general::AT_REMOVEDIR;
+pub(super) const X_OK: u32 = 1;
 pub(super) type ModeBits = u32;
 pub(super) const S_IRUSR: ModeBits = linux_raw_sys::general::S_IRUSR;
 pub(super) const S_IWUSR: ModeBits = linux_raw_sys::general::S_IWUSR;
+pub(super) const S_IFMT: ModeBits = linux_raw_sys::general::S_IFMT;
+pub(super) const S_IFREG: ModeBits = linux_raw_sys::general::S_IFREG;
+
+#[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
+pub(super) fn faccessat<R>(
+    dirfd: BorrowedFd<'_>,
+    path: CStr<'_, R>,
+    mode: AccessFlags,
+) -> Result<()> {
+    // SAFETY: `dirfd` remains borrowed and `path` is NUL-terminated for the
+    // syscall.
+    unsafe {
+        syscalls::syscall!(
+            syscalls::Sysno::faccessat,
+            dirfd.as_raw_fd(),
+            path.as_ptr(),
+            mode.bits()
+        )
+    }
+    .map_err(Error::from)?;
+    Ok(())
+}
 
 #[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
 pub(super) fn openat<R>(
@@ -69,7 +94,70 @@ pub(super) fn fstat(fd: BorrowedFd<'_>) -> Result<Stat> {
         .map_err(Error::from)?;
     // SAFETY: a successful `fstat` initialized the complete structure.
     let raw = unsafe { raw.assume_init() };
-    Ok(Stat { st_size: raw.st_size })
+    Ok(Stat { st_size: raw.st_size, st_mode: raw.st_mode })
+}
+
+/// Duplicates `fd` to the lowest available descriptor greater than or equal to
+/// `min_fd`, leaving `FD_CLOEXEC` clear on the duplicate.
+///
+/// # Errors
+///
+/// Returns the error reported by `fcntl`.
+pub fn fcntl_dupfd(fd: BorrowedFd<'_>, min_fd: RawFd) -> Result<OwnedFd> {
+    // SAFETY: `fd` remains borrowed and `F_DUPFD` takes one integer argument.
+    let dup = unsafe {
+        syscalls::syscall!(
+            syscalls::Sysno::fcntl,
+            fd.as_raw_fd(),
+            linux_raw_sys::general::F_DUPFD,
+            min_fd
+        )
+    }
+    .map_err(Error::from)?;
+
+    let dup = i32::try_from(dup).map_err(|_| Error::OVERFLOW)?;
+
+    // SAFETY: a successful `F_DUPFD` returns a new owned descriptor.
+    Ok(unsafe { OwnedFd::from_raw_fd(dup) })
+}
+
+/// Duplicates `fd` to the lowest available descriptor greater than or equal to
+/// `min_fd`, setting `FD_CLOEXEC` on the duplicate.
+///
+/// # Errors
+///
+/// Returns the error reported by `fcntl`.
+pub fn fcntl_dupfd_cloexec(fd: BorrowedFd<'_>, min_fd: RawFd) -> Result<OwnedFd> {
+    // SAFETY: `fd` remains borrowed and `F_DUPFD_CLOEXEC` takes one integer argument.
+    let dup = unsafe {
+        syscalls::syscall!(
+            syscalls::Sysno::fcntl,
+            fd.as_raw_fd(),
+            linux_raw_sys::general::F_DUPFD_CLOEXEC,
+            min_fd
+        )
+    }
+    .map_err(Error::from)?;
+
+    let dup = i32::try_from(dup).map_err(|_| Error::OVERFLOW)?;
+
+    // SAFETY: a successful `F_DUPFD_CLOEXEC` returns a new owned descriptor.
+    Ok(unsafe { OwnedFd::from_raw_fd(dup) })
+}
+
+/// Returns whether `FD_CLOEXEC` is set on `fd`.
+///
+/// # Errors
+///
+/// Returns the error reported by `fcntl`.
+pub fn fcntl_is_cloexec(fd: BorrowedFd<'_>) -> Result<bool> {
+    // SAFETY: `fd` remains borrowed and `F_GETFD` takes no additional arguments.
+    let flags = unsafe {
+        syscalls::syscall!(syscalls::Sysno::fcntl, fd.as_raw_fd(), linux_raw_sys::general::F_GETFD)
+    }
+    .map_err(Error::from)?;
+
+    Ok((flags & (linux_raw_sys::general::FD_CLOEXEC as usize)) != 0)
 }
 
 pub(super) fn ftruncate(fd: BorrowedFd<'_>, len: u64) -> Result<()> {

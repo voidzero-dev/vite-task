@@ -1518,6 +1518,7 @@ dependencies = [
  "allocator-api2",
  "bump-scope",
  "fspy_nostd",
+ "tempfile",
 ]
 
 [[package]]

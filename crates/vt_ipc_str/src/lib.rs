@@ -67,6 +67,12 @@ impl IpcStr {
         Self::wrap_ref(bytes)
     }
 
+    #[cfg(any(unix, target_os = "none"))]
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+
     #[cfg(windows)]
     #[must_use]
     pub fn from_wide(wide: &[u16]) -> &Self {

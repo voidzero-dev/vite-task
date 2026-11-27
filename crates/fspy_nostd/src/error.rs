@@ -17,11 +17,18 @@ pub struct Error(u32);
 
 #[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 impl Error {
+    pub const ACCES: Self = Self(errno::ACCES);
     pub const BADF: Self = Self(errno::BADF);
+    pub const FAULT: Self = Self(errno::FAULT);
     pub const INTR: Self = Self(errno::INTR);
     pub const INVAL: Self = Self(errno::INVAL);
+    pub const LOOP: Self = Self(errno::LOOP);
+    pub const NAMETOOLONG: Self = Self(errno::NAMETOOLONG);
     pub const NOENT: Self = Self(errno::NOENT);
+    pub const NOEXEC: Self = Self(errno::NOEXEC);
     pub const NOMEM: Self = Self(errno::NOMEM);
+    pub const NOSYS: Self = Self(errno::NOSYS);
+    pub const NOTDIR: Self = Self(errno::NOTDIR);
     pub const OVERFLOW: Self = Self(errno::OVERFLOW);
     pub const RANGE: Self = Self(errno::RANGE);
 
@@ -87,22 +94,36 @@ impl From<syscalls::Errno> for Error {
 
 #[cfg(any(target_os = "linux", target_os = "none"))]
 mod errno {
+    pub const ACCES: i32 = linux_raw_sys::errno::EACCES.cast_signed();
     pub const BADF: i32 = linux_raw_sys::errno::EBADF.cast_signed();
+    pub const FAULT: i32 = linux_raw_sys::errno::EFAULT.cast_signed();
     pub const INTR: i32 = linux_raw_sys::errno::EINTR.cast_signed();
     pub const INVAL: i32 = linux_raw_sys::errno::EINVAL.cast_signed();
-    pub const NOMEM: i32 = linux_raw_sys::errno::ENOMEM.cast_signed();
+    pub const LOOP: i32 = linux_raw_sys::errno::ELOOP.cast_signed();
+    pub const NAMETOOLONG: i32 = linux_raw_sys::errno::ENAMETOOLONG.cast_signed();
     pub const NOENT: i32 = linux_raw_sys::errno::ENOENT.cast_signed();
+    pub const NOEXEC: i32 = linux_raw_sys::errno::ENOEXEC.cast_signed();
+    pub const NOMEM: i32 = linux_raw_sys::errno::ENOMEM.cast_signed();
+    pub const NOSYS: i32 = linux_raw_sys::errno::ENOSYS.cast_signed();
+    pub const NOTDIR: i32 = linux_raw_sys::errno::ENOTDIR.cast_signed();
     pub const OVERFLOW: i32 = linux_raw_sys::errno::EOVERFLOW.cast_signed();
     pub const RANGE: i32 = linux_raw_sys::errno::ERANGE.cast_signed();
 }
 
 #[cfg(target_os = "macos")]
 mod errno {
+    pub const ACCES: i32 = libc::EACCES;
     pub const BADF: i32 = libc::EBADF;
+    pub const FAULT: i32 = libc::EFAULT;
     pub const INTR: i32 = libc::EINTR;
     pub const INVAL: i32 = libc::EINVAL;
-    pub const NOMEM: i32 = libc::ENOMEM;
+    pub const LOOP: i32 = libc::ELOOP;
+    pub const NAMETOOLONG: i32 = libc::ENAMETOOLONG;
     pub const NOENT: i32 = libc::ENOENT;
+    pub const NOEXEC: i32 = libc::ENOEXEC;
+    pub const NOMEM: i32 = libc::ENOMEM;
+    pub const NOSYS: i32 = libc::ENOSYS;
+    pub const NOTDIR: i32 = libc::ENOTDIR;
     pub const OVERFLOW: i32 = libc::EOVERFLOW;
     pub const RANGE: i32 = libc::ERANGE;
 }

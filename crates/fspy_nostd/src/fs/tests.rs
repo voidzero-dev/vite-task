@@ -60,3 +60,75 @@ fn readlinkat_returns_the_initialized_target() {
 
     assert_eq!(target, std::fs::read_link("/proc/self/exe").unwrap().as_os_str().as_bytes());
 }
+
+#[test]
+fn faccessat_checks_existence_and_execute_permission() {
+    use std::{ffi::CString, fs::Permissions, os::unix::fs::PermissionsExt as _};
+
+    let dir = tempfile::tempdir().unwrap();
+    let file_path = dir.path().join("target");
+    std::fs::write(&file_path, b"x").unwrap();
+    std::fs::set_permissions(&file_path, Permissions::from_mode(0o600)).unwrap();
+
+    let file_c = CString::new(file_path.as_os_str().as_bytes()).unwrap();
+    // SAFETY: `file_c` is NUL-terminated for the duration of the test.
+    let file_cstr = unsafe { crate::CStr::<crate::Thin>::from_ptr(file_c.as_ptr().cast()) };
+
+    assert_eq!(super::faccessat(crate::CWD, file_cstr, super::AccessFlags::empty()), Ok(()));
+    assert_eq!(
+        super::faccessat(crate::CWD, file_cstr, super::AccessFlags::X_OK),
+        Err(Error::ACCES)
+    );
+
+    std::fs::set_permissions(&file_path, Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(super::faccessat(crate::CWD, file_cstr, super::AccessFlags::X_OK), Ok(()));
+
+    let missing_path = dir.path().join("missing");
+    let missing_c = CString::new(missing_path.as_os_str().as_bytes()).unwrap();
+    // SAFETY: `missing_c` is NUL-terminated for the duration of the test.
+    let missing_cstr = unsafe { crate::CStr::<crate::Thin>::from_ptr(missing_c.as_ptr().cast()) };
+    assert_eq!(
+        super::faccessat(crate::CWD, missing_cstr, super::AccessFlags::empty()),
+        Err(Error::NOENT)
+    );
+}
+
+#[test]
+fn stat_distinguishes_regular_files_from_directories() {
+    use std::os::fd::AsRawFd as _;
+
+    let file = tempfile::tempfile().unwrap();
+    // SAFETY: `file` remains open for the call.
+    let file_fd = unsafe { crate::BorrowedFd::borrow_raw(file.as_raw_fd()) };
+    assert!(super::fstat(file_fd).unwrap().is_regular_file());
+
+    let dir = tempfile::tempdir().unwrap();
+    let dir_file = std::fs::File::open(dir.path()).unwrap();
+    // SAFETY: `dir_file` remains open for the call.
+    let dir_fd = unsafe { crate::BorrowedFd::borrow_raw(dir_file.as_raw_fd()) };
+    assert!(!super::fstat(dir_fd).unwrap().is_regular_file());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn fcntl_dupfd_duplicates_above_min_fd_without_cloexec() {
+    use std::{io::Write as _, os::fd::AsRawFd as _};
+
+    let mut file = tempfile::tempfile().unwrap();
+    file.write_all(b"dup-test").unwrap();
+
+    // SAFETY: `file` remains open for the call.
+    let fd = unsafe { crate::BorrowedFd::borrow_raw(file.as_raw_fd()) };
+    let dup = super::fcntl_dupfd(fd, 20).unwrap();
+
+    assert!(dup.as_raw_fd() >= 20);
+    assert!(!super::fcntl_is_cloexec(dup.as_fd()).unwrap());
+
+    let dup_cloexec = super::fcntl_dupfd_cloexec(fd, 25).unwrap();
+    assert!(dup_cloexec.as_raw_fd() >= 25);
+    assert!(super::fcntl_is_cloexec(dup_cloexec.as_fd()).unwrap());
+
+    let mut buf = [0u8; 8];
+    assert_eq!(crate::io::pread(dup.as_fd(), &mut buf, 0).unwrap(), 8);
+    assert_eq!(&buf, b"dup-test");
+}

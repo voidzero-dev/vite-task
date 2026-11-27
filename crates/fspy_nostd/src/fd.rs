@@ -100,7 +100,8 @@ impl OwnedFd {
     /// # Safety
     ///
     /// `fd` must be a valid, uniquely owned descriptor that may be closed.
-    pub(crate) const unsafe fn from_raw_fd(fd: RawFd) -> Self {
+    #[must_use]
+    pub const unsafe fn from_raw_fd(fd: RawFd) -> Self {
         debug_assert!(fd >= 0);
         Self { fd }
     }

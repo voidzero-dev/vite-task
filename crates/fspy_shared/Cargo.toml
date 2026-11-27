@@ -25,9 +25,9 @@ bytemuck = { workspace = true }
 omnipath = { workspace = true }
 winapi = { workspace = true, features = ["std"] }
 
-[dev-dependencies]
+[target.'cfg(not(target_os = "none"))'.dev-dependencies]
 assert2 = { workspace = true }
-bstr = { workspace = true, features = ["alloc", "std"] }
+bstr = { workspace = true }
 ctor = { workspace = true }
 rustc-hash = { workspace = true }
 vt_subprocess_test = { workspace = true }
