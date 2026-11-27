@@ -1,6 +1,7 @@
 //! Linux hardening tests covering `vfork`/`posix_spawn` memory reclamation,
-//! `memfd_create` + `execveat(AT_EMPTY_PATH)`, and deep `execve` chain
-//! FD/env/filter hygiene.
+//! `memfd_create` + `execveat(AT_EMPTY_PATH)`, `execve("/proc/self/fd/N")`,
+//! traces marked incomplete when a path cannot be resolved, and deep `execve`
+//! chain FD/env/filter hygiene.
 #![cfg(target_os = "linux")]
 
 mod test_utils;
@@ -143,6 +144,84 @@ async fn memfd_execveat_empty_path_tracks_child_accesses() -> anyhow::Result<()>
 
     let accesses = test_utils::spawn_command(cmd).await?;
     assert_contains(&accesses, probe_path, fspy::PathAccess::Read);
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn execve_proc_self_fd_of_cloexec_descriptor_runs_and_tracks() -> anyhow::Result<()> {
+    // `execve("/proc/self/fd/N")` on an `O_CLOEXEC` descriptor (glibc's
+    // `fexecve` fallback, memfd launchers): the kernel opens the image before
+    // closing CLOEXEC descriptors, so the launcher must hand the image over by
+    // descriptor rather than reopen the path after exec.
+    let probe_path = Path::new("/fspy-proc-self-fd-exec-probe");
+    let cmd = vt_subprocess_test::command_for_fn!(
+        (test_bin_path().to_str().unwrap().to_owned(), probe_path.to_str().unwrap().to_owned()),
+        |(static_bin, probe_path): (String, String)| {
+            use std::{ffi::CString, os::fd::AsRawFd as _};
+
+            // Rust opens files with `O_CLOEXEC`.
+            let file = std::fs::File::open(&static_bin).unwrap();
+            let path = CString::new(format!("/proc/self/fd/{}", file.as_raw_fd())).unwrap();
+            let arg0 = CString::new("fd-bin").unwrap();
+            let arg1 = CString::new("open_read").unwrap();
+            let arg2 = CString::new(probe_path).unwrap();
+            let argv = [arg0.as_ptr(), arg1.as_ptr(), arg2.as_ptr(), std::ptr::null()];
+            let envp = [std::ptr::null::<libc::c_char>()];
+
+            // SAFETY: `fork()` followed by async-signal-safe `execve` + `_exit`.
+            let pid = unsafe { libc::fork() };
+            assert!(pid >= 0, "fork failed");
+            if pid == 0 {
+                // SAFETY: `path`, `argv`, and `envp` are valid NUL-terminated arrays.
+                unsafe {
+                    libc::execve(path.as_ptr(), argv.as_ptr(), envp.as_ptr());
+                    libc::_exit(127);
+                }
+            }
+
+            let mut status: libc::c_int = 0;
+            // SAFETY: `pid` is our child and `status` is writable.
+            let waited = unsafe { libc::waitpid(pid, &raw mut status, 0) };
+            assert_eq!(waited, pid);
+            assert!(
+                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                "/proc/self/fd execve child failed with status {status}"
+            );
+        }
+    );
+
+    let accesses = test_utils::spawn_command(cmd).await?;
+    assert_contains(&accesses, probe_path, fspy::PathAccess::Read);
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn unresolvable_relative_path_marks_trace_incomplete() -> anyhow::Result<()> {
+    // A cwd deeper than `PATH_MAX` makes `getcwd` fail with `ENAMETOOLONG`, so
+    // a relative `open` there cannot be recorded. The trace must then be
+    // reported incomplete instead of silently missing the access.
+    let dir = tempfile::tempdir()?;
+    let cmd = vt_subprocess_test::command_for_fn!(
+        dir.path().to_str().unwrap().to_owned(),
+        |root: String| {
+            std::env::set_current_dir(&root).unwrap();
+            let component = "d".repeat(200);
+            for _ in 0..25 {
+                std::fs::create_dir(&component).unwrap();
+                std::env::set_current_dir(&component).unwrap();
+            }
+            std::fs::write("input.txt", b"x").unwrap();
+            let _ = std::fs::read("input.txt").unwrap();
+        }
+    );
+
+    let termination = fspy::Command::from(cmd)
+        .spawn(tokio_util::sync::CancellationToken::new())
+        .await?
+        .wait_handle
+        .await?;
+    assert!(termination.status.success());
+    assert!(matches!(termination.path_accesses, Err(fspy::TrackingIncomplete)));
     Ok(())
 }
 

@@ -159,8 +159,8 @@ impl<'a> EncodedPayload<'a> {
             exec.program = absolute_relative(&exec.program, allocator.clone())?;
         }
 
-        let injectable = match split_parent_file_name(&exec.program) {
-            Some((b"/bin" | b"/usr/bin", file_name)) => {
+        let injectable = match sip_bin_file_name(&exec.program) {
+            Some(file_name) => {
                 if matches!(file_name, b"sh" | b"bash") {
                     exec.program = to_vec_in(self.payload.bash_path.as_bytes(), allocator);
                     true
@@ -207,23 +207,21 @@ fn bytes_to_cstring<A: Allocator>(
     CString::from_vec_with_nul(owned).ok_or(Error::NOENT)
 }
 
-/// Splits an absolute path into `(parent, file_name)`, normalizing repeated
-/// trailing or interior slashes before the final component.
-fn split_parent_file_name(path: &[u8]) -> Option<(&[u8], &[u8])> {
-    let trimmed = path.strip_suffix(b"/").unwrap_or(path);
-    let slash = trimmed.iter().rposition(|&b| b == b'/')?;
-    let file_name = &trimmed[slash + 1..];
-    if file_name.is_empty() {
-        return None;
+/// Returns the file name of an absolute `path` directly inside `/bin` or
+/// `/usr/bin`. Like `Path::parent`, empty and `.` components are ignored,
+/// while `..` is kept as written.
+fn sip_bin_file_name(path: &[u8]) -> Option<&[u8]> {
+    let rest = path.strip_prefix(b"/")?;
+    let mut parts: [&[u8]; 3] = [&[]; 3];
+    let mut count = 0;
+    for part in rest.split(|&b| b == b'/').filter(|part| !matches!(*part, b"" | b".")) {
+        *parts.get_mut(count)? = part;
+        count += 1;
     }
-    let mut parent = &trimmed[..slash];
-    while parent.len() > 1 && parent.ends_with(b"/") {
-        parent = &parent[..parent.len() - 1];
+    match parts[..count] {
+        [b"bin", file_name] | [b"usr", b"bin", file_name] => Some(file_name),
+        _ => None,
     }
-    if parent.is_empty() {
-        parent = b"/";
-    }
-    Some((parent, file_name))
 }
 
 #[doc(hidden)]
@@ -246,24 +244,24 @@ pub static COREUTILS_FUNCTIONS_FOR_TEST: Set<&'static [u8]> = phf_set! {
 
 #[cfg(test)]
 mod tests {
-    use super::split_parent_file_name;
+    use super::sip_bin_file_name;
 
     #[test]
-    fn splits_parent_and_file_name() {
-        assert_eq!(
-            split_parent_file_name(b"/bin/sh"),
-            Some((b"/bin".as_slice(), b"sh".as_slice()))
-        );
-        assert_eq!(
-            split_parent_file_name(b"/usr/bin/cat"),
-            Some((b"/usr/bin".as_slice(), b"cat".as_slice()))
-        );
-        assert_eq!(
-            split_parent_file_name(b"/bin//sh"),
-            Some((b"/bin".as_slice(), b"sh".as_slice()))
-        );
-        assert_eq!(split_parent_file_name(b"/foo"), Some((b"/".as_slice(), b"foo".as_slice())));
-        assert_eq!(split_parent_file_name(b"/"), None);
+    fn finds_files_directly_in_sip_bin_dirs() {
+        for (path, expected) in [
+            (&b"/bin/sh"[..], Some(&b"sh"[..])),
+            (b"/usr/bin/cat", Some(b"cat")),
+            (b"/bin//sh", Some(b"sh")),
+            (b"/bin/./sh", Some(b"sh")),
+            (b"/./usr/bin/./cat/", Some(b"cat")),
+            (b"/bin/../bin/sh", None),
+            (b"/usr/local/bin/sh", None),
+            (b"/foo", None),
+            (b"/", None),
+            (b"bin/sh", None),
+        ] {
+            assert_eq!(sip_bin_file_name(path), expected, "{}", path.escape_ascii());
+        }
     }
 
     #[cfg(target_os = "macos")]

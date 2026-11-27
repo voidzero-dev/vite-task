@@ -19,9 +19,8 @@ mod runtime {
     use bstr::BStr;
     use fspy_elf_loader::{Syscall, SyscallAction, SyscallInterceptor};
     use fspy_nostd::{
-        BorrowedFd, CStr, CWD, Error, OwnedFd, RawFd, Result, Thin,
-        env::InitialStack,
-        fs::{Mode, OFlags, fcntl_dupfd, openat},
+        BorrowedFd, CStr, CWD, Error, OwnedFd, RawFd, Result, Thin, env::InitialStack,
+        fs::fcntl_dupfd,
     };
     use fspy_nostd_alloc::{
         PageAllocator, PageBump,
@@ -220,34 +219,6 @@ mod runtime {
                     )
                 }
             }
-            Target::ResolvedPath { path, execfn, sigmask } => {
-                let path_cstr =
-                    path.to_os_c_string_in(bump).expect("resolved target path contains NUL");
-                let execfn_cstr =
-                    execfn.to_os_c_string_in(bump).expect("resolved execfn contains NUL");
-                let file = openat(
-                    CWD,
-                    path_cstr.as_c_str().as_thin(),
-                    OFlags::RDONLY | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .expect("cannot open resolved target");
-
-                restore_sigmask(sigmask);
-
-                // SAFETY: fresh single-threaded freestanding launcher; `exec_elf`
-                // copies strings onto the new stack before abandoning ours.
-                unsafe {
-                    fspy_elf_loader::exec_elf(
-                        file,
-                        execfn_cstr.as_c_str().as_thin(),
-                        stack.args().iter().copied(),
-                        filtered_envs,
-                        stack.auxv(),
-                        Some(INTERCEPTOR),
-                    )
-                }
-            }
             Target::ResolvedFd { fd, execfn, sigmask } => {
                 let execfn_cstr =
                     execfn.to_os_c_string_in(bump).expect("resolved execfn contains NUL");
@@ -349,6 +320,14 @@ mod runtime {
         }
     }
 
+    /// Marks the trace incomplete: a tracked syscall touched a path that could
+    /// not be resolved, so caching from this run could miss an input.
+    fn report_loss() {
+        if let Some(sender) = runtime().sender.as_ref() {
+            sender.report_loss();
+        }
+    }
+
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_possible_wrap,
@@ -401,11 +380,22 @@ mod runtime {
             return;
         }
         let arena = pooled_bump();
-        if let Ok(Some(resolved)) = resolve_path_at(&arena, dirfd, c_path) {
-            send_path(mode, BStr::new(resolved.as_units()));
+        match resolve_path_at(&arena, dirfd, c_path) {
+            Ok(Some(resolved)) => send_path(mode, BStr::new(resolved.as_units())),
+            // The path exists but is too long to name, or naming it ran out of
+            // memory: a later run could depend on it, so the trace is partial.
+            Err(Error::NAMETOOLONG | Error::NOMEM) => report_loss(),
+            // No usable `dirfd` or a deleted cwd (the call fails or touches
+            // nothing), or a sandbox where `/proc/self/fd` cannot be read, such
+            // as Chromium's PID namespace, whose file access a broker performs.
+            Ok(None) | Err(_) => {}
         }
     }
 
+    /// Reports an access through an open descriptor. Failing to name it is not
+    /// a loss: opening the descriptor already recorded its path (or reported
+    /// the loss), and sandboxes such as Chromium's run in a PID namespace
+    /// where `/proc/self/fd` does not resolve.
     fn report_fd(fd: BorrowedFd<'_>, mode: AccessMode) {
         let arena = pooled_bump();
         if let Ok(Some(resolved)) = fd_path(&arena, fd) {
@@ -707,26 +697,20 @@ mod runtime {
         let resolved = resolve_exec(&mut exec, dirfd, flags, |p| send_path(AccessMode::Read, p))?;
         fspy_elf_loader::validate_exec(resolved.file.as_fd())?;
 
-        // Keep `duped_fd` open across `SYS_execve` (`fcntl_dupfd` clears
+        // Hand the validated descriptor itself to the new image instead of a
+        // pathname to reopen: the file may be replaced or unlinked meanwhile,
+        // and `/proc/self/fd/N` targets close with `FD_CLOEXEC` on exec. Keep
+        // `duped_fd` open across `SYS_execve` (`fcntl_dupfd` clears
         // `FD_CLOEXEC`). If `prepare_exec_in` fails below, `OwnedFd` closes it
         // automatically; once handed back as a raw fd, `cleanup_*` closes it on
         // `SYS_execve` failure while a successful exec transfers it to the child.
-        let duped_fd =
-            if resolved.fd_backed { Some(fcntl_dupfd(resolved.file.as_fd(), 3)?) } else { None };
+        let duped_fd = fcntl_dupfd(resolved.file.as_fd(), 3)?;
 
         let rt = runtime();
-        let target = if let Some(ref fd) = duped_fd {
-            Target::ResolvedFd {
-                fd: fd.as_raw_fd(),
-                execfn: IpcStr::from_bytes(&resolved.execfn),
-                sigmask,
-            }
-        } else {
-            Target::ResolvedPath {
-                path: IpcStr::from_bytes(&exec.program),
-                execfn: IpcStr::from_bytes(&resolved.execfn),
-                sigmask,
-            }
+        let target = Target::ResolvedFd {
+            fd: duped_fd.as_raw_fd(),
+            execfn: IpcStr::from_bytes(&resolved.execfn),
+            sigmask,
         };
         let bootstrap = Bootstrap {
             ipc_channel_conf: rt.ipc_channel_conf,
@@ -738,11 +722,8 @@ mod runtime {
 
         exec.program = copy_bytes(rt.preload_path.as_bytes(), arena);
         let raw_out = RawExec::from_exec(exec);
-        let duped_raw = duped_fd.map_or(-1, |fd| {
-            let raw = fd.as_raw_fd();
-            core::mem::forget(fd);
-            raw
-        });
+        let duped_raw = duped_fd.as_raw_fd();
+        core::mem::forget(duped_fd);
         Ok((raw_out, duped_raw))
     }
 }

@@ -47,13 +47,11 @@ bitflags! {
     }
 }
 
-/// Output of [`resolve_exec`]: the open final binary descriptor, the original
-/// execution name for `AT_EXECFN`, and whether the binary must be handed off by
-/// file descriptor rather than pathname.
+/// Output of [`resolve_exec`]: the open final binary descriptor and the
+/// original execution name for `AT_EXECFN`.
 pub struct ResolvedExec<A: Allocator> {
     pub file: OwnedFd,
     pub execfn: Vec<u8, A>,
-    pub fd_backed: bool,
 }
 
 /// What the freshly exec'd `fspy_preload_linux` binary should load and run.
@@ -63,10 +61,8 @@ pub enum Target<'a> {
     /// and ELF validation itself, reporting the result errno (or `0`) over
     /// `error_pipe_fd`.
     Unresolved { path: &'a IpcStr, error_pipe_fd: RawFd },
-    /// Child `execve`/`execveat` already resolved to an absolute pathname.
-    /// `sigmask` is the calling thread's virtualized signal mask prior to exec.
-    ResolvedPath { path: &'a IpcStr, execfn: &'a IpcStr, sigmask: u64 },
-    /// Child `fexecve` or unlinked-directory `execveat` handed off by open fd.
+    /// Child `execve`/`execveat` handed off as the already-validated open
+    /// descriptor, so the new image loads the exact file the call resolved.
     /// `sigmask` is the calling thread's virtualized signal mask prior to exec.
     ResolvedFd { fd: RawFd, execfn: &'a IpcStr, sigmask: u64 },
 }
@@ -141,10 +137,9 @@ pub fn ensure_bootstrap_env<A: Allocator + Clone>(
 /// handling and recursive `#!` shebang expansion, reporting every read path via
 /// `on_path_read`.
 ///
-/// On success, `exec.program` and `exec.args` reflect the final binary (with
-/// `exec.program` normalized to an absolute path whenever `fd_backed` is
-/// `false`), and [`ResolvedExec::file`] holds an open `O_CLOEXEC` descriptor to
-/// that binary ready for ELF validation or loading.
+/// On success, `exec.program` and `exec.args` reflect the final binary, and
+/// [`ResolvedExec::file`] holds an open `O_CLOEXEC` descriptor to that binary
+/// ready for ELF validation or loading.
 ///
 /// # Errors
 ///
@@ -225,21 +220,7 @@ pub fn resolve_exec<A: Allocator + Clone>(
             continue;
         }
 
-        let fd_backed = if is_abs {
-            false
-        } else if let Some(resolved) = abs_path {
-            let resolved_bytes = resolved.as_units();
-            if is_deleted_dir_path(cur_dirfd, &allocator) {
-                true
-            } else {
-                exec.program = to_vec_in(resolved_bytes, allocator.clone());
-                false
-            }
-        } else {
-            true
-        };
-
-        return Ok(ResolvedExec { file, execfn, fd_backed });
+        return Ok(ResolvedExec { file, execfn });
     }
 }
 
@@ -295,7 +276,7 @@ fn resolve_empty_path<A: Allocator + Clone>(
     let Some(shebang) =
         parse_shebang_bytes(&peek_buf[..n], ParseShebangOptions::linux(), allocator.clone())?
     else {
-        return Ok(EmptyPathStep::Resolved(ResolvedExec { file, execfn, fd_backed: true }));
+        return Ok(EmptyPathStep::Resolved(ResolvedExec { file, execfn }));
     };
 
     drop(file);
@@ -312,16 +293,6 @@ fn resolve_empty_path<A: Allocator + Clone>(
 /// Checks whether a non-CWD `dirfd` refers to an unlinked directory whose
 /// `/proc/self/fd/<fd>` symlink ends with ` (deleted)`, making its path
 /// unopenable in the child `fspy_preload_linux` process.
-fn is_deleted_dir_path<A: Allocator>(dirfd: Option<BorrowedFd<'_>>, allocator: &A) -> bool {
-    let Some(dirfd) = dirfd else {
-        return false;
-    };
-    if dirfd.as_raw_fd() == CWD.as_raw_fd() {
-        return false;
-    }
-    matches!(fd_path(allocator, dirfd), Ok(Some(base)) if base.as_units().ends_with(b" (deleted)"))
-}
-
 fn bytes_to_cstring<A: Allocator>(
     bytes: &[u8],
     allocator: A,
@@ -404,7 +375,6 @@ mod tests {
 
         let cases = [
             Target::Unresolved { path: target_path, error_pipe_fd: 7 },
-            Target::ResolvedPath { path: target_path, execfn, sigmask: 0x1234 },
             Target::ResolvedFd { fd: 9, execfn, sigmask: 0x5678 },
         ];
 
@@ -434,14 +404,6 @@ mod tests {
                 ) => {
                     assert_eq!(p1.as_bytes(), p2.as_bytes());
                     assert_eq!(f1, f2);
-                }
-                (
-                    Target::ResolvedPath { path: p1, execfn: e1, sigmask: m1 },
-                    Target::ResolvedPath { path: p2, execfn: e2, sigmask: m2 },
-                ) => {
-                    assert_eq!(p1.as_bytes(), p2.as_bytes());
-                    assert_eq!(e1.as_bytes(), e2.as_bytes());
-                    assert_eq!(m1, m2);
                 }
                 (
                     Target::ResolvedFd { fd: f1, execfn: e1, sigmask: m1 },
@@ -481,7 +443,6 @@ mod tests {
         let resolved =
             resolve_exec(&mut exec, Some(CWD), ExecAtFlags::empty(), |p| seen.push(p.to_vec()))
                 .unwrap();
-        assert!(!resolved.fd_backed);
         assert_eq!(resolved.execfn.as_slice(), s1.as_os_str().as_bytes());
         assert_eq!(exec.program.as_slice(), bin.as_os_str().as_bytes());
         assert_eq!(seen.len(), 6);
@@ -516,13 +477,12 @@ mod tests {
             Some(Error::LOOP)
         );
 
-        // AT_EMPTY_PATH on open executable fd -> fd_backed = true.
+        // AT_EMPTY_PATH on open executable fd resolves.
         let file = File::open(&bin).unwrap();
         // SAFETY: `file` remains open for the call.
         let fd = unsafe { BorrowedFd::borrow_raw(file.as_raw_fd()) };
         let mut exec = make_exec(b"", &[b"bin"]);
-        let resolved = resolve_exec(&mut exec, Some(fd), ExecAtFlags::EMPTY_PATH, |_| {}).unwrap();
-        assert!(resolved.fd_backed);
+        assert!(resolve_exec(&mut exec, Some(fd), ExecAtFlags::EMPTY_PATH, |_| {}).is_ok());
 
         // AT_EMPTY_PATH on CLOEXEC shebang script -> ENOENT.
         let script = dir.path().join("script.sh");
