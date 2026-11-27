@@ -1,9 +1,16 @@
 //! Configuration structures for user-defined tasks in `vite.config.*`
+//!
+//! Enums that accept more than one JSON shape implement `Deserialize` with
+//! [`UntaggedEnumVisitor`] instead of `#[serde(untagged)]`, which replaces each variant's
+//! error with a generic one.
 
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Deserializer};
+use serde::{
+    Deserialize, Deserializer,
+    de::{self, IntoDeserializer as _},
+};
 use serde_untagged::UntaggedEnumVisitor;
 #[cfg(all(test, not(clippy)))]
 use ts_rs::TS;
@@ -28,9 +35,8 @@ pub enum InputBase {
 }
 
 /// Glob pattern with explicit base directory for resolution.
-#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 #[cfg_attr(all(test, not(clippy)), derive(TS))]
-#[serde(deny_unknown_fields)]
 pub struct GlobWithBase {
     /// The glob pattern (positive or negative starting with `!`)
     pub pattern: Str,
@@ -39,12 +45,56 @@ pub struct GlobWithBase {
 }
 
 /// Automatic file-tracking directive for input fingerprinting or output archiving.
-#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 #[cfg_attr(all(test, not(clippy)), derive(TS))]
-#[serde(deny_unknown_fields)]
 pub struct AutoTracking {
     /// Enable automatic file tracking for this input or output list.
     pub auto: bool,
+}
+
+/// Deserializes an input or output entry: a glob string, `{ pattern, base }`, or `{ auto }`.
+fn deserialize_glob_entry<'de, D: Deserializer<'de>, T>(
+    deserializer: D,
+    glob: fn(Str) -> T,
+    glob_with_base: fn(GlobWithBase) -> T,
+    auto: fn(AutoTracking) -> T,
+) -> Result<T, D::Error> {
+    /// Both object forms in one struct, so a mistyped key is reported with every accepted key.
+    /// A field is `None` only when it's absent, so `null` is rejected as it is in either form.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct EntryObject {
+        #[serde(default, deserialize_with = "present")]
+        pattern: Option<Str>,
+        #[serde(default, deserialize_with = "present")]
+        base: Option<InputBase>,
+        #[serde(default, deserialize_with = "present")]
+        auto: Option<bool>,
+    }
+
+    fn present<'de, D: Deserializer<'de>, V: Deserialize<'de>>(
+        deserializer: D,
+    ) -> Result<Option<V>, D::Error> {
+        V::deserialize(deserializer).map(Some)
+    }
+
+    UntaggedEnumVisitor::new()
+        .expecting("a glob pattern, `{ pattern, base }`, or `{ auto: true }`")
+        .string(|pattern| Ok(glob(pattern.into())))
+        .map(|map| match map.deserialize::<EntryObject>()? {
+            EntryObject { pattern: Some(pattern), base: Some(base), auto: None } => {
+                Ok(glob_with_base(GlobWithBase { pattern, base }))
+            }
+            EntryObject { pattern: None, base: None, auto: Some(enabled) } => {
+                Ok(auto(AutoTracking { auto: enabled }))
+            }
+            EntryObject { auto: Some(_), .. } => {
+                Err(de::Error::custom("`auto` can't be combined with `pattern` or `base`"))
+            }
+            EntryObject { pattern: None, .. } => Err(de::Error::missing_field("pattern")),
+            EntryObject { base: None, .. } => Err(de::Error::missing_field("base")),
+        })
+        .deserialize(deserializer)
 }
 
 /// A single input entry in the `input` array.
@@ -53,10 +103,9 @@ pub struct AutoTracking {
 /// - Glob patterns as strings (resolved relative to the package directory)
 /// - Object form with explicit base: `{ "pattern": "...", "base": "workspace" | "package" }`
 /// - Automatic tracking directives: `{ "auto": true }`
-#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS))]
-#[serde(untagged)]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(untagged))]
 pub enum UserInputEntry {
     /// Glob pattern (positive or negative starting with `!`), resolved relative to package dir
     Glob(Str),
@@ -64,6 +113,12 @@ pub enum UserInputEntry {
     GlobWithBase(GlobWithBase),
     /// Automatic tracking directive
     Auto(AutoTracking),
+}
+
+impl<'de> Deserialize<'de> for UserInputEntry {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize_glob_entry(deserializer, Self::Glob, Self::GlobWithBase, Self::Auto)
+    }
 }
 
 /// The inputs configuration for cache fingerprinting.
@@ -86,10 +141,9 @@ pub enum UserDependencyType {
 }
 
 /// The `from` selector for object-form `dependsOn` entries.
-#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "DependsOnFrom"))]
-#[serde(untagged)]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "DependsOnFrom", untagged))]
 pub enum UserDependsOnFrom {
     /// Select one package.json dependency field.
     Single(UserDependencyType),
@@ -98,6 +152,25 @@ pub enum UserDependsOnFrom {
         #[cfg_attr(all(test, not(clippy)), ts(as = "Vec<UserDependencyType>"))]
         Vec1<UserDependencyType>,
     ),
+}
+
+impl<'de> Deserialize<'de> for UserDependsOnFrom {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        UntaggedEnumVisitor::new()
+            .expecting(
+                "a package.json dependency field name, such as `dependencies` or \
+                 `devDependencies`, or a non-empty array of them",
+            )
+            .string(|field| {
+                UserDependencyType::deserialize(field.into_deserializer()).map(Self::Single)
+            })
+            .seq(|seq| {
+                Vec1::try_from_vec(seq.deserialize()?).map(Self::Multiple).map_err(|_| {
+                    de::Error::invalid_length(0, &"at least one package.json dependency field name")
+                })
+            })
+            .deserialize(deserializer)
+    }
 }
 
 impl UserDependsOnFrom {
@@ -124,15 +197,24 @@ pub struct UserPackageDependency {
 }
 
 /// A single `dependsOn` entry.
-#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "DependsOnEntry"))]
-#[serde(untagged)]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(rename = "DependsOnEntry", untagged))]
 pub enum UserDependsOnEntry {
     /// Same-package task or `package#task` specifier.
     Task(Str),
     /// Direct package dependency selection entry.
     Package(UserPackageDependency),
+}
+
+impl<'de> Deserialize<'de> for UserDependsOnEntry {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        UntaggedEnumVisitor::new()
+            .expecting("a task name or an object with `task` and `from`")
+            .string(|task| Ok(Self::Task(task.into())))
+            .map(|map| map.deserialize().map(Self::Package))
+            .deserialize(deserializer)
+    }
 }
 
 /// A single output entry in the `output` array.
@@ -141,10 +223,9 @@ pub enum UserDependsOnEntry {
 /// - Glob patterns as strings (resolved relative to the package directory)
 /// - Object form with explicit base: `{ "pattern": "...", "base": "workspace" | "package" }`
 /// - Automatic tracking directive: `{ "auto": true }`
-#[derive(Debug, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS))]
-#[serde(untagged)]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(untagged))]
 pub enum UserOutputEntry {
     /// Glob pattern (positive or negative starting with `!`), resolved relative to package dir
     Glob(Str),
@@ -152,6 +233,12 @@ pub enum UserOutputEntry {
     GlobWithBase(GlobWithBase),
     /// Automatic tracking directive
     Auto(AutoTracking),
+}
+
+impl<'de> Deserialize<'de> for UserOutputEntry {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize_glob_entry(deserializer, Self::Glob, Self::GlobWithBase, Self::Auto)
+    }
 }
 
 /// The value of a task's `cache` field.
@@ -165,7 +252,6 @@ pub enum UserCacheConfig {
     Config(EnabledCacheConfig),
 }
 
-// Not `#[serde(untagged)]`, which replaces each variant's error with a generic one.
 impl<'de> Deserialize<'de> for UserCacheConfig {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         UntaggedEnumVisitor::new()
@@ -299,15 +385,24 @@ impl Default for UserTaskOptions {
     }
 }
 /// The command to run for a task: a single string or a sequence of strings.
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS))]
-#[serde(untagged)]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(untagged))]
 pub enum Command {
     /// A single command string.
     Single(Str),
     /// A sequence of command strings, run in order.
     Array(Arc<[Str]>),
+}
+
+impl<'de> Deserialize<'de> for Command {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        UntaggedEnumVisitor::new()
+            .expecting("a command string or an array of command strings")
+            .string(|command| Ok(Self::Single(command.into())))
+            .seq(|seq| seq.deserialize().map(Self::Array))
+            .deserialize(deserializer)
+    }
 }
 
 /// Full user-defined task configuration in `vite.config.*`, including the command and options.
@@ -342,7 +437,6 @@ pub enum UserTaskDefinition {
     CommandShorthand(Command),
 }
 
-// Not `#[serde(untagged)]`, which replaces each variant's error with a generic one.
 impl<'de> Deserialize<'de> for UserTaskDefinition {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         UntaggedEnumVisitor::new()
@@ -367,37 +461,53 @@ impl<'de> Deserialize<'de> for UserTaskDefinition {
 ///
 /// This option can only be set in the workspace root's config file.
 /// Setting it in a package's config will result in an error.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 // TS derive macro generates code using std types that clippy disallows; skip derive during linting
-#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
-#[serde(untagged, deny_unknown_fields)]
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(untagged))]
 pub enum UserGlobalCacheConfig {
     Bool(bool),
     /// Detailed cache configuration with separate control for scripts and tasks.
-    Detailed {
-        /// Enable caching for package.json scripts not defined in the `tasks` map.
-        ///
-        /// When `false`, package.json scripts will not be cached.
-        /// When `true`, package.json scripts will be cached with default settings.
-        ///
-        /// Default: `false`
-        scripts: Option<bool>,
+    Detailed(#[cfg_attr(all(test, not(clippy)), ts(inline))] DetailedGlobalCacheConfig),
+}
 
-        /// Global cache kill switch for task entries.
-        ///
-        /// When `false`, overrides all tasks to disable caching, even tasks with `cache: true`
-        /// or a `cache` object.
-        /// When `true`, respects each task's individual `cache` setting
-        /// (each task's `cache` defaults to `true` if omitted).
-        ///
-        /// Default: `true`
-        tasks: Option<bool>,
+impl<'de> Deserialize<'de> for UserGlobalCacheConfig {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        UntaggedEnumVisitor::new()
+            .expecting("a boolean or an object of cache settings")
+            .bool(|enabled| Ok(Self::Bool(enabled)))
+            .map(|map| map.deserialize().map(Self::Detailed))
+            .deserialize(deserializer)
+    }
+}
 
-        /// Remote cache shared by tasks in the workspace.
-        // Parsed but left out of the public types while remote caching is unreleased.
-        #[cfg_attr(all(test, not(clippy)), ts(skip))]
-        remote: Option<UserRemoteCacheConfig>,
-    },
+/// Detailed root-level cache configuration with separate control for scripts and tasks.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+// TS derive macro generates code using std types that clippy disallows; skip derive during linting
+#[cfg_attr(all(test, not(clippy)), derive(TS), ts(optional_fields))]
+#[serde(deny_unknown_fields)]
+pub struct DetailedGlobalCacheConfig {
+    /// Enable caching for package.json scripts not defined in the `tasks` map.
+    ///
+    /// When `false`, package.json scripts will not be cached.
+    /// When `true`, package.json scripts will be cached with default settings.
+    ///
+    /// Default: `false`
+    pub scripts: Option<bool>,
+
+    /// Global cache kill switch for task entries.
+    ///
+    /// When `false`, overrides all tasks to disable caching, even tasks with `cache: true`
+    /// or a `cache` object.
+    /// When `true`, respects each task's individual `cache` setting
+    /// (each task's `cache` defaults to `true` if omitted).
+    ///
+    /// Default: `true`
+    pub tasks: Option<bool>,
+
+    /// Remote cache shared by tasks in the workspace.
+    // Parsed but left out of the public types while remote caching is unreleased.
+    #[cfg_attr(all(test, not(clippy)), ts(skip))]
+    pub remote: Option<UserRemoteCacheConfig>,
 }
 
 /// Resolved global cache configuration with concrete values.
@@ -424,7 +534,11 @@ impl ResolvedGlobalCacheConfig {
             Some(UserGlobalCacheConfig::Bool(false)) => {
                 Self { scripts: false, tasks: false, remote_url: None }
             }
-            Some(UserGlobalCacheConfig::Detailed { scripts, tasks, remote }) => Self {
+            Some(UserGlobalCacheConfig::Detailed(DetailedGlobalCacheConfig {
+                scripts,
+                tasks,
+                remote,
+            })) => Self {
                 scripts: scripts.unwrap_or(false),
                 tasks: tasks.unwrap_or(true),
                 remote_url: remote.as_ref().map(|remote| Arc::clone(&remote.url)),
@@ -969,12 +1083,25 @@ mod tests {
 
     #[test]
     fn test_input_mixed_auto_and_glob_with_base_error() {
-        // An object with both "auto" and "pattern"/"base" should fail due to deny_unknown_fields
+        // An object with both "auto" and "pattern"/"base" should fail
         let user_config_json = json!({
             "input": [{ "auto": true, "pattern": "src/**", "base": "workspace" }]
         });
         let result = serde_json::from_value::<EnabledCacheConfig>(user_config_json);
         assert!(result.is_err(), "mixing auto and pattern/base fields should produce an error");
+    }
+
+    #[test]
+    fn test_input_null_field_error() {
+        // An explicit `null` is rejected, not treated as an absent field
+        for entry in [
+            json!({ "pattern": "src/**", "base": "workspace", "auto": null }),
+            json!({ "auto": false, "pattern": null }),
+        ] {
+            let user_config_json = json!({ "input": [entry] });
+            let result = serde_json::from_value::<EnabledCacheConfig>(user_config_json);
+            assert!(result.is_err(), "a null field should produce an error");
+        }
     }
 
     #[test]
@@ -1113,11 +1240,65 @@ mod tests {
                 "invalid type: integer `123`, expected a command string, an array of command \
                  strings, or a task object",
             ),
+            (
+                json!({ "command": 123 }),
+                "invalid type: integer `123`, expected a command string or an array of command \
+                 strings",
+            ),
+            (
+                json!({
+                    "command": "echo",
+                    "dependsOn": [{ "task": "build", "form": "dependencies" }]
+                }),
+                "unknown field `form`, expected `task` or `from`",
+            ),
+            (
+                json!({ "command": "echo", "dependsOn": [{ "task": "build", "from": "devDeps" }] }),
+                "unknown variant `devDeps`, expected one of `dependencies`, `devDependencies`, \
+                 `peerDependencies`",
+            ),
+            (
+                json!({ "command": "echo", "dependsOn": [{ "task": "build", "from": [] }] }),
+                "invalid length 0, expected at least one package.json dependency field name",
+            ),
+            (
+                json!({
+                    "command": "echo",
+                    "cache": { "input": [{ "pattern": "src/**", "bas": "workspace" }] }
+                }),
+                "unknown field `bas`, expected one of `pattern`, `base`, `auto`",
+            ),
+            (
+                json!({ "command": "echo", "cache": { "input": [{ "pattern": "src/**" }] } }),
+                "missing field `base`",
+            ),
+            (
+                json!({
+                    "command": "echo",
+                    "cache": { "input": [{ "auto": true, "pattern": "src/**" }] }
+                }),
+                "`auto` can't be combined with `pattern` or `base`",
+            ),
+            (
+                json!({ "command": "echo", "cache": { "output": [123] } }),
+                "invalid type: integer `123`, expected a glob pattern, `{ pattern, base }`, or \
+                 `{ auto: true }`",
+            ),
         ];
         for (task, expected) in cases {
             let user_config_json = json!({ "tasks": { "build": task } });
             let error = serde_json::from_value::<UserRunConfig>(user_config_json).unwrap_err();
             assert_eq!(error.to_string(), expected);
         }
+    }
+
+    #[test]
+    fn test_invalid_global_cache_error_names_the_problem() {
+        let error = serde_json::from_value::<UserRunConfig>(json!({ "cache": { "script": true } }))
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "unknown field `script`, expected one of `scripts`, `tasks`, `remote`"
+        );
     }
 }
