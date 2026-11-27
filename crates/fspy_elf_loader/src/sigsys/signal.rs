@@ -22,32 +22,32 @@
 //!   `epoll_pwait`, `epoll_pwait2`): strips `SIGSYS` from temporary kernel wait
 //!   masks while honoring `SIGSYS` blocking/unblocking in virtualized state.
 //! - True `fork()` (`fork` / `clone` without `CLONE_VM`): updates process
-//!   ownership, resets `ACTION_LOCK`, drops parent sibling TIDs, and inherits
-//!   the calling thread's virtual `SIGSYS` blocked bit.
+//!   ownership, resets the action seqlock, drops parent sibling TIDs, and
+//!   inherits the calling thread's virtual `SIGSYS` blocked bit.
 
 use core::{
     cell::UnsafeCell,
     mem::MaybeUninit,
     ptr,
-    sync::atomic::{AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering, fence},
 };
 
 use fspy_nostd::{Error, Result};
 use linux_raw_sys::{
     errno::{EFAULT, EINTR, EINVAL, ENOMEM, ESRCH},
     general::{
-        CLOCK_MONOTONIC, P_PID, SA_NODEFER, SA_RESETHAND, SA_SIGINFO, SIG_BLOCK, SIG_SETMASK,
-        SIG_UNBLOCK, SIGSYS, SYS_SECCOMP, WEXITED, WNOHANG, WNOWAIT, siginfo, timespec,
+        CLOCK_MONOTONIC, SA_NODEFER, SA_RESETHAND, SA_SIGINFO, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
+        SIGSYS, SYS_SECCOMP, siginfo, timespec,
     },
 };
 use syscalls::Sysno;
 
 use super::{
     arch::{
-        KERNEL_SIGSET_SIZE, KernelSigaction, SIGSYS_BIT, SyscallInvocation, UNBLOCKABLE_MASK,
-        Ucontext, arg_i32, getpid, gettid, invoke_user_sigsys_handler, masked_wait_return_pc,
-        neg_errno, replay, replay_masked_wait, rt_sigaction, rt_sigprocmask, syscall6,
-        uc_sigmask_mut, ucontext_pc,
+        HANDLER_BLOCK_MASK, KERNEL_SIGSET_SIZE, KernelSigaction, SIGSYS_BIT, SyscallInvocation,
+        UNBLOCKABLE_MASK, Ucontext, arg_i32, getpid, gettid, invoke_user_sigsys_handler, neg_errno,
+        replay, replay_masked_wait, rt_sigaction, rt_sigprocmask, set_syscall_result, syscall6,
+        uc_sigmask_mut,
     },
     usermem,
 };
@@ -72,26 +72,117 @@ const INFO_LOCK_BIT: u64 = 1_u64 << 63;
 
 struct SyncCell<T>(UnsafeCell<T>);
 
-// SAFETY: Access is serialized by `ACTION_LOCK` (for `USER_SIGSYS_ACTION`) or
-// per-slot `INFO_LOCK_BIT` (for `PENDING_INFOS`).
+// SAFETY: Access is serialized by per-slot `INFO_LOCK_BIT` (for `PENDING_INFOS`).
 unsafe impl<T> Sync for SyncCell<T> {}
+
+/// Lock-free seqlock storing the process-wide virtualized `SIGSYS` action.
+///
+/// Readers (`CLONE_VM` children, `rt_sigaction` queries, `forward_non_seccomp_sigsys`,
+/// and non-`SA_RESETHAND` deliveries) read completely lock-free without ever
+/// taking a lock. Writers (`!is_shared_vm_child()`) serialize via `writer_lock`
+/// while all maskable signals including `SIGSYS` are already blocked by our
+/// `SIGSYS` handler `sa_mask`.
+struct SeqAction {
+    /// Even when quiescent, odd while a writer updates the atomic fields.
+    seq: AtomicUsize,
+    writer_lock: AtomicBool,
+    sa_handler: AtomicUsize,
+    sa_flags: AtomicUsize,
+    sa_restorer: AtomicUsize,
+    sa_mask: AtomicU64,
+}
+
+impl SeqAction {
+    const fn new_dfl() -> Self {
+        Self {
+            seq: AtomicUsize::new(0),
+            writer_lock: AtomicBool::new(false),
+            sa_handler: AtomicUsize::new(SIG_DFL_RAW),
+            sa_flags: AtomicUsize::new(0),
+            sa_restorer: AtomicUsize::new(0),
+            sa_mask: AtomicU64::new(0),
+        }
+    }
+
+    fn init(&self, act: KernelSigaction) {
+        self.writer_lock.store(false, Ordering::Relaxed);
+        self.sa_handler.store(act.sa_handler, Ordering::Relaxed);
+        self.sa_flags.store(act.sa_flags, Ordering::Relaxed);
+        self.sa_restorer.store(act.sa_restorer, Ordering::Relaxed);
+        self.sa_mask.store(act.sa_mask, Ordering::Relaxed);
+        self.seq.store(0, Ordering::Release);
+    }
+
+    fn reset_after_fork(&self) {
+        let seq = self.seq.load(Ordering::Relaxed);
+        if (seq & 1) != 0 {
+            self.seq.store(seq.wrapping_add(1), Ordering::Relaxed);
+        }
+        self.writer_lock.store(false, Ordering::Release);
+    }
+
+    fn read(&self) -> KernelSigaction {
+        loop {
+            let seq1 = self.seq.load(Ordering::Acquire);
+            if (seq1 & 1) != 0 {
+                core::hint::spin_loop();
+                continue;
+            }
+            let act = KernelSigaction {
+                sa_handler: self.sa_handler.load(Ordering::Relaxed),
+                sa_flags: self.sa_flags.load(Ordering::Relaxed),
+                sa_restorer: self.sa_restorer.load(Ordering::Relaxed),
+                sa_mask: self.sa_mask.load(Ordering::Relaxed),
+            };
+            fence(Ordering::Acquire);
+            if self.seq.load(Ordering::Relaxed) == seq1 {
+                return act;
+            }
+            core::hint::spin_loop();
+        }
+    }
+
+    fn write_with<R>(&self, f: impl FnOnce(KernelSigaction) -> (KernelSigaction, R)) -> R {
+        let mut spins = 0_usize;
+        while self
+            .writer_lock
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            spins += 1;
+            if spins.trailing_zeros() >= 10 {
+                // SAFETY: `sched_yield` takes no arguments and is async-signal-safe.
+                let _ = unsafe { syscall6(Sysno::sched_yield as usize, 0, 0, 0, 0, 0, 0) };
+            } else {
+                core::hint::spin_loop();
+            }
+        }
+        let cur = KernelSigaction {
+            sa_handler: self.sa_handler.load(Ordering::Relaxed),
+            sa_flags: self.sa_flags.load(Ordering::Relaxed),
+            sa_restorer: self.sa_restorer.load(Ordering::Relaxed),
+            sa_mask: self.sa_mask.load(Ordering::Relaxed),
+        };
+        let (next, result) = f(cur);
+        let seq = self.seq.load(Ordering::Relaxed);
+        self.seq.store(seq.wrapping_add(1), Ordering::Relaxed);
+        fence(Ordering::Release);
+        self.sa_handler.store(next.sa_handler, Ordering::Relaxed);
+        self.sa_flags.store(next.sa_flags, Ordering::Relaxed);
+        self.sa_restorer.store(next.sa_restorer, Ordering::Relaxed);
+        self.sa_mask.store(next.sa_mask, Ordering::Relaxed);
+        self.seq.store(seq.wrapping_add(2), Ordering::Release);
+        self.writer_lock.store(false, Ordering::Release);
+        result
+    }
+}
 
 /// Owning PID of this address space (set in `init` and refreshed in `fork`
 /// children). Any thread observing `getpid() != OWNER_PID` is executing inside
 /// a `CLONE_VM` (`vfork` / `posix_spawn`) child sharing the parent's memory.
 static OWNER_PID: AtomicI32 = AtomicI32::new(0);
 
-/// Owner `(pid, tid)` key holding `USER_SIGSYS_ACTION` (`0` = unlocked).
-/// Storing the owner key lets waiters verify liveness via `tgkill`/`kill` and
-/// reclaim the lock ONLY if the previous owner provably died (e.g. a
-/// `CLONE_VM` child killed by `SIGKILL`), without ever racing a live holder.
-static ACTION_LOCK: AtomicU64 = AtomicU64::new(0);
-static USER_SIGSYS_ACTION: SyncCell<KernelSigaction> = SyncCell(UnsafeCell::new(KernelSigaction {
-    sa_handler: SIG_DFL_RAW,
-    sa_flags: 0,
-    sa_restorer: 0,
-    sa_mask: 0,
-}));
+static USER_SIGSYS_ACTION: SeqAction = SeqAction::new_dfl();
 
 /// Bit `sig - 1` records whether the target included `SIGSYS` in `sa_mask`
 /// when installing a handler for signal `sig` (`1..=64`, `sig != SIGSYS`).
@@ -147,10 +238,7 @@ struct PselectSigmask {
 pub fn init(inherited_action: KernelSigaction, inherited_sigsys_blocked: bool) {
     let pid = getpid();
     OWNER_PID.store(pid, Ordering::Release);
-    ACTION_LOCK.store(0, Ordering::Release);
-    with_action_lock(|slot| {
-        *slot = inherited_action;
-    });
+    USER_SIGSYS_ACTION.init(inherited_action);
     SA_MASK_HAS_SIGSYS.store(0, Ordering::Release);
     clear_all_tid_slots();
     if inherited_sigsys_blocked {
@@ -168,13 +256,13 @@ pub fn is_shared_vm_child() -> bool {
 }
 
 /// Resets process-owned state in a freshly `fork()`'d child (separate COW
-/// address space), dropping parent sibling TIDs, releasing any spinlock held
-/// by a sibling thread at `fork()` time, and inheriting the calling thread's
-/// virtual `SIGSYS` blocked state.
+/// address space), dropping parent sibling TIDs, resetting any action writer
+/// state held by a sibling thread at `fork()` time, and inheriting the calling
+/// thread's virtual `SIGSYS` blocked state.
 pub fn on_fork_child(parent_blocked: bool) {
     let pid = getpid();
     OWNER_PID.store(pid, Ordering::Release);
-    ACTION_LOCK.store(0, Ordering::Release);
+    USER_SIGSYS_ACTION.reset_after_fork();
     clear_all_tid_slots();
     if parent_blocked {
         let _ = set_tid_blocked(pid, gettid(), true);
@@ -211,57 +299,6 @@ pub fn restore_current_tid_entry(saved: Option<(u64, Option<siginfo>)>) {
         store_pending_info(key, info);
     }
     let _ = update_tid_flags(key, flags, 0);
-}
-
-fn with_action_lock<R>(f: impl FnOnce(&mut KernelSigaction) -> R) -> R {
-    // Block ALL maskable signals (including `SIGSYS`) across the brief
-    // critical section so an async non-seccomp `SIGSYS` (`tgkill`/`kill`)
-    // cannot re-enter `with_action_lock` on the same thread and self-deadlock.
-    // The closure performs only in-memory copies; contention wait-loop syscalls
-    // (`waitid`/`kill`/`tgkill`/`sched_yield`) run from our allowlisted `PF_X`
-    // range (note: a target-installed seccomp filter trapping those syscalls
-    // during contention would see `SIGSYS` blocked briefly).
-    let block_all = !UNBLOCKABLE_MASK;
-    let mut saved: u64 = 0;
-    // SAFETY: `block_all` and `saved` are valid stack-local `u64` values.
-    let masked = unsafe { rt_sigprocmask(SIG_SETMASK, &raw const block_all, &raw mut saved) } == 0;
-    let my_pid = getpid();
-    let my_key = make_key(my_pid, gettid()).unwrap_or(1);
-    let mut spins = 0_usize;
-    loop {
-        match ACTION_LOCK.compare_exchange_weak(0, my_key, Ordering::Acquire, Ordering::Relaxed) {
-            Ok(_) => break,
-            Err(owner) => {
-                spins += 1;
-                if spins.trailing_zeros() >= 10 {
-                    // Check whether the lock holder is provably dead (including
-                    // an unreaped zombie `CLONE_VM` child killed by `SIGKILL`).
-                    // Never steal from a live preempted thread.
-                    if owner != 0
-                        && owner != my_key
-                        && !is_tid_alive(my_pid, slot_pid(owner), slot_tid(owner))
-                        && ACTION_LOCK
-                            .compare_exchange(owner, my_key, Ordering::AcqRel, Ordering::Relaxed)
-                            .is_ok()
-                    {
-                        break;
-                    }
-                    // SAFETY: `sched_yield` takes no arguments and is async-signal-safe.
-                    let _ = unsafe { syscall6(Sysno::sched_yield as usize, 0, 0, 0, 0, 0, 0) };
-                } else {
-                    core::hint::spin_loop();
-                }
-            }
-        }
-    }
-    // SAFETY: Exclusively serialized by `ACTION_LOCK` (`my_key`).
-    let result = unsafe { f(&mut *USER_SIGSYS_ACTION.0.get()) };
-    ACTION_LOCK.store(0, Ordering::Release);
-    if masked {
-        // SAFETY: `saved` is a valid stack-local `u64`.
-        let _ = unsafe { rt_sigprocmask(SIG_SETMASK, &raw const saved, ptr::null_mut()) };
-    }
-    result
 }
 
 /// Combines the thread's kernel signal mask from `ucontext.uc_sigmask` with
@@ -375,31 +412,6 @@ fn is_tid_alive(my_pid: i32, slot_p: i32, slot_t: i32) -> bool {
         };
         rc != neg_errno(ESRCH)
     } else {
-        // First detect an unreaped zombie child without reaping it (`WNOWAIT`),
-        // since `kill(pid, 0)` still returns `0` for zombies.
-        // SAFETY: zero-initialized `siginfo` is valid writable storage for `waitid`.
-        let mut info: siginfo = unsafe { core::mem::zeroed() };
-        // SAFETY: `waitid(P_PID, slot_p, &info, WEXITED | WNOHANG | WNOWAIT)`
-        // never blocks and never consumes the child's wait status.
-        let wrc = unsafe {
-            syscall6(
-                Sysno::waitid as usize,
-                P_PID as usize,
-                slot_p.cast_unsigned() as usize,
-                (&raw mut info).addr(),
-                (WEXITED | WNOHANG | WNOWAIT) as usize,
-                0,
-                0,
-            )
-        };
-        if wrc == 0 {
-            // SAFETY: `waitid(WEXITED)` populates `_sigchld._pid` when a child has exited.
-            let exited_pid =
-                unsafe { info.__bindgen_anon_1.__bindgen_anon_1._sifields._sigchld._pid };
-            if exited_pid == slot_p {
-                return false;
-            }
-        }
         // `kill(pid, 0)` probes whether a `vfork`/other process still exists.
         // SAFETY: signal 0 performs only existence validation.
         let rc = unsafe {
@@ -505,10 +517,9 @@ const fn synthetic_sigsys_info() -> siginfo {
 }
 
 fn store_pending_info(key: u64, info: siginfo) {
-    // Pass 0: update an existing slot for `key`.
+    // Pass 0: update an existing unlocked slot for `key`.
     // Pass 1: claim an empty slot.
-    // Pass 2: reclaim any slot (including one abandoned with `INFO_LOCK_BIT`)
-    // whose owner thread is provably dead via `tgkill`/`kill` (`-ESRCH`).
+    // Pass 2: reclaim an unlocked slot whose owner thread is dead (`-ESRCH`).
     let my_pid = slot_pid(key);
     for pass in 0..3 {
         for slot in &PENDING_INFOS {
@@ -517,10 +528,10 @@ fn store_pending_info(key: u64, info: siginfo) {
                 0 => cur == key,
                 1 => cur == 0,
                 _ => {
-                    let owner = cur & KEY_MASK;
-                    owner != 0
-                        && owner != key
-                        && !is_tid_alive(my_pid, slot_pid(owner), slot_tid(owner))
+                    (cur & INFO_LOCK_BIT) == 0
+                        && cur != 0
+                        && cur != key
+                        && !is_tid_alive(my_pid, slot_pid(cur), slot_tid(cur))
                 }
             };
             if can_claim
@@ -600,8 +611,31 @@ fn take_pending_sigsys(pid: i32, tid: i32) -> Option<siginfo> {
     Some(take_pending_info(key).unwrap_or_else(synthetic_sigsys_info))
 }
 
-fn discard_pending_sigsys(pid: i32, tid: i32) {
-    let _ = take_pending_sigsys(pid, tid);
+/// Discards any pending virtual `SIGSYS` across every thread in process `pid`
+/// (matching POSIX/Linux `rt_sigaction(SIGSYS, SIG_IGN)` semantics).
+fn discard_all_pending_sigsys(pid: i32) {
+    if OCCUPIED_SLOTS.load(Ordering::Acquire) == 0 {
+        return;
+    }
+    for slot in &TID_SLOTS {
+        loop {
+            let val = slot.load(Ordering::Acquire);
+            if val == 0 || slot_pid(val) != pid || (val & BIT_PENDING) == 0 {
+                break;
+            }
+            let key = val & KEY_MASK;
+            let new_flags = (val & (BIT_BLOCKED | BIT_PENDING)) & !BIT_PENDING;
+            let new_val = if new_flags == 0 { 0 } else { key | new_flags };
+            if slot.compare_exchange_weak(val, new_val, Ordering::AcqRel, Ordering::Relaxed).is_ok()
+            {
+                if new_val == 0 {
+                    OCCUPIED_SLOTS.fetch_sub(1, Ordering::Release);
+                }
+                let _ = take_pending_info(key);
+                break;
+            }
+        }
+    }
 }
 
 /// Handles intercepted `rt_sigaction(signum, act, oldact, sigsetsize)`.
@@ -636,7 +670,7 @@ pub unsafe fn handle_rt_sigaction(inv: SyscallInvocation) -> isize {
         // Read `prev` first and validate/write `oldact` before mutating the
         // virtualized action so an unwritable `oldact` returns `-EFAULT`
         // without changing signal state.
-        let prev = with_action_lock(|slot| *slot);
+        let prev = USER_SIGSYS_ACTION.read();
         // SAFETY: user pointer from the trapped syscall (see `usermem`).
         if oldact_ptr != 0 && unsafe { usermem::write_user(oldact_ptr, &prev) }.is_err() {
             return neg_errno(EFAULT);
@@ -645,11 +679,13 @@ pub unsafe fn handle_rt_sigaction(inv: SyscallInvocation) -> isize {
         if let Some(act) = new_act
             && !shared_vm
         {
-            with_action_lock(|slot| {
-                *slot = act;
-            });
+            let actual_prev = USER_SIGSYS_ACTION.write_with(|cur| (act, cur));
+            if oldact_ptr != 0 && actual_prev != prev {
+                // SAFETY: `oldact_ptr` was validated writable above.
+                let _ = unsafe { usermem::write_user(oldact_ptr, &actual_prev) };
+            }
             if act.sa_handler == SIG_IGN_RAW {
-                discard_pending_sigsys(getpid(), gettid());
+                discard_all_pending_sigsys(getpid());
             }
         }
         return 0;
@@ -838,6 +874,18 @@ pub unsafe fn handle_rt_sigpending(inv: SyscallInvocation) -> isize {
     rc
 }
 
+/// Completes a masked-wait syscall in `ucontext`, delivering any pending
+/// `SIGSYS` AFTER writing the syscall return value so `SA_SIGINFO` handlers
+/// observe the real return value and any edits they make to `ucontext` survive.
+unsafe fn finish_masked_wait(ucontext: &mut Ucontext, rc: isize, pending: Option<siginfo>) {
+    set_syscall_result(ucontext, rc);
+    *uc_sigmask_mut(ucontext) &= !SIGSYS_BIT;
+    if let Some(mut info) = pending {
+        // SAFETY: `info` is valid stack storage and `ucontext` is writable.
+        unsafe { deliver_sigsys_now(SIGSYS_I32, &raw mut info, ucontext) };
+    }
+}
+
 /// Handles masked-wait syscalls where `args[mask_idx]` is a `*const u64`
 /// sigset pointer and `args[size_idx]` is `sigsetsize`.
 ///
@@ -858,7 +906,7 @@ pub unsafe fn handle_masked_wait(
     mask_idx: usize,
     size_idx: usize,
     allow_null_mask: bool,
-) -> isize {
+) {
     let mask_ptr = inv.args[mask_idx];
     let sigsetsize = inv.args[size_idx];
 
@@ -866,29 +914,40 @@ pub unsafe fn handle_masked_wait(
         if !allow_null_mask {
             // `rt_sigsuspend(NULL, ...)` fails immediately with `-EFAULT`.
             // SAFETY: Replays the invalid invocation directly.
-            return unsafe { replay(inv) };
+            let rc = unsafe { replay(inv) };
+            // SAFETY: Completes `ucontext` with no pending delivery.
+            unsafe { finish_masked_wait(ucontext, rc, None) };
+            return;
         }
         let orig_mask = ucontext.uc_sigmask & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
         inv.args[mask_idx] = (&raw const orig_mask).addr();
         inv.args[size_idx] = KERNEL_SIGSET_SIZE;
         // SAFETY: `orig_mask` remains valid on the entry stack for the syscall.
-        return unsafe { replay_masked_wait(&inv, ucontext) };
+        let rc = unsafe { replay_masked_wait(&inv, ucontext) };
+        // SAFETY: Completes `ucontext` with no pending delivery.
+        unsafe { finish_masked_wait(ucontext, rc, None) };
+        return;
     }
 
     if sigsetsize != KERNEL_SIGSET_SIZE {
         // SAFETY: Replay invalid sigsetsize to preserve exact `-EINVAL`.
-        return unsafe { replay(inv) };
+        let rc = unsafe { replay(inv) };
+        // SAFETY: Completes `ucontext` with no pending delivery.
+        unsafe { finish_masked_wait(ucontext, rc, None) };
+        return;
     }
 
     // SAFETY: `u64` accepts any bit pattern.
     let Ok(raw_mask) = (unsafe { usermem::read_user::<u64>(mask_ptr) }) else {
-        return neg_errno(EFAULT);
+        // SAFETY: Completes `ucontext` with `-EFAULT`.
+        unsafe { finish_masked_wait(ucontext, neg_errno(EFAULT), None) };
+        return;
     };
 
     let filtered = raw_mask & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
     inv.args[mask_idx] = (&raw const filtered).addr();
     // SAFETY: `filtered` lives on the entry stack for the wait duration.
-    unsafe { run_wait_with_virtual_sigsys(inv, ucontext, (raw_mask & SIGSYS_BIT) != 0) }
+    unsafe { run_wait_with_virtual_sigsys(inv, ucontext, (raw_mask & SIGSYS_BIT) != 0) };
 }
 
 /// Handles `pselect6(nfds, readfds, writefds, exceptfds, timeout, sigmask_struct)`.
@@ -899,40 +958,53 @@ pub unsafe fn handle_masked_wait(
 ///
 /// `inv` must contain the arguments from a trapped `pselect6` syscall, and
 /// `ucontext` must be the live writable signal frame for that trap.
-pub unsafe fn handle_pselect6(mut inv: SyscallInvocation, ucontext: &mut Ucontext) -> isize {
+pub unsafe fn handle_pselect6(mut inv: SyscallInvocation, ucontext: &mut Ucontext) {
     let orig_mask = ucontext.uc_sigmask & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
     let sig_ptr = inv.args[5];
     if sig_ptr == 0 {
         let local_wrapper = PselectSigmask { ss: &raw const orig_mask, ss_len: KERNEL_SIGSET_SIZE };
         inv.args[5] = (&raw const local_wrapper).addr();
         // SAFETY: `local_wrapper` and `orig_mask` live on the entry stack.
-        return unsafe { replay_masked_wait(&inv, ucontext) };
+        let rc = unsafe { replay_masked_wait(&inv, ucontext) };
+        // SAFETY: Completes `ucontext` with no pending delivery.
+        unsafe { finish_masked_wait(ucontext, rc, None) };
+        return;
     }
 
     // SAFETY: `PselectSigmask` is a plain `#[repr(C)]` struct of pointer + usize.
     let Ok(wrapper) = (unsafe { usermem::read_user::<PselectSigmask>(sig_ptr) }) else {
-        return neg_errno(EFAULT);
+        // SAFETY: Completes `ucontext` with `-EFAULT`.
+        unsafe { finish_masked_wait(ucontext, neg_errno(EFAULT), None) };
+        return;
     };
     if wrapper.ss.is_null() {
         let local_wrapper = PselectSigmask { ss: &raw const orig_mask, ss_len: KERNEL_SIGSET_SIZE };
         inv.args[5] = (&raw const local_wrapper).addr();
         // SAFETY: `local_wrapper` and `orig_mask` live on the entry stack.
-        return unsafe { replay_masked_wait(&inv, ucontext) };
+        let rc = unsafe { replay_masked_wait(&inv, ucontext) };
+        // SAFETY: Completes `ucontext` with no pending delivery.
+        unsafe { finish_masked_wait(ucontext, rc, None) };
+        return;
     }
     if wrapper.ss_len != KERNEL_SIGSET_SIZE {
         // SAFETY: Invalid sigsetsize; replay directly to return `-EINVAL`.
-        return unsafe { replay(inv) };
+        let rc = unsafe { replay(inv) };
+        // SAFETY: Completes `ucontext` with no pending delivery.
+        unsafe { finish_masked_wait(ucontext, rc, None) };
+        return;
     }
 
     // SAFETY: `u64` accepts any bit pattern.
     let Ok(raw_mask) = (unsafe { usermem::read_user::<u64>(wrapper.ss.addr()) }) else {
-        return neg_errno(EFAULT);
+        // SAFETY: Completes `ucontext` with `-EFAULT`.
+        unsafe { finish_masked_wait(ucontext, neg_errno(EFAULT), None) };
+        return;
     };
     let filtered = raw_mask & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
     let local_wrapper = PselectSigmask { ss: &raw const filtered, ss_len: KERNEL_SIGSET_SIZE };
     inv.args[5] = (&raw const local_wrapper).addr();
     // SAFETY: `local_wrapper` and `filtered` live on the entry stack for the wait.
-    unsafe { run_wait_with_virtual_sigsys(inv, ucontext, (raw_mask & SIGSYS_BIT) != 0) }
+    unsafe { run_wait_with_virtual_sigsys(inv, ucontext, (raw_mask & SIGSYS_BIT) != 0) };
 }
 
 #[inline]
@@ -957,31 +1029,9 @@ fn monotonic_ns() -> Option<i128> {
     }
 }
 
-/// Clears `pselect6`'s non-null `readfds`/`writefds`/`exceptfds` bitsets when
-/// a zero-timeout retry loop is exhausted under a continuous `SIGSYS` flood.
-fn clear_pselect_fdsets(inv: &SyscallInvocation) {
-    // Cap at `FD_SETSIZE` (1024 bits = 128 bytes) so callers passing a large
-    // `nfds` (e.g. `getdtablesize()`) with a standard `fd_set` never get memory
-    // beyond their `fd_set` zeroed if zero-timeout retries are exhausted.
-    let nfds = arg_i32(inv.args[0]).min(1024);
-    if nfds <= 0 {
-        return;
-    }
-    let words = nfds.cast_unsigned().div_ceil(64) as usize;
-    let total_bytes = words * core::mem::size_of::<u64>();
-    let zeros = [0_u8; 128];
-    for fdset_ptr in [inv.args[1], inv.args[2], inv.args[3]] {
-        if fdset_ptr == 0 {
-            continue;
-        }
-        // SAFETY: user pointer from the trapped syscall (see `usermem`).
-        let _ = unsafe { usermem::write_user_bytes(fdset_ptr, &zeros[..total_bytes]) };
-    }
-}
-
 /// Replays a masked-wait syscall while `SIGSYS` is virtually blocked, retrying
-/// if the wait returned `-EINTR` solely because a virtually-blocked non-seccomp
-/// `SIGSYS` woke the kernel wait.
+/// with the remaining timeout if a virtually-blocked non-seccomp `SIGSYS` woke
+/// the kernel wait with `-EINTR`.
 #[expect(clippy::cast_possible_truncation, reason = "Linux timeout fields fit in i32/i64")]
 unsafe fn replay_masked_wait_deferring_sigsys(
     pid: i32,
@@ -989,7 +1039,6 @@ unsafe fn replay_masked_wait_deferring_sigsys(
     mut inv: SyscallInvocation,
     ucontext: &mut Ucontext,
 ) -> isize {
-    const MAX_ZERO_POLL_RETRIES: u8 = 8;
     let sysno = Sysno::new(inv.nr);
     // Snapshot initial relative timeout (if any) before first wait so retries
     // after a deferred `SIGSYS` preserve the caller's deadline for `ppoll`,
@@ -1033,7 +1082,6 @@ unsafe fn replay_masked_wait_deferring_sigsys(
 
     let start_ns = initial_timeout_ns.and_then(|_| monotonic_ns());
     let mut retried = false;
-    let mut zero_poll_retries = 0_u8;
 
     loop {
         if retried && let Some(idx) = ts_arg_idx {
@@ -1051,37 +1099,32 @@ unsafe fn replay_masked_wait_deferring_sigsys(
             return rc;
         }
         retried = true;
-        // A virtually-blocked `SIGSYS` interrupted this thread's kernel wait;
-        // retry with the remaining timeout (or a bounded number of zero-timeout
-        // kernel polls if expired, falling back to clearing `pselect6` fd sets
-        // directly so a tight `SIGSYS` flood can neither livelock nor leave
-        // stale fd-set bits behind).
         if let (Some(total_ns), Some(t0)) = (initial_timeout_ns, start_ns) {
             let elapsed = monotonic_ns().map_or(total_ns, |now| now.saturating_sub(t0));
             let rem = total_ns - elapsed;
             if rem <= 0 {
-                if zero_poll_retries >= MAX_ZERO_POLL_RETRIES {
-                    if sysno == Some(Sysno::pselect6) {
-                        clear_pselect_fdsets(&inv);
-                    }
-                    if matches!(sysno, Some(Sysno::pselect6 | Sysno::ppoll)) && orig_ts_ptr != 0 {
-                        local_ts = timespec { tv_sec: 0, tv_nsec: 0 };
-                        // SAFETY: user pointer from the trapped syscall (see `usermem`).
-                        let _ = unsafe { usermem::write_user(orig_ts_ptr, &local_ts) };
-                    }
-                    return 0;
-                }
-                zero_poll_retries += 1;
+                // Deadline expired: perform one non-blocking zero-timeout poll
+                // so Linux reports any ready fds or clears `pselect6` fd sets
+                // and updates the caller's timespec, then return directly.
                 match sysno {
                     Some(Sysno::ppoll | Sysno::pselect6 | Sysno::epoll_pwait2) => {
                         local_ts = timespec { tv_sec: 0, tv_nsec: 0 };
+                        if let Some(idx) = ts_arg_idx {
+                            inv.args[idx] = (&raw const local_ts).addr();
+                        }
                     }
                     Some(Sysno::epoll_pwait) => {
                         inv.args[3] = 0;
                     }
                     _ => {}
                 }
-                continue;
+                // SAFETY: `inv` points to valid entry-stack wait args with zero timeout.
+                let rc = unsafe { replay_masked_wait(&inv, ucontext) };
+                if matches!(sysno, Some(Sysno::pselect6 | Sysno::ppoll)) && orig_ts_ptr != 0 {
+                    // SAFETY: user pointer from the trapped syscall (see `usermem`).
+                    let _ = unsafe { usermem::write_user(orig_ts_ptr, &local_ts) };
+                }
+                return rc;
             }
             match sysno {
                 Some(Sysno::ppoll | Sysno::pselect6 | Sysno::epoll_pwait2) => {
@@ -1102,52 +1145,57 @@ unsafe fn replay_masked_wait_deferring_sigsys(
 }
 
 /// Runs a masked-wait syscall while honoring the caller's temporary `SIGSYS`
-/// blocked/unblocked bit in the wait mask.
+/// blocked/unblocked bit in the wait mask, and completes `ucontext`.
 unsafe fn run_wait_with_virtual_sigsys(
     inv: SyscallInvocation,
     ucontext: &mut Ucontext,
     wait_blocks_sigsys: bool,
-) -> isize {
+) {
     let pid = getpid();
     let tid = gettid();
     let was_blocked = (lookup_tid_flags(pid, tid) & BIT_BLOCKED) != 0;
 
     if !wait_blocks_sigsys && was_blocked {
         // Wait mask temporarily unblocks `SIGSYS`. If one is already pending,
-        // deliver it immediately and return `-EINTR` (matching Linux `sigsuspend`).
-        if let Some(mut info) = take_pending_sigsys(pid, tid) {
+        // write `-EINTR` to `ucontext` first and then deliver it immediately
+        // (matching Linux `sigsuspend`).
+        if let Some(info) = take_pending_sigsys(pid, tid) {
             // SAFETY: Delivering pending virtual `SIGSYS` on entry stack.
-            unsafe { deliver_sigsys_now(SIGSYS_I32, &raw mut info, ucontext) };
-            return neg_errno(EINTR);
+            unsafe { finish_masked_wait(ucontext, neg_errno(EINTR), Some(info)) };
+            return;
         }
         let _ = set_tid_blocked(pid, tid, false);
         // SAFETY: `inv` points to valid entry-stack wait args.
         let rc = unsafe { replay_masked_wait(&inv, ucontext) };
         let _ = set_tid_blocked(pid, tid, true);
-        return rc;
+        // SAFETY: Completes `ucontext` with no pending delivery.
+        unsafe { finish_masked_wait(ucontext, rc, None) };
+        return;
     }
 
     if wait_blocks_sigsys && !was_blocked {
         // Wait mask temporarily blocks `SIGSYS`; defer any non-seccomp `SIGSYS`
-        // that arrives during the wait until the wait completes.
+        // that arrives during the wait until the wait completes, then write
+        // `rc` to `ucontext` BEFORE delivering any deferred `SIGSYS`.
         let _ = set_tid_blocked(pid, tid, true);
         // SAFETY: `inv` points to valid entry-stack wait args.
         let rc = unsafe { replay_masked_wait_deferring_sigsys(pid, tid, inv, ucontext) };
         let _ = set_tid_blocked(pid, tid, false);
-        if let Some(mut info) = take_pending_sigsys(pid, tid) {
-            // SAFETY: Delivering `SIGSYS` that arrived while masked by wait.
-            unsafe { deliver_sigsys_now(SIGSYS_I32, &raw mut info, ucontext) };
-        }
-        return rc;
+        let pending = take_pending_sigsys(pid, tid);
+        // SAFETY: Writes `rc` before delivering any deferred `SIGSYS`.
+        unsafe { finish_masked_wait(ucontext, rc, pending) };
+        return;
     }
 
-    if wait_blocks_sigsys {
+    let rc = if wait_blocks_sigsys {
         // SAFETY: `SIGSYS` is already blocked; retry if a deferred `SIGSYS` wakes the wait.
-        return unsafe { replay_masked_wait_deferring_sigsys(pid, tid, inv, ucontext) };
-    }
-
-    // SAFETY: `inv` points to valid entry-stack wait args.
-    unsafe { replay_masked_wait(&inv, ucontext) }
+        unsafe { replay_masked_wait_deferring_sigsys(pid, tid, inv, ucontext) }
+    } else {
+        // SAFETY: `inv` points to valid entry-stack wait args.
+        unsafe { replay_masked_wait(&inv, ucontext) }
+    };
+    // SAFETY: Completes `ucontext` with no pending delivery.
+    unsafe { finish_masked_wait(ucontext, rc, None) };
 }
 
 /// Handles a non-seccomp or foreign-seccomp `SIGSYS` delivery, deferring
@@ -1168,27 +1216,19 @@ pub unsafe fn forward_non_seccomp_sigsys(signum: i32, info: *mut siginfo, uconte
     if !is_foreign_seccomp && is_current_tid_blocked() {
         let pid = getpid();
         let tid = gettid();
-        let handler = with_action_lock(|slot| slot.sa_handler);
-        if handler != SIG_IGN_RAW {
+        if USER_SIGSYS_ACTION.read().sa_handler != SIG_IGN_RAW {
             record_pending_sigsys(pid, tid, info);
         }
-        // Only mark this thread's masked wait as woken by a deferred `SIGSYS`
-        // when `SIGSYS` directly interrupted `replay_masked_wait`'s syscall.
-        // If another signal (e.g. `SIGINT`/`SIGUSR1`) was dequeued first on
-        // the same wake or was already executing its handler, `ucontext_pc`
-        // points to that user handler rather than `masked_wait_return_pc()`,
-        // so the wait preserves `-EINTR` instead of swallowing it.
-        if !ucontext.is_null()
-            // SAFETY: Kernel guarantees `ucontext` is readable in `SA_SIGINFO` handler.
-            && ucontext_pc(unsafe { &*ucontext }) == masked_wait_return_pc()
-        {
-            bump_tid_deferred_seq(pid, tid);
-        }
+        bump_tid_deferred_seq(pid, tid);
         return;
     }
 
+    debug_assert!(!ucontext.is_null(), "kernel SA_SIGINFO delivery must supply ucontext");
+    if ucontext.is_null() {
+        return;
+    }
     // SAFETY: Caller passed valid kernel signal frame pointers.
-    unsafe { deliver_sigsys_now(signum, info, ucontext) };
+    unsafe { deliver_sigsys_now(signum, info, &mut *ucontext) };
 }
 
 /// Delivers a `SIGSYS` immediately to the target's virtualized `SIGSYS`
@@ -1197,68 +1237,84 @@ pub unsafe fn forward_non_seccomp_sigsys(signum: i32, info: *mut siginfo, uconte
 ///
 /// # Safety
 ///
-/// Must be called on the entry stack with valid `info` and `ucontext` pointers.
-pub unsafe fn deliver_sigsys_now(signum: i32, info: *mut siginfo, ucontext: *mut Ucontext) {
-    let user_act = with_action_lock(|slot| {
-        let act = *slot;
-        if (act.sa_flags & SA_RESETHAND as usize) != 0 {
-            slot.sa_handler = SIG_DFL_RAW;
-        }
-        act
-    });
-
-    match user_act.sa_handler {
-        SIG_IGN_RAW => {}
-        SIG_DFL_RAW => terminate_with_default_sigsys(),
-        handler_addr => {
-            // Our `SIGSYS` `sa_mask` blocked all maskable signals on entry;
-            // install the exact mask the target handler expects (`orig_mask |
-            // user_act.sa_mask`, with `SIGSYS` kept unblocked in the kernel).
-            let orig_mask = if ucontext.is_null() {
-                0
+/// Must be called on the entry stack with valid `info` and writable `ucontext`.
+pub unsafe fn deliver_sigsys_now(mut signum: i32, mut info: *mut siginfo, ucontext: &mut Ucontext) {
+    let mut deferred_info: siginfo;
+    loop {
+        let user_act = {
+            let act = USER_SIGSYS_ACTION.read();
+            if (act.sa_flags & SA_RESETHAND as usize) != 0 && !is_shared_vm_child() {
+                USER_SIGSYS_ACTION.write_with(|mut cur| {
+                    let prev = cur;
+                    if (cur.sa_flags & SA_RESETHAND as usize) != 0 {
+                        cur.sa_handler = SIG_DFL_RAW;
+                    }
+                    (cur, prev)
+                })
             } else {
-                // SAFETY: Kernel-provided `ucontext` is readable.
-                unsafe { (*ucontext).uc_sigmask }
-            };
-            let handler_mask = (orig_mask | user_act.sa_mask) & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
-            // SAFETY: `handler_mask` is a valid stack-local `u64`.
-            let _ =
-                unsafe { rt_sigprocmask(SIG_SETMASK, &raw const handler_mask, ptr::null_mut()) };
-
-            let defer_sigsys = (user_act.sa_flags & SA_NODEFER as usize) == 0;
-            let pid = if defer_sigsys { getpid() } else { 0 };
-            let tid = if defer_sigsys { gettid() } else { 0 };
-            let prev_virtual_blocked =
-                defer_sigsys && (lookup_tid_flags(pid, tid) & BIT_BLOCKED) != 0;
-            if defer_sigsys && !prev_virtual_blocked {
-                let _ = set_tid_blocked(pid, tid, true);
+                act
             }
+        };
 
-            // SAFETY: `handler_addr` was registered by the target as its `SIGSYS`
-            // handler; `invoke_user_sigsys_handler` restores `x28` on AArch64.
-            unsafe {
-                invoke_user_sigsys_handler(
-                    handler_addr,
-                    (user_act.sa_flags & SA_SIGINFO as usize) != 0,
-                    signum,
-                    info,
-                    ucontext,
-                );
-            }
+        match user_act.sa_handler {
+            SIG_IGN_RAW => return,
+            SIG_DFL_RAW => terminate_with_default_sigsys(),
+            handler_addr => {
+                // Our `SIGSYS` `sa_mask` blocked all maskable signals (including
+                // `SIGSYS`) on entry; install the exact mask the target handler
+                // expects (`orig_mask | user_act.sa_mask`, with `SIGSYS` unblocked
+                // in the kernel so trapped syscalls inside the handler keep working).
+                let orig_mask = ucontext.uc_sigmask;
+                let handler_mask =
+                    (orig_mask | user_act.sa_mask) & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
+                // SAFETY: `handler_mask` is a valid stack-local `u64`.
+                let _ = unsafe {
+                    rt_sigprocmask(SIG_SETMASK, &raw const handler_mask, ptr::null_mut())
+                };
 
-            if defer_sigsys && !prev_virtual_blocked {
-                let _ = set_tid_blocked(pid, tid, false);
-            }
-            if ucontext.is_null() {
-                let restore = orig_mask & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
-                // SAFETY: `restore` is a valid stack-local `u64`.
-                let _ = unsafe { rt_sigprocmask(SIG_SETMASK, &raw const restore, ptr::null_mut()) };
-            } else {
-                // Ensure returning through `rt_sigreturn` cannot re-block SIGSYS
+                let defer_sigsys = (user_act.sa_flags & SA_NODEFER as usize) == 0;
+                let pid = if defer_sigsys { getpid() } else { 0 };
+                let tid = if defer_sigsys { gettid() } else { 0 };
+                let prev_virtual_blocked =
+                    defer_sigsys && (lookup_tid_flags(pid, tid) & BIT_BLOCKED) != 0;
+                if defer_sigsys && !prev_virtual_blocked {
+                    let _ = set_tid_blocked(pid, tid, true);
+                }
+
+                // SAFETY: `handler_addr` was registered by the target as its `SIGSYS`
+                // handler; `invoke_user_sigsys_handler` restores `x28` on AArch64.
+                unsafe {
+                    invoke_user_sigsys_handler(
+                        handler_addr,
+                        (user_act.sa_flags & SA_SIGINFO as usize) != 0,
+                        signum,
+                        info,
+                        ucontext,
+                    );
+                }
+
+                // Ensure returning through `rt_sigreturn` cannot re-block `SIGSYS`
                 // even if the user handler mutated `ucontext->uc_sigmask`.
-                // `rt_sigreturn` also restores `ucontext->uc_sigmask` atomically.
-                // SAFETY: Kernel-provided `ucontext` is writable.
-                *uc_sigmask_mut(unsafe { &mut *ucontext }) &= !SIGSYS_BIT;
+                *uc_sigmask_mut(ucontext) &= !SIGSYS_BIT;
+
+                if defer_sigsys && !prev_virtual_blocked {
+                    let _ = set_tid_blocked(pid, tid, false);
+                    if let Some(next) = take_pending_sigsys(pid, tid) {
+                        // Re-block maskable signals before looping so any
+                        // `SA_RESETHAND` write in the next iteration cannot be
+                        // preempted by an async signal.
+                        let block_all = HANDLER_BLOCK_MASK;
+                        // SAFETY: `block_all` is a valid stack-local `u64`.
+                        let _ = unsafe {
+                            rt_sigprocmask(SIG_SETMASK, &raw const block_all, ptr::null_mut())
+                        };
+                        deferred_info = next;
+                        info = &raw mut deferred_info;
+                        signum = SIGSYS_I32;
+                        continue;
+                    }
+                }
+                return;
             }
         }
     }
@@ -1328,5 +1384,43 @@ mod tests {
         set_tid_blocked(pid, 99, false).unwrap();
         assert_eq!(lookup_tid_flags(pid, 99), 0);
         assert_eq!(OCCUPIED_SLOTS.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn discard_all_pending_clears_every_thread_in_pid_only() {
+        clear_all_tid_slots();
+        let pid = getpid();
+        set_tid_blocked(pid, 10, true).unwrap();
+        record_pending_sigsys(pid, 10, ptr::null());
+        record_pending_sigsys(pid, 11, ptr::null());
+        record_pending_sigsys(pid + 1, 10, ptr::null());
+
+        discard_all_pending_sigsys(pid);
+
+        assert_eq!(lookup_tid_flags(pid, 10), BIT_BLOCKED);
+        assert_eq!(lookup_tid_flags(pid, 11), 0);
+        assert_eq!(lookup_tid_flags(pid + 1, 10), BIT_PENDING);
+        clear_all_tid_slots();
+    }
+
+    #[test]
+    fn seq_action_reads_writes_and_resets_after_fork() {
+        let cell = SeqAction::new_dfl();
+        assert_eq!(cell.read().sa_handler, SIG_DFL_RAW);
+        let custom = KernelSigaction {
+            sa_handler: 0x1234,
+            sa_flags: SA_SIGINFO as usize,
+            sa_restorer: 0x5678,
+            sa_mask: 0x9abc,
+        };
+        let prev = cell.write_with(|cur| (custom, cur));
+        assert_eq!(prev.sa_handler, SIG_DFL_RAW);
+        assert_eq!(cell.read(), custom);
+
+        // Simulate a sibling thread interrupted mid-write across `fork()`.
+        cell.writer_lock.store(true, Ordering::Relaxed);
+        cell.seq.fetch_add(1, Ordering::Relaxed);
+        cell.reset_after_fork();
+        assert_eq!(cell.read(), custom);
     }
 }

@@ -73,6 +73,7 @@ fn run_loaded_fixture(fixture: &str, interpreter: bool, fixed_address: bool) -> 
     let mut command = launcher();
     command.args([fixture, "custom-argv-zero"]);
     configure_runtime_fixture(&mut command, fixture, interpreter, fixed_address);
+    command.env("EXPECT_ALIGNED_RANDOM", "1");
     output(command)
 }
 
@@ -245,7 +246,21 @@ fn virtualizes_sigsys_blocking_multi_threaded() {
 fn virtualizes_proc_self_exe_syscalls() {
     let tmp = tempfile::tempdir().unwrap();
     let other_exe_link = tmp.path().join("exe");
+    let other_exe_subdir = tmp.path().join("sub");
+    std::fs::create_dir(&other_exe_subdir).unwrap();
     unix_fs::symlink("/dev/null", &other_exe_link).unwrap();
+
+    // Spawn a separate process so `/proc/<other_pid>/exe` non-rewrite is tested
+    // deterministically with matching UID.
+    let mut sleeper = Command::new("/bin/sleep")
+        .arg("30")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let other_pid = sleeper.id().to_string();
+    let other_pid_exe = std::fs::canonicalize("/bin/sleep").unwrap();
 
     for (sym_name, fixture) in [
         ("sym_virt_dyn_pie", FIXTURE_VIRT_DYN_PIE),
@@ -259,6 +274,10 @@ fn virtualizes_proc_self_exe_syscalls() {
             .arg("proc-exe")
             .env("EXPECTED_EXE", &canonical)
             .env("OTHER_EXE_LINK", &other_exe_link)
+            .env("OTHER_EXE_DIR", tmp.path())
+            .env("OTHER_EXE_SUBDIR", &other_exe_subdir)
+            .env("OTHER_PID", &other_pid)
+            .env("OTHER_PID_EXE", &other_pid_exe)
             .stderr(Stdio::piped());
         let direct = output(direct);
         assert_eq!(direct.status.code(), Some(0), "kernel exec ({fixture}): {direct:?}");
@@ -268,7 +287,11 @@ fn virtualizes_proc_self_exe_syscalls() {
         loaded
             .args([fixture, "custom-argv0", "proc-exe"])
             .env("EXPECTED_EXE", &canonical)
-            .env("OTHER_EXE_LINK", &other_exe_link);
+            .env("OTHER_EXE_LINK", &other_exe_link)
+            .env("OTHER_EXE_DIR", tmp.path())
+            .env("OTHER_EXE_SUBDIR", &other_exe_subdir)
+            .env("OTHER_PID", &other_pid)
+            .env("OTHER_PID_EXE", &other_pid_exe);
         let loaded = output(loaded);
         assert_eq!(loaded.status.code(), Some(0), "loader exec ({fixture}): {loaded:?}");
         assert_eq!(loaded.stdout, direct.stdout);
@@ -282,7 +305,11 @@ fn virtualizes_proc_self_exe_syscalls() {
             .arg(&sym_target)
             .args(["sym-argv0", "proc-exe"])
             .env("EXPECTED_EXE", &canonical)
-            .env("OTHER_EXE_LINK", &other_exe_link);
+            .env("OTHER_EXE_LINK", &other_exe_link)
+            .env("OTHER_EXE_DIR", tmp.path())
+            .env("OTHER_EXE_SUBDIR", &other_exe_subdir)
+            .env("OTHER_PID", &other_pid)
+            .env("OTHER_PID_EXE", &other_pid_exe);
         let via_symlink = output(via_symlink);
         assert_eq!(
             via_symlink.status.code(),
@@ -292,6 +319,9 @@ fn virtualizes_proc_self_exe_syscalls() {
         assert_eq!(via_symlink.stdout, b"proc-exe-ok\n");
         assert!(via_symlink.stderr.is_empty(), "{via_symlink:?}");
     }
+
+    let _ = sleeper.kill();
+    let _ = sleeper.wait();
 }
 
 #[test]
@@ -600,6 +630,126 @@ fn posix_spawnp_long_path_preserves_small_child_stack() {
     }
 }
 
+#[test]
+#[timeout(10_000)]
+fn io_uring_setup_returns_enosys() {
+    for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
+        let mut loaded = launcher();
+        loaded.args([fixture, fixture, "io-uring-enosys"]);
+        let loaded = output(loaded);
+        assert_eq!(loaded.status.code(), Some(0), "io-uring-enosys ({fixture}): {loaded:?}");
+        assert_eq!(loaded.stdout, b"io-uring-enosys-ok\n");
+        assert!(loaded.stderr.is_empty(), "io-uring-enosys ({fixture}): {loaded:?}");
+    }
+}
+
+#[test]
+#[timeout(10_000)]
+fn mismatched_fingerprint_re_exec_installs_new_filter() {
+    for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
+        let canonical = std::fs::canonicalize(fixture).unwrap();
+        let mut loaded = launcher();
+        // Stage 1 runs without `--test-interceptor` and re-execs with `--test-interceptor`.
+        loaded
+            .args([fixture, "recursive-stage-1", "recursive-exec"])
+            .env("EXPECTED_EXE", &canonical)
+            .env("LAUNCHER_PATH", LAUNCHER)
+            .env("RECURSIVE_STAGE", "1")
+            .env("USE_INTERCEPTOR", "1")
+            .env("EXPECT_FILTER_INCREMENT", "1");
+        let loaded = output(loaded);
+        assert_eq!(loaded.status.code(), Some(0), "mismatched-fp ({fixture}): {loaded:?}");
+        assert_eq!(loaded.stdout, b"recursive-exec-ok\n");
+        assert!(loaded.stderr.is_empty(), "{loaded:?}");
+    }
+}
+
+#[test]
+#[timeout(10_000)]
+fn inherits_pre_exec_sigsys_ign_and_blocked_mask() {
+    for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
+        let canonical = std::fs::canonicalize(fixture).unwrap();
+        let configure_pre_exec = |cmd: &mut Command| {
+            // SAFETY: `sigaction` and `sigprocmask` are async-signal-safe and
+            // run in the forked child prior to `execve`.
+            unsafe {
+                cmd.pre_exec(|| {
+                    let mut sa: libc::sigaction = std::mem::zeroed();
+                    sa.sa_sigaction = libc::SIG_IGN;
+                    if libc::sigaction(libc::SIGSYS, &raw const sa, std::ptr::null_mut()) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    let mut set: libc::sigset_t = std::mem::zeroed();
+                    libc::sigemptyset(&raw mut set);
+                    libc::sigaddset(&raw mut set, libc::SIGSYS);
+                    libc::sigaddset(&raw mut set, libc::SIGUSR1);
+                    if libc::sigprocmask(libc::SIG_BLOCK, &raw const set, std::ptr::null_mut()) != 0
+                    {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        };
+
+        let mut direct = Command::new(fixture);
+        direct.arg("inherited-sigsys").env("EXPECTED_EXE", &canonical).stderr(Stdio::piped());
+        configure_pre_exec(&mut direct);
+        let direct = output(direct);
+        assert_eq!(direct.status.code(), Some(0), "kernel exec ({fixture}): {direct:?}");
+        assert_eq!(direct.stdout, b"inherited-sigsys-ok\n");
+
+        let mut loaded = launcher();
+        loaded.args([fixture, fixture, "inherited-sigsys"]).env("EXPECTED_EXE", &canonical);
+        configure_pre_exec(&mut loaded);
+        let loaded = output(loaded);
+        assert_eq!(loaded.status.code(), Some(0), "loader exec ({fixture}): {loaded:?}");
+        assert_eq!(loaded.stdout, direct.stdout);
+        assert_eq!(loaded.stderr, direct.stderr);
+    }
+}
+
+#[test]
+#[timeout(10_000)]
+fn aarch64_x28_survives_masked_wait_open_and_forwarded_sigsys() {
+    let tmp = tempfile::tempdir().unwrap();
+    for (direct_name, loaded_name, fixture) in [
+        ("x28_direct_0.fifo", "x28_loaded_0.fifo", FIXTURE_VIRT_DYN_PIE),
+        ("x28_direct_1.fifo", "x28_loaded_1.fifo", FIXTURE_VIRT_STATIC_EXEC),
+    ] {
+        let fifo_direct = tmp.path().join(direct_name);
+        let mut direct = Command::new(fixture);
+        direct.arg("aarch64-x28").env("FIFO_PATH", &fifo_direct).stderr(Stdio::piped());
+        let direct = output(direct);
+        assert_eq!(direct.status.code(), Some(0), "kernel exec ({fixture}): {direct:?}");
+        assert_eq!(direct.stdout, b"aarch64-x28-ok\n");
+
+        let fifo_loaded = tmp.path().join(loaded_name);
+        let mut loaded = launcher();
+        loaded.args([fixture, fixture, "aarch64-x28"]).env("FIFO_PATH", &fifo_loaded);
+        let loaded = output(loaded);
+        assert_eq!(loaded.status.code(), Some(0), "loader exec ({fixture}): {loaded:?}");
+        assert_eq!(loaded.stdout, direct.stdout);
+        assert_eq!(loaded.stderr, direct.stderr);
+    }
+}
+
+#[test]
+#[timeout(15_000)]
+fn vfork_current_sp_and_separate_altstack_preserve_state() {
+    for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
+        check_virt_subcommand(fixture, "vfork-altstack-save", b"vfork-altstack-save-ok\n");
+    }
+}
+
+#[test]
+#[timeout(20_000)]
+fn stack_pool_overflow_handles_more_than_64_concurrent_threads() {
+    for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
+        check_virt_subcommand(fixture, "stack-pool-overflow", b"stack-pool-overflow-ok\n");
+    }
+}
+
 fn check_virt_subcommand(fixture: &str, subcommand: &str, expected_stdout: &[u8]) {
     let canonical = std::fs::canonicalize(fixture).unwrap();
 
@@ -626,25 +776,67 @@ fn check_virt_subcommand(fixture: &str, subcommand: &str, expected_stdout: &[u8]
 #[timeout(10_000)]
 fn rejects_malformed_images() {
     let base = std::fs::read(FIXTURE_DYN_PIE).unwrap();
+    let mut bad_magic = base.clone();
+    bad_magic[0..4].copy_from_slice(b"NOPE");
+    let mut elf32 = base.clone();
+    elf32[elf::abi::EI_CLASS] = elf::abi::ELFCLASS32;
     let mut overflow = base.clone();
     write_u64(&mut overflow, offset_of!(libc::Elf64_Ehdr, e_phoff), u64::MAX);
     let mut wrong_machine = base.clone();
     write_u16(&mut wrong_machine, offset_of!(libc::Elf64_Ehdr, e_machine), 0);
     let mut unsupported_type = base.clone();
     write_u16(&mut unsupported_type, offset_of!(libc::Elf64_Ehdr, e_type), elf::abi::ET_REL);
+    let mut entry_outside_exec = base.clone();
+    write_u64(&mut entry_outside_exec, offset_of!(libc::Elf64_Ehdr, e_entry), u64::MAX - 0x100);
     let parsed = elf::ElfBytes::<elf::endian::LittleEndian>::minimal_parse(&base).unwrap();
-    let load =
-        parsed.segments().unwrap().iter().position(|ph| ph.p_type == elf::abi::PT_LOAD).unwrap();
+    let segments: Vec<_> = parsed.segments().unwrap().iter().collect();
+    let load = segments.iter().position(|ph| ph.p_type == elf::abi::PT_LOAD).unwrap();
     let phdr = usize::try_from(parsed.ehdr.e_phoff).unwrap() + load * size_of::<libc::Elf64_Phdr>();
     let mut invalid_size = base.clone();
     write_u64(&mut invalid_size, phdr + offset_of!(libc::Elf64_Phdr, p_filesz), u64::MAX);
+    let mut incongruent_load = base.clone();
+    write_u64(
+        &mut incongruent_load,
+        phdr + offset_of!(libc::Elf64_Phdr, p_vaddr),
+        segments[load].p_vaddr + 1,
+    );
+
+    let interp_index = segments
+        .iter()
+        .position(|ph| ph.p_type == elf::abi::PT_INTERP)
+        .expect("FIXTURE_DYN_PIE has PT_INTERP");
+    let interp_phdr = usize::try_from(parsed.ehdr.e_phoff).unwrap()
+        + interp_index * size_of::<libc::Elf64_Phdr>();
+    let with_interp = |path_with_nul: &[u8]| {
+        let mut bytes = base.clone();
+        let offset = u64::try_from(bytes.len()).unwrap();
+        let len = u64::try_from(path_with_nul.len()).unwrap();
+        bytes.extend_from_slice(path_with_nul);
+        write_u64(&mut bytes, interp_phdr + offset_of!(libc::Elf64_Phdr, p_offset), offset);
+        write_u64(&mut bytes, interp_phdr + offset_of!(libc::Elf64_Phdr, p_filesz), len);
+        write_u64(&mut bytes, interp_phdr + offset_of!(libc::Elf64_Phdr, p_memsz), len);
+        bytes
+    };
+    let missing_interp = with_interp(b"/nonexistent-interp\0");
+    let corrupt_interp_file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(corrupt_interp_file.path(), b"not an ELF interpreter").unwrap();
+    let mut corrupt_interp_path = corrupt_interp_file.path().as_os_str().as_bytes().to_vec();
+    corrupt_interp_path.push(0);
+    let corrupt_interp = with_interp(&corrupt_interp_path);
+
     for (case, bytes) in [
         ("truncated header", b"not ELF".to_vec()),
+        ("bad magic (>= 64 bytes)", bad_magic),
+        ("ELF32 header", elf32),
         ("truncated program headers", base[..size_of::<libc::Elf64_Ehdr>()].to_vec()),
         ("overflowing program-header offset", overflow),
         ("wrong architecture", wrong_machine),
         ("unsupported type", unsupported_type),
         ("invalid size", invalid_size),
+        ("e_entry outside PF_X", entry_outside_exec),
+        ("non-page-congruent PT_LOAD", incongruent_load),
+        ("missing PT_INTERP", missing_interp),
+        ("corrupt PT_INTERP", corrupt_interp),
     ] {
         let file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(file.path(), bytes).unwrap();
@@ -679,7 +871,12 @@ fn runs_images_with_an_executable_stack() {
     bytes[flags..flags + 4].copy_from_slice(&value.to_le_bytes());
     let file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(file.path(), bytes).unwrap();
-    let output = run_loaded_fixture(file.path().to_str().unwrap(), true, false);
+    let fixture = file.path().to_str().unwrap();
+    let mut command = launcher();
+    command.args([fixture, "custom-argv-zero"]);
+    configure_runtime_fixture(&mut command, fixture, true, false);
+    command.env("EXPECT_ALIGNED_RANDOM", "1").env("EXPECT_EXEC_STACK", "1");
+    let output = output(command);
     assert_eq!(output.status.code(), Some(37), "{output:?}");
     assert_eq!(output.stdout, b"runtime-ok\n");
     assert!(output.stderr.is_empty(), "{output:?}");

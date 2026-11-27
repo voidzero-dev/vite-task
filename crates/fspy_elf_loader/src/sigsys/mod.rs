@@ -20,8 +20,8 @@ use fspy_nostd::{BorrowedFd, CStr, Error, Result, Thin};
 #[cfg(target_arch = "x86_64")]
 use linux_raw_sys::general::AT_FDCWD;
 use linux_raw_sys::general::{
-    O_NONBLOCK, O_PATH, SA_NODEFER, SA_ONSTACK, SA_RESTORER, SA_SIGINFO, SIG_UNBLOCK, SIGSYS,
-    SS_DISABLE, open_how, siginfo,
+    CLONE_VFORK, CLONE_VM, O_NONBLOCK, O_PATH, SA_ONSTACK, SA_RESTORER, SA_SIGINFO, SIG_UNBLOCK,
+    SIGSYS, SS_DISABLE, open_how, siginfo,
 };
 use syscalls::Sysno;
 
@@ -136,13 +136,17 @@ pub unsafe fn install(
     // preserving any inherited `SIGSYS` disposition (e.g. `SIG_IGN`) in the
     // virtualized table.
     //
-    // `sa_mask` blocks all maskable signals except `SIGSYS` while the handler
-    // runs so asynchronous signals (such as Go's `SIGURG` preemption) cannot
-    // interrupt us while `SP` is switched onto `stack_pool` or observe
-    // non-target register state.
+    // `sa_mask` (with `SA_NODEFER` omitted) blocks all maskable signals
+    // including `SIGSYS` while Phase 1 runs on `stack_pool` so neither async
+    // signals (such as Go's `SIGURG`) nor async `SIGSYS` (`kill`/`tgkill`) can
+    // preempt the handler while `SP` is switched onto `stack_pool`. Every
+    // syscall executed during Phase 1 lives inside the launcher's allowlisted
+    // `PF_X` range, and `SIGSYS` is unmasked before re-entering target code
+    // (`deliver_sigsys_now`, `replay_unmasked`, `sigsys_masked_wait`, or
+    // `rt_sigreturn`).
     let our_action = KernelSigaction {
         sa_handler: handler_addr(),
-        sa_flags: (SA_SIGINFO | SA_RESTORER | SA_NODEFER | SA_ONSTACK) as usize,
+        sa_flags: (SA_SIGINFO | SA_RESTORER | SA_ONSTACK) as usize,
         sa_restorer: (sigreturn_trampoline as *const ()).addr(),
         sa_mask: HANDLER_BLOCK_MASK,
     };
@@ -229,24 +233,26 @@ pub unsafe extern "C" fn sigsys_masked_wait(ucontext_ptr: *mut Ucontext) {
     // SAFETY: `sigsys_trampoline` checked `ucontext_ptr` is non-null.
     let ucontext = unsafe { &mut *ucontext_ptr };
     let inv = decode_syscall(ucontext);
-    let result = match Sysno::new(inv.nr) {
-        // SAFETY: Each helper matches the corresponding Linux syscall ABI.
+    match Sysno::new(inv.nr) {
+        // SAFETY: Each helper matches the corresponding Linux syscall ABI and
+        // completes `ucontext` (before delivering any pending `SIGSYS`).
         Some(Sysno::rt_sigsuspend) => unsafe {
-            signal::handle_masked_wait(inv, ucontext, 0, 1, false)
+            signal::handle_masked_wait(inv, ucontext, 0, 1, false);
         },
         // SAFETY: Matches Linux `ppoll` ABI.
-        Some(Sysno::ppoll) => unsafe { signal::handle_masked_wait(inv, ucontext, 3, 4, true) },
+        Some(Sysno::ppoll) => unsafe {
+            signal::handle_masked_wait(inv, ucontext, 3, 4, true);
+        },
         // SAFETY: Matches Linux `pselect6` ABI.
-        Some(Sysno::pselect6) => unsafe { signal::handle_pselect6(inv, ucontext) },
+        Some(Sysno::pselect6) => unsafe {
+            signal::handle_pselect6(inv, ucontext);
+        },
         // SAFETY: Matches Linux `epoll_pwait` / `epoll_pwait2` ABI.
         Some(Sysno::epoll_pwait | Sysno::epoll_pwait2) => unsafe {
-            signal::handle_masked_wait(inv, ucontext, 4, 5, true)
+            signal::handle_masked_wait(inv, ucontext, 4, 5, true);
         },
-        // SAFETY: Unreachable; replay directly.
-        _ => unsafe { replay(inv) },
-    };
-    set_syscall_result(ucontext, result);
-    *uc_sigmask_mut(ucontext) &= !SIGSYS_BIT;
+        _ => unreachable!("sigsys_trampoline only routes masked-wait syscalls here"),
+    }
 }
 
 /// Phase 1 entry called by [`sigsys_trampoline`] on a private 64 KiB stack
@@ -388,6 +394,17 @@ unsafe fn finish_vfork_altstack(ucontext_ptr: *const Ucontext, packet: &Phase2Pa
         stack_pool::release_stack(save_top);
     }
     stack_pool::release_stack(altstack_top);
+    if rc > 0 && INTERCEPTOR_INSTALLED.load(Ordering::Acquire) {
+        // SAFETY: `INTERCEPTOR` was written once before `Release` store.
+        let hook = unsafe { (*INTERCEPTOR.0.get()).and_then(|ic| ic.on_vfork_return) };
+        if let Some(on_vfork_return) = hook {
+            #[expect(clippy::cast_possible_truncation, reason = "Linux pid_t fits in i32")]
+            let child_pid = rc as i32;
+            // SAFETY: `on_vfork_return` was validated inside `PF_X`, and `rc > 0`
+            // means the vfork child has already left the parent's `mm_struct`.
+            unsafe { on_vfork_return(child_pid) };
+        }
+    }
     rc
 }
 
@@ -523,7 +540,7 @@ unsafe fn dispatch_phase1(
                 return;
             }
             Sysno::clone => {
-                const CLONE_VM_VFORK: usize = 0x0000_0100 | 0x0000_4000;
+                const CLONE_VM_VFORK: usize = (CLONE_VM | CLONE_VFORK) as usize;
                 if (inv.args[0] & CLONE_VM_VFORK) == CLONE_VM_VFORK && inv.args[1] != 0 {
                     let child_mask = ucontext.uc_sigmask & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
                     packet.inv = inv;
@@ -627,7 +644,15 @@ unsafe fn dispatch_phase1(
     packet.inv = inv;
     // SAFETY: Inspects `openat2`'s `open_how` safely via `usermem` if not already prefetched.
     if unsafe { needs_unmasked_replay(sysno, &inv, prefetched_open_how) } {
-        let orig_mask = ucontext.uc_sigmask & !(SIGSYS_BIT | UNBLOCKABLE_MASK);
+        let orig_mask = if matches!(sysno, Sysno::execve | Sysno::execveat) {
+            // Preserve the caller's exact virtualized signal mask (including
+            // `SIGSYS`) across direct `execve`/`execveat`; `SYS_execve*` runs
+            // from allowlisted `PF_X`, so blocking `SIGSYS` cannot self-trap,
+            // and `replay_unmasked` restores `HANDLER_BLOCK_MASK` on failure.
+            signal::virtual_sigmask_from(ucontext.uc_sigmask)
+        } else {
+            ucontext.uc_sigmask & !(SIGSYS_BIT | UNBLOCKABLE_MASK)
+        };
         if orig_mask != HANDLER_BLOCK_MASK {
             #[expect(clippy::cast_possible_truncation, reason = "64-bit Linux usize == u64")]
             {

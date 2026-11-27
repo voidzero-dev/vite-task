@@ -45,10 +45,7 @@ bitflags! {
 
     /// Options accepted by `*at` filesystem operations.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    pub struct AtFlags: u32 {
-        /// Remove a directory rather than a non-directory entry.
-        const REMOVEDIR = imp::AT_REMOVEDIR;
-    }
+    pub struct AtFlags: u32 {}
 
     /// Mode bits accepted by [`faccessat`].
     ///
@@ -135,7 +132,9 @@ pub fn ftruncate(fd: BorrowedFd<'_>, len: u64) -> Result<()> {
 /// unspecified initialization state.
 ///
 /// This function performs one resolution attempt and does not allocate, grow,
-/// or retry. No buffer size guarantees success, including one larger than
+/// or retry. Callers should pass a buffer of at least [`PATH_MAX`] bytes
+/// (smaller buffers fail with [`Error::RANGE`](crate::Error::RANGE) on macOS),
+/// and no buffer size guarantees success, including one larger than
 /// [`PATH_MAX`].
 ///
 /// # Errors

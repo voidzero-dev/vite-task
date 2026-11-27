@@ -12,7 +12,7 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use linux_raw_sys::general::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_READ, PROT_WRITE};
+use linux_raw_sys::general::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_NONE, PROT_READ, PROT_WRITE};
 use syscalls::Sysno;
 
 use super::arch::{call_on_stack, syscall6};
@@ -31,9 +31,14 @@ pub const MIN_SIGSYS_STACK_SIZE: usize = 64 * 1024;
 /// lazily on demand, so single-threaded workloads only map one stack.
 pub const STACK_POOL_SLOTS: usize = 64;
 
-/// Active byte size of each private `SIGSYS` stack (multiple of the host page
-/// size, at least [`MIN_SIGSYS_STACK_SIZE`]).
+/// Active usable byte size of each private `SIGSYS` stack (multiple of the host
+/// page size, at least [`MIN_SIGSYS_STACK_SIZE`]), excluding the 1-page
+/// `PROT_NONE` guard page mapped immediately below it.
 static STACK_SIZE: AtomicUsize = AtomicUsize::new(MIN_SIGSYS_STACK_SIZE);
+
+/// Byte size of the `PROT_NONE` guard page placed at the bottom of each pooled
+/// stack (`0` until initialized, in which case `page_size()` is queried).
+static GUARD_SIZE: AtomicUsize = AtomicUsize::new(0);
 
 /// Cached `stack_top` pointers (`0` means empty slot).
 ///
@@ -42,14 +47,15 @@ static STACK_SIZE: AtomicUsize = AtomicUsize::new(MIN_SIGSYS_STACK_SIZE);
 pub static STACK_POOL: [AtomicUsize; STACK_POOL_SLOTS] =
     [const { AtomicUsize::new(0) }; STACK_POOL_SLOTS];
 
-/// Configures the private `SIGSYS` stack size from `AT_MINSIGSTKSZ` and
-/// `page_size`, then pre-allocates one stack during single-threaded
-/// `sigsys::install` so the first trapped syscall never needs to invoke `mmap`
-/// on a tiny caller stack.
+/// Configures the private `SIGSYS` stack size and guard page from
+/// `AT_MINSIGSTKSZ` and `page_size`, then pre-allocates one stack during
+/// single-threaded `sigsys::install` so the first trapped syscall never needs
+/// to invoke `mmap` on a tiny caller stack.
 pub fn init_and_warm(min_sigstksz: usize, page_size: usize) {
     let page = page_size.max(4096);
+    GUARD_SIZE.store(page, Ordering::Release);
     // Reserve at least `2 * AT_MINSIGSTKSZ + 16 KiB` (and >= 64 KiB) so both
-    // Phase 1 and AArch64 `vfork` `sigaltstack` (`stack_size - 64`) always
+    // Phase 1 and AArch64 `vfork` `sigaltstack` (`stack_size / 2`) always
     // satisfy kernel `MINSIGSTKSZ` with ample headroom.
     let needed =
         min_sigstksz.saturating_mul(2).saturating_add(16 * 1024).max(MIN_SIGSYS_STACK_SIZE);
@@ -60,11 +66,17 @@ pub fn init_and_warm(min_sigstksz: usize, page_size: usize) {
     }
 }
 
-/// Returns the active byte size of each private `SIGSYS` stack.
+/// Returns the active usable byte size of each private `SIGSYS` stack.
 #[inline]
 #[must_use]
 pub fn stack_size() -> usize {
     STACK_SIZE.load(Ordering::Acquire)
+}
+
+#[inline]
+fn guard_size() -> usize {
+    let guard = GUARD_SIZE.load(Ordering::Acquire);
+    if guard != 0 { guard } else { fspy_nostd::param::page_size().max(4096) }
 }
 
 /// Executes `entry(ctx)` on a private 64 KiB stack, restoring the caller's
@@ -116,9 +128,11 @@ pub fn release_stack(stack_top: usize) {
 
 fn acquire() -> Option<usize> {
     for slot in &STACK_POOL {
-        let top = slot.swap(0, Ordering::AcqRel);
-        if top != 0 {
-            return Some(top);
+        if slot.load(Ordering::Relaxed) != 0 {
+            let top = slot.swap(0, Ordering::AcqRel);
+            if top != 0 {
+                return Some(top);
+            }
         }
     }
     alloc_stack()
@@ -137,14 +151,18 @@ fn release(stack_top: usize) {
 
 #[inline(never)]
 fn alloc_stack() -> Option<usize> {
-    let size = stack_size();
-    // SAFETY: anonymous private `mmap` of `size` bytes.
+    let usable = stack_size();
+    let guard = guard_size();
+    let total = usable.checked_add(guard)?;
+    // SAFETY: anonymous private `mmap` of `guard + usable` bytes starting as
+    // `PROT_NONE`; the usable upper pages are made read/write below while the
+    // lowest page stays `PROT_NONE` as a stack-overflow guard.
     let rc = unsafe {
         syscall6(
             Sysno::mmap as usize,
             0,
-            size,
-            (PROT_READ | PROT_WRITE) as usize,
+            total,
+            PROT_NONE as usize,
             (MAP_PRIVATE | MAP_ANONYMOUS) as usize,
             (-1_isize).cast_unsigned(),
             0,
@@ -153,20 +171,43 @@ fn alloc_stack() -> Option<usize> {
     if rc <= 0 {
         return None;
     }
-    let Some(top) = rc.cast_unsigned().checked_add(size) else {
+    let base = rc.cast_unsigned();
+    let Some(usable_base) = base.checked_add(guard) else {
         // SAFETY: release mapping if address arithmetic ever overflowed.
-        let _ = unsafe { syscall6(Sysno::munmap as usize, rc.cast_unsigned(), size, 0, 0, 0, 0) };
+        let _ = unsafe { syscall6(Sysno::munmap as usize, base, total, 0, 0, 0, 0) };
         return None;
     };
+    let Some(top) = usable_base.checked_add(usable) else {
+        // SAFETY: release mapping if address arithmetic ever overflowed.
+        let _ = unsafe { syscall6(Sysno::munmap as usize, base, total, 0, 0, 0, 0) };
+        return None;
+    };
+    // SAFETY: `usable_base..top` lies exclusively inside our fresh `mmap`.
+    let mrc = unsafe {
+        syscall6(
+            Sysno::mprotect as usize,
+            usable_base,
+            usable,
+            (PROT_READ | PROT_WRITE) as usize,
+            0,
+            0,
+            0,
+        )
+    };
+    if mrc < 0 {
+        // SAFETY: release fresh mapping on `mprotect` failure.
+        let _ = unsafe { syscall6(Sysno::munmap as usize, base, total, 0, 0, 0, 0) };
+        return None;
+    }
     Some(top)
 }
 
 #[inline(never)]
 fn free_stack(stack_top: usize) {
-    let size = stack_size();
-    let base = stack_top - size;
-    // SAFETY: `base..stack_top` was mapped by `alloc_stack` and is no longer in use.
-    let _ = unsafe { syscall6(Sysno::munmap as usize, base, size, 0, 0, 0, 0) };
+    let total = stack_size() + guard_size();
+    let base = stack_top - total;
+    // SAFETY: `base..stack_top` (guard + usable) was mapped by `alloc_stack`.
+    let _ = unsafe { syscall6(Sysno::munmap as usize, base, total, 0, 0, 0, 0) };
 }
 
 #[cfg(test)]
@@ -201,9 +242,26 @@ mod tests {
         );
         assert_eq!(OBSERVED_ARG.load(Ordering::Acquire), 0x1234_5678);
 
+        // Verify the bottom guard page is `PROT_NONE` (`---p`) and the usable
+        // stack region is read-write (`rw-p`).
+        let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
+        let prot_of = |addr: usize| {
+            maps.lines()
+                .find_map(|line| {
+                    let mut fields = line.split_whitespace();
+                    let (start, end) = fields.next()?.split_once('-')?;
+                    let range = usize::from_str_radix(start, 16).ok()?
+                        ..usize::from_str_radix(end, 16).ok()?;
+                    range.contains(&addr).then(|| fields.next().unwrap())
+                })
+                .unwrap()
+        };
+        assert_eq!(prot_of(top - size - guard_size()), "---p");
+        assert_eq!(prot_of(top - size), "rw-p");
+
         release(top);
         let reused = acquire().expect("re-acquire cached stack");
         assert_eq!(reused, top);
-        release(reused);
+        free_stack(reused);
     }
 }

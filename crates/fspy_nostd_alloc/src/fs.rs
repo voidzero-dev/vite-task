@@ -146,9 +146,14 @@ pub fn fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> Result<Option<
     }
 }
 
-/// Formats `/proc/self/fd/<fd>\0` on the stack without allocating.
+/// Formats `/proc/self/fd/<fd>\0` into caller-provided stack storage without
+/// allocating.
+///
+/// The 32-byte buffer always fits the 14-byte prefix, up to 10 decimal digits
+/// for any `u32`, and the terminating NUL byte.
 #[cfg(any(target_os = "linux", target_os = "none"))]
-fn format_proc_self_fd(buf: &mut [u8; 32], mut fd: u32) -> CStr<'_, Thin> {
+#[must_use]
+pub fn format_proc_self_fd(buf: &mut [u8; 32], mut fd: u32) -> CStr<'_, Thin> {
     const PREFIX: &[u8] = b"/proc/self/fd/";
     let mut digits = [0u8; 10];
     let mut num_digits = 0;
@@ -255,6 +260,28 @@ mod tests {
         let path = super::fcntl_getpath(Global, root).unwrap();
 
         assert_eq!(path.as_c_str().count().as_units_with_nul(), b"/\0");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn format_proc_self_fd_formats_boundary_values() {
+        let mut buf = [0u8; 32];
+        assert_eq!(
+            super::format_proc_self_fd(&mut buf, 0).count().as_units_with_nul(),
+            b"/proc/self/fd/0\0"
+        );
+        assert_eq!(
+            super::format_proc_self_fd(&mut buf, 1).count().as_units_with_nul(),
+            b"/proc/self/fd/1\0"
+        );
+        assert_eq!(
+            super::format_proc_self_fd(&mut buf, 42).count().as_units_with_nul(),
+            b"/proc/self/fd/42\0"
+        );
+        assert_eq!(
+            super::format_proc_self_fd(&mut buf, u32::MAX).count().as_units_with_nul(),
+            b"/proc/self/fd/4294967295\0"
+        );
     }
 
     #[cfg(target_os = "linux")]

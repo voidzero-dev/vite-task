@@ -81,6 +81,9 @@ pub unsafe fn write_user_bytes(addr: usize, src: &[u8]) -> Result<()> {
 /// Borrows a NUL-terminated C string directly from user address `addr`,
 /// returning [`Error::FAULT`] if `addr` is in the first page (such as `NULL`).
 ///
+/// Prefer [`user_cstr_bounded`] for pathname inspection so malformed or
+/// unterminated strings cannot scan arbitrarily far past `PATH_MAX`.
+///
 /// # Safety
 ///
 /// Any other `addr` must point to a readable NUL-terminated C string that
@@ -92,4 +95,38 @@ pub unsafe fn user_cstr<'a>(addr: usize) -> Result<CStr<'a, Thin>> {
     // SAFETY: caller guarantees `addr` points to a readable NUL-terminated C
     // string valid for `'a`.
     Ok(unsafe { CStr::<Thin>::from_ptr(ptr::with_exposed_provenance(addr)) })
+}
+
+/// Scans at most `max_len` bytes starting at user address `addr` for a NUL
+/// terminator and returns the byte slice preceding the NUL.
+///
+/// Returns [`Error::FAULT`] if `addr` is in the first page (such as `NULL`) or
+/// if scanning would wrap the address space, and [`Error::NAMETOOLONG`] if no
+/// NUL byte appears within `max_len` bytes.
+///
+/// As documented at the module level, addresses outside page 0 are read
+/// directly rather than via `process_vm_readv` to avoid extra syscalls and
+/// sandbox-filter interactions.
+///
+/// # Safety
+///
+/// Any non-first-page `addr` must be readable up to and including the first
+/// NUL byte (or `max_len` bytes, whichever comes first) and remain unmodified
+/// for `'a`.
+pub unsafe fn user_cstr_bounded<'a>(addr: usize, max_len: usize) -> Result<&'a [u8]> {
+    if addr < MIN_USER_ADDR {
+        return Err(Error::FAULT);
+    }
+    let base = ptr::with_exposed_provenance::<u8>(addr);
+    let limit = max_len.min(usize::MAX - addr);
+    let mut len = 0_usize;
+    while len < limit {
+        // SAFETY: caller guarantees readability up to NUL or `max_len`.
+        if unsafe { base.add(len).read() } == 0 {
+            // SAFETY: `base..base + len` is readable and valid for `'a`.
+            return Ok(unsafe { slice::from_raw_parts(base, len) });
+        }
+        len += 1;
+    }
+    if limit < max_len { Err(Error::FAULT) } else { Err(Error::NAMETOOLONG) }
 }

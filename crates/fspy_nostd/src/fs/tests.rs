@@ -11,7 +11,8 @@ use crate::Error;
 )]
 fn getcwd_returns_current_directory() {
     let expected = std::env::current_dir().unwrap();
-    let mut buf = vec![MaybeUninit::uninit(); expected.as_os_str().as_bytes().len() + 1];
+    let len = super::PATH_MAX.max(expected.as_os_str().as_bytes().len() + 1);
+    let mut buf = vec![MaybeUninit::uninit(); len];
     let buf_ptr = buf.as_ptr().cast::<u8>();
 
     let actual = getcwd(&mut buf).unwrap();
@@ -26,6 +27,13 @@ fn getcwd_returns_current_directory() {
 #[test]
 fn getcwd_rejects_an_empty_buffer() {
     assert!(matches!(getcwd(&mut []), Err(Error::RANGE)));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn getcwd_rejects_buffer_smaller_than_path_max() {
+    let mut buf = [MaybeUninit::uninit(); super::PATH_MAX - 1];
+    assert!(matches!(getcwd(&mut buf), Err(Error::RANGE)));
 }
 
 #[cfg(target_os = "macos")]

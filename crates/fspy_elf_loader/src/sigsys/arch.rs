@@ -19,10 +19,10 @@ pub const SIGSYS_BIT: u64 = 1_u64 << (SIGSYS - 1);
 /// signal masks (`SIGKILL` and `SIGSTOP`).
 pub const UNBLOCKABLE_MASK: u64 = (1_u64 << (SIGKILL - 1)) | (1_u64 << (SIGSTOP - 1));
 
-/// Mask installed on our `SIGSYS` `sigaction.sa_mask` so asynchronous signals
-/// cannot preempt the dispatcher while it runs on a private pooled stack or
-/// modifies virtualized signal state.
-pub const HANDLER_BLOCK_MASK: u64 = !(SIGSYS_BIT | UNBLOCKABLE_MASK);
+/// Mask blocking all maskable signals (including `SIGSYS`) while the
+/// dispatcher runs on a private pooled stack or modifies virtualized signal
+/// state.
+pub const HANDLER_BLOCK_MASK: u64 = !UNBLOCKABLE_MASK;
 
 /// Size of the Linux kernel `sigset_t` on 64-bit architectures (8 bytes = 64 signals).
 pub const KERNEL_SIGSET_SIZE: usize = core::mem::size_of::<u64>();
@@ -107,7 +107,6 @@ mod imp {
     pub const REG_RDX: usize = 12;
     pub const REG_RAX: usize = 13;
     pub const REG_RSP: usize = 15;
-    pub const REG_RIP: usize = 16;
 
     #[repr(C)]
     pub struct Mcontext {
@@ -201,7 +200,6 @@ mod imp {
             "jz 6f",
             // Switch RSP to private 64 KiB stack (`r12 - 16`, 16-byte aligned).
             "lea rsp, [r12 - 16]",
-            "mov [rsp], r13",
             "mov rdi, rbx",
             "mov rsi, r13",
             "call {handle_phase1}",
@@ -336,38 +334,10 @@ mod imp {
         );
     }
 
-    unsafe extern "C" {
-        static __fspy_elf_loader_masked_wait_ret_pc: u8;
-    }
-
-    #[unsafe(naked)]
-    unsafe extern "C" fn replay_masked_wait_raw(inv: *const SyscallInvocation) -> isize {
-        // rdi = inv.
-        naked_asm!(
-            "mov rax, [rdi + 0]",
-            "mov rsi, [rdi + 16]",
-            "mov rdx, [rdi + 24]",
-            "mov r10, [rdi + 32]",
-            "mov r8,  [rdi + 40]",
-            "mov r9,  [rdi + 48]",
-            "mov rdi, [rdi + 8]",
-            "syscall",
-            ".globl __fspy_elf_loader_masked_wait_ret_pc",
-            ".hidden __fspy_elf_loader_masked_wait_ret_pc",
-            "__fspy_elf_loader_masked_wait_ret_pc:",
-            "ret",
-        );
-    }
-
-    #[inline]
-    pub fn masked_wait_return_pc() -> usize {
-        (&raw const __fspy_elf_loader_masked_wait_ret_pc).addr()
-    }
-
     #[inline]
     pub unsafe fn replay_masked_wait(inv: &SyscallInvocation, _ucontext: &Ucontext) -> isize {
         // SAFETY: forwarded from caller contract.
-        unsafe { replay_masked_wait_raw(inv) }
+        unsafe { super::replay(*inv) }
     }
 
     /// Builds a private child `ucontext` in the upper half of `altstack_top`
@@ -497,11 +467,6 @@ mod imp {
         ucontext.uc_mcontext.gregs[REG_RSP] as usize
     }
 
-    #[expect(clippy::cast_possible_truncation, reason = "64-bit x86-64 usize == u64")]
-    pub const fn ucontext_pc(ucontext: &Ucontext) -> usize {
-        ucontext.uc_mcontext.gregs[REG_RIP] as usize
-    }
-
     pub const fn set_ucontext_sp(ucontext: &mut Ucontext, sp: usize) {
         ucontext.uc_mcontext.gregs[REG_RSP] = sp as u64;
     }
@@ -516,7 +481,7 @@ mod imp {
         is_siginfo: bool,
         signum: i32,
         info: *mut linux_raw_sys::general::siginfo,
-        ucontext: *mut Ucontext,
+        ucontext: &mut Ucontext,
     ) {
         if is_siginfo {
             // SAFETY: `handler_addr` was registered by the target as an `SA_SIGINFO` handler.
@@ -526,7 +491,7 @@ mod imp {
                 *mut c_void,
             ) = unsafe { core::mem::transmute(handler_addr) };
             // SAFETY: Invoking target's registered `SIGSYS` handler.
-            unsafe { handler(signum, info, ucontext.cast()) };
+            unsafe { handler(signum, info, ptr::from_mut(ucontext).cast()) };
         } else {
             // SAFETY: `handler_addr` was registered by the target as a 1-arg handler.
             let handler: unsafe extern "C" fn(i32) = unsafe { core::mem::transmute(handler_addr) };
@@ -648,7 +613,6 @@ mod imp {
             "12:",
             "cbz x20, 6f",
             "sub x10, x20, #16",
-            "str x21, [x10]",
             "mov sp, x10",
             "mov x0, x19",
             "mov x1, x21",
@@ -739,10 +703,6 @@ mod imp {
         );
     }
 
-    unsafe extern "C" {
-        static __fspy_elf_loader_masked_wait_ret_pc: u8;
-    }
-
     #[unsafe(naked)]
     unsafe extern "C" fn replay_with_x28_raw(
         inv: *const SyscallInvocation,
@@ -761,18 +721,10 @@ mod imp {
             "ldp x2, x3, [x9, #24]",
             "ldp x4, x5, [x9, #40]",
             "svc #0",
-            ".globl __fspy_elf_loader_masked_wait_ret_pc",
-            ".hidden __fspy_elf_loader_masked_wait_ret_pc",
-            "__fspy_elf_loader_masked_wait_ret_pc:",
             "ldr x28, [sp]",
             "add sp, sp, #16",
             "ret",
         );
-    }
-
-    #[inline]
-    pub fn masked_wait_return_pc() -> usize {
-        (&raw const __fspy_elf_loader_masked_wait_ret_pc).addr()
     }
 
     #[unsafe(naked)]
@@ -945,21 +897,16 @@ mod imp {
         _is_siginfo: bool,
         signum: i32,
         info: *mut linux_raw_sys::general::siginfo,
-        ucontext: *mut Ucontext,
+        ucontext: &mut Ucontext,
     ) {
-        let target_x28 = if ucontext.is_null() {
-            0
-        } else {
-            // SAFETY: Kernel-provided `ucontext` is readable.
-            unsafe { (*ucontext).uc_mcontext.regs[28] }
-        };
+        let target_x28 = ucontext.uc_mcontext.regs[28];
         // SAFETY: `handler_addr` was registered by the target as a signal handler.
         unsafe {
             call_handler_with_x28_raw(
                 handler_addr,
                 signum,
                 info.cast(),
-                ucontext.cast(),
+                ptr::from_mut(ucontext).cast(),
                 target_x28,
             );
         }
@@ -1014,11 +961,6 @@ mod imp {
         ucontext.uc_mcontext.sp as usize
     }
 
-    #[expect(clippy::cast_possible_truncation, reason = "64-bit AArch64 usize == u64")]
-    pub const fn ucontext_pc(ucontext: &Ucontext) -> usize {
-        ucontext.uc_mcontext.pc as usize
-    }
-
     pub const fn set_ucontext_sp(ucontext: &mut Ucontext, sp: usize) {
         ucontext.uc_mcontext.sp = sp as u64;
     }
@@ -1029,10 +971,10 @@ mod imp {
 }
 
 pub use imp::{
-    Ucontext, call_on_stack, decode_syscall, invoke_user_sigsys_handler, masked_wait_return_pc,
+    Ucontext, call_on_stack, decode_syscall, invoke_user_sigsys_handler,
     prepare_vfork_child_sigframe, replay_masked_wait, replay_unmasked, replay_vfork_with_altstack,
     set_syscall_result, set_ucontext_sp, sigreturn_trampoline, sigsys_trampoline, uc_sigmask_mut,
-    ucontext_pc, ucontext_sp,
+    ucontext_sp,
 };
 
 /// Executes a raw 6-argument Linux syscall from within the launcher's

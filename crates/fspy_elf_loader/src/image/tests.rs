@@ -121,6 +121,61 @@ fn unordered_shared_page_does_not_wipe_higher_segment() {
 }
 
 #[test]
+fn padzero_clamps_to_higher_segment_overlapping_bss() {
+    let page = fspy_nostd::param::page_size();
+    let mut bytes = std::vec![0xa5; 3 * page];
+    write_header(&mut bytes, 3, 0x200);
+    load(&mut bytes, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    // Higher vaddr first at page + 0x300; lower vaddr second at page + 0x100
+    // with filesz = 0x100 (file_end = page + 0x200) and memsz = 0x300
+    // (end = page + 0x400 > other_start).
+    load(&mut bytes, 1, page + 0x300, 0x100, 0x100, abi::PF_R | abi::PF_W, page);
+    load(&mut bytes, 2, page + 0x100, 0x100, 0x300, abi::PF_R | abi::PF_W, page);
+    bytes[page + 0x300] = 0x11;
+    bytes[page + 0x100] = 0x22;
+    let image = map_bytes(&bytes);
+    // SAFETY: both segments on the shared page are mapped readable.
+    unsafe {
+        assert_eq!(ptr::with_exposed_provenance::<u8>(image.bias + page + 0x100).read(), 0x22);
+        let bss = core::slice::from_raw_parts(
+            ptr::with_exposed_provenance::<u8>(image.bias + page + 0x200),
+            0x100,
+        );
+        assert!(bss.iter().all(|byte| *byte == 0));
+        assert_eq!(
+            ptr::with_exposed_provenance::<u8>(image.bias + page + 0x300).read(),
+            0x11,
+            "padzero must clamp at other_start >= file_end even when other_start < end"
+        );
+    }
+}
+
+#[test]
+fn at_phdr_requires_full_program_header_table_within_p_filesz() {
+    let page = fspy_nostd::param::page_size();
+    let table_end = EHDR_SIZE + 2 * PHDR_SIZE;
+
+    // p_filesz covers e_phoff (headers.start) but ends inside the second Phdr.
+    let mut partial = std::vec![0; 2 * page];
+    write_header(&mut partial, 2, 0x200);
+    load(&mut partial, 0, 0, table_end - 1, page, abi::PF_R | abi::PF_X, page);
+    load(&mut partial, 1, page, 0x40, 0x40, abi::PF_R | abi::PF_W, page);
+    let partial_image = map_bytes(&partial);
+    assert_eq!(
+        partial_image.phdr, partial_image.bias,
+        "AT_PHDR must not point to a program-header table partially past p_filesz"
+    );
+
+    // Exact boundary: p_filesz == headers.end maps the entire table.
+    let mut exact = std::vec![0; 2 * page];
+    write_header(&mut exact, 2, 0x200);
+    load(&mut exact, 0, 0, table_end, page, abi::PF_R | abi::PF_X, page);
+    load(&mut exact, 1, page, 0x40, 0x40, abi::PF_R | abi::PF_W, page);
+    let exact_image = map_bytes(&exact);
+    assert_eq!(exact_image.phdr, exact_image.bias + EHDR_SIZE);
+}
+
+#[test]
 fn preserves_previous_load_when_bss_only_starts_mid_page() {
     let page = fspy_nostd::param::page_size();
     for memory_size in [0x180, page + 0x180] {
@@ -339,7 +394,7 @@ fn maps_et_dyn_with_high_nonzero_p_vaddr_without_underflow() {
     let file = open_bytes(&bytes);
     let parsed = File::open(file.as_fd()).unwrap();
     let layout = parsed.validate_segments(page).unwrap();
-    let image = parsed.map(page, &layout);
+    let image = parsed.try_map(page, &layout).unwrap();
     let mapped_base = image.bias.wrapping_add(layout.low);
     assert_eq!(image.entry, mapped_base + 0x200);
     assert_eq!(image.phdr, mapped_base + EHDR_SIZE);
@@ -439,7 +494,7 @@ fn map_bytes(bytes: &[u8]) -> Image {
     let fd = open_bytes(bytes);
     let file = File::open(fd.as_fd()).unwrap();
     let layout = file.validate_segments(page).unwrap();
-    file.map(page, &layout)
+    file.try_map(page, &layout).unwrap()
 }
 
 fn open_bytes(bytes: &[u8]) -> OwnedFd {
