@@ -93,9 +93,19 @@ impl SpyImpl {
         mut command: Command,
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
-        let Some(preload_path) = self.preload_path() else {
+        let Some(mut preload_path) = self.preload_path() else {
             return spawn_untracked(command, cancellation_token);
         };
+        // If the cached launcher binary was removed mid-process (e.g. by
+        // `systemd-tmpfiles`), re-materialize before building `tokio_command`
+        // so both `Bootstrap` and `redirect_program` pick up any new fallback
+        // directory path.
+        if !Path::new(preload_path.as_os_str()).exists() {
+            match self.rematerialize_preload(&preload_path) {
+                Some(new_path) => preload_path = new_path,
+                None => return spawn_untracked(command, cancellation_token),
+            }
+        }
 
         let ipc_receiver = channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)
             .map_err(SpawnError::ChannelCreation)?;

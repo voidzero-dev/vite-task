@@ -605,18 +605,25 @@ mod runtime {
             return false;
         }
         // SAFETY: `kcmp(pid1, pid2, KCMP_VM, 0, 0)` takes integer arguments
-        // only and returns `0` iff both processes share the same `mm_struct`.
-        let rc = unsafe {
-            syscalls::raw::syscall5(
-                Sysno::kcmp as usize,
-                my_pid.cast_unsigned() as usize,
-                other_pid.cast_unsigned() as usize,
+        // only and returns `0` iff both processes share the same `mm_struct`,
+        // `1..=3` for distinct `mm_struct`s, or `-errno` on failure.
+        match unsafe {
+            syscalls::syscall!(
+                Sysno::kcmp,
+                my_pid.cast_unsigned(),
+                other_pid.cast_unsigned(),
                 KCMP_VM,
                 0,
-                0,
+                0
             )
-        };
-        rc == 0
+        } {
+            Ok(0) => true,
+            Ok(_) | Err(syscalls::Errno::ESRCH) => false,
+            // Treat any other error (`EPERM`, `EINVAL`, `ENOSYS`, etc.)
+            // conservatively as still sharing VM so a live `CLONE_VM` child's
+            // exec scratch is never freed prematurely.
+            Err(_) => true,
+        }
     }
 
     #[inline]

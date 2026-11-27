@@ -92,8 +92,16 @@ impl RawExec {
         for i in 0..count {
             // SAFETY: `i < count`, so `strs.add(i)` is within the pointer array.
             let entry_ptr = unsafe { *strs.add(i) };
-            // SAFETY: `entry_ptr` is non-null and `>= MIN_USER_ADDR` (verified
-            // by the counting loop) and points to a valid NUL-terminated C string.
+            // Re-verify against concurrent mutation in multithreaded callers
+            // between the counting pass and this copy pass.
+            if entry_ptr.is_null() {
+                break;
+            }
+            if entry_ptr.addr() < MIN_USER_ADDR {
+                return Err(Error::FAULT);
+            }
+            // SAFETY: `entry_ptr` is non-null and `>= MIN_USER_ADDR` and points
+            // to a valid NUL-terminated C string.
             let bytes = unsafe { CStr::<Thin>::from_ptr(entry_ptr.cast()) }.count().as_units();
             str_vec.push(map_fn(bytes)?);
         }
