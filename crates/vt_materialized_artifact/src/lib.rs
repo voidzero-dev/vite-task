@@ -10,8 +10,8 @@
 //!
 //! Materialized files are named `{name}_{hash}{suffix}` in the caller-chosen
 //! directory, normally the current user's own folder in the system temp dir
-//! (falling back to the user cache directory if the temp dir is unwritable or,
-//! on Unix, mounted `noexec`; see [`Materialize::at_user_temp_dir`]).
+//! (on Unix, falling back to the user cache directory if the temp dir is
+//! unwritable or mounted `noexec`; see [`Materialize::at_user_temp_dir`]).
 //! The hash (computed at macro-expansion time by [`artifact!`]) gives three
 //! properties without any coordination between processes:
 //!
@@ -25,27 +25,27 @@
 //!   without overwriting each other.
 
 #[cfg(unix)]
-use std::ffi::CString;
+use std::ffi::{CString, OsString};
 use std::{
-    env,
-    ffi::OsString,
-    fs,
+    env, fs,
     io::{self, Write},
     path::{Path, PathBuf},
 };
 
+#[cfg(unix)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CandidateBase {
     path: PathBuf,
     create_if_missing: bool,
 }
 
+#[cfg(unix)]
 fn candidate_bases() -> Vec<CandidateBase> {
     #[cfg(target_vendor = "apple")]
     {
         candidate_bases_from_apple(env::temp_dir(), env::var_os("HOME"))
     }
-    #[cfg(all(unix, not(target_vendor = "apple")))]
+    #[cfg(not(target_vendor = "apple"))]
     {
         candidate_bases_from_xdg(
             env::temp_dir(),
@@ -53,12 +53,9 @@ fn candidate_bases() -> Vec<CandidateBase> {
             env::var_os("HOME"),
         )
     }
-    #[cfg(windows)]
-    {
-        candidate_bases_from_windows(env::temp_dir(), env::var_os("LOCALAPPDATA"))
-    }
 }
 
+#[cfg(unix)]
 fn build_candidate_bases(temp_dir: PathBuf, cache_dir: Option<PathBuf>) -> Vec<CandidateBase> {
     let mut candidates = Vec::with_capacity(2);
     let mut push_unique = |path: PathBuf, create_if_missing: bool| {
@@ -69,7 +66,7 @@ fn build_candidate_bases(temp_dir: PathBuf, cache_dir: Option<PathBuf>) -> Vec<C
         }
     };
 
-    // 1. System temp dir (respects `TMPDIR` on Unix, `TMP`/`TEMP` on Windows).
+    // 1. System temp dir (respects `TMPDIR`).
     push_unique(temp_dir, false);
 
     // 2. Per-user cache directory (created if missing).
@@ -80,7 +77,7 @@ fn build_candidate_bases(temp_dir: PathBuf, cache_dir: Option<PathBuf>) -> Vec<C
     candidates
 }
 
-#[cfg(any(target_vendor = "apple", test))]
+#[cfg(all(unix, any(target_vendor = "apple", test)))]
 fn candidate_bases_from_apple(temp_dir: PathBuf, home: Option<OsString>) -> Vec<CandidateBase> {
     let cache_dir = home
         .map(PathBuf::from)
@@ -89,7 +86,7 @@ fn candidate_bases_from_apple(temp_dir: PathBuf, home: Option<OsString>) -> Vec<
     build_candidate_bases(temp_dir, cache_dir)
 }
 
-#[cfg(any(all(unix, not(target_vendor = "apple")), test))]
+#[cfg(all(unix, any(not(target_vendor = "apple"), test)))]
 fn candidate_bases_from_xdg(
     temp_dir: PathBuf,
     xdg_cache_home: Option<OsString>,
@@ -99,15 +96,6 @@ fn candidate_bases_from_xdg(
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .or_else(|| home.map(PathBuf::from).filter(|p| p.is_absolute()).map(|h| h.join(".cache")));
-    build_candidate_bases(temp_dir, cache_dir)
-}
-
-#[cfg(any(windows, test))]
-fn candidate_bases_from_windows(
-    temp_dir: PathBuf,
-    local_app_data: Option<OsString>,
-) -> Vec<CandidateBase> {
-    let cache_dir = local_app_data.map(PathBuf::from).filter(|p| p.is_absolute());
     build_candidate_bases(temp_dir, cache_dir)
 }
 
@@ -248,15 +236,13 @@ fn is_dir_executable(path: &Path) -> io::Result<bool> {
     }
 }
 
+#[cfg(unix)]
 enum CandidateFailure {
-    #[cfg(unix)]
     Noexec(String),
-    Io {
-        err: io::Error,
-        detail: String,
-    },
+    Io { err: io::Error, detail: String },
 }
 
+#[cfg(unix)]
 impl CandidateFailure {
     fn io(path: &Path, err: io::Error) -> Self {
         let detail = format!("{}: {err}", path.display());
@@ -325,6 +311,11 @@ fn user_dir_in(temp_dir: &Path, name: &str) -> io::Result<PathBuf> {
 fn current_uid() -> libc::uid_t {
     // SAFETY: `geteuid` has no preconditions and always succeeds.
     unsafe { libc::geteuid() }
+}
+
+#[cfg(windows)]
+fn user_temp_dir(prefix: &str) -> io::Result<PathBuf> {
+    user_dir_in(&env::temp_dir(), prefix)
 }
 
 #[cfg(windows)]
@@ -411,8 +402,8 @@ impl Materialize<'_> {
 
     /// Materialize the artifact, as [`Self::at`] does, in the folder named
     /// after `prefix` inside the system temp dir that only the current user can
-    /// write to, falling back to the user cache directory when the temp dir is
-    /// unusable.
+    /// write to (on Unix, falling back to the user cache directory when the
+    /// temp dir is unusable).
     ///
     /// - On Unix, each candidate base directory hosts `{base}/{prefix}-{uid}`,
     ///   created with mode `0o700`, since temp dirs can be shared by every user
@@ -427,19 +418,19 @@ impl Materialize<'_> {
     ///   `$XDG_CACHE_HOME` / `$HOME/.cache` on other Unix platforms). When
     ///   [`Self::executable`] is set, the materialized file is also verified
     ///   with `access(X_OK)`.
-    /// - On Windows, each candidate base directory hosts `{base}\{prefix}`
-    ///   (falling back from [`env::temp_dir()`] to `%LOCALAPPDATA%` when the
-    ///   temp dir cannot be used).
+    /// - On Windows, the folder is `{temp_dir}\{prefix}`; the system temp dir
+    ///   (`%LOCALAPPDATA%\Temp`) is already per-user.
     ///
     /// # Errors
     ///
-    /// Returns an error if every candidate directory fails (cannot be created,
-    /// fails per-user ownership/permission checks, is mounted `noexec` on Unix,
-    /// or fails [`Self::at`]).
+    /// On Unix, returns an error if every candidate directory fails (cannot be
+    /// created, fails per-user ownership/permission checks, is mounted
+    /// `noexec`, or fails [`Self::at`]). On Windows, returns an error if the
+    /// folder can't be created or [`Self::at`] fails.
     pub fn at_user_temp_dir(self, prefix: &str) -> io::Result<PathBuf> {
-        let candidates = candidate_bases();
         #[cfg(unix)]
         {
+            let candidates = candidate_bases();
             self.materialize_in_candidates(
                 prefix,
                 &candidates,
@@ -449,7 +440,7 @@ impl Materialize<'_> {
         }
         #[cfg(windows)]
         {
-            self.materialize_in_candidates(prefix, &candidates)
+            self.at(user_temp_dir(prefix)?)
         }
     }
 
@@ -533,26 +524,6 @@ impl Materialize<'_> {
         }
     }
 
-    #[cfg(windows)]
-    fn try_materialize_in_candidate(
-        self,
-        prefix: &str,
-        candidate: &CandidateBase,
-    ) -> Result<PathBuf, CandidateFailure> {
-        let base = &candidate.path;
-        match fs::symlink_metadata(base) {
-            Ok(_) => {}
-            Err(err) if err.kind() == io::ErrorKind::NotFound && candidate.create_if_missing => {
-                fs::create_dir_all(base)
-                    .map_err(|create_err| CandidateFailure::io(base, create_err))?;
-            }
-            Err(err) => return Err(CandidateFailure::io(base, err)),
-        }
-
-        let user_dir = user_dir_in(base, prefix).map_err(|err| CandidateFailure::io(base, err))?;
-        self.at(&user_dir).map_err(|err| CandidateFailure::io(&user_dir, err))
-    }
-
     #[cfg(unix)]
     fn materialize_in_candidates<FD, FF>(
         self,
@@ -565,25 +536,50 @@ impl Materialize<'_> {
         FD: FnMut(&Path) -> io::Result<bool>,
         FF: FnMut(&Path) -> io::Result<bool>,
     {
-        materialize_across_candidates(candidates, |candidate| {
-            self.try_materialize_in_candidate(
+        let mut saw_noexec = false;
+        let mut last_io_error: Option<io::Error> = None;
+        let mut failures: Vec<String> = Vec::new();
+
+        for candidate in candidates {
+            match self.try_materialize_in_candidate(
                 prefix,
                 candidate,
                 &mut is_dir_executable,
                 &mut is_file_executable,
-            )
-        })
-    }
+            ) {
+                Ok(path) => return Ok(path),
+                Err(CandidateFailure::Noexec(detail)) => {
+                    saw_noexec = true;
+                    failures.push(detail);
+                }
+                Err(CandidateFailure::Io { err, detail }) => {
+                    failures.push(detail);
+                    last_io_error = Some(err);
+                }
+            }
+        }
 
-    #[cfg(windows)]
-    fn materialize_in_candidates(
-        self,
-        prefix: &str,
-        candidates: &[CandidateBase],
-    ) -> io::Result<PathBuf> {
-        materialize_across_candidates(candidates, |candidate| {
-            self.try_materialize_in_candidate(prefix, candidate)
-        })
+        let details = failures.join("; ");
+        if saw_noexec {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "failed to materialize artifact in any candidate directory (noexec or unwritable): {details}"
+                ),
+            ));
+        }
+
+        if let Some(err) = last_io_error {
+            return Err(io::Error::new(
+                err.kind(),
+                format!("failed to materialize artifact in any candidate directory: {details}"),
+            ));
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "no candidate directories available for materialized artifact",
+        ))
     }
 
     /// Materialize the artifact in `dir` under a content-addressed filename,
@@ -661,60 +657,14 @@ impl Materialize<'_> {
     }
 }
 
-fn materialize_across_candidates(
-    candidates: &[CandidateBase],
-    mut try_candidate: impl FnMut(&CandidateBase) -> Result<PathBuf, CandidateFailure>,
-) -> io::Result<PathBuf> {
-    #[cfg(unix)]
-    let mut saw_noexec = false;
-    let mut last_io_error: Option<io::Error> = None;
-    let mut failures: Vec<String> = Vec::new();
-
-    for candidate in candidates {
-        match try_candidate(candidate) {
-            Ok(path) => return Ok(path),
-            #[cfg(unix)]
-            Err(CandidateFailure::Noexec(detail)) => {
-                saw_noexec = true;
-                failures.push(detail);
-            }
-            Err(CandidateFailure::Io { err, detail }) => {
-                failures.push(detail);
-                last_io_error = Some(err);
-            }
-        }
-    }
-
-    let details = failures.join("; ");
-    #[cfg(unix)]
-    if saw_noexec {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!(
-                "failed to materialize artifact in any candidate directory (noexec or unwritable): {details}"
-            ),
-        ));
-    }
-
-    if let Some(err) = last_io_error {
-        return Err(io::Error::new(
-            err.kind(),
-            format!("failed to materialize artifact in any candidate directory: {details}"),
-        ));
-    }
-
-    Err(io::Error::new(
-        io::ErrorKind::NotFound,
-        "no candidate directories available for materialized artifact",
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     const TEST_EXEC_ARTIFACT: Artifact =
         Artifact::__new("helper", b"#!/bin/sh\necho ok\n", "deadbeef");
+    #[cfg(unix)]
     const TEST_DATA_ARTIFACT: Artifact = Artifact::__new("addon", b"shared-lib-bytes", "cafebabe");
 
     #[test]
@@ -755,11 +705,11 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
     }
 
+    #[cfg(unix)]
     #[test]
     fn candidate_bases_apple_uses_library_caches_and_ignores_relative() {
-        let abs_home =
-            PathBuf::from(if cfg!(windows) { r"C:\Users\alice" } else { "/Users/alice" });
-        let tmp = PathBuf::from(if cfg!(windows) { r"C:\Temp" } else { "/tmp" });
+        let abs_home = PathBuf::from("/Users/alice");
+        let tmp = PathBuf::from("/tmp");
 
         let candidates =
             candidate_bases_from_apple(tmp.clone(), Some(abs_home.clone().into_os_string()));
@@ -779,12 +729,12 @@ mod tests {
         assert_eq!(relative_home, vec![CandidateBase { path: tmp, create_if_missing: false }]);
     }
 
+    #[cfg(unix)]
     #[test]
-    fn candidate_bases_xdg_prefers_xdg_cache_home_and_falls_back_to_home_cache() {
-        let tmp = PathBuf::from(if cfg!(windows) { r"C:\Temp" } else { "/tmp" });
-        let custom_cache =
-            PathBuf::from(if cfg!(windows) { r"C:\custom\cache" } else { "/custom/cache" });
-        let home = PathBuf::from(if cfg!(windows) { r"C:\home\alice" } else { "/home/alice" });
+    fn candidate_bases_xdg_prefers_xdg_cache_home_falls_back_to_home_and_deduplicates() {
+        let tmp = PathBuf::from("/tmp");
+        let custom_cache = PathBuf::from("/custom/cache");
+        let home = PathBuf::from("/home/alice");
 
         let with_xdg = candidate_bases_from_xdg(
             tmp.clone(),
@@ -812,42 +762,23 @@ mod tests {
             ]
         );
 
+        let deduped = candidate_bases_from_xdg(
+            tmp.clone(),
+            Some(tmp.clone().into_os_string()),
+            Some(home.into_os_string()),
+        );
+        assert_eq!(deduped, vec![CandidateBase { path: tmp.clone(), create_if_missing: false }]);
+
         let all_relative =
             candidate_bases_from_xdg(tmp.clone(), None, Some(OsString::from("relative/home")));
         assert_eq!(all_relative, vec![CandidateBase { path: tmp, create_if_missing: false }]);
     }
 
-    #[test]
-    fn candidate_bases_windows_uses_local_app_data_and_deduplicates() {
-        let tmp = PathBuf::from(if cfg!(windows) { r"C:\Temp" } else { "/tmp" });
-        let local_app_data = PathBuf::from(if cfg!(windows) {
-            r"C:\Users\alice\AppData\Local"
-        } else {
-            "/users/alice/appdata/local"
-        });
-
-        let candidates = candidate_bases_from_windows(
-            tmp.clone(),
-            Some(local_app_data.clone().into_os_string()),
-        );
-        assert_eq!(
-            candidates,
-            vec![
-                CandidateBase { path: tmp.clone(), create_if_missing: false },
-                CandidateBase { path: local_app_data, create_if_missing: true },
-            ]
-        );
-
-        let deduped = candidate_bases_from_windows(tmp.clone(), Some(tmp.clone().into_os_string()));
-        assert_eq!(deduped, vec![CandidateBase { path: tmp.clone(), create_if_missing: false }]);
-
-        let relative =
-            candidate_bases_from_windows(tmp.clone(), Some(OsString::from("relative/local")));
-        assert_eq!(relative, vec![CandidateBase { path: tmp, create_if_missing: false }]);
-    }
-
+    #[cfg(unix)]
     #[test]
     fn fallback_creates_missing_cache_dir_for_all_artifacts() {
+        use std::os::unix::fs::PermissionsExt;
+
         let root = tempfile::tempdir().unwrap();
         let missing_tmp = root.path().join("missing_tmp");
         let cache_dir = root.path().join("user_cache");
@@ -856,7 +787,6 @@ mod tests {
             CandidateBase { path: cache_dir.clone(), create_if_missing: true },
         ];
 
-        #[cfg(unix)]
         let data_path = TEST_DATA_ARTIFACT
             .materialize()
             .suffix(".node")
@@ -866,15 +796,8 @@ mod tests {
                 is_dir_executable,
                 is_file_executable,
             )
-            .unwrap();
-        #[cfg(windows)]
-        let data_path = TEST_DATA_ARTIFACT
-            .materialize()
-            .suffix(".node")
-            .materialize_in_candidates("vp_test", &candidates)
             .unwrap();
 
-        #[cfg(unix)]
         let exec_path = TEST_EXEC_ARTIFACT
             .materialize()
             .executable()
@@ -884,12 +807,6 @@ mod tests {
                 is_dir_executable,
                 is_file_executable,
             )
-            .unwrap();
-        #[cfg(windows)]
-        let exec_path = TEST_EXEC_ARTIFACT
-            .materialize()
-            .executable()
-            .materialize_in_candidates("vp_test", &candidates)
             .unwrap();
 
         assert!(cache_dir.is_dir());
@@ -898,40 +815,10 @@ mod tests {
         assert_eq!(data_path.parent(), exec_path.parent());
         assert_eq!(fs::read(&data_path).unwrap(), b"shared-lib-bytes");
         assert_eq!(fs::read(&exec_path).unwrap(), b"#!/bin/sh\necho ok\n");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            // Non-executable artifact keeps default temp file mode (no execute bit).
-            assert_eq!(fs::metadata(&data_path).unwrap().permissions().mode() & 0o111, 0);
-            // Executable artifact gets `+x`.
-            assert_ne!(fs::metadata(&exec_path).unwrap().permissions().mode() & 0o100, 0);
-        }
-    }
-
-    #[test]
-    fn all_candidates_failed_preserves_last_io_error() {
-        let root = tempfile::tempdir().unwrap();
-        let missing_dir = root.path().join("missing");
-        let candidates = [CandidateBase { path: missing_dir, create_if_missing: false }];
-
-        #[cfg(unix)]
-        let io_err = TEST_EXEC_ARTIFACT
-            .materialize()
-            .executable()
-            .materialize_in_candidates(
-                "vp_test",
-                &candidates,
-                is_dir_executable,
-                is_file_executable,
-            )
-            .unwrap_err();
-        #[cfg(windows)]
-        let io_err = TEST_EXEC_ARTIFACT
-            .materialize()
-            .executable()
-            .materialize_in_candidates("vp_test", &candidates)
-            .unwrap_err();
-        assert_eq!(io_err.kind(), io::ErrorKind::NotFound);
+        // Non-executable artifact keeps default temp file mode (no execute bit).
+        assert_eq!(fs::metadata(&data_path).unwrap().permissions().mode() & 0o111, 0);
+        // Executable artifact gets `+x`.
+        assert_ne!(fs::metadata(&exec_path).unwrap().permissions().mode() & 0o100, 0);
     }
 
     #[cfg(unix)]
