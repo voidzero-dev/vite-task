@@ -353,12 +353,12 @@ unsafe fn is_proc_self_exe(dirfd: i32, path_ptr: usize) -> bool {
         };
     }
 
-    // Relative path ending in `exe`: resolve a real `dirfd` via
-    // `fspy_nostd_alloc::fs::fd_path` using a pooled bump arena so stack
-    // usage stays tiny. Paths relative to the cwd (`AT_FDCWD`) are not
-    // matched; programs name `/proc/self/exe` absolutely.
-    // SAFETY: `dirfd` comes from the trapped syscall; `AT_FDCWD` and `-1`
-    // yield `None`, and any invalid fd cleanly returns `Ok(None)` from `fd_path`.
+    // Relative path ending in `exe`: resolve `dirfd` (or `cwd` for `AT_FDCWD`,
+    // which is `-100` on Linux and yields `Some(CWD)` from `try_borrow_raw`)
+    // via `fspy_nostd_alloc::fs::fd_path` using a pooled bump arena so stack
+    // usage stays tiny.
+    // SAFETY: `dirfd` comes from the trapped syscall; `-1` yields `None`, and
+    // any invalid fd cleanly returns `Ok(None)` from `fd_path`.
     let Some(borrowed_dirfd) = (unsafe { BorrowedFd::try_borrow_raw(dirfd) }) else {
         return false;
     };
