@@ -83,13 +83,19 @@ unsafe impl<T> Sync for SyncCell<T> {}
 /// while all maskable signals including `SIGSYS` are already blocked by our
 /// `SIGSYS` handler `sa_mask`.
 struct SeqAction {
-    /// Even when quiescent, odd while a writer updates the atomic fields.
+    /// Even when quiescent, odd while a writer updates the primary fields.
     seq: AtomicUsize,
     writer_lock: AtomicBool,
     sa_handler: AtomicUsize,
     sa_flags: AtomicUsize,
     sa_restorer: AtomicUsize,
     sa_mask: AtomicU64,
+    /// Last fully committed even snapshot, updated only while `seq` is even so
+    /// `reset_after_fork` can roll back a torn odd `seq` in a forked child.
+    backup_handler: AtomicUsize,
+    backup_flags: AtomicUsize,
+    backup_restorer: AtomicUsize,
+    backup_mask: AtomicU64,
 }
 
 impl SeqAction {
@@ -101,6 +107,10 @@ impl SeqAction {
             sa_flags: AtomicUsize::new(0),
             sa_restorer: AtomicUsize::new(0),
             sa_mask: AtomicU64::new(0),
+            backup_handler: AtomicUsize::new(SIG_DFL_RAW),
+            backup_flags: AtomicUsize::new(0),
+            backup_restorer: AtomicUsize::new(0),
+            backup_mask: AtomicU64::new(0),
         }
     }
 
@@ -110,13 +120,31 @@ impl SeqAction {
         self.sa_flags.store(act.sa_flags, Ordering::Relaxed);
         self.sa_restorer.store(act.sa_restorer, Ordering::Relaxed);
         self.sa_mask.store(act.sa_mask, Ordering::Relaxed);
+        self.backup_handler.store(act.sa_handler, Ordering::Relaxed);
+        self.backup_flags.store(act.sa_flags, Ordering::Relaxed);
+        self.backup_restorer.store(act.sa_restorer, Ordering::Relaxed);
+        self.backup_mask.store(act.sa_mask, Ordering::Relaxed);
         self.seq.store(0, Ordering::Release);
     }
 
     fn reset_after_fork(&self) {
+        // Runs single-threaded in a fresh `fork()` child. If `fork()` captured
+        // another thread mid-`write_with` (odd `seq`), `backup_*` still holds
+        // the previous fully committed action; restore it instead of sealing
+        // torn fields. If `seq` is even, primary is consistent and `backup_*`
+        // may have been mid-sync, so refresh `backup_*` from primary.
         let seq = self.seq.load(Ordering::Relaxed);
         if (seq & 1) != 0 {
-            self.seq.store(seq.wrapping_add(1), Ordering::Relaxed);
+            self.sa_handler.store(self.backup_handler.load(Ordering::Relaxed), Ordering::Relaxed);
+            self.sa_flags.store(self.backup_flags.load(Ordering::Relaxed), Ordering::Relaxed);
+            self.sa_restorer.store(self.backup_restorer.load(Ordering::Relaxed), Ordering::Relaxed);
+            self.sa_mask.store(self.backup_mask.load(Ordering::Relaxed), Ordering::Relaxed);
+            self.seq.store(seq.wrapping_add(1), Ordering::Release);
+        } else {
+            self.backup_handler.store(self.sa_handler.load(Ordering::Relaxed), Ordering::Relaxed);
+            self.backup_flags.store(self.sa_flags.load(Ordering::Relaxed), Ordering::Relaxed);
+            self.backup_restorer.store(self.sa_restorer.load(Ordering::Relaxed), Ordering::Relaxed);
+            self.backup_mask.store(self.sa_mask.load(Ordering::Relaxed), Ordering::Relaxed);
         }
         self.writer_lock.store(false, Ordering::Release);
     }
@@ -172,6 +200,10 @@ impl SeqAction {
         self.sa_restorer.store(next.sa_restorer, Ordering::Relaxed);
         self.sa_mask.store(next.sa_mask, Ordering::Relaxed);
         self.seq.store(seq.wrapping_add(2), Ordering::Release);
+        self.backup_handler.store(next.sa_handler, Ordering::Relaxed);
+        self.backup_flags.store(next.sa_flags, Ordering::Relaxed);
+        self.backup_restorer.store(next.sa_restorer, Ordering::Relaxed);
+        self.backup_mask.store(next.sa_mask, Ordering::Relaxed);
         self.writer_lock.store(false, Ordering::Release);
         result
     }
@@ -528,10 +560,16 @@ fn store_pending_info(key: u64, info: siginfo) {
                 0 => cur == key,
                 1 => cur == 0,
                 _ => {
-                    (cur & INFO_LOCK_BIT) == 0
-                        && cur != 0
-                        && cur != key
-                        && !is_tid_alive(my_pid, slot_pid(cur), slot_tid(cur))
+                    // Reclaim any slot (including one abandoned with
+                    // `INFO_LOCK_BIT` set by a killed `CLONE_VM` child) whose
+                    // recorded `(pid, tid)` is confirmed dead (`-ESRCH`).
+                    // Live lockers (`store_pending_info` / `take_pending_info`)
+                    // always store their own live `(pid, tid)`, so this never
+                    // races an active writer.
+                    let owner_key = cur & !INFO_LOCK_BIT;
+                    owner_key != 0
+                        && owner_key != key
+                        && !is_tid_alive(my_pid, slot_pid(owner_key), slot_tid(owner_key))
                 }
             };
             if can_claim
@@ -552,7 +590,8 @@ fn store_pending_info(key: u64, info: siginfo) {
 fn take_pending_info(key: u64) -> Option<siginfo> {
     // Lock with the calling (live) thread's own key so `store_pending_info`
     // pass 2 never mistakes a live `reap_dead_tids` take for an abandoned dead slot.
-    let lock_val = make_key(getpid(), gettid()).unwrap_or(key) | INFO_LOCK_BIT;
+    let my_pid = getpid();
+    let lock_val = make_key(my_pid, gettid()).unwrap_or(key) | INFO_LOCK_BIT;
     for slot in &PENDING_INFOS {
         let mut spins = 0_usize;
         loop {
@@ -560,8 +599,13 @@ fn take_pending_info(key: u64) -> Option<siginfo> {
             if cur == (key | INFO_LOCK_BIT) {
                 spins += 1;
                 if spins >= MAX_INFO_LOCK_SPINS {
-                    // Never clear a live thread's lock bit (which would race
-                    // an in-progress write); fall back to `synthetic_sigsys_info`.
+                    // If the locked slot's owner thread is confirmed dead
+                    // (`-ESRCH`), release the leaked slot; never clear a live
+                    // thread's lock bit.
+                    if !is_tid_alive(my_pid, slot_pid(key), slot_tid(key)) {
+                        let _ =
+                            slot.key.compare_exchange(cur, 0, Ordering::AcqRel, Ordering::Relaxed);
+                    }
                     break;
                 }
                 core::hint::spin_loop();

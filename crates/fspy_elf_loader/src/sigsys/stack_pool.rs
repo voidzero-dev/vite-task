@@ -168,7 +168,13 @@ fn alloc_stack() -> Option<usize> {
             0,
         )
     };
-    if rc <= 0 {
+    if rc == 0 {
+        // SAFETY: `mmap` succeeded at address 0 (`vm.mmap_min_addr == 0`);
+        // release the mapping before failing so it is not leaked.
+        let _ = unsafe { syscall6(Sysno::munmap as usize, 0, total, 0, 0, 0, 0) };
+        return None;
+    }
+    if rc < 0 {
         return None;
     }
     let base = rc.cast_unsigned();
