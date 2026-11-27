@@ -567,7 +567,6 @@ mod tests {
 
     /// A tar.zst archive with one regular file entry whose path is written to
     /// the header verbatim (`tar::Builder` itself refuses `..`).
-
     fn archive_with_raw_path(path: &str) -> Vec<u8> {
         let mut header = tar::Header::new_gnu();
         header.as_old_mut().name[..path.len()].copy_from_slice(path.as_bytes());
