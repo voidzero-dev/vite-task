@@ -3808,6 +3808,32 @@ static int run_posix_spawn_sigsys_dfl_test(void) {
     return 0;
 }
 
+static int run_x32_enosys_test(void) {
+#ifdef __x86_64__
+    errno = 0;
+    long rc = syscall(0x40000000L | SYS_getpid);
+    if (rc != -1 || errno != ENOSYS) {
+        fail("expected x32 getpid syscall to return -1/ENOSYS");
+    }
+#endif
+    write_all(STDOUT_FILENO, "x32-enosys-ok\n", 14);
+    return 0;
+}
+
+static int run_validate_exec_eexist_test(void) {
+    const char *overlap_path = getenv("OVERLAP_ELF_PATH");
+    if (overlap_path == NULL || overlap_path[0] == '\0') {
+        fail("missing OVERLAP_ELF_PATH");
+    }
+    errno = 0;
+    long rc = syscall(SYS_execve, overlap_path, (void *)0x55553456UL, NULL);
+    if (rc != -1 || errno != EEXIST) {
+        fail("expected intercepted overlapping ET_EXEC to fail with EEXIST");
+    }
+    write_all(STDOUT_FILENO, "validate-exec-eexist-ok\n", 24);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fail("missing subcommand");
@@ -3919,6 +3945,12 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "posix-spawn-sigsys-dfl") == 0) {
         return run_posix_spawn_sigsys_dfl_test();
+    }
+    if (strcmp(argv[1], "x32-enosys") == 0) {
+        return run_x32_enosys_test();
+    }
+    if (strcmp(argv[1], "validate-exec-eexist") == 0) {
+        return run_validate_exec_eexist_test();
     }
     fail("unknown subcommand");
     return 1;

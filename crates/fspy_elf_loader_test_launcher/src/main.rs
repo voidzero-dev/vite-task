@@ -21,6 +21,7 @@ mod freestanding {
     const INTERCEPTOR_EXEC_PROBE_ARGV: usize = 0x5555_1234;
     const INTERCEPTOR_EXEC_FAIL_CLEANUP_ARGV: usize = 0x5555_2345;
     const INTERCEPTOR_EXEC_FAIL_NO_CLEANUP_ARGV: usize = 0x5555_2346;
+    const INTERCEPTOR_VALIDATE_EXEC_ARGV: usize = 0x5555_3456;
 
     static NONEXISTENT_EXEC_PATH: &[u8] = b"/nonexistent_fspy_execve_action_probe\0";
     static SIGSYS_IGNORED_PROBE_PATH: &[u8] = b"/fspy_probe_sigsys_ignored";
@@ -103,6 +104,13 @@ mod freestanding {
                         envp: EMPTY_EXEC_PTRS.as_ptr().cast(),
                         cleanup: None,
                     });
+                }
+                if call.args[1] == INTERCEPTOR_VALIDATE_EXEC_ARGV {
+                    // SAFETY: `call.args[0]` is the trapped `execve` pathname pointer.
+                    let cstr = unsafe { fspy_elf_loader::user_cstr(call.args[0]) }?;
+                    let fd = openat(CWD, cstr, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty())?;
+                    fspy_elf_loader::validate_exec(fd.as_fd())?;
+                    return Err(Error::NOENT);
                 }
                 // SAFETY: `call.args[0]` is the trapped `execve` pathname pointer.
                 if let Ok(cstr) = unsafe { fspy_elf_loader::user_cstr(call.args[0]) }

@@ -249,6 +249,24 @@ impl<'fd> File<'fd> {
         Ok(ValidatedLayout { low, span, alignment, exec_stack })
     }
 
+    /// Rejects fixed-address (`ET_EXEC`) images whose page-rounded span
+    /// intersects [`crate::LAUNCHER_REGION`].
+    ///
+    /// Returns `EEXIST` rather than `ENOEXEC` so `execvp`/`posix_spawnp`/shells
+    /// do not fall back to interpreting the ELF binary with `/bin/sh`.
+    pub(crate) const fn reject_launcher_region_overlap(
+        &self,
+        layout: &ValidatedLayout,
+    ) -> Result<()> {
+        if self.header.e_type == abi::ET_EXEC {
+            let (region_base, region_limit) = crate::LAUNCHER_REGION;
+            if layout.low < region_limit && layout.low.saturating_add(layout.span) > region_base {
+                return Err(Error::from_raw_os_error(linux_raw_sys::errno::EEXIST.cast_signed()));
+            }
+        }
+        Ok(())
+    }
+
     pub fn try_map(&self, page: usize, layout: &ValidatedLayout) -> Result<Image> {
         // Reserve the whole image, including holes, before replacing pages
         // with MAP_FIXED. That flag discards existing mappings at its address;
@@ -256,6 +274,7 @@ impl<'fd> File<'fd> {
         let (mapping, bias) = if self.header.e_type == abi::ET_EXEC {
             // Fixed-address executables cannot move. Refuse collisions rather
             // than replacing resident loader code or other process state.
+            self.reject_launcher_region_overlap(layout)?;
             (Mapping::try_reserve_at(layout.low, layout.span)?, 0)
         } else {
             // Extra space aligns the load bias even when `p_align` exceeds a
@@ -422,7 +441,8 @@ impl<'fd> File<'fd> {
 /// closing `fd`.
 pub fn validate_exec_fd(fd: BorrowedFd<'_>, page: usize) -> Result<()> {
     let executable = File::open(fd)?;
-    let _ = executable.validate_segments(page)?;
+    let layout = executable.validate_segments(page)?;
+    executable.reject_launcher_region_overlap(&layout)?;
     if let Some(interp_path) = executable.interpreter()? {
         let interp_fd = fs::openat(
             fspy_nostd::CWD,
@@ -433,7 +453,8 @@ pub fn validate_exec_fd(fd: BorrowedFd<'_>, page: usize) -> Result<()> {
         // Like Linux, accept an ET_EXEC interpreter and ignore its own
         // PT_INTERP and PT_GNU_STACK.
         let interp = File::open(interp_fd.as_fd())?;
-        let _ = interp.validate_segments(page)?;
+        let interp_layout = interp.validate_segments(page)?;
+        interp.reject_launcher_region_overlap(&interp_layout)?;
     }
     Ok(())
 }

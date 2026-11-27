@@ -1,8 +1,10 @@
 //! Seccomp-BPF filter construction, fingerprint probing, and installation.
 //!
 //! The installed filter executes in optimal order:
-//! 1. Allows syscalls whose `seccomp_data.arch` does not match the native 64-bit
-//!    architecture.
+//! 1. Rejects syscalls whose `seccomp_data.arch` does not match the native
+//!    64-bit architecture (and, on x86-64, x32 ABI syscalls with
+//!    `nr >= 0x4000_0000`) with `SECCOMP_RET_ERRNO | ENOSYS` so foreign/compat
+//!    ABIs cannot bypass tracking or crash on foreign-ABI `execve`.
 //! 2. Answers the idempotency probe
 //!    `getpid(PROBE_MAGIC, fingerprint)` with `SECCOMP_RET_ERRNO | EOWNERDEAD`
 //!    **before** the `PF_X` IP allowlist so recursive `execve`s of the same
@@ -40,8 +42,8 @@ use linux_raw_sys::{
     general::{CLONE_VFORK, CLONE_VM},
     prctl::PR_SET_NO_NEW_PRIVS,
     ptrace::{
-        BPF_ABS, BPF_JEQ, BPF_JGE, BPF_JGT, BPF_JMP, BPF_JSET, BPF_K, BPF_LD, BPF_RET, BPF_W,
-        SECCOMP_RET_ALLOW, SECCOMP_RET_DATA, SECCOMP_RET_ERRNO, SECCOMP_RET_TRAP,
+        AUDIT_ARCH_X86_64, BPF_ABS, BPF_JEQ, BPF_JGE, BPF_JGT, BPF_JMP, BPF_JSET, BPF_K, BPF_LD,
+        BPF_RET, BPF_W, SECCOMP_RET_ALLOW, SECCOMP_RET_DATA, SECCOMP_RET_ERRNO, SECCOMP_RET_TRAP,
         SECCOMP_SET_MODE_FILTER, seccomp_data, sock_filter, sock_fprog,
     },
 };
@@ -96,9 +98,15 @@ pub const SECCOMP_RET_TAGGED_TRAP: u32 = SECCOMP_RET_TRAP | (TRAP_TAG as u32 & S
 /// Seccomp return action emitted when the `getpid` idempotency probe matches.
 pub const SECCOMP_RET_PROBE: u32 = SECCOMP_RET_ERRNO | (EOWNERDEAD & SECCOMP_RET_DATA);
 
-/// Seccomp return action emitted for `clone3` and `io_uring_setup` so runtimes
-/// fall back to `clone(2)` and standard filesystem syscalls.
+/// Seccomp return action emitted for foreign/compat ABIs (including x32 on
+/// x86-64), `clone3`, and `io_uring_setup` so foreign ABIs cannot bypass
+/// tracking and runtimes fall back to `clone(2)` and standard filesystem
+/// syscalls.
 pub const SECCOMP_RET_ENOSYS: u32 = SECCOMP_RET_ERRNO | (ENOSYS & SECCOMP_RET_DATA);
+
+/// Linux `__X32_SYSCALL_BIT`: x32 ABI syscalls share `AUDIT_ARCH_X86_64` and
+/// set bit 30 (`nr >= 0x4000_0000`).
+const X32_SYSCALL_BIT: u32 = 0x4000_0000;
 
 /// Maximum number of unique unconditionally trapped syscalls (loader base +
 /// interceptor).
@@ -301,21 +309,36 @@ pub const fn build_filter(
 
     let mut prog = FilterProgram::new();
 
-    // 1. Native architecture gate: allow foreign/compat architectures untouched.
+    // 1. Native architecture gate: reject foreign/compat architectures (e.g.
+    //    i386 `int 0x80` on x86-64) with `ENOSYS` so they cannot bypass
+    //    tracking or crash on foreign-ABI `execve`.
     prog.push(LD_W_ABS, 0, 0, OFF_ARCH);
     let j_arch = prog.push(JMP_JEQ_K, 0, 0, arch);
-    prog.push(RET_K, 0, 0, SECCOMP_RET_ALLOW);
+    prog.push(RET_K, 0, 0, SECCOMP_RET_ENOSYS);
     let after_arch = prog.len;
     prog.patch_jt(j_arch, after_arch);
 
+    // Load `seccomp_data.nr` once; reused by the x32 gate and idempotency probe.
+    prog.push(LD_W_ABS, 0, 0, OFF_NR);
+
+    // 1b. On x86-64, x32 syscalls share `AUDIT_ARCH_X86_64` with bit 30 set
+    //     (`nr >= 0x4000_0000`). Reject them with `ENOSYS` before any allowlist
+    //     or trap dispatch so they cannot bypass tracking.
+    if arch == AUDIT_ARCH_X86_64 {
+        let j_x32 = prog.push(JMP_JGE_K, 0, 0, X32_SYSCALL_BIT);
+        prog.push(RET_K, 0, 0, SECCOMP_RET_ENOSYS);
+        let after_x32 = prog.len;
+        prog.patch_jf(j_x32, after_x32);
+    }
+
     // 2. Idempotency probe (runs BEFORE the PF_X IP allowlist):
     //    `getpid(PROBE_MAGIC, fingerprint)` -> `SECCOMP_RET_ERRNO | EOWNERDEAD`.
+    //    `A` already holds `nr`.
     let magic_lo = PROBE_MAGIC as u32;
     let magic_hi = (PROBE_MAGIC >> 32) as u32;
     let fp_lo = fingerprint as u32;
     let fp_hi = (fingerprint >> 32) as u32;
 
-    prog.push(LD_W_ABS, 0, 0, OFF_NR);
     let j_probe_nr = prog.push(JMP_JEQ_K, 0, 0, Sysno::getpid as u32);
     prog.push(LD_W_ABS, 0, 0, OFF_ARG0_LO);
     let j_probe_a0_lo = prog.push(JMP_JEQ_K, 0, 0, magic_lo);
@@ -575,10 +598,10 @@ mod tests {
         let prog = build_filter(AUDIT_ARCH_NATIVE, code_start, code_end, fp, trapped);
         let insns = prog.as_slice();
 
-        // Foreign arch is always allowed (even for matching probe or trapped syscall).
+        // Foreign arch always returns `ENOSYS` (even for matching probe or trapped syscall).
         assert_eq!(
             eval_bpf(insns, &make_data(AUDIT_ARCH_NATIVE ^ 1, 0x1000, trapped[0], [0; 6])),
-            SECCOMP_RET_ALLOW
+            SECCOMP_RET_ENOSYS
         );
         assert_eq!(
             eval_bpf(
@@ -590,7 +613,7 @@ mod tests {
                     [PROBE_MAGIC, fp, 0, 0, 0, 0],
                 ),
             ),
-            SECCOMP_RET_ALLOW
+            SECCOMP_RET_ENOSYS
         );
 
         // Inside half-open `[code_start, code_end)` is allowed even for trapped syscalls.
@@ -823,5 +846,70 @@ mod tests {
         assert_eq!(fp1, fp2);
         assert_ne!(fp1, fp_diff_range);
         assert_ne!(fp1, fp_diff_syscalls);
+    }
+
+    #[test]
+    fn filter_rejects_foreign_arch_and_x32_syscalls_with_enosys() {
+        let code_start = 0x5500_0000_1000_u64;
+        let code_end = 0x5500_0000_9000_u64;
+        let (buf, count) = collect_trapped_syscalls(&[]).unwrap();
+        let trapped = &buf[..count];
+        let fp = compute_fingerprint(code_start, code_end, trapped);
+
+        let prog_x86 = build_filter(AUDIT_ARCH_X86_64, code_start, code_end, fp, trapped);
+        let insns_x86 = prog_x86.as_slice();
+
+        // Compat i386 (`AUDIT_ARCH_I386`) and arbitrary foreign arch return `ENOSYS`.
+        for foreign_arch in [linux_raw_sys::ptrace::AUDIT_ARCH_I386, AUDIT_ARCH_X86_64 ^ 1] {
+            for ip in [0x1000, code_start + 8] {
+                assert_eq!(
+                    eval_bpf(insns_x86, &make_data(foreign_arch, ip, 1, [0; 6])),
+                    SECCOMP_RET_ENOSYS
+                );
+            }
+        }
+
+        // x32 syscalls (`nr >= 0x4000_0000`) return `ENOSYS` even from `PF_X`
+        // or with matching `getpid` probe arguments.
+        for nr in [
+            X32_SYSCALL_BIT,
+            X32_SYSCALL_BIT | (Sysno::getpid as u32),
+            X32_SYSCALL_BIT | (Sysno::openat as u32),
+            X32_SYSCALL_BIT | (Sysno::execve as u32),
+            u32::MAX,
+        ] {
+            for ip in [0x1000, code_start + 8] {
+                assert_eq!(
+                    eval_bpf(
+                        insns_x86,
+                        &make_data(AUDIT_ARCH_X86_64, ip, nr, [PROBE_MAGIC, fp, 0, 0, 0, 0]),
+                    ),
+                    SECCOMP_RET_ENOSYS,
+                    "expected ENOSYS for x32 nr={nr:#x} at ip={ip:#x}"
+                );
+            }
+        }
+
+        // Native x86-64 syscalls below `X32_SYSCALL_BIT` keep working normally.
+        assert_eq!(
+            eval_bpf(
+                insns_x86,
+                &make_data(
+                    AUDIT_ARCH_X86_64,
+                    0x1000,
+                    Sysno::getpid as u32,
+                    [PROBE_MAGIC, fp, 0, 0, 0, 0],
+                ),
+            ),
+            SECCOMP_RET_PROBE
+        );
+        assert_eq!(
+            eval_bpf(insns_x86, &make_data(AUDIT_ARCH_X86_64, 0x1000, trapped[0], [0; 6])),
+            SECCOMP_RET_TAGGED_TRAP
+        );
+        assert_eq!(
+            eval_bpf(insns_x86, &make_data(AUDIT_ARCH_X86_64, 0x1000, Sysno::write as u32, [0; 6])),
+            SECCOMP_RET_ALLOW
+        );
     }
 }
