@@ -8,9 +8,12 @@
 //!    **before** the `PF_X` IP allowlist so recursive `execve`s of the same
 //!    launcher detect an already-installed identical filter and avoid filter
 //!    stacking.
-//! 3. Returns `SECCOMP_RET_ERRNO | ENOSYS` for `clone3` so callers (notably
-//!    glibc's `posix_spawn`, which passes `CLONE_CLEAR_SIGHAND` to reset all
-//!    signal handlers including `SIGSYS`) fall back cleanly to `clone(2)`.
+//! 3. Returns `SECCOMP_RET_ERRNO | ENOSYS` for `clone3` (so callers like
+//!    glibc's `posix_spawn`, which pass `CLONE_CLEAR_SIGHAND` to reset all
+//!    signal handlers including `SIGSYS`, fall back cleanly to `clone(2)`) and
+//!    for `io_uring_setup` (so runtimes fall back to standard syscalls instead
+//!    of bypassing `/proc/*/exe` virtualization and caller interceptors via
+//!    `io_uring` rings).
 //! 4. Conditionally traps:
 //!    - `ppoll` / `pselect6` / `epoll_pwait` / `epoll_pwait2` **only** when the
 //!      temporary sigmask pointer argument is non-null (avoiding `SIGSYS` traps
@@ -93,8 +96,9 @@ pub const SECCOMP_RET_TAGGED_TRAP: u32 = SECCOMP_RET_TRAP | (TRAP_TAG as u32 & S
 /// Seccomp return action emitted when the `getpid` idempotency probe matches.
 pub const SECCOMP_RET_PROBE: u32 = SECCOMP_RET_ERRNO | (EOWNERDEAD & SECCOMP_RET_DATA);
 
-/// Seccomp return action emitted for `clone3` so runtimes fall back to `clone(2)`.
-pub const SECCOMP_RET_CLONE3_ENOSYS: u32 = SECCOMP_RET_ERRNO | (ENOSYS & SECCOMP_RET_DATA);
+/// Seccomp return action emitted for `clone3` and `io_uring_setup` so runtimes
+/// fall back to `clone(2)` and standard filesystem syscalls.
+pub const SECCOMP_RET_ENOSYS: u32 = SECCOMP_RET_ERRNO | (ENOSYS & SECCOMP_RET_DATA);
 
 /// Maximum number of unique unconditionally trapped syscalls (loader base +
 /// interceptor).
@@ -317,12 +321,18 @@ pub const fn build_filter(
     prog.push(JMP_JEQ_K, 0, 1, fp_hi);
     prog.push(RET_K, 0, 0, SECCOMP_RET_PROBE);
 
-    // 3. Reject `clone3` with `ENOSYS` so callers using `CLONE_CLEAR_SIGHAND`
-    //    (which resets our `SIGSYS` handler to `SIG_DFL` in the child while
-    //    keeping the seccomp filter active) fall back cleanly to `clone(2)`.
+    // 3. Reject `clone3` and `io_uring_setup` with `ENOSYS`:
+    //    - `clone3` callers using `CLONE_CLEAR_SIGHAND` would reset our
+    //      `SIGSYS` handler to `SIG_DFL` in the child while keeping the
+    //      seccomp filter active; `ENOSYS` makes glibc fall back to `clone(2)`.
+    //    - `io_uring` operations bypass seccomp syscall traps entirely, so
+    //      rejecting `io_uring_setup` ensures runtimes fall back to standard
+    //      syscalls where `/proc/*/exe` virtualization and caller interceptors
+    //      observe them.
     prog.push(LD_W_ABS, 0, 0, OFF_NR);
-    prog.push(JMP_JEQ_K, 0, 1, Sysno::clone3 as u32);
-    prog.push(RET_K, 0, 0, SECCOMP_RET_CLONE3_ENOSYS);
+    prog.push(JMP_JEQ_K, 1, 0, Sysno::clone3 as u32);
+    prog.push(JMP_JEQ_K, 0, 1, Sysno::io_uring_setup as u32);
+    prog.push(RET_K, 0, 0, SECCOMP_RET_ENOSYS);
 
     // Collect indices of jumps that must target `ip_check_idx`.
     let mut on_true_to_ip = [0_usize; MAX_TRAPPED_SYSCALLS + 16];
@@ -582,13 +592,15 @@ mod tests {
             }
         }
 
-        // `clone3` always returns `SECCOMP_RET_CLONE3_ENOSYS` on the native arch.
-        for ip in [0, code_start, code_end, 0x0000_7fff_0000_0000] {
-            assert_eq!(
-                eval_bpf(insns, &make_data(AUDIT_ARCH_NATIVE, ip, Sysno::clone3 as u32, [0; 6])),
-                SECCOMP_RET_CLONE3_ENOSYS,
-                "expected ENOSYS for clone3 at ip={ip:#x}"
-            );
+        // `clone3` and `io_uring_setup` always return `SECCOMP_RET_ENOSYS` on the native arch.
+        for nr in [Sysno::clone3 as u32, Sysno::io_uring_setup as u32] {
+            for ip in [0, code_start, code_end, 0x0000_7fff_0000_0000] {
+                assert_eq!(
+                    eval_bpf(insns, &make_data(AUDIT_ARCH_NATIVE, ip, nr, [0; 6])),
+                    SECCOMP_RET_ENOSYS,
+                    "expected ENOSYS for nr={nr} at ip={ip:#x}"
+                );
+            }
         }
 
         // Outside `[code_start, code_end)` (including `code_end` itself!) is trapped with `TRAP_TAG`.
