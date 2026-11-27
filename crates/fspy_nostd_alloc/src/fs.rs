@@ -111,7 +111,11 @@ fn path_buffer<A: Allocator>(
 /// error reported while resolving the descriptor.
 pub fn fd_path<A: Allocator>(allocator: A, fd: BorrowedFd<'_>) -> Result<Option<CString<Fat, A>>> {
     if fd.as_raw_fd() == CWD.as_raw_fd() {
-        return getcwd(allocator).map(Some);
+        return match getcwd(allocator) {
+            Ok(path) => Ok(Some(path)),
+            Err(Error::NOENT) => Ok(None),
+            Err(err) => Err(err),
+        };
     }
 
     #[cfg(any(target_os = "linux", target_os = "none"))]
