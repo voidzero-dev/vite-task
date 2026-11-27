@@ -283,6 +283,11 @@ struct PendingInfoSlot {
     info: SyncCell<MaybeUninit<siginfo>>,
 }
 
+/// Lock-free side table holding `siginfo` payloads for deferred non-seccomp
+/// `SIGSYS` deliveries while `SIGSYS` is virtually blocked.
+///
+/// Note: unlike the Linux kernel, virtually pending non-seccomp `SIGSYS` state
+/// is not preserved across tracked `execve`.
 static PENDING_INFOS: [PendingInfoSlot; MAX_PENDING_INFOS] = [const {
     PendingInfoSlot {
         key: AtomicU64::new(0),

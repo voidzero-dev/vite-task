@@ -773,6 +773,69 @@ fn posix_spawn_setsigdef_preserves_child_sigsys_dfl_without_mutating_parent() {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+#[test]
+#[timeout(10_000)]
+fn x32_syscalls_return_enosys() {
+    for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
+        let mut loaded = launcher();
+        loaded.args([fixture, fixture, "x32-enosys"]);
+        let loaded = output(loaded);
+        assert_eq!(loaded.status.code(), Some(0), "x32-enosys ({fixture}): {loaded:?}");
+        assert_eq!(loaded.stdout, b"x32-enosys-ok\n");
+        assert!(loaded.stderr.is_empty(), "x32-enosys ({fixture}): {loaded:?}");
+    }
+}
+
+#[test]
+#[timeout(10_000)]
+fn intercepted_overlapping_et_exec_returns_eexist_cleanly() {
+    let launcher_bytes = std::fs::read(LAUNCHER).unwrap();
+    let launcher_elf =
+        elf::ElfBytes::<elf::endian::LittleEndian>::minimal_parse(&launcher_bytes).unwrap();
+    let launcher_base = launcher_elf
+        .segments()
+        .unwrap()
+        .iter()
+        .find(|ph| ph.p_type == elf::abi::PT_LOAD)
+        .unwrap()
+        .p_vaddr;
+    let mut bytes = std::fs::read(FIXTURE_DYN_EXEC).unwrap();
+    let parsed = elf::ElfBytes::<elf::endian::LittleEndian>::minimal_parse(&bytes).unwrap();
+    let table = usize::try_from(parsed.ehdr.e_phoff).unwrap();
+    let loads: Vec<_> = parsed
+        .segments()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .filter(|(_, ph)| ph.p_type == elf::abi::PT_LOAD)
+        .collect();
+    let base = loads[0].1.p_vaddr;
+    let entry = parsed.ehdr.e_entry - base + launcher_base;
+    write_u64(&mut bytes, offset_of!(libc::Elf64_Ehdr, e_entry), entry);
+    for (index, ph) in loads {
+        let phdr_offset = table + index * size_of::<libc::Elf64_Phdr>();
+        write_u64(
+            &mut bytes,
+            phdr_offset + offset_of!(libc::Elf64_Phdr, p_vaddr),
+            ph.p_vaddr - base + launcher_base,
+        );
+    }
+    let overlap_file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(overlap_file.path(), bytes).unwrap();
+
+    for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
+        let mut loaded = launcher();
+        loaded
+            .args(["--test-interceptor", fixture, fixture, "validate-exec-eexist"])
+            .env("OVERLAP_ELF_PATH", overlap_file.path());
+        let loaded = output(loaded);
+        assert_eq!(loaded.status.code(), Some(0), "validate-exec-eexist ({fixture}): {loaded:?}");
+        assert_eq!(loaded.stdout, b"validate-exec-eexist-ok\n");
+        assert!(loaded.stderr.is_empty(), "validate-exec-eexist ({fixture}): {loaded:?}");
+    }
+}
+
 fn check_virt_subcommand(fixture: &str, subcommand: &str, expected_stdout: &[u8]) {
     let canonical = std::fs::canonicalize(fixture).unwrap();
 
