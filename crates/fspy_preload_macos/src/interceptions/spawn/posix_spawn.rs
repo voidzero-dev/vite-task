@@ -1,6 +1,9 @@
-use std::sync::{
-    Mutex,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    cell::UnsafeCell,
+    sync::{
+        Once,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use allocator_api2::vec::Vec as AllocVec;
@@ -20,34 +23,140 @@ type PosixSpawnFn = unsafe extern "C" fn(
     envp: *const *mut c_char,
 ) -> c_int;
 
+/// Initial capacity pre-allocated for [`SPAWN_CHDIRS`] outside the mutex.
+const INITIAL_CAPACITY: usize = 64;
+
 /// Number of `posix_spawn_file_actions_t` handles currently tracked in
 /// [`SPAWN_CHDIRS`]. Allows `posix_spawn(p)` and `destroy` to skip the mutex
 /// completely in the common case when no chdir action is active.
 static ACTIVE_CHDIRS: AtomicUsize = AtomicUsize::new(0);
 
-/// Maps live `posix_spawn_file_actions_t` handle values (`*file_actions as usize`)
-/// to their effective absolute working directory from `addchdir_np` / `addfchdir_np`.
-static SPAWN_CHDIRS: Mutex<Vec<(usize, Vec<u8>)>> = Mutex::new(Vec::new());
+/// Fork-safe table mapping live `posix_spawn_file_actions_t` handle values
+/// (`*file_actions as usize`) to their effective absolute working directory
+/// from `addchdir_np` / `addfchdir_np`.
+///
+/// Coordinated across `fork()` via `pthread_atfork`. No heap allocation or
+/// deallocation ever runs while holding `mutex`, avoiding lock-order inversion
+/// with libmalloc's own `atfork` handlers.
+struct SpawnChdirTable {
+    mutex: UnsafeCell<libc::pthread_mutex_t>,
+    entries: UnsafeCell<Vec<(usize, Box<[u8]>)>>,
+}
 
-fn set_spawn_chdir(key: usize, path: Vec<u8>) {
-    let mut map = SPAWN_CHDIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some((_, existing)) = map.iter_mut().find(|(k, _)| *k == key) {
-        *existing = path;
-    } else {
-        map.push((key, path));
-        ACTIVE_CHDIRS.store(map.len(), Ordering::Release);
+// SAFETY: `entries` is only accessed while holding `mutex`.
+unsafe impl Sync for SpawnChdirTable {}
+
+static SPAWN_CHDIRS: SpawnChdirTable = SpawnChdirTable {
+    mutex: UnsafeCell::new(libc::PTHREAD_MUTEX_INITIALIZER),
+    entries: UnsafeCell::new(Vec::new()),
+};
+static ATFORK_INIT: Once = Once::new();
+
+unsafe extern "C" fn atfork_prepare() {
+    // SAFETY: `SPAWN_CHDIRS.mutex` is statically initialized.
+    unsafe { libc::pthread_mutex_lock(SPAWN_CHDIRS.mutex.get()) };
+}
+
+unsafe extern "C" fn atfork_parent() {
+    // SAFETY: `atfork_prepare` acquired `SPAWN_CHDIRS.mutex` on this thread.
+    unsafe { libc::pthread_mutex_unlock(SPAWN_CHDIRS.mutex.get()) };
+}
+
+unsafe extern "C" fn atfork_child() {
+    // SAFETY: `atfork_prepare` acquired `SPAWN_CHDIRS.mutex` on the forking
+    // thread, so the single-threaded child owns the lock and can unlock it.
+    unsafe { libc::pthread_mutex_unlock(SPAWN_CHDIRS.mutex.get()) };
+}
+
+fn ensure_init() {
+    ATFORK_INIT.call_once(|| {
+        let prealloc = Vec::with_capacity(INITIAL_CAPACITY);
+        // SAFETY: `SPAWN_CHDIRS.mutex` is statically initialized; swap the
+        // pre-allocated buffer under the lock and drop the empty old `Vec`
+        // outside the lock, then register fork handlers.
+        let old = unsafe {
+            libc::pthread_mutex_lock(SPAWN_CHDIRS.mutex.get());
+            let old = core::mem::replace(&mut *SPAWN_CHDIRS.entries.get(), prealloc);
+            libc::pthread_mutex_unlock(SPAWN_CHDIRS.mutex.get());
+            libc::pthread_atfork(Some(atfork_prepare), Some(atfork_parent), Some(atfork_child));
+            old
+        };
+        drop(old);
+    });
+}
+
+fn set_spawn_chdir(key: usize, path: Box<[u8]>) {
+    ensure_init();
+    let mut pending = Some(path);
+    let mut spare: Option<Vec<(usize, Box<[u8]>)>> = None;
+    let mut to_drop_entry: Option<Box<[u8]>> = None;
+    let mut to_drop_vec: Option<Vec<(usize, Box<[u8]>)>> = None;
+
+    loop {
+        // SAFETY: `SPAWN_CHDIRS.mutex` serializes all access to `entries`, and
+        // no allocation or deallocation occurs while the lock is held.
+        let need_capacity = unsafe {
+            libc::pthread_mutex_lock(SPAWN_CHDIRS.mutex.get());
+            let map = &mut *SPAWN_CHDIRS.entries.get();
+
+            let result = if let Some((_, existing)) = map.iter_mut().find(|(k, _)| *k == key) {
+                let new_path = pending.take().unwrap();
+                to_drop_entry = Some(core::mem::replace(existing, new_path));
+                None
+            } else if map.len() < map.capacity() {
+                map.push((key, pending.take().unwrap()));
+                ACTIVE_CHDIRS.store(map.len(), Ordering::Release);
+                None
+            } else if let Some(mut grown) = spare.take()
+                && grown.capacity() > map.len()
+            {
+                grown.append(map);
+                grown.push((key, pending.take().unwrap()));
+                let old_vec = core::mem::replace(map, grown);
+                ACTIVE_CHDIRS.store(map.len(), Ordering::Release);
+                to_drop_vec = Some(old_vec);
+                None
+            } else {
+                Some(map.capacity().max(INITIAL_CAPACITY).saturating_mul(2))
+            };
+
+            libc::pthread_mutex_unlock(SPAWN_CHDIRS.mutex.get());
+            result
+        };
+
+        if let Some(cap) = need_capacity {
+            // Allocate outside `SPAWN_CHDIRS.mutex` so `malloc` never nests
+            // inside our `atfork`-locked mutex.
+            spare = Some(Vec::with_capacity(cap));
+        } else {
+            break;
+        }
     }
+
+    drop(to_drop_entry);
+    drop(to_drop_vec);
+    drop(spare);
 }
 
 fn remove_spawn_chdir(key: usize) {
     if ACTIVE_CHDIRS.load(Ordering::Acquire) == 0 {
         return;
     }
-    let mut map = SPAWN_CHDIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(pos) = map.iter().position(|(k, _)| *k == key) {
-        map.swap_remove(pos);
-        ACTIVE_CHDIRS.store(map.len(), Ordering::Release);
-    }
+    ensure_init();
+    // SAFETY: `SPAWN_CHDIRS.mutex` serializes access to `entries`; the removed
+    // `Box<[u8]>` is dropped strictly after unlocking.
+    let removed = unsafe {
+        libc::pthread_mutex_lock(SPAWN_CHDIRS.mutex.get());
+        let map = &mut *SPAWN_CHDIRS.entries.get();
+        let removed = map.iter().position(|(k, _)| *k == key).map(|pos| {
+            let entry = map.swap_remove(pos);
+            ACTIVE_CHDIRS.store(map.len(), Ordering::Release);
+            entry
+        });
+        libc::pthread_mutex_unlock(SPAWN_CHDIRS.mutex.get());
+        removed
+    };
+    drop(removed);
 }
 
 fn get_spawn_chdir_in<A: allocator_api2::alloc::Allocator>(
@@ -62,14 +171,37 @@ fn get_spawn_chdir_in<A: allocator_api2::alloc::Allocator>(
     if key == 0 {
         return None;
     }
-    let map = SPAWN_CHDIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let out = map.iter().find(|(k, _)| *k == key).map(|(_, bytes)| {
-        let mut out = AllocVec::with_capacity_in(bytes.len(), allocator);
-        out.extend_from_slice(bytes);
-        out
-    });
-    drop(map);
-    out
+    ensure_init();
+
+    // Pre-allocate outside `SPAWN_CHDIRS.mutex` (macOS PATH_MAX is 1024).
+    let mut out = AllocVec::with_capacity_in(1024, allocator);
+    loop {
+        // SAFETY: `SPAWN_CHDIRS.mutex` serializes access to `entries`, and
+        // copying into pre-allocated `out` performs no heap allocation.
+        let status = unsafe {
+            libc::pthread_mutex_lock(SPAWN_CHDIRS.mutex.get());
+            let map = &*SPAWN_CHDIRS.entries.get();
+            let status = match map.iter().find(|(k, _)| *k == key) {
+                None => Ok(false),
+                Some((_, bytes)) if bytes.len() <= out.capacity() => {
+                    out.clear();
+                    out.extend_from_slice(bytes);
+                    Ok(true)
+                }
+                Some((_, bytes)) => Err(bytes.len()),
+            };
+            libc::pthread_mutex_unlock(SPAWN_CHDIRS.mutex.get());
+            status
+        };
+
+        match status {
+            Ok(true) => return Some(out),
+            Ok(false) => return None,
+            Err(needed) => {
+                out.reserve(needed.saturating_sub(out.len()));
+            }
+        }
+    }
 }
 
 intercept!(posix_spawn_file_actions_addchdir_np: unsafe extern "C" fn(
@@ -90,7 +222,7 @@ unsafe extern "C" fn posix_spawn_file_actions_addchdir_np(
             let c_path = unsafe { CStr::<Thin>::from_ptr(path.cast()) };
             let raw = c_path.count().as_units();
             if raw.starts_with(b"/") {
-                set_spawn_chdir(key, raw.to_vec());
+                set_spawn_chdir(key, Box::from(raw));
             } else if !raw.is_empty() {
                 let prev =
                     get_spawn_chdir_in(file_actions.cast_const(), allocator_api2::alloc::Global);
@@ -100,7 +232,7 @@ unsafe extern "C" fn posix_spawn_file_actions_addchdir_np(
                         resolve_path_at(&arena, Some(CWD), c_path)
                             .ok()
                             .flatten()
-                            .map(|p| p.as_units().to_vec())
+                            .map(|p| Box::from(p.as_units()))
                     },
                     |base| {
                         let mut joined = base.to_vec();
@@ -108,7 +240,7 @@ unsafe extern "C" fn posix_spawn_file_actions_addchdir_np(
                             joined.push(b'/');
                         }
                         joined.extend_from_slice(raw);
-                        Some(joined)
+                        Some(joined.into_boxed_slice())
                     },
                 );
                 if let Some(dir) = resolved {
@@ -139,7 +271,7 @@ unsafe extern "C" fn posix_spawn_file_actions_addfchdir_np(
             if let Some(borrowed) = borrowed {
                 let arena = fspy_nostd_alloc::pooled_bump();
                 if let Ok(Some(dir)) = fd_path(&arena, borrowed) {
-                    set_spawn_chdir(key, dir.as_units().to_vec());
+                    set_spawn_chdir(key, Box::from(dir.as_units()));
                 }
             }
         }

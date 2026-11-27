@@ -72,6 +72,9 @@ Do not try to close these in this crate unless a real target requires it:
 - **Privileged / unsupported binaries.** `PR_SET_NO_NEW_PRIVS` is enabled for
   seccomp (so setuid/setgid and file-capability escalations do not apply), and
   ELF32 and `binfmt_misc` binaries are rejected with `ENOEXEC`.
+- **Execute-only (`0111`) binaries.** Userland ELF mapping opens the executable
+  with `O_RDONLY` to validate headers and `mmap` segments, so execute-only
+  (`chmod 0111`) binaries cannot be mapped and fail with `EACCES`.
 - **Launcher path visibility across mount changes.** Every tracked `execve`
   re-enters the materialized freestanding launcher binary on disk. If a tracked
   process tree changes its mount namespace or root (`chroot`, `pivot_root`, or

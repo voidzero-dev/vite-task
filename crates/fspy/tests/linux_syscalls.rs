@@ -588,3 +588,119 @@ async fn legacy_x86_64_open_stat_lstat_syscalls_are_tracked() -> anyhow::Result<
     assert_includes(&accesses, &lstat_target, PathAccess::Read);
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn execveat_sets_kernel_matching_at_execfn_while_preserving_proc_self_exe()
+-> anyhow::Result<()> {
+    let cmd = vt_subprocess_test::command_for_fn!((), |()| {
+        use std::{
+            ffi::{CStr, CString},
+            os::{fd::AsRawFd as _, unix::ffi::OsStrExt as _},
+        };
+
+        if let Some(expected_execfn) = std::env::var_os("FSPY_TEST_EXPECT_EXECFN") {
+            let expected_exe = std::env::var_os("FSPY_TEST_EXPECT_EXE").unwrap();
+            // SAFETY: `getauxval(AT_EXECFN)` returns a pointer to the NUL-terminated
+            // `AT_EXECFN` string on the initial stack (or 0 if absent).
+            let raw = unsafe { libc::getauxval(libc::AT_EXECFN) };
+            assert_ne!(raw, 0, "AT_EXECFN missing in execveat child");
+            // SAFETY: non-zero `AT_EXECFN` points to a valid NUL-terminated C string.
+            let actual_execfn = unsafe { CStr::from_ptr(raw as *const libc::c_char) };
+            assert_eq!(
+                actual_execfn.to_bytes(),
+                expected_execfn.as_bytes(),
+                "AT_EXECFN did not match Linux execveat format"
+            );
+            let actual_exe = std::fs::read_link("/proc/self/exe").unwrap();
+            assert_eq!(
+                actual_exe.as_os_str().as_bytes(),
+                expected_exe.as_bytes(),
+                "/proc/self/exe did not preserve real binary path"
+            );
+            return;
+        }
+
+        let exe = std::fs::read_link("/proc/self/exe").unwrap();
+        let exe_dir = exe.parent().unwrap();
+        let exe_name = exe.file_name().unwrap();
+
+        let mut args: Vec<CString> =
+            std::env::args_os().map(|a| CString::new(a.as_bytes()).unwrap()).collect();
+        if args.is_empty() {
+            let cmdline = std::fs::read("/proc/self/cmdline").unwrap();
+            let mut parts: Vec<&[u8]> = cmdline.split(|&b| b == 0).collect();
+            if parts.last().is_some_and(|s| s.is_empty()) {
+                parts.pop();
+            }
+            args = parts.into_iter().map(|p| CString::new(p).unwrap()).collect();
+        }
+        let mut argv: Vec<*const libc::c_char> = args.iter().map(|s| s.as_ptr()).collect();
+        argv.push(std::ptr::null());
+
+        let base_envs: Vec<CString> = std::env::vars_os()
+            .filter(|(k, _)| k != "FSPY_TEST_EXPECT_EXECFN" && k != "FSPY_TEST_EXPECT_EXE")
+            .map(|(k, v)| {
+                let mut bytes = k.as_bytes().to_vec();
+                bytes.push(b'=');
+                bytes.extend_from_slice(v.as_bytes());
+                CString::new(bytes).unwrap()
+            })
+            .collect();
+
+        let run_case = |dirfd: libc::c_int,
+                        path: &CStr,
+                        flags: libc::c_int,
+                        expect_execfn: &str,
+                        chdir_root: bool| {
+            let mut envs = base_envs.clone();
+            envs.push(CString::new(format!("FSPY_TEST_EXPECT_EXECFN={expect_execfn}")).unwrap());
+            let mut exe_env = b"FSPY_TEST_EXPECT_EXE=".to_vec();
+            exe_env.extend_from_slice(exe.as_os_str().as_bytes());
+            envs.push(CString::new(exe_env).unwrap());
+            let mut envp: Vec<*const libc::c_char> = envs.iter().map(|s| s.as_ptr()).collect();
+            envp.push(std::ptr::null());
+
+            // SAFETY: `fork()` followed by async-signal-safe `chdir`/`execveat`/`_exit`.
+            let pid = unsafe { libc::fork() };
+            assert!(pid >= 0, "fork failed");
+            if pid == 0 {
+                // SAFETY: all pointers are valid NUL/NULL-terminated C strings/arrays.
+                unsafe {
+                    if chdir_root {
+                        let _ = libc::chdir(c"/".as_ptr());
+                    }
+                    libc::syscall(
+                        libc::SYS_execveat,
+                        dirfd,
+                        path.as_ptr(),
+                        argv.as_ptr(),
+                        envp.as_ptr(),
+                        flags,
+                    );
+                    libc::_exit(127);
+                }
+            }
+            let mut status: libc::c_int = 0;
+            // SAFETY: `pid` is our child and `status` is writable.
+            assert_eq!(unsafe { libc::waitpid(pid, &raw mut status, 0) }, pid);
+            assert!(
+                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                "execveat AT_EXECFN check failed for {expect_execfn} with status {status}"
+            );
+        };
+
+        // 1. `execveat(bin_fd, "", ..., AT_EMPTY_PATH)` -> `/dev/fd/<bin_fd>`.
+        let bin_file = File::open(&exe).unwrap();
+        let expect_empty = format!("/dev/fd/{}", bin_file.as_raw_fd());
+        run_case(bin_file.as_raw_fd(), c"", libc::AT_EMPTY_PATH, &expect_empty, false);
+
+        // 2. `execveat(dirfd, basename, ..., 0)` -> `/dev/fd/<dirfd>/<basename>`.
+        let dir_file = File::open(exe_dir).unwrap();
+        let name_c = CString::new(exe_name.as_bytes()).unwrap();
+        let expect_rel = format!("/dev/fd/{}/{}", dir_file.as_raw_fd(), exe_name.to_str().unwrap());
+        run_case(dir_file.as_raw_fd(), &name_c, 0, &expect_rel, true);
+    });
+
+    let _accesses = test_utils::spawn_command(cmd).await?;
+    Ok(())
+}

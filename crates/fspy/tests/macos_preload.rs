@@ -490,3 +490,120 @@ async fn posix_spawn_addchdir_np_resolves_relative_program() -> anyhow::Result<(
 
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn posix_spawn_addchdir_np_is_fork_safe_under_concurrent_churn() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+    let sub = root.join("fork_child_cwd");
+    fs::create_dir(&sub)?;
+    let marker = sub.join("marker_fork_chdir");
+    fs::write(&marker, "ok")?;
+    let script = sub.join("run.sh");
+    write_executable(&script, "#!/bin/sh\ncat marker_fork_chdir >/dev/null\n")?;
+
+    let sub_str = sub.to_str().unwrap().to_owned();
+    let accesses = track_fn!(sub_str, |sub_str: String| {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        unsafe extern "C" {
+            fn posix_spawn_file_actions_addchdir_np(
+                file_actions: *mut libc::posix_spawn_file_actions_t,
+                path: *const libc::c_char,
+            ) -> libc::c_int;
+        }
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let sub_c = CString::new(sub_str).unwrap();
+
+        // Spawn background threads hammering `addchdir_np` + `destroy` while the
+        // main thread repeatedly calls `fork()` and uses `addchdir_np` +
+        // `posix_spawn` in the forked child.
+        let mut workers = Vec::new();
+        for _ in 0..2 {
+            let stop_flag = Arc::clone(&stop);
+            let dir_c = sub_c.clone();
+            workers.push(std::thread::spawn(move || {
+                while !stop_flag.load(Ordering::Relaxed) {
+                    let mut actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+                    // SAFETY: valid uninitialized handle and NUL-terminated path.
+                    unsafe {
+                        if libc::posix_spawn_file_actions_init(&raw mut actions) == 0 {
+                            let _ = posix_spawn_file_actions_addchdir_np(
+                                &raw mut actions,
+                                dir_c.as_ptr(),
+                            );
+                            let _ = libc::posix_spawn_file_actions_destroy(&raw mut actions);
+                        }
+                    }
+                }
+            }));
+        }
+
+        let prog = c"./run.sh";
+        let argv = [prog.as_ptr().cast_mut(), std::ptr::null_mut()];
+        let path_env = c"PATH=/bin:/usr/bin";
+        let envp = [path_env.as_ptr().cast_mut(), std::ptr::null_mut()];
+
+        for _ in 0..16 {
+            // SAFETY: child executes only raw libc / `posix_spawn` + `_exit`.
+            let pid = unsafe { libc::fork() };
+            assert!(pid >= 0, "fork failed: {}", std::io::Error::last_os_error());
+            if pid == 0 {
+                let mut actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+                // SAFETY: all pointers are pre-allocated valid C strings / arrays.
+                unsafe {
+                    if libc::posix_spawn_file_actions_init(&raw mut actions) != 0 {
+                        libc::_exit(10);
+                    }
+                    if posix_spawn_file_actions_addchdir_np(&raw mut actions, sub_c.as_ptr()) != 0 {
+                        libc::_exit(11);
+                    }
+                    let mut grandchild: libc::pid_t = 0;
+                    let rc = libc::posix_spawn(
+                        &raw mut grandchild,
+                        prog.as_ptr(),
+                        &raw const actions,
+                        std::ptr::null(),
+                        argv.as_ptr(),
+                        envp.as_ptr(),
+                    );
+                    let _ = libc::posix_spawn_file_actions_destroy(&raw mut actions);
+                    if rc != 0 {
+                        libc::_exit(12);
+                    }
+                    let mut gc_status: libc::c_int = 0;
+                    if libc::waitpid(grandchild, &raw mut gc_status, 0) != grandchild
+                        || !libc::WIFEXITED(gc_status)
+                        || libc::WEXITSTATUS(gc_status) != 0
+                    {
+                        libc::_exit(13);
+                    }
+                    libc::_exit(0);
+                }
+            }
+            let mut status: libc::c_int = 0;
+            // SAFETY: `pid` is our child and `status` is writable.
+            let waited = unsafe { libc::waitpid(pid, &raw mut status, 0) };
+            assert_eq!(waited, pid);
+            assert!(
+                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                "forked child failed with status {status:#x}"
+            );
+        }
+
+        stop.store(true, Ordering::Relaxed);
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    })
+    .await?;
+
+    assert_contains(&accesses, &script, PathAccess::Read);
+    assert_contains(&accesses, &marker, PathAccess::Read);
+
+    Ok(())
+}

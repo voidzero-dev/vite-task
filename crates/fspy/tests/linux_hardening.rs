@@ -611,3 +611,162 @@ async fn child_execve_with_stale_bootstrap_env_succeeds() -> anyhow::Result<()> 
     assert_contains(&accesses, probe_path, fspy::PathAccess::Read);
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn posix_spawn_setsigdef_resets_child_sigsys_without_mutating_parent() -> anyhow::Result<()> {
+    let probe_path = Path::new("/fspy-posix-spawn-sigdef-probe");
+    let cmd = vt_subprocess_test::command_for_fn!(
+        probe_path.to_str().unwrap().to_owned(),
+        |probe_path: String| {
+            use std::{ffi::CString, os::unix::ffi::OsStrExt as _};
+
+            if std::env::var_os("FSPY_TEST_SPAWN_SIGDEF_CHILD").is_some() {
+                // Child requested `POSIX_SPAWN_SETSIGDEF` with `SIGSYS` +
+                // `POSIX_SPAWN_SETSIGMASK` with `SIGSYS | SIGUSR1`, so it must
+                // observe `SIGSYS == SIG_DFL` (not parent's `SIG_IGN`) and both
+                // signals blocked.
+                // SAFETY: `libc::sigaction` is a plain C struct valid when zeroed.
+                let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+                // SAFETY: querying current disposition for `SIGSYS`.
+                let rc = unsafe { libc::sigaction(libc::SIGSYS, std::ptr::null(), &raw mut old) };
+                assert_eq!(rc, 0);
+                assert_eq!(
+                    old.sa_sigaction,
+                    libc::SIG_DFL,
+                    "posix_spawn POSIX_SPAWN_SETSIGDEF did not reset child SIGSYS to SIG_DFL"
+                );
+
+                // SAFETY: `sigset_t` is a plain C struct valid when zeroed.
+                let mut cur_mask: libc::sigset_t = unsafe { std::mem::zeroed() };
+                // SAFETY: querying current thread signal mask.
+                let mask_rc = unsafe {
+                    libc::sigprocmask(libc::SIG_SETMASK, std::ptr::null(), &raw mut cur_mask)
+                };
+                assert_eq!(mask_rc, 0);
+                // SAFETY: `cur_mask` was initialized by `sigprocmask`.
+                let sigsys_blocked =
+                    unsafe { libc::sigismember(&raw const cur_mask, libc::SIGSYS) };
+                assert_eq!(
+                    sigsys_blocked, 1,
+                    "posix_spawn POSIX_SPAWN_SETSIGMASK did not block SIGSYS"
+                );
+                // SAFETY: `cur_mask` was initialized by `sigprocmask`.
+                let sigusr1_blocked =
+                    unsafe { libc::sigismember(&raw const cur_mask, libc::SIGUSR1) };
+                assert_eq!(
+                    sigusr1_blocked, 1,
+                    "posix_spawn POSIX_SPAWN_SETSIGMASK did not block SIGUSR1"
+                );
+
+                // Syscall tracking must keep working inside the spawned child.
+                let _ = std::fs::File::open(&probe_path);
+                return;
+            }
+
+            // Parent sets `SIGSYS` to `SIG_IGN`.
+            // SAFETY: `libc::sigaction` is a plain C struct valid when zeroed.
+            let mut ign: libc::sigaction = unsafe { std::mem::zeroed() };
+            ign.sa_sigaction = libc::SIG_IGN;
+            // SAFETY: installing `SIG_IGN` for `SIGSYS`.
+            let ign_rc =
+                unsafe { libc::sigaction(libc::SIGSYS, &raw const ign, std::ptr::null_mut()) };
+            assert_eq!(ign_rc, 0);
+
+            let exe = std::fs::read_link("/proc/self/exe").unwrap();
+            let prog = CString::new(exe.as_os_str().as_bytes()).unwrap();
+            let mut args: Vec<CString> =
+                std::env::args_os().map(|a| CString::new(a.as_bytes()).unwrap()).collect();
+            if args.is_empty() {
+                let cmdline = std::fs::read("/proc/self/cmdline").unwrap();
+                let mut parts: Vec<&[u8]> = cmdline.split(|&b| b == 0).collect();
+                if parts.last().is_some_and(|s| s.is_empty()) {
+                    parts.pop();
+                }
+                args = parts.into_iter().map(|p| CString::new(p).unwrap()).collect();
+            }
+            let mut argv: Vec<*mut libc::c_char> =
+                args.iter().map(|s| s.as_ptr().cast_mut()).collect();
+            argv.push(std::ptr::null_mut());
+
+            let mut env_cstrs: Vec<CString> = std::env::vars_os()
+                .map(|(k, v)| {
+                    let mut bytes = k.as_bytes().to_vec();
+                    bytes.push(b'=');
+                    bytes.extend_from_slice(v.as_bytes());
+                    CString::new(bytes).unwrap()
+                })
+                .collect();
+            env_cstrs.push(CString::new("FSPY_TEST_SPAWN_SIGDEF_CHILD=1").unwrap());
+            let mut envp: Vec<*mut libc::c_char> =
+                env_cstrs.iter().map(|s| s.as_ptr().cast_mut()).collect();
+            envp.push(std::ptr::null_mut());
+
+            // Configure `posix_spawnattr_t` with `POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK`.
+            // SAFETY: `posix_spawnattr_t` and `sigset_t` are plain C structs valid when zeroed.
+            let mut attr: libc::posix_spawnattr_t = unsafe { std::mem::zeroed() };
+            // SAFETY: `sigset_t` is valid when zeroed.
+            let mut sigdef_set: libc::sigset_t = unsafe { std::mem::zeroed() };
+            // SAFETY: `sigset_t` is valid when zeroed.
+            let mut sigmask_set: libc::sigset_t = unsafe { std::mem::zeroed() };
+            let mut child_pid: libc::pid_t = 0;
+            let spawn_flags =
+                libc::c_short::try_from(libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_SETSIGMASK)
+                    .unwrap();
+            // SAFETY: valid stack-local `posix_spawnattr_t`, `sigset_t`, and C arrays.
+            let spawn_rc = unsafe {
+                assert_eq!(libc::posix_spawnattr_init(&raw mut attr), 0);
+                libc::sigemptyset(&raw mut sigdef_set);
+                libc::sigaddset(&raw mut sigdef_set, libc::SIGSYS);
+                libc::sigemptyset(&raw mut sigmask_set);
+                libc::sigaddset(&raw mut sigmask_set, libc::SIGSYS);
+                libc::sigaddset(&raw mut sigmask_set, libc::SIGUSR1);
+                assert_eq!(libc::posix_spawnattr_setflags(&raw mut attr, spawn_flags), 0);
+                assert_eq!(
+                    libc::posix_spawnattr_setsigdefault(&raw mut attr, &raw const sigdef_set),
+                    0
+                );
+                assert_eq!(
+                    libc::posix_spawnattr_setsigmask(&raw mut attr, &raw const sigmask_set),
+                    0
+                );
+                let rc = libc::posix_spawn(
+                    &raw mut child_pid,
+                    prog.as_ptr(),
+                    std::ptr::null(),
+                    &raw const attr,
+                    argv.as_ptr(),
+                    envp.as_ptr(),
+                );
+                libc::posix_spawnattr_destroy(&raw mut attr);
+                rc
+            };
+            assert_eq!(spawn_rc, 0, "posix_spawn failed with errno {spawn_rc}");
+
+            let mut status: libc::c_int = 0;
+            // SAFETY: `child_pid` is our child and `status` is writable.
+            let waited = unsafe { libc::waitpid(child_pid, &raw mut status, 0) };
+            assert_eq!(waited, child_pid);
+            assert!(
+                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                "posix_spawn child failed with status {status}"
+            );
+
+            // Parent must retain `SIGSYS == SIG_IGN`!
+            // SAFETY: `libc::sigaction` is a plain C struct valid when zeroed.
+            let mut parent_old: libc::sigaction = unsafe { std::mem::zeroed() };
+            // SAFETY: querying parent's `SIGSYS` disposition.
+            let parent_rc =
+                unsafe { libc::sigaction(libc::SIGSYS, std::ptr::null(), &raw mut parent_old) };
+            assert_eq!(parent_rc, 0);
+            assert_eq!(
+                parent_old.sa_sigaction,
+                libc::SIG_IGN,
+                "posix_spawn child clobbered parent's SIGSYS SIG_IGN"
+            );
+        }
+    );
+
+    let accesses = test_utils::spawn_command(cmd).await?;
+    assert_contains(&accesses, probe_path, fspy::PathAccess::Read);
+    Ok(())
+}

@@ -182,7 +182,17 @@ pub fn resolve_exec<A: Allocator + Clone>(
             }
         }
     } else {
-        let execfn = to_vec_in(&exec.program, allocator.clone());
+        // Linux `fs/exec.c` (`do_execveat_common`) formats `AT_EXECFN` as
+        // `/dev/fd/<dirfd>/<program>` for non-`AT_FDCWD` relative `execveat`.
+        let execfn = if !exec.program.starts_with(b"/")
+            && let Some(fd) = dirfd
+            && fd.as_raw_fd() != CWD.as_raw_fd()
+            && let Ok(raw_fd) = u32::try_from(fd.as_raw_fd())
+        {
+            format_dev_fd_rel(raw_fd, &exec.program, allocator.clone())
+        } else {
+            to_vec_in(&exec.program, allocator.clone())
+        };
         (execfn, None, 0usize, dirfd, flags.contains(ExecAtFlags::SYMLINK_NOFOLLOW))
     };
 
@@ -259,8 +269,7 @@ fn resolve_empty_path<A: Allocator + Clone>(
     let proc_fd = format_proc_self_fd(&mut proc_buf, raw_fd);
     faccessat(CWD, proc_fd, AccessFlags::X_OK)?;
 
-    let resolved_fd_path = fd_path(allocator.clone(), fd)?;
-    if let Some(ref p) = resolved_fd_path {
+    if let Some(p) = fd_path(allocator.clone(), fd)? {
         on_path_read(BStr::new(p.as_units()));
     }
 
@@ -280,10 +289,9 @@ fn resolve_empty_path<A: Allocator + Clone>(
         Err(err) => return Err(err),
     };
 
-    let execfn = resolved_fd_path.map_or_else(
-        || format_dev_fd(raw_fd, allocator.clone()),
-        fspy_nostd_alloc::CString::into_units,
-    );
+    // Match Linux `fs/exec.c` (`do_execveat_common`): `AT_EMPTY_PATH` always
+    // sets `AT_EXECFN` to `/dev/fd/<raw_fd>` for both binaries and `#!` scripts.
+    let execfn = format_dev_fd(raw_fd, allocator.clone());
 
     let Some(shebang) =
         parse_shebang_bytes(&peek_buf[..n], ParseShebangOptions::linux(), allocator.clone())?
@@ -334,6 +342,19 @@ fn format_dev_fd<A: Allocator>(fd: u32, allocator: A) -> Vec<u8, A> {
     let mut out = Vec::with_capacity_in(b"/dev/fd/".len() + digits.len(), allocator);
     out.extend_from_slice(b"/dev/fd/");
     out.extend_from_slice(digits);
+    out
+}
+
+fn format_dev_fd_rel<A: Allocator>(fd: u32, rel: &[u8], allocator: A) -> Vec<u8, A> {
+    let mut buf = [0u8; 32];
+    let proc_fd = format_proc_self_fd(&mut buf, fd).count().as_units();
+    let digits = proc_fd.strip_prefix(b"/proc/self/fd/").unwrap_or(proc_fd);
+    let mut out =
+        Vec::with_capacity_in(b"/dev/fd/".len() + digits.len() + 1 + rel.len(), allocator);
+    out.extend_from_slice(b"/dev/fd/");
+    out.extend_from_slice(digits);
+    out.push(b'/');
+    out.extend_from_slice(rel);
     out
 }
 
@@ -518,5 +539,76 @@ mod tests {
         assert!(!fcntl_is_cloexec(extra.as_fd()).unwrap());
         let expected_dev_fd = format!("/dev/fd/{}", extra.as_raw_fd());
         assert_eq!(exec.args.last().unwrap().as_slice(), expected_dev_fd.as_bytes());
+        assert_eq!(
+            resolved.execfn.as_slice(),
+            format!("/dev/fd/{}", o_path_owned.as_raw_fd()).as_bytes()
+        );
+    }
+
+    #[test]
+    fn resolve_exec_formats_execfn_matching_linux_kernel() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        write_exec(&bin, b"\x7fELFdummy");
+        let script = dir.path().join("script.sh");
+        write_exec(&script, format!("#!{}\n", bin.display()).as_bytes());
+
+        // 1. `AT_EMPTY_PATH` on ELF binary -> `/dev/fd/<fd>`, while `on_path_read`
+        //    still receives the resolved file path.
+        let bin_file = File::open(&bin).unwrap();
+        // SAFETY: `bin_file` stays open for the call.
+        let bin_fd = unsafe { BorrowedFd::borrow_raw(bin_file.as_raw_fd()) };
+        let mut seen = std::vec::Vec::new();
+        let mut exec = make_exec(b"", &[b"bin"]);
+        let resolved = resolve_exec(&mut exec, Some(bin_fd), ExecAtFlags::EMPTY_PATH, |p| {
+            seen.push(p.to_vec());
+        })
+        .unwrap();
+        assert_eq!(
+            resolved.execfn.as_slice(),
+            format!("/dev/fd/{}", bin_file.as_raw_fd()).as_bytes()
+        );
+        assert!(seen.iter().any(|p| p.as_slice() == bin.as_os_str().as_bytes()));
+
+        // 2. `AT_EMPTY_PATH` on non-CLOEXEC `#!` script -> `/dev/fd/<fd>`.
+        let script_c = bytes_to_cstring(script.as_os_str().as_bytes(), Global).unwrap();
+        let script_owned =
+            openat(CWD, script_c.as_c_str().as_thin(), OFlags::RDONLY, Mode::empty()).unwrap();
+        let mut exec = make_exec(b"", &[b"script"]);
+        let resolved =
+            resolve_exec(&mut exec, Some(script_owned.as_fd()), ExecAtFlags::EMPTY_PATH, |_| {})
+                .unwrap();
+        assert_eq!(
+            resolved.execfn.as_slice(),
+            format!("/dev/fd/{}", script_owned.as_raw_fd()).as_bytes()
+        );
+
+        // 3. Relative path with real `dirfd` -> `/dev/fd/<dirfd>/<rel>` (both binary & script).
+        let dir_file = File::open(dir.path()).unwrap();
+        // SAFETY: `dir_file` stays open for the call.
+        let dir_fd = unsafe { BorrowedFd::borrow_raw(dir_file.as_raw_fd()) };
+        let mut exec = make_exec(b"bin", &[b"bin"]);
+        let resolved = resolve_exec(&mut exec, Some(dir_fd), ExecAtFlags::empty(), |_| {}).unwrap();
+        assert_eq!(
+            resolved.execfn.as_slice(),
+            format!("/dev/fd/{}/bin", dir_file.as_raw_fd()).as_bytes()
+        );
+
+        let mut exec = make_exec(b"script.sh", &[b"script.sh"]);
+        let resolved = resolve_exec(&mut exec, Some(dir_fd), ExecAtFlags::empty(), |_| {}).unwrap();
+        assert_eq!(
+            resolved.execfn.as_slice(),
+            format!("/dev/fd/{}/script.sh", dir_file.as_raw_fd()).as_bytes()
+        );
+
+        // 4. Absolute path (even with real `dirfd`) preserves `exec.program`.
+        let mut exec = make_exec(bin.as_os_str().as_bytes(), &[b"bin"]);
+        let resolved = resolve_exec(&mut exec, Some(dir_fd), ExecAtFlags::empty(), |_| {}).unwrap();
+        assert_eq!(resolved.execfn.as_slice(), bin.as_os_str().as_bytes());
+
+        // 5. `AT_FDCWD` with relative path preserves `exec.program`.
+        let mut exec = make_exec(bin.as_os_str().as_bytes(), &[b"bin"]);
+        let resolved = resolve_exec(&mut exec, Some(CWD), ExecAtFlags::empty(), |_| {}).unwrap();
+        assert_eq!(resolved.execfn.as_slice(), bin.as_os_str().as_bytes());
     }
 }

@@ -12,7 +12,10 @@ installs a `SECCOMP_RET_TRAP` (`SIGSYS`) filter to record filesystem syscalls
 into the shared-memory IPC channel (`fspy_shared::ipc::channel`) and chain child
 `execve`/`execveat` calls. When `seccomp` is unavailable (such as in a
 restricted sandbox), `fspy` falls back to running the command untracked and
-reports `TrackingIncomplete`.
+reports `TrackingIncomplete`. Because seccomp sets `PR_SET_NO_NEW_PRIVS` and
+userland ELF mapping opens target binaries read-only, setuid/setgid and
+file-capability escalations do not apply, and execute-only (`chmod 0111`)
+binaries cannot be mapped and fail with `EACCES`.
 
 ## macOS implementation
 
