@@ -94,19 +94,25 @@ impl Mapping {
         // caller keeps the file unchanged while this view is used.
         let ptr =
             unsafe { mm::mmap(ptr::null_mut(), len, ProtFlags::READ, MapFlags::PRIVATE, fd, 0) }?;
-        Ok(Self::new(ptr.cast(), len))
+        Self::try_new(ptr.cast(), len)
     }
 
     fn check_len(len: usize) {
         assert!(len != 0 && isize::try_from(len).is_ok(), "invalid mapping length");
     }
 
+    fn try_new(ptr: *mut u8, len: usize) -> Result<Self> {
+        let Some(ptr) = NonNull::new(ptr) else {
+            // SAFETY: this successful mapping is owned here, but address zero
+            // cannot back Rust references, so release it before failing.
+            let _ = unsafe { mm::munmap(ptr.cast(), len) };
+            return Err(Error::NOMEM);
+        };
+        Ok(Self { ptr, len })
+    }
+
     fn new(ptr: *mut u8, len: usize) -> Self {
-        debug_assert!(!ptr.is_null(), "mmap returned address zero");
-        // SAFETY: Linux never returns address 0 from a non-`MAP_FIXED` `mmap`
-        // (or a non-zero `MAP_FIXED_NOREPLACE` request) when `vm.mmap_min_addr > 0`.
-        let ptr = unsafe { NonNull::new_unchecked(ptr) };
-        Self { ptr, len }
+        Self::try_new(ptr, len).expect("mmap returned address zero")
     }
 
     /// Only called on immutable, fully readable file mappings.
