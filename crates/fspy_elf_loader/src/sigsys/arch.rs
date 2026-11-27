@@ -102,14 +102,8 @@ mod imp {
     pub const REG_R8: usize = 0;
     pub const REG_R9: usize = 1;
     pub const REG_R10: usize = 2;
-    pub const REG_R12: usize = 4;
-    pub const REG_R13: usize = 5;
-    pub const REG_R14: usize = 6;
-    pub const REG_R15: usize = 7;
     pub const REG_RDI: usize = 8;
     pub const REG_RSI: usize = 9;
-    pub const REG_RBP: usize = 10;
-    pub const REG_RBX: usize = 11;
     pub const REG_RDX: usize = 12;
     pub const REG_RAX: usize = 13;
     pub const REG_RSP: usize = 15;
@@ -137,9 +131,6 @@ mod imp {
     const UC_FPREGS_OFFSET: usize = UC_GREGS_OFFSET + 23 * 8;
     const UC_SIGMASK_OFFSET: usize = 296;
     const UC_NR_OFFSET: usize = UC_GREGS_OFFSET + REG_RAX * 8;
-    /// Linux 6.6+ x86-64 CET shadow-stack `arch_prctl` constants.
-    const ARCH_SHSTK_DISABLE: usize = 0x5002;
-    const ARCH_SHSTK_SHSTK: usize = 1;
 
     const _: () = {
         use core::mem::offset_of;
@@ -382,7 +373,7 @@ mod imp {
     /// Builds a private child `ucontext` in the upper half of `altstack_top`
     /// so the `vfork`/`posix_spawn` child can install its `sigaltstack` and
     /// return via `SYS_rt_sigreturn` (preserving all GPRs, FPU/AVX/AMX state,
-    /// `eflags`, and Intel CET/IBT landing-pad compliance).
+    /// and `eflags`).
     ///
     /// Returns the `rsp` value (`&child_uc`) to pass to `SYS_clone` and
     /// `SYS_rt_sigreturn`, or `None` if `altstack_size` is too small.
@@ -426,15 +417,7 @@ mod imp {
     /// the child on `child_sigreturn_sp` (`&child_uc`), where the child
     /// installs its pooled `sigaltstack` and returns via `SYS_rt_sigreturn`
     /// (restoring all GPRs, FPU/AVX/AMX state, `eflags`, and `sigmask`).
-    ///
-    /// When CET shadow stack is active (`rdsspq != 0`), disables SHSTK in the
-    /// child first (`arch_prctl(ARCH_SHSTK_DISABLE, ARCH_SHSTK_SHSTK)`, which
-    /// is per-thread and does not unmap the parent's shadow stack because
-    /// `CLONE_VFORK` leaves `child->thread.shstk.size == 0`) so
-    /// `SYS_rt_sigreturn` succeeds without touching the parent's shared
-    /// shadow-stack signal token. If SHSTK is locked (`-EPERM`), falls back on
-    /// a best-effort basis to direct GPR restore (working for forward-calling
-    /// `posix_spawn` children).
+    /// Processes running with a CET shadow stack are not supported here.
     #[unsafe(naked)]
     pub unsafe extern "C" fn replay_vfork_with_altstack(
         inv: *const SyscallInvocation,
@@ -469,54 +452,12 @@ mod imp {
             "mov rax, {neg_enomem}; jmp 4b",
             "1:",
             "mov eax, {nr_sigaltstack}; lea rdi, [rsp + {uc_stack_off}]; xor esi, esi; syscall",
-            // `rdsspq rax` (NOP when CET SHSTK is disabled -> `rax == 0`).
-            "xor eax, eax; .byte 0xf3, 0x48, 0x0f, 0x1e, 0xc8; test rax, rax; jz 5f",
-            // CET SHSTK active: disable SHSTK in the child before `rt_sigreturn`
-            // so `restore_signal_shadow_stack()` is a no-op and does not fault
-            // on the parent's shared shadow-stack signal token.
-            "mov eax, {nr_arch_prctl}; mov edi, {arch_shstk_disable}; mov esi, {arch_shstk_shstk}; syscall",
-            "test rax, rax; jnz 2f",
-            "5:",
             "mov eax, {nr_rt_sigreturn}; syscall; ud2",
-            "2:",
-            // Locked-SHSTK best-effort fallback (forward-calling `posix_spawn`).
-            "mov eax, {nr_rt_sigprocmask}; mov edi, {sig_setmask}",
-            "lea rsi, [rsp + {uc_sigmask_off}]; xor edx, edx; mov r10d, 8; syscall",
-            "lea r11, [rsp + {uc_gregs_off}]",
-            "mov r8,  [r11 + {reg_r8}  * 8]; mov r9,  [r11 + {reg_r9}  * 8]",
-            "mov r10, [r11 + {reg_r10} * 8]; mov r12, [r11 + {reg_r12} * 8]",
-            "mov r13, [r11 + {reg_r13} * 8]; mov r14, [r11 + {reg_r14} * 8]",
-            "mov r15, [r11 + {reg_r15} * 8]; mov rdi, [r11 + {reg_rdi} * 8]",
-            "mov rsi, [r11 + {reg_rsi} * 8]; mov rbp, [r11 + {reg_rbp} * 8]",
-            "mov rbx, [r11 + {reg_rbx} * 8]; mov rdx, [r11 + {reg_rdx} * 8]",
-            "mov rcx, [r11 + {reg_rip} * 8]; mov rsp, [r11 + {reg_rsp} * 8]",
-            "xor eax, eax; jmp rcx",
             neg_enomem = const -(ENOMEM as i64),
             uc_stack_off = const UC_STACK_OFFSET,
             uc_fpregs_off = const UC_FPREGS_OFFSET,
-            uc_sigmask_off = const UC_SIGMASK_OFFSET,
-            uc_gregs_off = const UC_GREGS_OFFSET,
-            arch_shstk_disable = const ARCH_SHSTK_DISABLE,
-            arch_shstk_shstk = const ARCH_SHSTK_SHSTK,
-            nr_arch_prctl = const Sysno::arch_prctl as usize,
             nr_sigaltstack = const Sysno::sigaltstack as usize,
             nr_rt_sigreturn = const Sysno::rt_sigreturn as usize,
-            nr_rt_sigprocmask = const Sysno::rt_sigprocmask as usize,
-            sig_setmask = const SIG_SETMASK as usize,
-            reg_r8 = const REG_R8,
-            reg_r9 = const REG_R9,
-            reg_r10 = const REG_R10,
-            reg_r12 = const REG_R12,
-            reg_r13 = const REG_R13,
-            reg_r14 = const REG_R14,
-            reg_r15 = const REG_R15,
-            reg_rdi = const REG_RDI,
-            reg_rsi = const REG_RSI,
-            reg_rbp = const REG_RBP,
-            reg_rbx = const REG_RBX,
-            reg_rdx = const REG_RDX,
-            reg_rsp = const REG_RSP,
-            reg_rip = const REG_RIP,
         );
     }
 
@@ -634,24 +575,10 @@ mod imp {
     const RT_SIGFRAME_UC_OFFSET: usize = 128;
     /// Offset of `uc.uc_stack` from `rt_sigframe` start (`128 + 16`).
     const RT_SIGFRAME_UC_STACK_OFFSET: usize = RT_SIGFRAME_UC_OFFSET + 16;
-    /// Offset of `uc.uc_sigmask` from `rt_sigframe` start (`128 + 40`).
-    const RT_SIGFRAME_UC_SIGMASK_OFFSET: usize = RT_SIGFRAME_UC_OFFSET + 40;
-    /// Offset of `uc.uc_mcontext.regs` from `rt_sigframe` start (`128 + 176 + 8`).
-    const RT_SIGFRAME_UC_REGS_OFFSET: usize = RT_SIGFRAME_UC_OFFSET + 176 + 8;
-    /// Offset of `uc_mcontext.sp` from `uc_mcontext.regs[0]` (`256 - 8`).
-    const UC_SP_FROM_REGS: usize = 256 - 8;
-    /// Offset of `uc_mcontext.pc` from `uc_mcontext.regs[0]` (`264 - 8`).
-    const UC_PC_FROM_REGS: usize = 264 - 8;
     /// Offset of `uc_mcontext.__reserved[4096]` from `Ucontext` start (`176 + 288`).
     const UC_RESERVED_OFFSET: usize = 176 + 288;
     /// Full kernel `struct ucontext` size including `sigcontext.__reserved[4096]`.
     const UC_FULL_BYTES: usize = UC_RESERVED_OFFSET + 4096;
-    const EXTRA_MAGIC: u32 = 0x4558_5401;
-    /// Arm64 Guarded Control Stack signal record magic (`struct gcs_context`).
-    const GCS_MAGIC: u32 = 0x4743_5300;
-    /// Linux 6.13+ Arm Guarded Control Stack `prctl` selectors.
-    const PR_GET_SHADOW_STACK_STATUS: usize = 74;
-    const PR_SET_SHADOW_STACK_STATUS: usize = 75;
 
     const UC_NR_OFFSET: usize = 176 + 8 + 8 * 8;
 
@@ -674,18 +601,6 @@ mod imp {
         assert!(
             RT_SIGFRAME_UC_STACK_OFFSET == RT_SIGFRAME_UC_OFFSET + offset_of!(Ucontext, uc_stack)
         );
-        assert!(
-            RT_SIGFRAME_UC_SIGMASK_OFFSET
-                == RT_SIGFRAME_UC_OFFSET + offset_of!(Ucontext, uc_sigmask)
-        );
-        assert!(
-            RT_SIGFRAME_UC_REGS_OFFSET
-                == RT_SIGFRAME_UC_OFFSET
-                    + offset_of!(Ucontext, uc_mcontext)
-                    + offset_of!(Sigcontext, regs)
-        );
-        assert!(UC_SP_FROM_REGS == offset_of!(Sigcontext, sp) - offset_of!(Sigcontext, regs));
-        assert!(UC_PC_FROM_REGS == offset_of!(Sigcontext, pc) - offset_of!(Sigcontext, regs));
     };
 
     #[unsafe(naked)]
@@ -905,16 +820,12 @@ mod imp {
         );
     }
 
-    /// Builds a private child `rt_sigframe` (including `sigcontext.__reserved`
-    /// and any contiguous SVE/SME `EXTRA_MAGIC` extension records) in the upper
-    /// half of `altstack_top` so the `vfork`/`posix_spawn` child can install
-    /// its `sigaltstack` and return via `SYS_rt_sigreturn` (preserving `x16`,
-    /// `pstate`, FP/SIMD/SVE/SME state, and ARM64 BTI compliance via `eret`).
-    ///
-    /// Also zeroes `gcs_context.features_enabled` (magic `0x4743_5300`, offset
-    /// `+16`) in the child's copy so Linux v6.13–v6.19 `restore_gcs_context`
-    /// accepts `rt_sigreturn` after the child disables GCS via
-    /// `PR_SET_SHADOW_STACK_STATUS(0)`.
+    /// Builds a private child `rt_sigframe` (including `sigcontext.__reserved`)
+    /// in the upper half of `altstack_top` so the `vfork`/`posix_spawn` child
+    /// can install its `sigaltstack` and return via `SYS_rt_sigreturn`
+    /// (preserving `x16`, `pstate`, FP/SIMD state, and ARM64 BTI compliance
+    /// via `eret`). Frames with an `EXTRA_MAGIC` record past `__reserved` (live
+    /// SME `ZA` state) are not supported here.
     ///
     /// Returns the `sp` value (`&child_rt_sigframe`) to pass to `SYS_clone`
     /// and `SYS_rt_sigreturn`, or `None` if `altstack_size` is too small.
@@ -934,72 +845,12 @@ mod imp {
         let altstack_base = altstack_top - altstack_size;
         let child_frame_addr = altstack_base + half;
         let child_uc_addr = child_frame_addr + RT_SIGFRAME_UC_OFFSET;
-        let src_uc_addr = ucontext.addr();
-        let src_uc = ucontext.cast::<u8>();
         let dst_uc = ptr::with_exposed_provenance_mut::<u8>(child_uc_addr);
-        // SAFETY: `src_uc` is the raw kernel `AArch64` `ucontext` pointer
-        // (`UC_FULL_BYTES` = 4560 bytes including `__reserved[4096]`, plus any
-        // contiguous `EXTRA_MAGIC` payload), and `dst_uc` owns `max_uc_bytes`
-        // writable bytes.
+        // SAFETY: `ucontext` is the raw kernel `AArch64` `ucontext` pointer
+        // (`UC_FULL_BYTES` = 4560 bytes including `__reserved[4096]`), and
+        // `dst_uc` owns `max_uc_bytes >= UC_FULL_BYTES` writable bytes.
         unsafe {
-            // Inspect `__reserved` first so any `EXTRA_MAGIC` extension data
-            // is copied contiguously at the exact offset `parse_user_sigframe`
-            // requires (`datap == &extra + head.size + 16`), and record any
-            // `GCS_MAGIC` entry so we can clear `features_enabled` in the copy.
-            let mut total_bytes = UC_FULL_BYTES;
-            let mut extra_rec_off: Option<(usize, usize)> = None;
-            let mut gcs_rec_off: Option<usize> = None;
-            let mut off = 0_usize;
-            while off + 8 <= 4096 {
-                let rec = src_uc.add(UC_RESERVED_OFFSET + off);
-                let magic = u32::from_ne_bytes(rec.cast::<[u8; 4]>().read_unaligned());
-                let size =
-                    u32::from_ne_bytes(rec.add(4).cast::<[u8; 4]>().read_unaligned()) as usize;
-                if magic == 0 && size == 0 {
-                    break;
-                }
-                if size < 8 || off + size > 4096 {
-                    break;
-                }
-                if magic == GCS_MAGIC && size >= 32 {
-                    gcs_rec_off = Some(off);
-                } else if magic == EXTRA_MAGIC && size >= 24 {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "64-bit AArch64 usize == u64"
-                    )]
-                    let datap =
-                        u64::from_ne_bytes(rec.add(8).cast::<[u8; 8]>().read_unaligned()) as usize;
-                    let extra_size =
-                        u32::from_ne_bytes(rec.add(16).cast::<[u8; 4]>().read_unaligned()) as usize;
-                    let rel_datap = datap.checked_sub(src_uc_addr)?;
-                    let needed = rel_datap.checked_add(extra_size)?;
-                    total_bytes = total_bytes.max(needed);
-                    extra_rec_off = Some((off, rel_datap));
-                    break;
-                }
-                off += size;
-            }
-            if total_bytes > max_uc_bytes {
-                return None;
-            }
-            ptr::copy_nonoverlapping(src_uc, dst_uc, total_bytes);
-            if let Some(gcs_off) = gcs_rec_off {
-                // Zero `gcs_context.features_enabled` (offset `+16`) in the
-                // child copy so v6.13–v6.19 `restore_gcs_context` accepts
-                // `rt_sigreturn` once the child disables GCS.
-                dst_uc
-                    .add(UC_RESERVED_OFFSET + gcs_off + 16)
-                    .cast::<[u8; 8]>()
-                    .write_unaligned(0_u64.to_ne_bytes());
-            }
-            if let Some((rec_off, rel_datap)) = extra_rec_off {
-                let new_datap = child_uc_addr + rel_datap;
-                dst_uc
-                    .add(UC_RESERVED_OFFSET + rec_off + 8)
-                    .cast::<[u8; 8]>()
-                    .write_unaligned((new_datap as u64).to_ne_bytes());
-            }
+            ptr::copy_nonoverlapping(ucontext.cast::<u8>(), dst_uc, UC_FULL_BYTES);
             let child_uc = &mut *ptr::with_exposed_provenance_mut::<Ucontext>(child_uc_addr);
             child_uc.uc_mcontext.regs[0] = 0;
             if orig_child_stack != 0 {
@@ -1019,11 +870,9 @@ mod imp {
     /// Replays `clone(CLONE_VM | CLONE_VFORK, non_null_stack, ...)` starting
     /// the child on `child_sigreturn_sp` (`&child_rt_sigframe`), where the
     /// child installs its pooled `sigaltstack` and returns via
-    /// `SYS_rt_sigreturn` (preserving `x16`, FP/SIMD/SVE/SME, and ARM64 BTI
-    /// compliance via `eret`). If Arm Guarded Control Stack (GCS) is active,
-    /// disables GCS in the child first (`PR_SET_SHADOW_STACK_STATUS(0)`) so
-    /// `rt_sigreturn` does not consume the parent's GCS cap token, falling back
-    /// to direct register restore if GCS is locked.
+    /// `SYS_rt_sigreturn` (preserving `x16`, FP/SIMD, and ARM64 BTI
+    /// compliance via `eret`). Processes running with an Arm Guarded Control
+    /// Stack (GCS) are not supported here.
     #[unsafe(naked)]
     pub unsafe extern "C" fn replay_vfork_with_altstack(
         inv: *const SyscallInvocation,
@@ -1058,40 +907,11 @@ mod imp {
             "mov x0, #{neg_enomem}; b 4b",
             "1:",
             "add x0, sp, #{uc_stack_from_frame}; mov x1, #0; mov x8, #{nr_sigaltstack}; svc #0",
-            // Check Arm GCS status using the unused `siginfo` slot at `[sp]`.
-            "str xzr, [sp]; mov x0, #{pr_get_shstk}; mov x1, sp; mov x2, #0; mov x3, #0; mov x4, #0",
-            "mov x8, #{nr_prctl}; svc #0",
-            "cbnz x0, 12f; ldr x9, [sp]; tbz x9, #0, 12f",
-            // GCS is active: disable it in the child before `rt_sigreturn` so
-            // the kernel does not consume the parent's shared GCS cap token.
-            "mov x0, #{pr_set_shstk}; mov x1, #0; mov x2, #0; mov x3, #0; mov x4, #0",
-            "mov x8, #{nr_prctl}; svc #0; cbnz x0, 13f",
-            "12:",
             "mov x8, #{nr_rt_sigreturn}; svc #0; brk #0",
-            "13:",
-            // Locked-GCS fallback: restore sigmask and GPRs directly.
-            "mov x0, #{sig_setmask}; add x1, sp, #{uc_sigmask_from_frame}; mov x2, #0; mov x3, #8",
-            "mov x8, #{nr_rt_sigprocmask}; svc #0",
-            "add x17, sp, #{uc_regs_from_frame}; ldr x9, [x17, #{uc_sp_from_regs}]; mov sp, x9",
-            "ldr x1,  [x17, #8];   ldp x2,  x3,  [x17, #16]; ldp x4,  x5,  [x17, #32]",
-            "ldp x6,  x7,  [x17, #48]; ldp x8,  x9,  [x17, #64]; ldp x10, x11, [x17, #80]",
-            "ldp x12, x13, [x17, #96]; ldp x14, x15, [x17, #112]; ldp x18, x19, [x17, #144]",
-            "ldp x20, x21, [x17, #160]; ldp x22, x23, [x17, #176]; ldp x24, x25, [x17, #192]",
-            "ldp x26, x27, [x17, #208]; ldp x28, x29, [x17, #224]; ldr x30, [x17, #240]",
-            "ldr x16, [x17, #{uc_pc_from_regs}]; ldr x17, [x17, #136]; mov x0, xzr; br x16",
             neg_enomem = const -(ENOMEM as i64),
             uc_stack_from_frame = const RT_SIGFRAME_UC_STACK_OFFSET,
-            uc_sigmask_from_frame = const RT_SIGFRAME_UC_SIGMASK_OFFSET,
-            uc_regs_from_frame = const RT_SIGFRAME_UC_REGS_OFFSET,
-            uc_sp_from_regs = const UC_SP_FROM_REGS,
-            uc_pc_from_regs = const UC_PC_FROM_REGS,
-            pr_get_shstk = const PR_GET_SHADOW_STACK_STATUS,
-            pr_set_shstk = const PR_SET_SHADOW_STACK_STATUS,
-            sig_setmask = const SIG_SETMASK as usize,
             nr_sigaltstack = const Sysno::sigaltstack as usize,
-            nr_prctl = const Sysno::prctl as usize,
             nr_rt_sigreturn = const Sysno::rt_sigreturn as usize,
-            nr_rt_sigprocmask = const Sysno::rt_sigprocmask as usize,
         );
     }
 

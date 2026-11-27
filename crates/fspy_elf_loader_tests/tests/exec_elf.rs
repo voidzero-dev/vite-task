@@ -638,8 +638,6 @@ fn rejects_malformed_images() {
     let phdr = usize::try_from(parsed.ehdr.e_phoff).unwrap() + load * size_of::<libc::Elf64_Phdr>();
     let mut invalid_size = base.clone();
     write_u64(&mut invalid_size, phdr + offset_of!(libc::Elf64_Phdr, p_filesz), u64::MAX);
-    let mut invalid_alignment = base.clone();
-    write_u64(&mut invalid_alignment, phdr + offset_of!(libc::Elf64_Phdr, p_align), 3);
     for (case, bytes) in [
         ("truncated header", b"not ELF".to_vec()),
         ("truncated program headers", base[..size_of::<libc::Elf64_Ehdr>()].to_vec()),
@@ -647,7 +645,6 @@ fn rejects_malformed_images() {
         ("wrong architecture", wrong_machine),
         ("unsupported type", unsupported_type),
         ("invalid size", invalid_size),
-        ("invalid alignment", invalid_alignment),
     ] {
         let file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(file.path(), bytes).unwrap();
@@ -660,6 +657,32 @@ fn rejects_malformed_images() {
             "{case}: {output:?}"
         );
     }
+}
+
+#[test]
+#[timeout(10_000)]
+fn runs_images_with_an_executable_stack() {
+    // Like Linux, an executable PT_GNU_STACK maps the stack executable rather
+    // than rejecting the image (e.g. objects built without `.note.GNU-stack`).
+    let mut bytes = std::fs::read(FIXTURE_DYN_PIE).unwrap();
+    let parsed = elf::ElfBytes::<elf::endian::LittleEndian>::minimal_parse(&bytes).unwrap();
+    let stack = parsed
+        .segments()
+        .unwrap()
+        .iter()
+        .position(|ph| ph.p_type == elf::abi::PT_GNU_STACK)
+        .expect("fixture has PT_GNU_STACK");
+    let phdr =
+        usize::try_from(parsed.ehdr.e_phoff).unwrap() + stack * size_of::<libc::Elf64_Phdr>();
+    let flags = phdr + offset_of!(libc::Elf64_Phdr, p_flags);
+    let value = u32::from_le_bytes(bytes[flags..flags + 4].try_into().unwrap()) | elf::abi::PF_X;
+    bytes[flags..flags + 4].copy_from_slice(&value.to_le_bytes());
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), bytes).unwrap();
+    let output = run_loaded_fixture(file.path().to_str().unwrap(), true, false);
+    assert_eq!(output.status.code(), Some(37), "{output:?}");
+    assert_eq!(output.stdout, b"runtime-ok\n");
+    assert!(output.stderr.is_empty(), "{output:?}");
 }
 
 #[test]

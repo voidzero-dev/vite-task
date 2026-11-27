@@ -91,27 +91,27 @@ struct Builder {
 }
 
 impl Builder {
-    fn new(page: usize) -> Self {
+    fn new(page: usize, exec_stack: bool) -> Self {
         let capacity = query_stack_capacity(page);
-        Self::with_capacity(page, capacity)
+        Self::with_capacity(page, capacity, exec_stack)
     }
 
-    fn with_capacity(page: usize, capacity: usize) -> Self {
+    /// Maps the stack read-write, plus execute when the executable's
+    /// `PT_GNU_STACK` asks for it, as Linux does.
+    fn with_capacity(page: usize, capacity: usize, exec_stack: bool) -> Self {
         assert!(page.is_multiple_of(align_of::<usize>()), "invalid page size");
         assert!(capacity.is_multiple_of(page), "stack capacity must be page-aligned");
         let mapping = Mapping::reserve(add(capacity, page));
+        let mut protection = MprotectFlags::READ | MprotectFlags::WRITE;
+        if exec_stack {
+            protection |= MprotectFlags::EXEC;
+        }
         // Keep the low page inaccessible so an overflow reaching it faults
         // instead of writing into a neighboring mapping.
         // SAFETY: the first page remains a guard; the remaining pages are
         // exclusively owned and do not have live references.
-        unsafe {
-            mm::mprotect(
-                mapping.ptr.as_ptr().add(page).cast(),
-                capacity,
-                MprotectFlags::READ | MprotectFlags::WRITE,
-            )
-        }
-        .expect("cannot map target stack");
+        unsafe { mm::mprotect(mapping.ptr.as_ptr().add(page).cast(), capacity, protection) }
+            .expect("cannot map target stack");
         Self { strings: mapping.len, mapping, start: page, word_count: 0 }
     }
 
@@ -241,7 +241,7 @@ pub unsafe fn build<'a>(
     interpreter: Option<&Image>,
     page: usize,
 ) -> *mut usize {
-    let mut stack = Builder::new(page);
+    let mut stack = Builder::new(page, image.exec_stack);
     stack.args_envs(argv, envp);
     for mut entry in inherited {
         let Ok(key) = u32::try_from(entry.key) else {
@@ -288,7 +288,7 @@ pub unsafe fn build<'a>(
     // PHDR/PHENT/PHNUM locate and size the executable's header table; ENTRY
     // is its startup address. With PT_INTERP we enter the interpreter first
     // and BASE is that image's load bias. Without one, BASE is 0 as on Linux.
-    stack.aux(abi::AT_PHDR, image.phdr.expect("program headers are not mapped by PT_LOAD"));
+    stack.aux(abi::AT_PHDR, image.phdr);
     stack.aux(abi::AT_PHENT, PHDR_SIZE);
     stack.aux(abi::AT_PHNUM, image.phnum);
     stack.aux(abi::AT_ENTRY, image.entry);
@@ -322,13 +322,34 @@ mod tests {
     }
 
     #[test]
+    fn maps_the_stack_executable_only_when_asked() {
+        let page = fspy_nostd::param::page_size();
+        for (exec_stack, expected) in [(false, "rw-p"), (true, "rwxp")] {
+            let builder = Builder::with_capacity(page, MIN_CAPACITY, exec_stack);
+            let usable = builder.mapping.ptr.as_ptr().addr() + page;
+            let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
+            let protection = maps
+                .lines()
+                .find_map(|line| {
+                    let mut fields = line.split_whitespace();
+                    let (start, end) = fields.next()?.split_once('-')?;
+                    let range = usize::from_str_radix(start, 16).ok()?
+                        ..usize::from_str_radix(end, 16).ok()?;
+                    range.contains(&usable).then(|| fields.next().unwrap())
+                })
+                .unwrap();
+            assert_eq!(protection, expected);
+        }
+    }
+
+    #[test]
     fn args_and_envs_are_contiguous_in_forward_order() {
         let args = [c"program", c"", c"\xff", c"longer-argument"];
         let envs = [c"EMPTY=", c"BYTES=\xff", c"A=B=C"];
         let page = fspy_nostd::param::page_size();
         for argc in 0..=args.len() {
             for envc in 0..=envs.len() {
-                let mut builder = Builder::with_capacity(page, MIN_CAPACITY);
+                let mut builder = Builder::with_capacity(page, MIN_CAPACITY, false);
                 let thin = |value: &'static core::ffi::CStr| {
                     CStr::from_units_with_nul(value.to_bytes_with_nul()).unwrap().as_thin()
                 };
@@ -416,7 +437,7 @@ mod tests {
     #[should_panic(expected = "initial stack exceeds capacity")]
     fn rejects_stack_without_call_headroom() {
         let page = fspy_nostd::param::page_size();
-        let mut builder = Builder::with_capacity(page, MIN_CAPACITY);
+        let mut builder = Builder::with_capacity(page, MIN_CAPACITY, false);
         let huge = std::vec![b'x'; MIN_CAPACITY - MIN_STACK_HEADROOM / 2];
         let _ = builder.copy(&huge);
         let _ = builder.finish();

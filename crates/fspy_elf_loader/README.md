@@ -18,8 +18,9 @@ the kernel will not, once it never sees the target.
 
 ## Support
 
-Native little-endian ELF64 on x86-64 and AArch64. `PT_GNU_STACK` must be
-non-executable. `ET_EXEC` that overlaps any retained mapping is rejected.
+Native little-endian ELF64 on x86-64 and AArch64. An executable `PT_GNU_STACK`
+maps the stack executable, as Linux does. `ET_EXEC` that overlaps any retained
+mapping is rejected.
 
 |           | `PT_INTERP`                                       | no `PT_INTERP`                                     |
 | --------- | ------------------------------------------------- | -------------------------------------------------- |
@@ -70,8 +71,7 @@ Do not try to close these in this crate unless a real target requires it:
   observers still see the launcher binary.
 - **Privileged / unsupported binaries.** `PR_SET_NO_NEW_PRIVS` is enabled for
   seccomp (so setuid/setgid and file-capability escalations do not apply), and
-  ELF32, executable `PT_GNU_STACK`, and `binfmt_misc` binaries are rejected
-  with `ENOEXEC`.
+  ELF32 and `binfmt_misc` binaries are rejected with `ENOEXEC`.
 - **Launcher path visibility across mount changes.** Every tracked `execve`
   re-enters the materialized freestanding launcher binary on disk. If a tracked
   process tree changes its mount namespace or root (`chroot`, `pivot_root`, or
