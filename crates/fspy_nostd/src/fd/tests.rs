@@ -96,3 +96,27 @@ fn standard_descriptors_have_the_expected_numbers() {
     assert_eq!(stdout.as_raw_fd(), 1);
     assert_eq!(stderr.as_raw_fd(), 2);
 }
+
+#[test]
+fn try_borrow_raw_accepts_non_negative_and_cwd_only() {
+    // SAFETY: test inspects only the raw descriptor number without performing I/O.
+    unsafe {
+        assert_eq!(BorrowedFd::try_borrow_raw(0).map(BorrowedFd::as_raw_fd), Some(0));
+        assert_eq!(BorrowedFd::try_borrow_raw(3).map(BorrowedFd::as_raw_fd), Some(3));
+        assert_eq!(BorrowedFd::try_borrow_raw(CWD_RAW).map(BorrowedFd::as_raw_fd), Some(CWD_RAW));
+
+        for invalid in [-1, -3, -50, CWD_RAW - 1, CWD_RAW + 1, RawFd::MIN] {
+            assert!(
+                BorrowedFd::try_borrow_raw(invalid).is_none(),
+                "expected try_borrow_raw({invalid}) to return None"
+            );
+        }
+
+        // On Linux `AT_FDCWD` is `-100`, so `-2` is invalid; on macOS `AT_FDCWD`
+        // is `-2`, so `-100` is invalid.
+        #[cfg(any(target_os = "linux", target_os = "none"))]
+        assert!(BorrowedFd::try_borrow_raw(-2).is_none());
+        #[cfg(target_os = "macos")]
+        assert!(BorrowedFd::try_borrow_raw(-100).is_none());
+    }
+}

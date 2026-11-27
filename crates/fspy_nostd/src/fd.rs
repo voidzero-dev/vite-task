@@ -42,23 +42,24 @@ impl BorrowedFd<'_> {
     }
 
     /// Borrows a descriptor argument passed by a caller, or returns `None`
-    /// when it is `-1`.
+    /// when it is neither a non-negative descriptor nor [`CWD`] (`AT_FDCWD`).
     ///
-    /// Callers can pass `-1` unchecked from a failed call such as `open`.
-    /// The kernel rejects it with `EBADF` wherever it uses the descriptor,
-    /// so it is not a caller error to report here.
+    /// Callers can pass `-1` (from a failed call such as `open`) or another
+    /// invalid negative descriptor value. The kernel rejects those with `EBADF`
+    /// wherever it uses the descriptor, so they are not valid borrows to
+    /// report here.
     ///
     /// # Safety
     ///
-    /// Any value other than `-1` must satisfy [`Self::borrow_raw`].
+    /// Any non-negative `fd` must satisfy [`Self::borrow_raw`].
     #[must_use]
     pub const unsafe fn try_borrow_raw(fd: RawFd) -> Option<Self> {
-        if fd == -1 {
-            None
-        } else {
-            // SAFETY: `fd` is not `-1`, and the caller upholds the
-            // remaining requirements of `borrow_raw`.
+        if fd >= 0 || fd == CWD_RAW {
+            // SAFETY: `fd` is either `CWD_RAW` (which is valid and not `-1`) or
+            // a non-negative descriptor upholding `borrow_raw`'s contract.
             Some(unsafe { Self::borrow_raw(fd) })
+        } else {
+            None
         }
     }
 
