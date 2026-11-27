@@ -18,7 +18,7 @@ Any zero-initialized shared memory works. In practice it is a sparse file mapped
 
 Two `AtomicU64` counters sit at the front, followed by one 8-byte descriptor slot per frame.
 
-- The **claim counter** counts frames ever claimed. Bit 63 is the CLOSED gate: the receiver sets it when it seals, and so does any writer whose claim failed, which is how the receiver hears about a lost record.
+- The **claim counter** counts frames ever claimed. Bit 63 is the CLOSED gate: the receiver sets it when it seals, and so does any writer whose claim failed or that went on to do something it could not record, which is how the receiver hears about a lost record.
 - The **payload counter** counts payload bytes ever reserved.
 
 The mapping's size and the number of slots are the whole geometry, and every process attaching to a region passes the slot count it was created with. Payloads take what the table leaves. Attaching checks one bound: the counters and the table fit, and what remains is small enough for the descriptors' 32-bit offsets. Splitting 4 GiB at one slot per 64 bytes, say, gives ~67 million slots and ~3.5 GiB of payload room, which is tens of millions of records of a few hundred bytes; payload space runs out first.

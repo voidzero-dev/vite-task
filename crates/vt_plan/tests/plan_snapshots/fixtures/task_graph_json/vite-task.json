@@ -1,0 +1,7 @@
+{
+  "tasks": {
+    "ci": {
+      "command": ["vt run -r lint", "vt run -r build"]
+    }
+  }
+}

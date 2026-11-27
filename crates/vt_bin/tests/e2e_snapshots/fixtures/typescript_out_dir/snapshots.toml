@@ -1,0 +1,29 @@
+[[e2e]]
+name = "typescript_out_dir"
+comment = """
+TypeScript 7's `tsc` compiles `src` into `dist`. It stats `dist` and lists the package root.
+"""
+ignore = true
+steps = [
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  { argv = [
+    "vtt",
+    "rm",
+    "-r",
+    "dist",
+  ], comment = "remove the output folder, as on a clean checkout" },
+  [
+    "vt",
+    "run",
+    "build",
+  ],
+  [
+    "vtt",
+    "stat-file",
+    "dist/main.js",
+  ],
+]

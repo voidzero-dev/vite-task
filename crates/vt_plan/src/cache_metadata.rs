@@ -110,6 +110,18 @@ impl SpawnFingerprint {
         vt_str::format!("{:?}", self.program_fingerprint)
     }
 
+    /// The program as the fingerprint records it: its path relative to the
+    /// workspace root if it's inside it, otherwise just its name.
+    #[must_use]
+    pub fn program(&self) -> Str {
+        match &self.program_fingerprint {
+            ProgramFingerprint::OutsideWorkspace { program_name } => program_name.clone(),
+            ProgramFingerprint::InsideWorkspace { relative_program_path } => {
+                Str::from(relative_program_path.as_str())
+            }
+        }
+    }
+
     /// Get the command args.
     #[must_use]
     pub const fn args(&self) -> &Arc<[Str]> {

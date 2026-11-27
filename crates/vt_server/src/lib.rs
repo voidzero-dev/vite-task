@@ -157,6 +157,13 @@ impl Handler for Recorder {
         query: &IpcEnvQuery<'_>,
         tracked: bool,
     ) -> Result<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>, vt_glob::env::EnvGlobError> {
+        // A query that matches every name, like the one Vite's
+        // `loadEnv(mode, dir, '')` sends, gets nothing and records nothing.
+        // Recording it would put every variable of the parent env in the cache
+        // key, so per-run ones, such as a CI run ID, would make every run miss.
+        if matches!(query, IpcEnvQuery::Prefix("") | IpcEnvQuery::Glob("*")) {
+            return Ok(FxHashMap::default());
+        }
         let key = match query {
             IpcEnvQuery::Glob(pattern) => EnvQuery::Glob(Arc::from(*pattern)),
             IpcEnvQuery::Prefix(prefix) => EnvQuery::Prefix(Arc::from(*prefix)),

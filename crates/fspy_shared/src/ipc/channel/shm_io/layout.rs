@@ -7,7 +7,7 @@
 //! an offset and a length always fit a descriptor's 32-bit fields and
 //! bounds checks add them in 32 bits.
 
-use std::{num::NonZeroU32, ptr::NonNull, sync::atomic::AtomicU64};
+use core::{num::NonZeroU32, ptr::NonNull, sync::atomic::AtomicU64};
 
 /// The CLOSED gate bit of the claim counter. The receiver sets it when it
 /// seals, and so does a claim the region had no room for, which is how it
@@ -147,6 +147,13 @@ pub enum SlotState {
     /// Nothing is published in the slot: the writer has not finished it
     /// yet, or died or gave it up before finishing. The receiver ignores
     /// such slots.
+    #[cfg_attr(
+        target_os = "none",
+        expect(
+            dead_code,
+            reason = "target-none builds only the writer; the hosted reader uses it"
+        )
+    )]
     Unfinished,
     /// A payload is committed: the receiver may read its span, once
     /// checked against the payload area's bounds.
@@ -163,6 +170,13 @@ pub enum SlotState {
 impl SlotState {
     /// Decodes a slot value into its state. The two processes sharing a
     /// value run on one machine, so native byte order is fine.
+    #[cfg_attr(
+        target_os = "none",
+        expect(
+            dead_code,
+            reason = "target-none builds only the writer; the hosted reader uses it"
+        )
+    )]
     pub const fn decode(slot_value: u64) -> Self {
         let [offset, len] = bytemuck::must_cast::<u64, [u32; 2]>(slot_value);
         let Some(len) = NonZeroU32::new(len) else {

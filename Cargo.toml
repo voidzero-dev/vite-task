@@ -48,7 +48,7 @@ async-trait = "0.1.89"
 base64 = "0.22.1"
 bytes = "1.11.1"
 url = "2.5.8"
-wincode = "0.6.0"
+wincode = { version = "0.6.0", default-features = false, features = ["alloc"] }
 bindgen = "0.72.1"
 bitflags = "2.10.0"
 brush-parser = "0.4.0"
@@ -75,6 +75,7 @@ diff-struct = "0.5.3"
 directories = "6.0.0"
 dunce = "1.0.5"
 elf = { version = "0.8.0", default-features = false }
+elsa = "1.11.2"
 flate2 = "1.0.35"
 fspy = { path = "crates/fspy" }
 fspy_benchmark_launcher = { path = "crates/fspy_benchmark_launcher", artifact = "bin" }
@@ -125,9 +126,10 @@ rayon = "1.10.0"
 ref-cast = "1.0.24"
 regex = "1.11.3"
 reqwest = { version = "0.13.5", default-features = false }
-rusqlite = "0.39.0"
+rusqlite = "0.41.0"
 rustc-hash = "2.1.1"
 rustls = { version = "0.23.44", default-features = false }
+schemars = "1.2.3"
 # SeccompAction::UserNotif (SECCOMP_RET_USER_NOTIF) was added after the latest published release (v0.5.0)
 seccompiler = { git = "https://github.com/rust-vmm/seccompiler", rev = "08587106340b8e3cb361c7561411510039436857" }
 serde = "1.0.219"
@@ -148,7 +150,7 @@ syscalls = { version = "0.8.0", default-features = false }
 tar = "0.4.45"
 tempfile = "3.14.0"
 test-log = "0.2.18"
-thiserror = "2"
+thiserror = { version = "2", default-features = false }
 tokio = "1.53.3"
 tokio-util = "0.7.17"
 toml = "1.0.0"

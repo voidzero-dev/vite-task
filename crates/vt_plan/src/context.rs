@@ -3,7 +3,7 @@ use std::{env::JoinPathsError, ffi::OsStr, ops::Range, rc::Rc, sync::Arc};
 use rustc_hash::FxHashMap;
 use vt_casefold::EnvName;
 use vt_graph::{
-    IndexedTaskGraph, TaskNodeIndex,
+    IndexedTaskGraph, TaskId,
     config::{GlobResolver, ResolvedGlobalCacheConfig},
     query::TaskQuery,
 };
@@ -24,8 +24,10 @@ pub struct TaskRecursionError {
 }
 
 /// The context for planning an execution from a task.
+///
+/// `'a` borrows the session's state; `'l` is the task graph's config loader.
 #[derive(Debug)]
-pub struct PlanContext<'a> {
+pub struct PlanContext<'a, 'l> {
     /// The root path of the workspace.
     workspace_path: &'a Arc<AbsolutePath>,
 
@@ -44,14 +46,14 @@ pub struct PlanContext<'a> {
     /// The callbacks for loading task graphs and parsing commands.
     callbacks: &'a mut (dyn PlanRequestParser + 'a),
 
-    /// The current call stack of task index nodes being planned.
-    task_call_stack: Vec<(TaskNodeIndex, Range<usize>)>,
+    /// The current call stack of tasks being planned.
+    task_call_stack: Vec<(TaskId, Range<usize>)>,
 
     /// The extra args (`vp run task [extra_arg...]`).
     /// It may come from real cli args, or commands in task scripts.
     extra_args: Arc<[Str]>,
 
-    indexed_task_graph: &'a IndexedTaskGraph,
+    indexed_task_graph: &'a IndexedTaskGraph<'l>,
 
     /// The session's glob resolver, shared with task graph loading and every nested context.
     glob_resolver: Rc<GlobResolver>,
@@ -79,7 +81,7 @@ pub struct PlanContext<'a> {
     parent_query: Arc<TaskQuery>,
 }
 
-impl<'a> PlanContext<'a> {
+impl<'a, 'l> PlanContext<'a, 'l> {
     #[expect(
         clippy::too_many_arguments,
         reason = "each argument initializes its own context field"
@@ -89,7 +91,7 @@ impl<'a> PlanContext<'a> {
         cwd: Arc<AbsolutePath>,
         envs: Arc<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>>,
         callbacks: &'a mut (dyn PlanRequestParser + 'a),
-        indexed_task_graph: &'a IndexedTaskGraph,
+        indexed_task_graph: &'a IndexedTaskGraph<'l>,
         glob_resolver: Rc<GlobResolver>,
         resolved_global_cache: ResolvedGlobalCacheConfig,
         parent_query: Arc<TaskQuery>,
@@ -113,20 +115,16 @@ impl<'a> PlanContext<'a> {
         &self.envs
     }
 
-    /// Check if adding the given task node index would create a recursion in the call stack.
-    pub fn check_recursion(
-        &self,
-        task_node_index: TaskNodeIndex,
-    ) -> Result<(), TaskRecursionError> {
-        if let Some(recursion_start) =
-            self.task_call_stack.iter().position(|(idx, _)| *idx == task_node_index)
+    /// Check if adding the given task would create a recursion in the call stack.
+    pub fn check_recursion(&self, task_id: &TaskId) -> Result<(), TaskRecursionError> {
+        if let Some(recursion_start) = self.task_call_stack.iter().position(|(id, _)| id == task_id)
         {
             return Err(TaskRecursionError { recursion_point: recursion_start });
         }
         Ok(())
     }
 
-    pub const fn indexed_task_graph(&self) -> &'a IndexedTaskGraph {
+    pub const fn indexed_task_graph(&self) -> &'a IndexedTaskGraph<'l> {
         self.indexed_task_graph
     }
 
@@ -139,8 +137,8 @@ impl<'a> PlanContext<'a> {
     }
 
     /// Push a new frame onto the task call stack.
-    pub fn push_stack_frame(&mut self, task_node_index: TaskNodeIndex, command_span: Range<usize>) {
-        self.task_call_stack.push((task_node_index, command_span));
+    pub fn push_stack_frame(&mut self, task_id: TaskId, command_span: Range<usize>) {
+        self.task_call_stack.push((task_id, command_span));
     }
 
     pub fn callbacks(&mut self) -> &mut (dyn PlanRequestParser + '_) {
@@ -201,11 +199,11 @@ impl<'a> PlanContext<'a> {
 
     /// Returns the task currently being expanded (whose command triggered a nested query).
     /// This is the last task on the call stack, or `None` at the top level.
-    pub fn expanding_task(&self) -> Option<TaskNodeIndex> {
-        self.task_call_stack.last().map(|(idx, _)| *idx)
+    pub fn expanding_task(&self) -> Option<&TaskId> {
+        self.task_call_stack.last().map(|(id, _)| id)
     }
 
-    pub fn duplicate(&mut self) -> PlanContext<'_> {
+    pub fn duplicate(&mut self) -> PlanContext<'_, 'l> {
         PlanContext {
             workspace_path: self.workspace_path,
             cwd: Arc::clone(&self.cwd),

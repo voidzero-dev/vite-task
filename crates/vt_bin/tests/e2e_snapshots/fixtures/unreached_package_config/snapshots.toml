@@ -1,0 +1,60 @@
+[[e2e]]
+name = "cache_set_in_unreached_package"
+comment = """
+`packages/broken/vite-task.json` sets `cache`, which only the workspace root config may set. `vt run -t build` in `packages/app` runs `@test/app` and `@test/lib`, so it never needs `@test/broken`'s config; `-r` and `dependsOn` reach it.
+"""
+cwd = "packages/app"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "-t",
+    "build",
+  ], comment = "app and lib only" },
+  { argv = [
+    "vt",
+    "run",
+    "-r",
+    "build",
+  ], comment = "reaches @test/broken" },
+  { argv = [
+    "vt",
+    "run",
+    "deploy",
+  ], comment = "`dependsOn` reaches @test/broken" },
+  { argv = [
+    "vtt",
+    "pipe-stdout",
+    "--",
+    "vt",
+    "run",
+    "--json",
+  ], comment = "`--json` loads every config, as listing the tasks does" },
+]
+
+[[e2e]]
+name = "invalid_json_in_unreached_package"
+comment = """
+`packages/broken/vite-task.json` isn't valid JSON. `vt run -t build` in `packages/app` never needs `@test/broken`'s config; `-r` reaches it.
+"""
+cwd = "packages/app"
+steps = [
+  [
+    "vtt",
+    "cp",
+    "../broken/vite-task.invalid",
+    "../broken/vite-task.json",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "-t",
+    "build",
+  ], comment = "app and lib only" },
+  { argv = [
+    "vt",
+    "run",
+    "-r",
+    "build",
+  ], comment = "reaches @test/broken" },
+]

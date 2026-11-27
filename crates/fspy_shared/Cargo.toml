@@ -6,17 +6,18 @@ license.workspace = true
 publish = false
 
 [dependencies]
-wincode = { workspace = true, features = ["derive"] }
 allocator-api2 = { workspace = true, features = ["alloc"] }
-bumpalo = { workspace = true }
-bstr = { workspace = true, features = ["alloc", "std"] }
 bytemuck = { workspace = true, features = ["must_cast", "derive"] }
 fspy_nostd = { workspace = true }
 fspy_nostd_alloc = { workspace = true }
 fspy_shm = { workspace = true }
 thiserror = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
 vt_ipc_str = { workspace = true, features = ["fspy_nostd"] }
+wincode = { workspace = true, features = ["derive"] }
+
+[target.'cfg(not(target_os = "none"))'.dependencies]
+bumpalo = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 vt_path = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -26,6 +27,7 @@ winapi = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 assert2 = { workspace = true }
+bstr = { workspace = true, features = ["alloc", "std"] }
 ctor = { workspace = true }
 rustc-hash = { workspace = true }
 vt_subprocess_test = { workspace = true }

@@ -1,0 +1,30 @@
+# A nested `vt run` is a step with its own plan, whose `dependsOn` refers only
+# to its own tasks. `vtt` and `vt` are outside the workspace, at absolute
+# paths, so they're redacted.
+
+[[e2e]]
+name = "nested"
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "ci",
+  ], comment = "`ci` runs two nested plans in turn. The first has its own edges, and the root's `build` in it runs a third plan, so `packages/a#build` is at two levels.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"', '"program": "[^"]*vtt[^"]*"' = '"program": "<vtt>"' } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "ci",
+    "--flag",
+  ], comment = "Args after the task name go to the last command, a nested run here.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"', '"program": "[^"]*vtt[^"]*"' = '"program": "<vtt>"' } },
+  { argv = [
+    "vt",
+    "run",
+    "--dry-run",
+    "--json",
+    "preview",
+  ], comment = "A nested `vt run --dry-run` stays a spawned step, which a dry run doesn't start.", redact = { '"\$schema": "[^"]*"' = '"$$schema": "<schema>"', '"program": "[^"]*/vt(\.exe)?"' = '"program": "<vt>"' } },
+]

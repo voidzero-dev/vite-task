@@ -1,0 +1,6 @@
+{
+  "name": "@test/ui",
+  "scripts": {
+    "build": "tsdown"
+  }
+}

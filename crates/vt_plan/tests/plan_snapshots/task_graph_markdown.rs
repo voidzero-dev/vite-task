@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
-use petgraph::visit::{EdgeRef as _, IntoNodeReferences};
-use vt_graph::{TaskGraph, TaskNode};
+use vt_graph::{IndexedTaskGraph, TaskGraphLoadError, TaskNode};
 use vt_path::AbsolutePath;
 use vt_str::Str;
 
@@ -15,34 +14,24 @@ struct TaskGraphEntry<'a> {
     neighbors: Vec<TaskGraphKey<'a>>,
 }
 
-impl<'a> TaskGraphEntry<'a> {
-    fn from_graph_node(
-        task_graph: &'a TaskGraph,
-        node_index: vt_graph::TaskNodeIndex,
-        node: &'a TaskNode,
-    ) -> Self {
-        let mut neighbors = task_graph
-            .edges(node_index)
-            .map(|edge| task_graph_key(&task_graph[edge.target()]))
-            .collect::<Vec<_>>();
-        neighbors.sort_unstable();
-        Self { key: task_graph_key(node), node, neighbors }
-    }
-}
-
 fn task_graph_key(node: &TaskNode) -> TaskGraphKey<'_> {
     (node.task_display.package_path.as_ref(), node.task_display.task_name.as_str())
 }
 
-fn sorted_task_graph_entries(task_graph: &TaskGraph) -> Vec<TaskGraphEntry<'_>> {
+async fn sorted_task_graph_entries<'a>(
+    task_graph: &'a IndexedTaskGraph<'_>,
+) -> Result<Vec<TaskGraphEntry<'a>>, TaskGraphLoadError> {
+    let mut entries = Vec::new();
+    for node in task_graph.tasks().await? {
+        let mut neighbors =
+            task_graph.depends_on(&node.id).await?.map(task_graph_key).collect::<Vec<_>>();
+        neighbors.sort_unstable();
+        entries.push(TaskGraphEntry { key: task_graph_key(node), node, neighbors });
+    }
     // Sort by the visible task identity so node IDs stay stable and snapshot
-    // diffs don't depend on petgraph insertion order.
-    let mut entries = task_graph
-        .node_references()
-        .map(|(node_index, node)| TaskGraphEntry::from_graph_node(task_graph, node_index, node))
-        .collect::<Vec<_>>();
+    // diffs don't depend on load order.
     entries.sort_unstable_by(|a, b| a.key.cmp(&b.key));
-    entries
+    Ok(entries)
 }
 
 fn redacted_package_path(path: &AbsolutePath, workspace_root: &AbsolutePath) -> Str {
@@ -79,8 +68,11 @@ fn push_mermaid_label_text(out: &mut String, text: &str) {
     clippy::disallowed_types,
     reason = "Markdown snapshot rendering needs a mutable string buffer"
 )]
-pub fn render_task_graph_markdown(task_graph: &TaskGraph, workspace_root: &AbsolutePath) -> String {
-    let entries = sorted_task_graph_entries(task_graph);
+pub async fn render_task_graph_markdown(
+    task_graph: &IndexedTaskGraph<'_>,
+    workspace_root: &AbsolutePath,
+) -> Result<String, TaskGraphLoadError> {
+    let entries = sorted_task_graph_entries(task_graph).await?;
     let mut ids_by_key = BTreeMap::<TaskGraphKey<'_>, Str>::new();
 
     for (index, entry) in entries.iter().enumerate() {
@@ -124,5 +116,5 @@ pub fn render_task_graph_markdown(task_graph: &TaskGraph, workspace_root: &Absol
         out.push_str("\n```\n\n");
     }
 
-    out
+    Ok(out)
 }

@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+elsa = { workspace = true }
 hashbrown = { workspace = true }
 wincode = { workspace = true, features = ["derive"] }
 petgraph = { workspace = true }
@@ -18,6 +19,7 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde-untagged = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 vec1 = { workspace = true, features = ["serde"] }
 vt_path = { workspace = true }
@@ -27,6 +29,7 @@ wax = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
 ts-rs = { workspace = true, features = ["no-serde-warnings"] }
 vt_path = { workspace = true, features = ["ts-rs"] }
 vt_str = { workspace = true, features = ["ts-rs"] }

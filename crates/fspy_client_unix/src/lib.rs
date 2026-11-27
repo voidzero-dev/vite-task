@@ -87,6 +87,17 @@ impl<'a> Client<'a> {
         ipc_sender.send(&mode.with_path(path.into()));
     }
 
+    /// Marks the run's trace incomplete, so the receiver treats it as
+    /// untracked and the runner does not cache it. Call it before the
+    /// process does something that tracking cannot record, such as an exec
+    /// that continues untracked because [`PreExec::run`] failed. It does
+    /// nothing when this client has no channel sender.
+    pub fn report_loss(&self) {
+        if let Some(ipc_sender) = &self.ipc_sender {
+            ipc_sender.report_loss();
+        }
+    }
+
     /// Resolves and reports an exec, returning the transformed arguments to
     /// forward and what to run before forwarding them.
     ///

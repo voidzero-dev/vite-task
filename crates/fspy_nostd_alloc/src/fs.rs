@@ -3,9 +3,9 @@
 #[cfg(target_os = "macos")]
 use allocator_api2::boxed::Box;
 use allocator_api2::{alloc::Allocator, vec::Vec};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "none", target_os = "macos"))]
 use fspy_nostd::Thin;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "none"))]
 use fspy_nostd::{BorrowedFd, CStr};
 use fspy_nostd::{Error, Fat, Result};
 
@@ -43,7 +43,7 @@ pub fn getcwd<A: Allocator>(allocator: A) -> Result<CString<Fat, A>> {
 ///
 /// Returns [`Error::NOMEM`] if storage cannot be allocated, or the error from
 /// [`fspy_nostd::fs::readlinkat`].
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "none"))]
 pub fn readlinkat<A: Allocator>(
     allocator: A,
     dirfd: BorrowedFd<'_>,
