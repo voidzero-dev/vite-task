@@ -101,7 +101,15 @@ impl<'fd> File<'fd> {
         // The 16-byte identity tells us how to decode the rest of the 64-byte
         // ELF64 header. Section headers describe linker/debugger information;
         // loading these images needs only the separate program-header table.
-        let ident = file::parse_ident::<LittleEndian>(&bytes[..16]).map_err(|_| Error::NOEXEC)?;
+        //
+        // Linux `fs/binfmt_elf.c` does not check `e_ident[EI_VERSION]` or
+        // `e_version`, while `elf::file::parse_ident` rejects non-`EV_CURRENT`.
+        // Normalize `EI_VERSION` on a local copy while keeping the magic,
+        // class, and endianness checks.
+        let mut ident_buf = [0_u8; 16];
+        ident_buf.copy_from_slice(&bytes[..16]);
+        ident_buf[abi::EI_VERSION] = abi::EV_CURRENT;
+        let ident = file::parse_ident::<LittleEndian>(&ident_buf).map_err(|_| Error::NOEXEC)?;
         if ident.1 != Class::ELF64 {
             return Err(Error::NOEXEC);
         }
@@ -114,9 +122,6 @@ impl<'fd> File<'fd> {
         // Position-independent executables (PIE) and their interpreters use it.
         // ET_EXEC instead uses its declared addresses with no load bias.
         if !matches!(header.e_type, abi::ET_DYN | abi::ET_EXEC) {
-            return Err(Error::NOEXEC);
-        }
-        if header.version != u32::from(abi::EV_CURRENT) {
             return Err(Error::NOEXEC);
         }
         if usize::from(header.e_phentsize) != PHDR_SIZE {

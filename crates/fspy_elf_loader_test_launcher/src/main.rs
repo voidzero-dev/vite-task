@@ -23,6 +23,7 @@ mod freestanding {
     const INTERCEPTOR_EXEC_FAIL_NO_CLEANUP_ARGV: usize = 0x5555_2346;
 
     static NONEXISTENT_EXEC_PATH: &[u8] = b"/nonexistent_fspy_execve_action_probe\0";
+    static SIGSYS_IGNORED_PROBE_PATH: &[u8] = b"/fspy_probe_sigsys_ignored";
     static EMPTY_EXEC_PTRS: [usize; 1] = [0];
 
     unsafe fn test_execve_cleanup(ctx: *mut core::ffi::c_void) {
@@ -102,6 +103,12 @@ mod freestanding {
                         envp: EMPTY_EXEC_PTRS.as_ptr().cast(),
                         cleanup: None,
                     });
+                }
+                // SAFETY: `call.args[0]` is the trapped `execve` pathname pointer.
+                if let Ok(cstr) = unsafe { fspy_elf_loader::user_cstr(call.args[0]) }
+                    && cstr.count().as_units() == SIGSYS_IGNORED_PROBE_PATH
+                {
+                    return Err(if call.sigsys_ignored() { Error::LOOP } else { Error::NOENT });
                 }
                 Ok(SyscallAction::Replay)
             }

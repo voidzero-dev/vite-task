@@ -2266,6 +2266,10 @@ static void *churn_thread_fn(void *unused) {
 static void *post_churn_check_fn(void *unused) {
     (void)unused;
     sigset_t set, cur;
+    sigemptyset(&cur);
+    if (pthread_sigmask(SIG_SETMASK, NULL, &cur) != 0 || sigismember(&cur, SIGSYS) != 0) {
+        fail("post-churn thread started with stale blocked SIGSYS");
+    }
     sigemptyset(&set);
     sigaddset(&set, SIGSYS);
     if (pthread_sigmask(SIG_BLOCK, &set, NULL) != 0) {
@@ -3567,6 +3571,243 @@ static int run_stack_pool_overflow_test(void) {
     return 0;
 }
 
+/* ---- thread-exit-tid-cleanup subcommand ---- */
+
+static void *exit_blocking_all_thread_fn(void *unused) {
+    (void)unused;
+    sigset_t all;
+    sigfillset(&all);
+    if (pthread_sigmask(SIG_SETMASK, &all, NULL) != 0) {
+        fail("exit_blocking_all_thread_fn block all");
+    }
+    return NULL;
+}
+
+static void *verify_clean_sigsys_thread_fn(void *unused) {
+    (void)unused;
+    sigset_t cur, only_sigsys;
+    sigemptyset(&cur);
+    if (pthread_sigmask(SIG_SETMASK, NULL, &cur) != 0 || sigismember(&cur, SIGSYS) != 0) {
+        fail("subsequent thread observed stale blocked SIGSYS");
+    }
+
+    g_sigsys_plain_count = 0;
+    if (pthread_kill(pthread_self(), SIGSYS) != 0 || g_sigsys_plain_count != 1) {
+        fail("subsequent thread did not deliver SIGSYS immediately");
+    }
+
+    sigemptyset(&only_sigsys);
+    sigaddset(&only_sigsys, SIGSYS);
+    if (pthread_sigmask(SIG_BLOCK, &only_sigsys, NULL) != 0) {
+        fail("subsequent thread block SIGSYS");
+    }
+    if (pthread_kill(pthread_self(), SIGSYS) != 0 || g_sigsys_plain_count != 1) {
+        fail("subsequent thread did not defer blocked SIGSYS");
+    }
+    if (pthread_sigmask(SIG_UNBLOCK, &only_sigsys, NULL) != 0 || g_sigsys_plain_count != 2) {
+        fail("subsequent thread did not deliver deferred SIGSYS on unblock");
+    }
+    return NULL;
+}
+
+static int run_thread_exit_tid_cleanup_test(void) {
+    g_expected_exe = expected_exe_path();
+    struct sigaction act;
+    memset(&act, 0, sizeof act);
+    act.sa_handler = sigsys_plain_handler;
+    sigemptyset(&act.sa_mask);
+    if (sigaction(SIGSYS, &act, NULL) != 0) {
+        fail("install sigsys handler");
+    }
+
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0) {
+        fail("pthread_attr_init");
+    }
+    (void)pthread_attr_setstacksize(&attr, 64 * 1024);
+
+    for (int round = 0; round < 32; round++) {
+        for (int i = 0; i < 4; i++) {
+            pthread_t t;
+            if (pthread_create(&t, &attr, exit_blocking_all_thread_fn, NULL) != 0) {
+                fail("pthread_create exit_blocking_all");
+            }
+            if (pthread_join(t, NULL) != 0) {
+                fail("pthread_join exit_blocking_all");
+            }
+        }
+        pthread_t verify;
+        if (pthread_create(&verify, &attr, verify_clean_sigsys_thread_fn, NULL) != 0) {
+            fail("pthread_create verify_clean_sigsys");
+        }
+        if (pthread_join(verify, NULL) != 0) {
+            fail("pthread_join verify_clean_sigsys");
+        }
+    }
+
+    pthread_attr_destroy(&attr);
+    write_all(STDOUT_FILENO, "thread-exit-tid-cleanup-ok\n", 27);
+    return 0;
+}
+
+/* ---- posix-spawn-sigsys-dfl subcommand ---- */
+
+static int vfork_sigsys_override_child_fn(void *unused) {
+    (void)unused;
+    struct kernel_sigaction_compat {
+        void (*sa_handler_fn)(int);
+        unsigned long sa_flags;
+        void (*sa_restorer_fn)(void);
+        uint64_t sa_mask;
+    };
+    struct kernel_sigaction_compat old_act, new_act;
+    memset(&old_act, 0, sizeof old_act);
+    if (syscall(SYS_rt_sigaction, SIGSYS, NULL, &old_act, sizeof(uint64_t)) != 0) {
+        _exit(10);
+    }
+    if (old_act.sa_handler_fn != SIG_IGN) {
+        _exit(11);
+    }
+
+    /* Reset SIGSYS to SIG_DFL inside the CLONE_VM child. */
+    memset(&new_act, 0, sizeof new_act);
+    new_act.sa_handler_fn = SIG_DFL;
+    memset(&old_act, 0, sizeof old_act);
+    if (syscall(SYS_rt_sigaction, SIGSYS, &new_act, &old_act, sizeof(uint64_t)) != 0) {
+        _exit(12);
+    }
+    if (old_act.sa_handler_fn != SIG_IGN) {
+        _exit(13);
+    }
+
+    /* Mutate sigmask (like posix_spawn POSIX_SPAWN_SETSIGMASK) and confirm
+     * BIT_CHILD_SIGSYS_DFL was not wiped! */
+    uint64_t block_sigsys = UINT64_C(1) << (SIGSYS - 1);
+    uint64_t empty_mask = 0;
+    if (syscall(SYS_rt_sigprocmask, SIG_SETMASK, &block_sigsys, NULL, sizeof(uint64_t)) != 0) {
+        _exit(14);
+    }
+    if (syscall(SYS_rt_sigprocmask, SIG_SETMASK, &empty_mask, NULL, sizeof(uint64_t)) != 0) {
+        _exit(15);
+    }
+
+    memset(&old_act, 0, sizeof old_act);
+    if (syscall(SYS_rt_sigaction, SIGSYS, NULL, &old_act, sizeof(uint64_t)) != 0) {
+        _exit(16);
+    }
+    if (old_act.sa_handler_fn != SIG_DFL) {
+        _exit(17);
+    }
+
+    /* Switch back to SIG_IGN and verify readback. */
+    new_act.sa_handler_fn = SIG_IGN;
+    memset(&old_act, 0, sizeof old_act);
+    if (syscall(SYS_rt_sigaction, SIGSYS, &new_act, &old_act, sizeof(uint64_t)) != 0) {
+        _exit(18);
+    }
+    if (old_act.sa_handler_fn != SIG_DFL) {
+        _exit(19);
+    }
+    memset(&old_act, 0, sizeof old_act);
+    if (syscall(SYS_rt_sigaction, SIGSYS, NULL, &old_act, sizeof(uint64_t)) != 0) {
+        _exit(20);
+    }
+    if (old_act.sa_handler_fn != SIG_IGN) {
+        _exit(21);
+    }
+
+    _exit(0);
+}
+
+static int run_posix_spawn_sigsys_dfl_test(void) {
+    struct sigaction ign, old;
+    memset(&ign, 0, sizeof ign);
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    if (sigaction(SIGSYS, &ign, NULL) != 0) {
+        fail("parent set SIGSYS SIG_IGN");
+    }
+
+    /* 1. Exercise direct CLONE_VM | CLONE_VFORK child override + sigprocmask
+     *    survival + clear_pid_slots on _exit(0) without exec. */
+    size_t stack_sz = 64 * 1024;
+    void *child_stack = mmap(NULL, stack_sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (child_stack == MAP_FAILED) {
+        fail("mmap vfork child stack");
+    }
+    pid_t vpid = clone(
+        vfork_sigsys_override_child_fn,
+        (char *)child_stack + stack_sz,
+        CLONE_VM | CLONE_VFORK | SIGCHLD,
+        NULL
+    );
+    if (vpid < 0) {
+        fail("clone CLONE_VM|CLONE_VFORK");
+    }
+    int vstatus = 0;
+    if (waitpid(vpid, &vstatus, 0) != vpid || !WIFEXITED(vstatus) || WEXITSTATUS(vstatus) != 0) {
+        fail("vfork_sigsys_override_child_fn failed");
+    }
+    munmap(child_stack, stack_sz);
+
+    /* 2. Under --test-interceptor, probe `call.sigsys_ignored()` during real
+     *    `posix_spawn` with `POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK`. */
+    if (getenv("FSPY_TEST_INTERCEPTOR_ACTIVE") != NULL) {
+        char *probe_argv[] = {"probe", NULL};
+        sigset_t full;
+        sigfillset(&full);
+
+        /* 2a. With POSIX_SPAWN_SETSIGDEF containing SIGSYS AND POSIX_SPAWN_SETSIGMASK:
+         *     interceptor must observe `sigsys_ignored() == false` -> ENOENT. */
+        posix_spawnattr_t attr_dfl;
+        if (posix_spawnattr_init(&attr_dfl) != 0) {
+            fail("posix_spawnattr_init dfl");
+        }
+        if (posix_spawnattr_setflags(&attr_dfl, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK) != 0
+            || posix_spawnattr_setsigdefault(&attr_dfl, &full) != 0
+            || posix_spawnattr_setsigmask(&attr_dfl, &full) != 0) {
+            fail("posix_spawnattr configure dfl");
+        }
+        pid_t pid = -1;
+        int rc = posix_spawn(&pid, "/fspy_probe_sigsys_ignored", NULL, &attr_dfl, probe_argv, environ);
+        posix_spawnattr_destroy(&attr_dfl);
+        if (rc != ENOENT) {
+            errno = rc;
+            fail("expected ENOENT (sigsys_ignored=false) with POSIX_SPAWN_SETSIGDEF");
+        }
+
+        /* 2b. Without POSIX_SPAWN_SETSIGDEF (only POSIX_SPAWN_SETSIGMASK):
+         *     interceptor must observe `sigsys_ignored() == true` -> ELOOP. */
+        posix_spawnattr_t attr_ign;
+        if (posix_spawnattr_init(&attr_ign) != 0) {
+            fail("posix_spawnattr_init ign");
+        }
+        if (posix_spawnattr_setflags(&attr_ign, POSIX_SPAWN_SETSIGMASK) != 0
+            || posix_spawnattr_setsigmask(&attr_ign, &full) != 0) {
+            fail("posix_spawnattr configure ign");
+        }
+        pid = -1;
+        rc = posix_spawn(&pid, "/fspy_probe_sigsys_ignored", NULL, &attr_ign, probe_argv, environ);
+        posix_spawnattr_destroy(&attr_ign);
+        if (rc != ELOOP) {
+            errno = rc;
+            fail("expected ELOOP (sigsys_ignored=true) without POSIX_SPAWN_SETSIGDEF");
+        }
+    }
+
+    /* Parent must STILL have SIGSYS == SIG_IGN! */
+    memset(&old, 0, sizeof old);
+    if (sigaction(SIGSYS, NULL, &old) != 0 || old.sa_handler != SIG_IGN) {
+        fail("parent lost SIGSYS SIG_IGN after CLONE_VM child override");
+    }
+    if (raise(SIGSYS) != 0) {
+        fail("parent raise(SIGSYS) failed under retained SIG_IGN");
+    }
+
+    write_all(STDOUT_FILENO, "posix-spawn-sigsys-dfl-ok\n", 26);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fail("missing subcommand");
@@ -3672,6 +3913,12 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "stack-pool-overflow") == 0) {
         return run_stack_pool_overflow_test();
+    }
+    if (strcmp(argv[1], "thread-exit-tid-cleanup") == 0) {
+        return run_thread_exit_tid_cleanup_test();
+    }
+    if (strcmp(argv[1], "posix-spawn-sigsys-dfl") == 0) {
+        return run_posix_spawn_sigsys_dfl_test();
     }
     fail("unknown subcommand");
     return 1;
