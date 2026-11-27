@@ -48,7 +48,8 @@ pub struct ValidatedLayout {
     pub low: usize,
     pub span: usize,
     pub alignment: usize,
-    pub has_phdr: bool,
+    /// The last `PT_GNU_STACK` asks for an executable stack (`PF_X`).
+    pub exec_stack: bool,
 }
 
 /// The final memory layout, with addresses the target can use at runtime.
@@ -57,9 +58,11 @@ pub struct Image {
     /// Add this load bias to an ELF virtual address to get its runtime address.
     pub bias: usize,
     pub entry: usize,
-    /// Address of the program-header table inside the mapped image, if present.
-    pub phdr: Option<usize>,
+    /// Address of the program-header table inside the mapped image (`AT_PHDR`).
+    pub phdr: usize,
     pub phnum: usize,
+    /// The image's `PT_GNU_STACK` asks for an executable stack.
+    pub exec_stack: bool,
 }
 
 impl Image {
@@ -69,7 +72,14 @@ impl Image {
 
     #[cfg(test)]
     pub fn test_stub(page: usize) -> Self {
-        Self { mapping: Mapping::reserve(page), bias: 0, entry: 0x1000, phdr: Some(0x40), phnum: 1 }
+        Self {
+            mapping: Mapping::reserve(page),
+            bias: 0,
+            entry: 0x1000,
+            phdr: 0x40,
+            phnum: 1,
+            exec_stack: false,
+        }
     }
 }
 
@@ -135,17 +145,10 @@ impl<'fd> File<'fd> {
         )
     }
 
-    pub const fn is_dynamic(&self) -> bool {
-        self.header.e_type == abi::ET_DYN
-    }
-
+    /// Returns the first `PT_INTERP` path; like Linux, later ones are ignored.
     pub fn interpreter(&self) -> Result<Option<CStr<'_, Fat>>> {
-        let mut result = None;
         for segment in self.segments().iter() {
             if segment.p_type == abi::PT_INTERP {
-                if result.is_some() {
-                    return Err(Error::NOEXEC);
-                }
                 let start = usize::try_from(segment.p_offset).map_err(|_| Error::NOEXEC)?;
                 let len = usize::try_from(segment.p_filesz).map_err(|_| Error::NOEXEC)?;
                 let end = start.checked_add(len).ok_or(Error::NOEXEC)?;
@@ -161,29 +164,16 @@ impl<'fd> File<'fd> {
                 if path.as_units().is_empty() {
                     return Err(Error::NOEXEC);
                 }
-                result = Some(path);
+                return Ok(Some(path));
             }
         }
-        Ok(result)
+        Ok(None)
     }
 
-    fn check_disjoint_load(&self, index: usize, start: usize, end: usize) -> Result<()> {
-        for (other_index, other) in self.segments().iter().enumerate() {
-            if other_index > index && other.p_type == abi::PT_LOAD && other.p_memsz != 0 {
-                let other_start = usize::try_from(other.p_vaddr).map_err(|_| Error::NOEXEC)?;
-                let other_memsz = usize::try_from(other.p_memsz).map_err(|_| Error::NOEXEC)?;
-                let other_end = other_start.checked_add(other_memsz).ok_or(Error::NOEXEC)?;
-                if !(end <= other_start || other_end <= start) {
-                    return Err(Error::NOEXEC);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Validates all program headers (`PT_GNU_STACK`, `PT_LOAD` bounds,
-    /// disjointness, alignment, page congruence, entry point, and `AT_PHDR`
-    /// coverage) without mapping any execution segments.
+    /// Validates the `PT_LOAD` headers (bounds, page congruence, and entry
+    /// point) and records `PT_GNU_STACK`, without mapping any execution
+    /// segments. Like Linux `binfmt_elf`, overlapping loads, non-power-of-two
+    /// `p_align`, and an executable stack are accepted.
     pub fn validate_segments(&self, page: usize) -> Result<ValidatedLayout> {
         if !page.is_power_of_two() {
             return Err(Error::INVAL);
@@ -191,12 +181,12 @@ impl<'fd> File<'fd> {
         let mut low = usize::MAX;
         let mut high = 0_usize;
         let mut alignment = page;
-        let mut has_phdr = false;
+        let mut exec_stack = false;
         let mut executable_entry = false;
 
-        for (index, segment) in self.segments().iter().enumerate() {
-            if segment.p_type == abi::PT_GNU_STACK && (segment.p_flags & abi::PF_X) != 0 {
-                return Err(Error::NOEXEC);
+        for segment in self.segments().iter() {
+            if segment.p_type == abi::PT_GNU_STACK {
+                exec_stack = (segment.p_flags & abi::PF_X) != 0;
             }
             if segment.p_type == abi::PT_LOAD {
                 let start = usize::try_from(segment.p_vaddr).map_err(|_| Error::NOEXEC)?;
@@ -208,35 +198,30 @@ impl<'fd> File<'fd> {
                 if segment.p_filesz > segment.p_memsz || file_end > self.view.len {
                     return Err(Error::NOEXEC);
                 }
-                // Byte ranges must not overlap. Header order need not match
-                // vaddr order; mapping below still walks headers so a later
-                // MAP_FIXED can share a page with an earlier load.
+                // Header order need not match vaddr order; mapping below walks
+                // headers so a later MAP_FIXED wins where loads share pages.
                 if segment.p_memsz != 0 {
-                    self.check_disjoint_load(index, start, end)?;
                     low = low.min(start & !(page - 1));
                     let aligned_end = try_align_up(end, page).ok_or(Error::NOEXEC)?;
                     high = high.max(aligned_end);
-                    if self.headers.start >= offset && self.headers.end <= file_end {
-                        has_phdr = true;
-                    }
                     let entry_end =
                         segment.p_vaddr.checked_add(segment.p_memsz).ok_or(Error::NOEXEC)?;
                     executable_entry |= (segment.p_flags & abi::PF_X) != 0
                         && self.header.e_entry >= segment.p_vaddr
                         && self.header.e_entry < entry_end;
                 }
-                // ELF treats alignment 0 and 1 as no extra constraint. File
-                // and memory offsets must agree within a page for mmap; like
-                // Linux binfmt_elf, do not reject binaries (e.g. patchelf
-                // output) that are page-congruent but incongruent mod p_align.
-                let align = usize::try_from(segment.p_align).map_err(|_| Error::NOEXEC)?.max(1);
-                if !align.is_power_of_two() {
-                    return Err(Error::NOEXEC);
-                }
+                // ELF treats alignment 0 and 1 as no extra constraint, and
+                // Linux ignores a non-power-of-two `p_align`. File and memory
+                // offsets must agree within a page for mmap; like Linux
+                // binfmt_elf, do not reject binaries (e.g. patchelf output)
+                // that are page-congruent but incongruent mod p_align.
+                let align = usize::try_from(segment.p_align).map_err(|_| Error::NOEXEC)?;
                 if start % page != offset % page {
                     return Err(Error::NOEXEC);
                 }
-                alignment = alignment.max(align);
+                if align.is_power_of_two() {
+                    alignment = alignment.max(align);
+                }
             }
         }
 
@@ -253,7 +238,7 @@ impl<'fd> File<'fd> {
         if !executable_entry {
             return Err(Error::NOEXEC);
         }
-        Ok(ValidatedLayout { low, span, alignment, has_phdr })
+        Ok(ValidatedLayout { low, span, alignment, exec_stack })
     }
 
     pub fn map(&self, page: usize, layout: &ValidatedLayout) -> Image {
@@ -283,23 +268,23 @@ impl<'fd> File<'fd> {
             );
             (mapping, bias)
         };
-        let mut phdr = None;
+        // Like Linux, AT_PHDR is the table's address in the LOAD whose file
+        // bytes contain `e_phoff`, or the load bias when no LOAD does. This
+        // also works when the ELF has no explicit PT_PHDR header.
+        let mut phdr = bias;
         // All segments share one bias, preserving their relative addresses.
         // The executable and interpreter each get their own reservation/bias.
         for segment in
             self.segments().iter().filter(|ph| ph.p_type == abi::PT_LOAD && ph.p_memsz != 0)
         {
             let file_start = word(segment.p_offset);
-            // AT_PHDR must point into the final image, not our temporary file
-            // view. Find the LOAD covering the table and translate its offset.
-            // This also works when the ELF has no explicit PT_PHDR header.
             if self.headers.start >= file_start
-                && self.headers.end <= add(file_start, word(segment.p_filesz))
+                && self.headers.start < add(file_start, word(segment.p_filesz))
             {
-                phdr = Some(add(
+                phdr = add(
                     bias.wrapping_add(word(segment.p_vaddr)),
                     sub(self.headers.start, file_start),
-                ));
+                );
             }
             // SAFETY: validation and reservation cover every page this
             // segment replaces. No references to those pages exist yet.
@@ -311,6 +296,7 @@ impl<'fd> File<'fd> {
             entry: bias.wrapping_add(word(self.header.e_entry)),
             phdr,
             phnum: usize::from(self.header.e_phnum),
+            exec_stack: layout.exec_stack,
         }
     }
 
@@ -430,10 +416,7 @@ impl<'fd> File<'fd> {
 /// closing `fd`.
 pub fn validate_exec_fd(fd: BorrowedFd<'_>, page: usize) -> Result<()> {
     let executable = File::open(fd)?;
-    let layout = executable.validate_segments(page)?;
-    if !layout.has_phdr {
-        return Err(Error::NOEXEC);
-    }
+    let _ = executable.validate_segments(page)?;
     if let Some(interp_path) = executable.interpreter()? {
         let interp_fd = fs::openat(
             fspy_nostd::CWD,
@@ -441,10 +424,9 @@ pub fn validate_exec_fd(fd: BorrowedFd<'_>, page: usize) -> Result<()> {
             fs::OFlags::RDONLY | fs::OFlags::CLOEXEC,
             fs::Mode::empty(),
         )?;
+        // Like Linux, accept an ET_EXEC interpreter and ignore its own
+        // PT_INTERP and PT_GNU_STACK.
         let interp = File::open(interp_fd.as_fd())?;
-        if !interp.is_dynamic() || interp.interpreter()?.is_some() {
-            return Err(Error::NOEXEC);
-        }
         let _ = interp.validate_segments(page)?;
     }
     Ok(())

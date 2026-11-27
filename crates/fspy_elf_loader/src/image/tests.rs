@@ -19,7 +19,7 @@ fn check_bss(page: usize, flags: u32, expected_protection: &str) {
         let bytes = fixture(page, memory_size, flags);
         let image = map_bytes(&bytes);
         assert_eq!(image.bias % (2 * page), 0);
-        assert_eq!(image.phdr, Some(image.bias + EHDR_SIZE));
+        assert_eq!(image.phdr, image.bias + EHDR_SIZE);
         let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
         let protection = |address| {
             maps.lines()
@@ -194,18 +194,6 @@ fn accepts_page_congruent_segment_incongruent_with_large_p_align() {
 }
 
 #[test]
-fn rejects_overlapping_load_segments() {
-    let page = fspy_nostd::param::page_size();
-    let mut bytes = std::vec![0xa5; 2 * page];
-    write_header(&mut bytes, 2, 0x80);
-    load(&mut bytes, 0, 0, 0x200, 0x200, abi::PF_R | abi::PF_X, page);
-    load(&mut bytes, 1, 0x100, 0x200, 0x200, abi::PF_R | abi::PF_W, page);
-    let fd = open_bytes(&bytes);
-    let file = File::open(fd.as_fd()).unwrap();
-    assert_eq!(file.validate_segments(page).unwrap_err(), Error::NOEXEC);
-}
-
-#[test]
 fn reports_no_interpreter_when_pt_interp_is_absent() {
     let page = fspy_nostd::param::page_size();
     let fd = open_bytes(&fixture(page, 0x180, abi::PF_R | abi::PF_W));
@@ -262,7 +250,7 @@ fn validate_exec_checks_valid_and_invalid_images_without_closing_fd() {
     let bad_arch_fd = open_bytes(&bad_arch);
     assert_eq!(crate::validate_exec(bad_arch_fd.as_fd()), Err(Error::NOEXEC));
 
-    // Executable PT_GNU_STACK -> NOEXEC.
+    // Executable PT_GNU_STACK is accepted, as Linux does, and recorded.
     let mut exec_stack = std::vec![0; 2 * page];
     write_header(&mut exec_stack, 2, 0x200);
     load(&mut exec_stack, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
@@ -277,7 +265,9 @@ fn validate_exec_checks_valid_and_invalid_images_without_closing_fd() {
     }
     .write_to(&mut exec_stack, 1);
     let exec_stack_fd = open_bytes(&exec_stack);
-    assert_eq!(crate::validate_exec(exec_stack_fd.as_fd()), Err(Error::NOEXEC));
+    assert_eq!(crate::validate_exec(exec_stack_fd.as_fd()), Ok(()));
+    let exec_stack_file = File::open(exec_stack_fd.as_fd()).unwrap();
+    assert!(exec_stack_file.validate_segments(page).unwrap().exec_stack);
 
     // Missing PT_INTERP -> NOENT.
     let missing_interp_path = b"/nonexistent-fspy-interp-for-test\0";
@@ -300,8 +290,8 @@ fn validate_exec_checks_valid_and_invalid_images_without_closing_fd() {
     assert_eq!(crate::validate_exec(missing_interp_fd.as_fd()), Err(Error::NOENT));
     assert!(fs::fstat(missing_interp_fd.as_fd()).is_ok());
 
-    // Valid PT_INTERP pointing to a valid ET_DYN interpreter succeeds; pointing
-    // to an ET_EXEC interpreter fails with NOEXEC.
+    // Valid PT_INTERP pointing to a valid ET_DYN or (as Linux allows) ET_EXEC
+    // interpreter succeeds.
     let dyn_interp_file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(dyn_interp_file.path(), fixture(page, 0x180, abi::PF_R | abi::PF_W)).unwrap();
     let dyn_interp_path =
@@ -325,9 +315,8 @@ fn validate_exec_checks_valid_and_invalid_images_without_closing_fd() {
     let valid_dyn_fd = open_bytes(&with_valid_interp);
     assert_eq!(crate::validate_exec(valid_dyn_fd.as_fd()), Ok(()));
 
-    // Overwrite interpreter with ET_EXEC -> validate_exec rejects with NOEXEC.
     std::fs::write(dyn_interp_file.path(), &exec_bytes).unwrap();
-    assert_eq!(crate::validate_exec(valid_dyn_fd.as_fd()), Err(Error::NOEXEC));
+    assert_eq!(crate::validate_exec(valid_dyn_fd.as_fd()), Ok(()));
 }
 
 #[test]
@@ -353,7 +342,7 @@ fn maps_et_dyn_with_high_nonzero_p_vaddr_without_underflow() {
     let image = parsed.map(page, &layout);
     let mapped_base = image.bias.wrapping_add(layout.low);
     assert_eq!(image.entry, mapped_base + 0x200);
-    assert_eq!(image.phdr, Some(mapped_base + EHDR_SIZE));
+    assert_eq!(image.phdr, mapped_base + EHDR_SIZE);
 }
 
 fn fixture(page: usize, memory_size: usize, flags: u32) -> std::vec::Vec<u8> {

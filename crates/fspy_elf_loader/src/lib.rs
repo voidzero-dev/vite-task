@@ -34,8 +34,7 @@ mod stack;
 /// # Errors
 ///
 /// Returns [`fspy_nostd::Error::NOEXEC`] for malformed or unsupported ELF
-/// images (including wrong architecture, non-ELF64, executable `PT_GNU_STACK`,
-/// fixed-address `PT_INTERP`, or nested `PT_INTERP`), or the underlying OS
+/// images (such as wrong architecture or non-ELF64), or the underlying OS
 /// error if `fd` or its `PT_INTERP` cannot be inspected or opened.
 pub fn validate_exec(fd: BorrowedFd<'_>) -> Result<()> {
     image::validate_exec_fd(fd, fspy_nostd::param::page_size())
@@ -65,7 +64,7 @@ pub fn validate_exec(fd: BorrowedFd<'_>) -> Result<()> {
 /// that executed the loader.
 ///
 /// Currently supports native little-endian ELF64 executables on `AArch64` and
-/// x86-64, with a non-executable stack. Both PIE (`ET_DYN`) and fixed-address
+/// x86-64. Both PIE (`ET_DYN`) and fixed-address
 /// (`ET_EXEC`) images are supported, with or without `PT_INTERP`.
 /// Fixed-address images must not overlap any existing process mappings.
 /// Existing loader mappings, the old stack, and kernel process metadata
@@ -107,7 +106,6 @@ pub unsafe fn exec_elf<'a>(
     let executable = image::File::open(elf_file.as_fd()).expect("invalid ELF executable");
     let executable_layout =
         executable.validate_segments(page_size).expect("invalid ELF executable segments");
-    assert!(executable_layout.has_phdr, "program headers are not mapped by PT_LOAD");
 
     // PT_INTERP names a second ELF file. Loading it here lets us delegate
     // dynamic linking and libc startup to the program's own interpreter.
@@ -124,11 +122,6 @@ pub unsafe fn exec_elf<'a>(
     });
     let interpreter = interp_fd.as_ref().map(|fd| {
         let file = image::File::open(fd.as_fd()).expect("invalid ELF interpreter");
-        assert!(file.is_dynamic(), "fixed-address PT_INTERP is unsupported");
-        assert!(
-            file.interpreter().expect("invalid nested PT_INTERP").is_none(),
-            "nested PT_INTERP is unsupported"
-        );
         let layout = file.validate_segments(page_size).expect("invalid ELF interpreter segments");
         (file, layout)
     });
