@@ -86,6 +86,12 @@ impl Default for &'static ChunkPool<PageAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOT
     }
 }
 
+/// [`PageBump`]'s settings: start without a chunk, so creating one
+/// allocates nothing.
+type PageBumpSettings = <BumpSettings as BumpAllocatorSettings>::WithGuaranteedAllocated<false>;
+
+type RawPageBump = Bump<AllocatorApi2V02Compat<PageAllocator>, PageBumpSettings>;
+
 /// A bump allocator drawing whole pages straight from the kernel — never
 /// from the chunk pool — so its memory is never recycled into other bumps.
 ///
@@ -93,11 +99,39 @@ impl Default for &'static ChunkPool<PageAllocator, CHUNK_SIZE, CHUNK_ALIGN, SLOT
 /// storage; note that a bump is not [`Sync`], so a `static` needs a cell
 /// that hands out access, and no safe code can retain a leaked handle
 /// globally.
-pub type PageBump = Bump<AllocatorApi2V02Compat<PageAllocator>, PageBumpSettings>;
+///
+/// Wraps `bump_scope::Bump` so that the `Allocator` methods stay out of line
+/// (`#[inline(never)]`): `bump-scope` marks its allocation helpers
+/// `#[inline(always)]`, which duplicates large stack frames into every `Vec`
+/// caller and would risk overflowing tight `SIGSYS` / `sigaltstack` / `vfork`
+/// stacks.
+pub struct PageBump(RawPageBump);
 
-/// [`PageBump`]'s settings: start without a chunk, so creating one
-/// allocates nothing.
-pub type PageBumpSettings = <BumpSettings as BumpAllocatorSettings>::WithGuaranteedAllocated<false>;
+// SAFETY: Every method delegates directly to `bump_scope::Bump`'s `Allocator`
+// implementation without altering returned pointers, layouts, or lifetimes.
+unsafe impl Allocator for PageBump {
+    #[inline(never)]
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        self.0.allocate(layout)
+    }
+
+    #[inline(never)]
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded directly from caller's `Allocator::deallocate` contract.
+        unsafe { self.0.deallocate(ptr, layout) }
+    }
+
+    #[inline(never)]
+    unsafe fn grow(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        // SAFETY: forwarded directly from caller's `Allocator::grow` contract.
+        unsafe { self.0.grow(ptr, old_layout, new_layout) }
+    }
+}
 
 /// Creates an empty [`PageBump`].
 ///
@@ -107,7 +141,7 @@ pub type PageBumpSettings = <BumpSettings as BumpAllocatorSettings>::WithGuarant
 /// permanent.
 #[must_use]
 pub const fn page_bump() -> PageBump {
-    Bump::unallocated()
+    PageBump(RawPageBump::unallocated())
 }
 
 type RawPooledBump = Bump<
@@ -118,34 +152,28 @@ type RawPooledBump = Bump<
 /// A bump allocator backed by the process-wide chunk pool, created by
 /// [`pooled_bump`].
 ///
-/// Wraps `bump_scope::Bump` so that in unoptimized (`debug_assertions`) builds
-/// the `Allocator` methods are kept out of line (`inline(never)`): `bump-scope`
-/// marks its allocation helpers `#[inline(always)]`, which without LLVM stack
-/// slot coloring duplicates multi-KiB stack frames into every `Vec` caller and
-/// would overflow tight `SIGSYS` / `sigaltstack` / `vfork` stacks. Release
-/// builds inline normally.
+/// Wraps `bump_scope::Bump` so that the `Allocator` methods stay out of line
+/// (`#[inline(never)]`): `bump-scope` marks its allocation helpers
+/// `#[inline(always)]`, which duplicates large stack frames into every `Vec`
+/// caller and would risk overflowing tight `SIGSYS` / `sigaltstack` / `vfork`
+/// stacks.
 pub struct PooledBump(RawPooledBump);
 
 // SAFETY: Every method delegates directly to `bump_scope::Bump`'s `Allocator`
 // implementation without altering returned pointers, layouts, or lifetimes.
 unsafe impl Allocator for PooledBump {
-    #[cfg_attr(debug_assertions, inline(never))]
+    #[inline(never)]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         self.0.allocate(layout)
     }
 
-    #[cfg_attr(debug_assertions, inline(never))]
-    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        self.0.allocate_zeroed(layout)
-    }
-
-    #[cfg_attr(debug_assertions, inline(never))]
+    #[inline(never)]
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         // SAFETY: forwarded directly from caller's `Allocator::deallocate` contract.
         unsafe { self.0.deallocate(ptr, layout) }
     }
 
-    #[cfg_attr(debug_assertions, inline(never))]
+    #[inline(never)]
     unsafe fn grow(
         &self,
         ptr: NonNull<u8>,
@@ -154,28 +182,6 @@ unsafe impl Allocator for PooledBump {
     ) -> Result<NonNull<[u8]>, AllocError> {
         // SAFETY: forwarded directly from caller's `Allocator::grow` contract.
         unsafe { self.0.grow(ptr, old_layout, new_layout) }
-    }
-
-    #[cfg_attr(debug_assertions, inline(never))]
-    unsafe fn grow_zeroed(
-        &self,
-        ptr: NonNull<u8>,
-        old_layout: Layout,
-        new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        // SAFETY: forwarded directly from caller's `Allocator::grow_zeroed` contract.
-        unsafe { self.0.grow_zeroed(ptr, old_layout, new_layout) }
-    }
-
-    #[cfg_attr(debug_assertions, inline(never))]
-    unsafe fn shrink(
-        &self,
-        ptr: NonNull<u8>,
-        old_layout: Layout,
-        new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        // SAFETY: forwarded directly from caller's `Allocator::shrink` contract.
-        unsafe { self.0.shrink(ptr, old_layout, new_layout) }
     }
 }
 
@@ -266,5 +272,24 @@ mod tests {
         let second_bump = pooled_bump();
         let again = second_bump.allocate(layout).unwrap();
         assert_eq!(again.cast::<u8>().as_ptr().addr(), first_addr);
+    }
+
+    #[test]
+    #[cfg(not(miri))]
+    fn page_bump_allocates_and_grows() {
+        let bump = page_bump();
+        let small = Layout::from_size_align(64, 8).unwrap();
+        let large = Layout::from_size_align(256, 8).unwrap();
+        let block = bump.allocate(small).unwrap();
+        // SAFETY: fresh exclusive block of at least 64 bytes.
+        unsafe { block.cast::<u8>().as_ptr().write_bytes(0xAB, 64) };
+        // SAFETY: `block` was allocated from `bump` with `small` and `large >= small`.
+        let grown = unsafe { bump.grow(block.cast(), small, large) }.unwrap();
+        assert!(grown.len() >= 256);
+        // SAFETY: first 64 bytes were preserved from the original allocation.
+        let prefix = unsafe { core::slice::from_raw_parts(grown.cast::<u8>().as_ptr(), 64) };
+        assert!(prefix.iter().all(|&b| b == 0xAB));
+        // SAFETY: `grown` was allocated from `bump` with `large`.
+        unsafe { bump.deallocate(grown.cast(), large) };
     }
 }

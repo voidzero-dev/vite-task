@@ -5,8 +5,7 @@ use crate::{
     fs::{AccessFlags, AtFlags, Mode, OFlags, Stat},
 };
 
-// Linux UAPI `PATH_MAX`.
-pub(super) const PATH_MAX: usize = 4096;
+pub(super) const PATH_MAX: usize = linux_raw_sys::general::PATH_MAX as usize;
 pub(super) const O_RDONLY: u32 = linux_raw_sys::general::O_RDONLY;
 pub(super) const O_RDWR: u32 = linux_raw_sys::general::O_RDWR;
 pub(super) const O_CREAT: u32 = linux_raw_sys::general::O_CREAT;
@@ -14,13 +13,22 @@ pub(super) const O_EXCL: u32 = linux_raw_sys::general::O_EXCL;
 pub(super) const O_NOFOLLOW: u32 = linux_raw_sys::general::O_NOFOLLOW;
 pub(super) const O_NONBLOCK: u32 = linux_raw_sys::general::O_NONBLOCK;
 pub(super) const O_CLOEXEC: u32 = linux_raw_sys::general::O_CLOEXEC;
-pub(super) const AT_REMOVEDIR: u32 = linux_raw_sys::general::AT_REMOVEDIR;
-pub(super) const X_OK: u32 = 1;
+pub(super) const X_OK: u32 = linux_raw_sys::general::X_OK;
 pub(super) type ModeBits = u32;
 pub(super) const S_IRUSR: ModeBits = linux_raw_sys::general::S_IRUSR;
 pub(super) const S_IWUSR: ModeBits = linux_raw_sys::general::S_IWUSR;
 pub(super) const S_IFMT: ModeBits = linux_raw_sys::general::S_IFMT;
 pub(super) const S_IFREG: ModeBits = linux_raw_sys::general::S_IFREG;
+
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    reason = "successful Linux syscalls always return a non-negative c_int file descriptor"
+)]
+fn raw_fd_from_syscall(fd: usize) -> RawFd {
+    debug_assert!(i32::try_from(fd).is_ok());
+    fd as RawFd
+}
 
 #[expect(clippy::needless_pass_by_value, reason = "CStr is a borrowed value type")]
 pub(super) fn faccessat<R>(
@@ -62,9 +70,7 @@ pub(super) fn openat<R>(
     }
     .map_err(Error::from)?;
 
-    // This should not fail with a well-behaved kernel: `openat` returns a
-    // nonnegative `c_int` file descriptor.
-    let fd = i32::try_from(fd).map_err(|_| Error::OVERFLOW)?;
+    let fd = raw_fd_from_syscall(fd);
 
     // SAFETY: a successful `openat` returns a new owned descriptor.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
@@ -115,7 +121,7 @@ pub fn fcntl_dupfd(fd: BorrowedFd<'_>, min_fd: RawFd) -> Result<OwnedFd> {
     }
     .map_err(Error::from)?;
 
-    let dup = i32::try_from(dup).map_err(|_| Error::OVERFLOW)?;
+    let dup = raw_fd_from_syscall(dup);
 
     // SAFETY: a successful `F_DUPFD` returns a new owned descriptor.
     Ok(unsafe { OwnedFd::from_raw_fd(dup) })
@@ -139,7 +145,7 @@ pub fn fcntl_dupfd_cloexec(fd: BorrowedFd<'_>, min_fd: RawFd) -> Result<OwnedFd>
     }
     .map_err(Error::from)?;
 
-    let dup = i32::try_from(dup).map_err(|_| Error::OVERFLOW)?;
+    let dup = raw_fd_from_syscall(dup);
 
     // SAFETY: a successful `F_DUPFD_CLOEXEC` returns a new owned descriptor.
     Ok(unsafe { OwnedFd::from_raw_fd(dup) })
