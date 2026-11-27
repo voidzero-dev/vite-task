@@ -82,6 +82,11 @@ pub fn is_shared_vm_child() -> bool {
     signal::is_shared_vm_child()
 }
 
+/// Returns `true` when the target's virtualized `SIGSYS` disposition is `SIG_IGN`.
+pub fn is_sigsys_ignored() -> bool {
+    signal::is_sigsys_ignored()
+}
+
 /// Installs the `SIGSYS` runtime, `/proc/self/exe` virtualization, and
 /// optional [`SyscallInterceptor`] for an open executable descriptor.
 ///

@@ -96,6 +96,20 @@ impl Syscall {
     pub fn is_shared_vm_child(&self) -> bool {
         sigsys::is_shared_vm_child()
     }
+
+    /// Returns `true` when the target process has virtualized `SIGSYS` set to
+    /// `SIG_IGN`.
+    ///
+    /// Because Linux `execve(2)` preserves `SIG_IGN` across exec while
+    /// resetting custom handlers (such as the loader's own `SIGSYS` handler) to
+    /// `SIG_DFL`, an interceptor returning [`SyscallAction::Execve`] should
+    /// propagate this bit and restore `SIG_IGN` before re-installing the
+    /// loader in the new image.
+    #[must_use]
+    #[expect(clippy::unused_self, reason = "scopes the query to an active SIGSYS trap")]
+    pub fn sigsys_ignored(&self) -> bool {
+        sigsys::is_sigsys_ignored()
+    }
 }
 
 /// Failure-cleanup callback and context pointer attached to
