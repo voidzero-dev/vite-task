@@ -258,12 +258,13 @@ mod runtime {
                     }
                 }
             }
-            Target::ResolvedFd { fd, execfn, sigmask } => {
+            Target::ResolvedFd { fd, execfn, sigmask, sigsys_ignored } => {
                 let execfn_cstr =
                     execfn.to_os_c_string_in(bump).expect("resolved execfn contains NUL");
                 // SAFETY: parent duped `fd` specifically for this handoff.
                 let file = unsafe { OwnedFd::from_raw_fd(fd) };
 
+                restore_sigsys_ignored(sigsys_ignored);
                 restore_sigmask(sigmask);
 
                 // SAFETY: fresh single-threaded freestanding launcher;
@@ -339,6 +340,34 @@ mod runtime {
                 Err(_) => break,
             }
         }
+    }
+
+    fn restore_sigsys_ignored(sigsys_ignored: bool) {
+        #[repr(C)]
+        struct KernelSigaction {
+            handler: usize,
+            flags: usize,
+            restorer: usize,
+            mask: u64,
+        }
+        if !sigsys_ignored {
+            return;
+        }
+        let ign = KernelSigaction { handler: 1, flags: 0, restorer: 0, mask: 0 };
+        // SAFETY: `ign` is a valid stack-local kernel `sigaction` with `SIG_IGN`
+        // (`1`). Executing from inside the launcher's `PF_X` allowlist bypasses
+        // the inherited seccomp filter, and `try_exec_elf`'s `sigsys::install`
+        // will record `SIG_IGN` in the virtualized table before installing our
+        // handler.
+        let _ = unsafe {
+            syscalls::syscall!(
+                Sysno::rt_sigaction,
+                linux_raw_sys::general::SIGSYS,
+                &raw const ign,
+                0usize,
+                size_of::<u64>()
+            )
+        };
     }
 
     fn restore_sigmask(sigmask: u64) {
@@ -462,6 +491,7 @@ mod runtime {
                 call.args[2],
                 ExecAtFlags::empty(),
                 call.sigmask(),
+                call.sigsys_ignored(),
                 call.is_shared_vm_child(),
             ),
             Sysno::execveat => {
@@ -489,6 +519,7 @@ mod runtime {
                     call.args[3],
                     flags,
                     call.sigmask(),
+                    call.sigsys_ignored(),
                     call.is_shared_vm_child(),
                 )
             }
@@ -758,6 +789,10 @@ mod runtime {
     /// `fspy_preload_linux`, returning [`SyscallAction::Execve`] so
     /// `fspy_elf_loader` releases the private `SIGSYS` stack before executing
     /// the replacement `SYS_execve`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "forwards raw trapped execve/execveat arguments plus caller signal state"
+    )]
     fn handle_exec(
         dirfd: Option<BorrowedFd<'_>>,
         prog_ptr: usize,
@@ -765,6 +800,7 @@ mod runtime {
         envp_ptr: usize,
         flags: ExecAtFlags,
         sigmask: u64,
+        sigsys_ignored: bool,
         is_shared_vm_child: bool,
     ) -> Result<SyscallAction> {
         reclaim_exec_scratch();
@@ -786,15 +822,23 @@ mod runtime {
         }
         // SAFETY: `arena` was just set and lives until the node is freed.
         let arena: &'static PageBump = unsafe { (*(*node).arena.get()).as_ref().unwrap() };
-        let (raw_out, duped_fd, extra_fd) =
-            match prepare_exec_in(dirfd, prog_ptr, argv_ptr, envp_ptr, flags, sigmask, arena) {
-                Ok(prepared) => prepared,
-                Err(err) => {
-                    // SAFETY: the node was never published.
-                    unsafe { free_exec_scratch(node) };
-                    return Err(err);
-                }
-            };
+        let (raw_out, duped_fd, extra_fd) = match prepare_exec_in(
+            dirfd,
+            prog_ptr,
+            argv_ptr,
+            envp_ptr,
+            flags,
+            sigmask,
+            sigsys_ignored,
+            arena,
+        ) {
+            Ok(prepared) => prepared,
+            Err(err) => {
+                // SAFETY: the node was never published.
+                unsafe { free_exec_scratch(node) };
+                return Err(err);
+            }
+        };
         // SAFETY: the node is owned by this thread until published below.
         unsafe {
             *(*node).duped_fd.get() = duped_fd;
@@ -821,6 +865,10 @@ mod runtime {
         })
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "forwards raw trapped execve/execveat arguments plus caller signal state"
+    )]
     fn prepare_exec_in(
         dirfd: Option<BorrowedFd<'_>>,
         prog_ptr: usize,
@@ -828,6 +876,7 @@ mod runtime {
         envp_ptr: usize,
         flags: ExecAtFlags,
         sigmask: u64,
+        sigsys_ignored: bool,
         arena: &'static PageBump,
     ) -> Result<(RawExec, RawFd, RawFd)> {
         let raw = RawExec {
@@ -855,6 +904,7 @@ mod runtime {
             fd: duped_fd.as_raw_fd(),
             execfn: IpcStr::from_bytes(&resolved.execfn),
             sigmask,
+            sigsys_ignored,
         };
         let bootstrap = Bootstrap {
             ipc_channel_conf: rt.ipc_channel_conf,

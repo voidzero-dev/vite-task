@@ -71,8 +71,9 @@ pub enum Target<'a> {
     Unresolved { path: &'a IpcStr, error_pipe_fd: RawFd },
     /// Child `execve`/`execveat` handed off as the already-validated open
     /// descriptor, so the new image loads the exact file the call resolved.
-    /// `sigmask` is the calling thread's virtualized signal mask prior to exec.
-    ResolvedFd { fd: RawFd, execfn: &'a IpcStr, sigmask: u64 },
+    /// `sigmask` is the calling thread's virtualized signal mask prior to exec,
+    /// and `sigsys_ignored` records whether virtualized `SIGSYS` was `SIG_IGN`.
+    ResolvedFd { fd: RawFd, execfn: &'a IpcStr, sigmask: u64, sigsys_ignored: bool },
 }
 
 /// Bootstrap configuration passed into `fspy_preload_linux` via
@@ -375,7 +376,7 @@ mod tests {
 
         let cases = [
             Target::Unresolved { path: target_path, error_pipe_fd: 7 },
-            Target::ResolvedFd { fd: 9, execfn, sigmask: 0x5678 },
+            Target::ResolvedFd { fd: 9, execfn, sigmask: 0x5678, sigsys_ignored: true },
         ];
 
         for target in cases {
@@ -406,12 +407,13 @@ mod tests {
                     assert_eq!(f1, f2);
                 }
                 (
-                    Target::ResolvedFd { fd: f1, execfn: e1, sigmask: m1 },
-                    Target::ResolvedFd { fd: f2, execfn: e2, sigmask: m2 },
+                    Target::ResolvedFd { fd: f1, execfn: e1, sigmask: m1, sigsys_ignored: i1 },
+                    Target::ResolvedFd { fd: f2, execfn: e2, sigmask: m2, sigsys_ignored: i2 },
                 ) => {
                     assert_eq!(f1, f2);
                     assert_eq!(e1.as_bytes(), e2.as_bytes());
                     assert_eq!(m1, m2);
+                    assert_eq!(i1, i2);
                 }
                 _ => panic!("mismatched target variant"),
             }
