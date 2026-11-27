@@ -165,16 +165,17 @@ pub unsafe fn try_handle_readlink(
     let copy_len = exe_len.min(bufsiz.cast_unsigned() as usize);
     // SAFETY: `exe_ptr` is permanently retained and readable for `exe_len` bytes.
     let src = unsafe { core::slice::from_raw_parts(exe_ptr, copy_len) };
-    if usermem::write_user_bytes(buf_ptr, src).is_err() {
+    // SAFETY: user pointer from the trapped syscall (see `usermem`).
+    if unsafe { usermem::write_user_bytes(buf_ptr, src) }.is_err() {
         return Some(neg_errno(EFAULT));
     }
     Some(copy_len.cast_signed())
 }
 
-/// Path and `open_how` values already fault-safely copied while inspecting a
-/// trapped syscall for `/proc/*/exe` rewriting, reused by the caller's
-/// [`crate::SyscallInterceptor`] and unmasked-replay check to avoid duplicate
-/// `process_vm_readv` round trips on the hot path.
+/// Path and `open_how` values already copied while inspecting a trapped
+/// syscall for `/proc/*/exe` rewriting, reused by the caller's
+/// [`crate::SyscallInterceptor`] and unmasked-replay check to avoid copying
+/// them again on the hot path.
 pub struct Prefetched<'a> {
     pub path: Option<(usize, &'a [u8])>,
     pub open_how: Option<open_how>,
@@ -365,9 +366,9 @@ unsafe fn is_proc_self_exe(dirfd: i32, path_ptr: usize) -> bool {
     unsafe { inspect_proc_self_exe(dirfd, path_ptr, &mut stack_buf).0 }
 }
 
-/// Fault-safely reads `path_ptr` into `stack_buf` once, returning
+/// Reads `path_ptr` into `stack_buf` once, returning
 /// `(matches_proc_exe, copied_bytes)` so non-matching callers can reuse the
-/// already-copied bytes without a second `process_vm_readv`.
+/// already-copied bytes without copying them again.
 ///
 /// # Safety
 ///
@@ -377,7 +378,8 @@ unsafe fn inspect_proc_self_exe(
     path_ptr: usize,
     stack_buf: &mut [MaybeUninit<u8>; PATH_MAX],
 ) -> (bool, Option<&[u8]>) {
-    let Ok(Some(raw)) = usermem::read_user_cstr(path_ptr, stack_buf) else {
+    // SAFETY: forwarded from the caller contract.
+    let Ok(Some(raw)) = (unsafe { usermem::read_user_cstr(path_ptr, stack_buf) }) else {
         return (false, None);
     };
     // Fast rejection for 99.99% of paths: any path naming `/proc/.../exe`

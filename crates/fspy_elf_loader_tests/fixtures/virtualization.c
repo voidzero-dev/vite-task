@@ -1964,30 +1964,14 @@ static int run_tiny_vfork_stack_test(void) {
     return 0;
 }
 
-/* ---- efault-bad-pointers subcommand (including Abseil AddressIsReadable) ---- */
+/* ---- abseil-address-probe subcommand (Abseil AddressIsReadable) ---- */
 
-static int run_efault_bad_pointers_test(void) {
+static int run_abseil_address_probe_test(void) {
+    /* Abseil AddressIsReadable: how = ~0, set = probe_addr. The kernel copies
+     * set first (EFAULT) and checks how second (EINVAL), and the loader must
+     * pass the probe to the kernel without reading the address itself. */
     const uintptr_t bad_low = 1;
     const uintptr_t bad_high = 0xdeadbeef0000ULL;
-
-    errno = 0;
-    if (syscall(SYS_openat, AT_FDCWD, bad_low, O_RDONLY, 0) != -1 || errno != EFAULT) {
-        fail("openat(bad_low) did not return EFAULT");
-    }
-    errno = 0;
-    if (syscall(SYS_openat, AT_FDCWD, bad_high, O_RDONLY, 0) != -1 || errno != EFAULT) {
-        fail("openat(bad_high) did not return EFAULT");
-    }
-    errno = 0;
-    if (syscall(SYS_readlinkat, AT_FDCWD, "/proc/self/exe", bad_low, 16) != -1 || errno != EFAULT) {
-        fail("readlinkat(/proc/self/exe, bad_low) did not return EFAULT");
-    }
-    errno = 0;
-    if (syscall(SYS_rt_sigprocmask, SIG_BLOCK, bad_low, 0, 8) != -1 || errno != EFAULT) {
-        fail("rt_sigprocmask(SIG_BLOCK, bad_low) did not return EFAULT");
-    }
-    /* Abseil AddressIsReadable: how = ~0, set = probe_addr. Kernel copies set
-     * first (EFAULT) and checks how second (EINVAL). */
     errno = 0;
     if (syscall(SYS_rt_sigprocmask, ~0L, bad_low, 0, 8) != -1 || errno != EFAULT) {
         fail("Abseil rt_sigprocmask(~0, bad_low) did not return EFAULT");
@@ -2001,20 +1985,8 @@ static int run_efault_bad_pointers_test(void) {
     if (syscall(SYS_rt_sigprocmask, ~0L, &valid_set, 0, 8) != -1 || errno != EINVAL) {
         fail("Abseil rt_sigprocmask(~0, valid) did not return EINVAL");
     }
-    errno = 0;
-    if (syscall(SYS_rt_sigaction, SIGSYS, bad_low, 0, 8) != -1 || errno != EFAULT) {
-        fail("rt_sigaction(SIGSYS, bad_low, NULL) did not return EFAULT");
-    }
-    errno = 0;
-    if (syscall(SYS_rt_sigaction, SIGSYS, 0, bad_low, 8) != -1 || errno != EFAULT) {
-        fail("rt_sigaction(SIGSYS, NULL, bad_low) did not return EFAULT");
-    }
-    errno = 0;
-    if (syscall(SYS_rt_sigpending, bad_low, 8) != -1 || errno != EFAULT) {
-        fail("rt_sigpending(bad_low) did not return EFAULT");
-    }
 
-    write_all(STDOUT_FILENO, "efault-bad-pointers-ok\n", 23);
+    write_all(STDOUT_FILENO, "abseil-address-probe-ok\n", 24);
     return 0;
 }
 
@@ -2273,101 +2245,6 @@ static int run_proc_sibling_tid_exe_test(void) {
     st.stop = 1;
     pthread_join(th, NULL);
     write_all(STDOUT_FILENO, "proc-sibling-tid-exe-ok\n", 24);
-    return 0;
-}
-
-/* ---- usermem-vm-readv-denied subcommand (Grok M5 regression test) ---- */
-
-static int run_usermem_vm_readv_denied_test(void) {
-    /* Install a seccomp filter that denies `process_vm_readv` and
-     * `process_vm_writev` with EPERM, forcing `usermem.rs` onto its
-     * `rt_sigprocmask` / `readlinkat` sandbox fallback path. */
-    struct raw_sock_filter insns[] = {
-        {0x20, 0, 0, 0},                              /* LD_W_ABS nr */
-        {0x15, 1, 0, (uint32_t)SYS_process_vm_readv}, /* JEQ readv -> +1 (EPERM) */
-        {0x15, 0, 1, (uint32_t)SYS_process_vm_writev},/* JEQ writev -> +0 (EPERM) else +1 (ALLOW) */
-        {0x06, 0, 0, 0x00050000U | (uint32_t)EPERM},  /* RET SECCOMP_RET_ERRNO | EPERM */
-        {0x06, 0, 0, 0x7fff0000U},                    /* RET SECCOMP_RET_ALLOW */
-    };
-    struct raw_sock_fprog prog = {
-        .len = (uint16_t)(sizeof insns / sizeof insns[0]),
-        .filter = insns,
-    };
-    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 ||
-        syscall(SYS_seccomp, 1 /* SECCOMP_SET_MODE_FILTER */, 0, &prog) != 0) {
-        fail("install deny process_vm_* filter");
-    }
-
-    void *prot_none = mmap(NULL, 4096, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (prot_none == MAP_FAILED) {
-        fail("mmap PROT_NONE");
-    }
-    void *ro_page = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (ro_page == MAP_FAILED) {
-        fail("mmap PROT_READ");
-    }
-
-    errno = 0;
-    if (syscall(SYS_openat, AT_FDCWD, 0UL, O_RDONLY, 0) != -1 || errno != EFAULT) {
-        fail("fallback openat(NULL) did not return EFAULT");
-    }
-    errno = 0;
-    if (syscall(SYS_openat, AT_FDCWD, (uintptr_t)prot_none, O_RDONLY, 0) != -1 || errno != EFAULT) {
-        fail("fallback openat(PROT_NONE) did not return EFAULT");
-    }
-    errno = 0;
-    if (syscall(SYS_rt_sigprocmask, ~0UL, (uintptr_t)prot_none, 0UL, 8) != -1 || errno != EFAULT) {
-        fail("fallback rt_sigprocmask(~0, PROT_NONE) did not return EFAULT");
-    }
-    errno = 0;
-    if (readlink("/proc/self/exe", (char *)ro_page, 16) != -1 || errno != EFAULT) {
-        fail("fallback readlink(/proc/self/exe, ro_page, 16) did not return EFAULT");
-    }
-    errno = 0;
-    if (readlink("/proc/self/exe", (char *)ro_page, 4) != -1 || errno != EFAULT) {
-        fail("fallback readlink(/proc/self/exe, ro_page, 4) did not return EFAULT");
-    }
-
-    /* Map a writable page immediately followed by a read-only guard page so a
-     * multi-page `readlink` write faults on page 2 and must leave page 1's
-     * sentinel bytes completely unmodified (no partial probe mutation). */
-    size_t page = (size_t)sysconf(_SC_PAGESIZE);
-    unsigned char *two_pages =
-        mmap(NULL, page * 2, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (two_pages == MAP_FAILED) {
-        fail("mmap two_pages");
-    }
-    memset(two_pages, 0xaa, page);
-    if (mprotect(two_pages + page, page, PROT_READ) != 0) {
-        fail("mprotect second page PROT_READ");
-    }
-    errno = 0;
-    if (readlink("/proc/self/exe", (char *)(two_pages + page - 4), 16) != -1 || errno != EFAULT) {
-        fail("fallback cross-page readlink into PROT_READ did not return EFAULT");
-    }
-    /* Under the loader's fallback path (`FSPY_LOADER_EXEC=1`), `probe_range_writable`
-     * restores each probed byte before probing the next page, so page 1's sentinel
-     * bytes must be completely unmodified (Linux's native kernel `readlink` writes
-     * the prefix before faulting on page 2). */
-    if (getenv("FSPY_LOADER_EXEC") != NULL) {
-        for (size_t i = page - 8; i < page; i++) {
-            if (two_pages[i] != 0xaa) {
-                fail("fallback write probe mutated writable prefix before EFAULT on second page");
-            }
-        }
-    }
-    errno = 0;
-    if (readlink("/proc/self/exe", (char *)ro_page, 1) != -1 || errno != EFAULT) {
-        fail("fallback readlink(/proc/self/exe, ro_page, 1) did not return EFAULT");
-    }
-
-    /* Valid reads and writes must still succeed under the fallback path. */
-    assert_readlink_matches_expected("/proc/self/exe", expected_exe_path());
-
-    munmap(two_pages, page * 2);
-    munmap(prot_none, 4096);
-    munmap(ro_page, 4096);
-    write_all(STDOUT_FILENO, "usermem-vm-readv-denied-ok\n", 27);
     return 0;
 }
 
@@ -2763,8 +2640,8 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "tiny-vfork-stack") == 0) {
         return run_tiny_vfork_stack_test();
     }
-    if (strcmp(argv[1], "efault-bad-pointers") == 0) {
-        return run_efault_bad_pointers_test();
+    if (strcmp(argv[1], "abseil-address-probe") == 0) {
+        return run_abseil_address_probe_test();
     }
     if (strcmp(argv[1], "vfork-shared-stack-deep") == 0) {
         return run_vfork_shared_stack_deep_test();
@@ -2777,9 +2654,6 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "proc-sibling-tid-exe") == 0) {
         return run_proc_sibling_tid_exe_test();
-    }
-    if (strcmp(argv[1], "usermem-vm-readv-denied") == 0) {
-        return run_usermem_vm_readv_denied_test();
     }
     if (strcmp(argv[1], "altstack-8kib-storm") == 0) {
         return run_altstack_8kib_storm_test();

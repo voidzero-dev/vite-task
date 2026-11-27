@@ -637,7 +637,8 @@ pub unsafe fn handle_rt_sigaction(inv: SyscallInvocation) -> isize {
         // virtualized action so an unwritable `oldact` returns `-EFAULT`
         // without changing signal state.
         let prev = with_action_lock(|slot| *slot);
-        if oldact_ptr != 0 && usermem::write_user(oldact_ptr, &prev).is_err() {
+        // SAFETY: user pointer from the trapped syscall (see `usermem`).
+        if oldact_ptr != 0 && unsafe { usermem::write_user(oldact_ptr, &prev) }.is_err() {
             return neg_errno(EFAULT);
         }
 
@@ -700,7 +701,8 @@ pub unsafe fn handle_rt_sigaction(inv: SyscallInvocation) -> isize {
             // SAFETY: `KernelSigaction` is a plain `#[repr(C)]` struct of integers.
             if let Ok(mut oldact) = unsafe { usermem::read_user::<KernelSigaction>(oldact_ptr) } {
                 oldact.sa_mask |= SIGSYS_BIT;
-                let _ = usermem::write_user(oldact_ptr, &oldact);
+                // SAFETY: the kernel has just written `oldact_ptr`.
+                let _ = unsafe { usermem::write_user(oldact_ptr, &oldact) };
             }
         }
     }
@@ -761,7 +763,8 @@ pub unsafe fn handle_rt_sigprocmask(
     if oldset_ptr != 0 {
         let old_virtual =
             if was_blocked { cur_kernel_mask | SIGSYS_BIT } else { cur_kernel_mask & !SIGSYS_BIT };
-        if usermem::write_user(oldset_ptr, &old_virtual).is_err() {
+        // SAFETY: user pointer from the trapped syscall (see `usermem`).
+        if unsafe { usermem::write_user(oldset_ptr, &old_virtual) }.is_err() {
             return SigprocmaskOutcome::Done(neg_errno(EFAULT));
         }
     }
@@ -826,7 +829,8 @@ pub unsafe fn handle_rt_sigpending(inv: SyscallInvocation) -> isize {
         // SAFETY: `u64` accepts any bit pattern.
         if let Ok(mask) = unsafe { usermem::read_user::<u64>(inv.args[0]) } {
             let updated = mask | SIGSYS_BIT;
-            if usermem::write_user(inv.args[0], &updated).is_err() {
+            // SAFETY: the kernel has just written `inv.args[0]`.
+            if unsafe { usermem::write_user(inv.args[0], &updated) }.is_err() {
                 return neg_errno(EFAULT);
             }
         }
@@ -970,7 +974,8 @@ fn clear_pselect_fdsets(inv: &SyscallInvocation) {
         if fdset_ptr == 0 {
             continue;
         }
-        let _ = usermem::write_user_bytes(fdset_ptr, &zeros[..total_bytes]);
+        // SAFETY: user pointer from the trapped syscall (see `usermem`).
+        let _ = unsafe { usermem::write_user_bytes(fdset_ptr, &zeros[..total_bytes]) };
     }
 }
 
@@ -1040,7 +1045,8 @@ unsafe fn replay_masked_wait_deferring_sigsys(
         if rc != neg_errno(EINTR) || read_tid_deferred_seq(pid, tid) == seq_before {
             if retried && matches!(sysno, Some(Sysno::pselect6 | Sysno::ppoll)) && orig_ts_ptr != 0
             {
-                let _ = usermem::write_user(orig_ts_ptr, &local_ts);
+                // SAFETY: user pointer from the trapped syscall (see `usermem`).
+                let _ = unsafe { usermem::write_user(orig_ts_ptr, &local_ts) };
             }
             return rc;
         }
@@ -1060,7 +1066,8 @@ unsafe fn replay_masked_wait_deferring_sigsys(
                     }
                     if matches!(sysno, Some(Sysno::pselect6 | Sysno::ppoll)) && orig_ts_ptr != 0 {
                         local_ts = timespec { tv_sec: 0, tv_nsec: 0 };
-                        let _ = usermem::write_user(orig_ts_ptr, &local_ts);
+                        // SAFETY: user pointer from the trapped syscall (see `usermem`).
+                        let _ = unsafe { usermem::write_user(orig_ts_ptr, &local_ts) };
                     }
                     return 0;
                 }

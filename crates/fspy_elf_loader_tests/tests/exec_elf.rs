@@ -526,9 +526,9 @@ fn tiny_5kib_vfork_stack_with_guard_page_survives_trapped_syscalls() {
 
 #[test]
 #[timeout(10_000)]
-fn invalid_user_pointers_return_efault_including_abseil_probe() {
+fn abseil_address_probe_reaches_the_kernel() {
     for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
-        check_virt_subcommand(fixture, "efault-bad-pointers", b"efault-bad-pointers-ok\n");
+        check_virt_subcommand(fixture, "abseil-address-probe", b"abseil-address-probe-ok\n");
     }
 }
 
@@ -569,14 +569,6 @@ fn pselect_deferred_sigsys_does_not_restart_timeout() {
 fn proc_sibling_tid_exe_is_virtualized() {
     for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
         check_virt_subcommand(fixture, "proc-sibling-tid-exe", b"proc-sibling-tid-exe-ok\n");
-    }
-}
-
-#[test]
-#[timeout(10_000)]
-fn usermem_sandbox_fallback_returns_efault() {
-    for fixture in [FIXTURE_VIRT_DYN_PIE, FIXTURE_VIRT_STATIC_EXEC] {
-        check_virt_subcommand(fixture, "usermem-vm-readv-denied", b"usermem-vm-readv-denied-ok\n");
     }
 }
 

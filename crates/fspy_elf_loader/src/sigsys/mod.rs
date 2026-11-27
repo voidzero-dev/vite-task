@@ -50,19 +50,25 @@ pub fn handler_addr() -> usize {
     (sigsys_trampoline as *const ()).addr()
 }
 
-/// Fault-safe copy of a user C string into `buf`.
-pub fn copy_user_cstr(
-    addr: usize,
-    buf: &mut [core::mem::MaybeUninit<u8>],
-) -> Result<Option<&[u8]>> {
-    usermem::read_user_cstr(addr, buf)
-}
-
-/// Fault-safe copy of a user `Copy` value.
+/// Copies a user C string into `buf`.
 ///
 /// # Safety
 ///
-/// `T` must be valid for any bit pattern.
+/// See [`usermem::read_user_cstr`].
+pub unsafe fn copy_user_cstr(
+    addr: usize,
+    buf: &mut [core::mem::MaybeUninit<u8>],
+) -> Result<Option<&[u8]>> {
+    // SAFETY: forwarded from caller contract.
+    unsafe { usermem::read_user_cstr(addr, buf) }
+}
+
+/// Copies a user `Copy` value.
+///
+/// # Safety
+///
+/// `T` must be valid for any bit pattern, and `addr` must satisfy
+/// [`usermem::read_user`].
 pub unsafe fn copy_user_value<T: Copy>(addr: usize) -> Result<T> {
     // SAFETY: forwarded from caller contract.
     unsafe { usermem::read_user(addr) }
@@ -106,10 +112,9 @@ pub unsafe fn install(
         return Err(Error::INVAL);
     }
 
-    // Prime cached page size, `process_vm_readv` probe, and private SIGSYS
-    // stack pool (honoring `AT_MINSIGSTKSZ`) before arming seccomp.
+    // Prime cached page size and private SIGSYS stack pool (honoring
+    // `AT_MINSIGSTKSZ`) before arming seccomp.
     let _ = fspy_nostd::param::page_size();
-    usermem::init();
     stack_pool::init_and_warm(min_sigstksz, page_size);
 
     let bump = fspy_nostd_alloc::pooled_bump();
@@ -581,8 +586,8 @@ unsafe fn dispatch_phase1(
 
     // 3. Path-following syscalls -> rewrite `/proc/*/exe` in place in `inv`,
     //    retaining any prefetched path bytes and `open_how` on the private
-    //    stack so the interceptor and unmasked-replay check avoid duplicate
-    //    `process_vm_readv` round trips.
+    //    stack so the interceptor and unmasked-replay check avoid copying
+    //    them again.
     let mut path_buf = [core::mem::MaybeUninit::<u8>::uninit(); fspy_nostd::fs::PATH_MAX];
     // SAFETY: Arguments come from the trapped syscall for `sysno`.
     let prefetched = unsafe { proc_exe::rewrite_path_arg(&mut inv, sysno, &mut path_buf) };
