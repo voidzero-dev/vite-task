@@ -343,7 +343,7 @@ mod tests {
         fs::{self, File, Permissions},
         os::unix::{
             ffi::OsStrExt as _,
-            fs::{OpenOptionsExt as _, PermissionsExt as _, symlink},
+            fs::{PermissionsExt as _, symlink},
             io::AsRawFd as _,
         },
         path::Path,
@@ -500,14 +500,16 @@ mod tests {
 
         // AT_EMPTY_PATH on non-CLOEXEC O_PATH shebang script reopens readable
         // and passes `/dev/fd/<extra_fd>` (non-CLOEXEC) to the interpreter.
-        let o_path_cloexec = fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(linux_raw_sys::general::O_PATH.cast_signed())
-            .open(&script)
-            .unwrap();
-        // SAFETY: `o_path_cloexec` remains open for the `fcntl_dupfd` call.
-        let o_path_borrowed = unsafe { BorrowedFd::borrow_raw(o_path_cloexec.as_raw_fd()) };
-        let o_path_owned = fcntl_dupfd(o_path_borrowed, 3).unwrap();
+        // Open directly via `openat(O_PATH)` because Rust's `OpenOptions::custom_flags`
+        // masks off `O_ACCMODE`, which on musl includes `O_PATH` (`O_SEARCH`).
+        let script_c = bytes_to_cstring(script.as_os_str().as_bytes(), Global).unwrap();
+        let o_path_owned = openat(
+            CWD,
+            script_c.as_c_str().as_thin(),
+            OFlags::from_bits_retain(linux_raw_sys::general::O_PATH),
+            Mode::empty(),
+        )
+        .unwrap();
         let mut exec = make_exec(b"", &[]);
         let resolved =
             resolve_exec(&mut exec, Some(o_path_owned.as_fd()), ExecAtFlags::EMPTY_PATH, |_| {})
