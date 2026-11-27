@@ -108,16 +108,17 @@ impl EnvFingerprints {
         envs: &mut FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>,
         env_config: &EnvConfig,
     ) -> Result<Self, ResolveEnvError> {
-        // Collect all envs matching fingerprinted or untracked envs in env_config
-        *envs = resolve_envs_with_patterns(
-            envs.iter(),
-            &env_config
-                .untracked_env
-                .iter()
-                .map(std::convert::AsRef::as_ref)
-                .chain(env_config.fingerprinted_envs.iter().map(std::convert::AsRef::as_ref))
-                .collect::<Vec<&str>>(),
-        )?;
+        // Match each list on its own, so a `!` pattern only excludes names from
+        // the list it's in. Compile both before modifying `envs`.
+        let untracked_patterns = EnvGlobSet::new(env_config.untracked_env.iter())?;
+        let fingerprinted_patterns = EnvGlobSet::new(env_config.fingerprinted_envs.iter())?;
+
+        // Keep envs matching either list
+        envs.retain(|name, _| {
+            name.inner().to_str().is_some_and(|name_str| {
+                untracked_patterns.is_match(name_str) || fingerprinted_patterns.is_match(name_str)
+            })
+        });
 
         // Ensure cached output is colored by default. Skipped if the user
         // opted into passing `FORCE_COLOR` through (via `env` / `untrackedEnv`)
@@ -129,12 +130,11 @@ impl EnvFingerprints {
         // Resolve fingerprinted envs
         let mut fingerprinted_envs = BTreeMap::<Str, EnvValueHash>::new();
         if !env_config.fingerprinted_envs.is_empty() {
-            let fingerprinted_env_patterns = EnvGlobSet::new(env_config.fingerprinted_envs.iter())?;
             for (name, value) in envs.iter() {
                 let Some(name) = name.inner().to_str() else {
                     continue;
                 };
-                if !fingerprinted_env_patterns.is_match(name) {
+                if !fingerprinted_patterns.is_match(name) {
                     continue;
                 }
                 let Some(value) = value.to_str() else {
@@ -159,20 +159,6 @@ impl EnvFingerprints {
     }
 }
 
-fn resolve_envs_with_patterns<'a>(
-    env_vars: impl Iterator<Item = (&'a EnvName<Arc<OsStr>>, &'a Arc<OsStr>)>,
-    patterns: &[&str],
-) -> Result<FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>, vt_glob::env::EnvGlobError> {
-    let patterns = EnvGlobSet::new(patterns.iter())?;
-    let envs: FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>> = env_vars
-        .filter_map(|(name, value)| {
-            let name_str = name.inner().to_str()?;
-            if patterns.is_match(name_str) { Some((name.clone(), Arc::clone(value))) } else { None }
-        })
-        .collect();
-    Ok(envs)
-}
-
 #[cfg(test)]
 mod tests {
     use vt_graph::config::DEFAULT_UNTRACKED_ENV;
@@ -195,6 +181,12 @@ mod tests {
 
     fn hash(value: &str) -> EnvValueHash {
         EnvValueHash::new(value)
+    }
+
+    fn env_pairs(envs: &FxHashMap<EnvName<Arc<OsStr>>, Arc<OsStr>>) -> BTreeMap<&str, &str> {
+        envs.iter()
+            .map(|(name, value)| (name.inner().to_str().unwrap(), value.to_str().unwrap()))
+            .collect()
     }
 
     #[test]
@@ -299,6 +291,115 @@ mod tests {
             "1"
         );
         assert_eq!(result.fingerprinted_envs.get("FORCE_COLOR").copied(), Some(hash("1")));
+    }
+
+    #[test]
+    fn test_untracked_negation_does_not_cancel_env() {
+        let untracked = [DEFAULT_UNTRACKED_ENV, &["!CI"]].concat();
+        let env_config = create_env_config(&["CI"], &untracked);
+        let mut envs = create_test_envs(vec![("CI", "true"), ("PATH", "bin")]);
+
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
+
+        assert_eq!(
+            env_pairs(&envs),
+            BTreeMap::from([("CI", "true"), ("FORCE_COLOR", "1"), ("PATH", "bin")])
+        );
+        assert_eq!(result.fingerprinted_envs, BTreeMap::from([("CI".into(), hash("true"))]));
+    }
+
+    #[test]
+    fn test_env_negation_does_not_cancel_untracked() {
+        let env_config = create_env_config(&["VITE_*", "!VITE_DEBUG"], &["VITE_DEBUG"]);
+        let mut envs = create_test_envs(vec![("VITE_API_URL", "api"), ("VITE_DEBUG", "true")]);
+
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
+
+        assert_eq!(
+            env_pairs(&envs),
+            BTreeMap::from([("FORCE_COLOR", "1"), ("VITE_API_URL", "api"), ("VITE_DEBUG", "true")])
+        );
+        assert_eq!(
+            result.fingerprinted_envs,
+            BTreeMap::from([("VITE_API_URL".into(), hash("api"))])
+        );
+    }
+
+    #[test]
+    fn test_untracked_exclude_all_keeps_only_explicit_env() {
+        let untracked = [DEFAULT_UNTRACKED_ENV, &["!*"]].concat();
+        let env_config = create_env_config(&["PATH", "CI"], &untracked);
+        let mut envs = create_test_envs(vec![("CI", "true"), ("HOME", "home"), ("PATH", "bin")]);
+
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
+
+        assert_eq!(
+            env_pairs(&envs),
+            BTreeMap::from([("CI", "true"), ("FORCE_COLOR", "1"), ("PATH", "bin")])
+        );
+        assert_eq!(
+            result.fingerprinted_envs,
+            BTreeMap::from([("CI".into(), hash("true")), ("PATH".into(), hash("bin"))])
+        );
+    }
+
+    #[test]
+    fn test_env_negation_does_not_suppress_default_untracked_passthrough() {
+        // `*_TOKEN` is in `DEFAULT_UNTRACKED_ENV`, so negating `NPM_TOKEN` only in
+        // `env` still lets it pass through untracked; keeping it out of the
+        // spawned process environment requires negating it in `untrackedEnv`.
+        let env_config = create_env_config(&["!NPM_TOKEN"], DEFAULT_UNTRACKED_ENV);
+        let mut envs = create_test_envs(vec![("NPM_TOKEN", "secret"), ("PATH", "bin")]);
+
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
+
+        assert_eq!(
+            env_pairs(&envs),
+            BTreeMap::from([("FORCE_COLOR", "1"), ("NPM_TOKEN", "secret"), ("PATH", "bin")])
+        );
+        assert!(result.fingerprinted_envs.is_empty());
+
+        let untracked = [DEFAULT_UNTRACKED_ENV, &["!NPM_TOKEN"]].concat();
+        let env_config = create_env_config(&["!NPM_TOKEN"], &untracked);
+        let mut envs = create_test_envs(vec![("NPM_TOKEN", "secret"), ("PATH", "bin")]);
+
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
+
+        assert_eq!(env_pairs(&envs), BTreeMap::from([("FORCE_COLOR", "1"), ("PATH", "bin")]));
+        assert!(result.fingerprinted_envs.is_empty());
+    }
+
+    #[test]
+    fn test_force_color_opt_in_survives_negation_in_other_list() {
+        // A negation in the other list must not trigger the `FORCE_COLOR=1` fallback.
+        let env_config = create_env_config(&["FORCE_COLOR"], &["!FORCE_COLOR"]);
+        let mut envs = create_test_envs(vec![("FORCE_COLOR", "3")]);
+
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
+
+        assert_eq!(env_pairs(&envs), BTreeMap::from([("FORCE_COLOR", "3")]));
+        assert_eq!(result.fingerprinted_envs, BTreeMap::from([("FORCE_COLOR".into(), hash("3"))]));
+
+        let env_config = create_env_config(&["*", "!FORCE_COLOR"], &["FORCE_COLOR"]);
+        let mut envs = create_test_envs(vec![("FORCE_COLOR", "0")]);
+
+        let result = EnvFingerprints::resolve(&mut envs, &env_config).unwrap();
+
+        assert_eq!(env_pairs(&envs), BTreeMap::from([("FORCE_COLOR", "0")]));
+        assert!(result.fingerprinted_envs.is_empty());
+    }
+
+    #[test]
+    fn test_invalid_glob_in_either_list_leaves_envs_unmodified() {
+        for env_config in [create_env_config(&["["], &[]), create_env_config(&[], &["["])] {
+            let original = create_test_envs(vec![("UNLISTED", "value")]);
+            let mut envs = original.clone();
+
+            let result = EnvFingerprints::resolve(&mut envs, &env_config);
+
+            assert!(matches!(result, Err(ResolveEnvError::GlobError { .. })));
+            assert_eq!(envs, original);
+        }
     }
 
     #[test]
