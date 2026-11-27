@@ -1,0 +1,57 @@
+[[e2e]]
+name = "pagefind_cache"
+comment = """
+`pagefind` (static-PIE ELF64 on Linux x86-64) indexes `site/index.html` into `dist/pagefind/`. Deleting `dist` and re-running restores outputs from cache; editing `site/index.html` invalidates the cache.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "index",
+  ], comment = "first run: cache miss" },
+  [
+    "vtt",
+    "grep-file",
+    "dist/pagefind/pagefind-entry.json",
+    "\"page_count\":1",
+  ],
+  [
+    "vtt",
+    "rm",
+    "-r",
+    "dist",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "index",
+  ], comment = "second run: cache hit restores dist/pagefind" },
+  [
+    "vtt",
+    "grep-file",
+    "dist/pagefind/pagefind-entry.json",
+    "\"page_count\":1",
+  ],
+  [
+    "vtt",
+    "replace-file-content",
+    "site/index.html",
+    "initial-pagefind",
+    "edited-pagefind",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "index",
+  ], comment = "third run: cache miss after editing site/index.html" },
+  [
+    "vtt",
+    "grep-file",
+    "dist/pagefind/pagefind-entry.json",
+    "\"page_count\":1",
+  ],
+]

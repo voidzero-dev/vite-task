@@ -33,6 +33,7 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "pagefind": "catalog:",
     "playwright": "catalog:",
     "pnpm": "catalog:",
     "postject": "catalog:",

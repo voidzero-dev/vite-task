@@ -44,6 +44,7 @@ catalog:
   oxfmt: 0.73.0
   oxlint: ^1.55.0
   oxlint-tsgolint: ^7.0.0
+  pagefind: 1.6.0
   # Playwright 1.52 pins the browser package to Chromium 136.
   playwright: 1.63.0
   # The e2e tests run this pnpm; keep it in sync with `packageManager`.
