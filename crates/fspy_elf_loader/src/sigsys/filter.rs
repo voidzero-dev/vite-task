@@ -127,8 +127,8 @@ pub const BASE_TRAPPED_SYSCALLS: &[u32] = &[
     Sysno::open as u32,
     Sysno::openat as u32,
     Sysno::openat2 as u32,
+    // `lstat` never follows `/proc/self/exe`, so it needs no rewrite.
     Sysno::stat as u32,
-    Sysno::lstat as u32,
     Sysno::newfstatat as u32,
     Sysno::statx as u32,
     Sysno::access as u32,
