@@ -2,6 +2,7 @@
 
 pub mod exec;
 pub(crate) mod open_exec;
+pub mod open_flags;
 pub mod payload;
 pub mod spawn;
 
