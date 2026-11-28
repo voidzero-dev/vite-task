@@ -4,6 +4,8 @@ packages:
   - packages/vite-task-client
 
 allowBuilds:
+  # Prebuilt native binaries come as optional dependencies, so build scripts aren't needed.
+  '@parcel/watcher': false
   '@playwright/browser-chromium': true
   bun: true
   deno: true
@@ -19,11 +21,15 @@ minimumReleaseAgeExclude:
 
 catalog:
   '@anthropic-ai/sandbox-runtime': 0.0.78
+  '@biomejs/biome': 2.6.9
   '@openai/codex': 0.160.0
+  '@playwright/browser-chromium': 1.63.0
+  '@rspack/cli': 2.3.4
+  '@rspack/core': 2.3.4
+  '@tailwindcss/cli': 4.3.5
   '@tsconfig/strictest': ^2.0.8
   '@types/cross-spawn': 6.0.6
   '@types/node': 25.0.3
-  '@playwright/browser-chromium': 1.63.0
   '@vitest/browser-playwright': 5.0.3
   astro: 7.3.8
   bun: 1.4.2
@@ -38,6 +44,7 @@ catalog:
   oxfmt: 0.73.0
   oxlint: ^1.55.0
   oxlint-tsgolint: ^7.0.0
+  pagefind: 1.6.0
   # Playwright 1.52 pins the browser package to Chromium 136.
   playwright: 1.63.0
   # The e2e tests run this pnpm; keep it in sync with `packageManager`.
@@ -45,7 +52,11 @@ catalog:
   postject: 1.0.0-alpha.6
   react: 19.3.1
   react-dom: 19.3.1
+  sass-embedded: 1.108.2
+  sharp: 0.35.5
+  tailwindcss: 4.3.5
   tsdown: 0.23.3
+  tsx: 4.23.15
   typescript: ^6.0.3
   vite: npm:@voidzero-dev/vite-plus-core@1.1.0
   vite-plus: 1.1.0

@@ -1,8 +1,5 @@
-//! Tests for fspy tracing of statically-linked executables (seccomp path).
-//! Skipped on musl: the test binary is an artifact dep targeting musl, and when
-//! the CI builds with `-crt-static` the binary becomes dynamically linked,
-//! defeating the purpose of these tests.
-#![cfg(all(target_os = "linux", not(target_env = "musl")))]
+//! Tests for fspy tracing of statically-linked executables on Linux.
+#![cfg(target_os = "linux")]
 use std::path::Path;
 
 use fspy::PathAccessIterable;

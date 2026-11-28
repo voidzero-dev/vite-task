@@ -53,13 +53,12 @@ fn track_script(
     })
 }
 
-// Bun's Linux runtime uses direct syscalls, which require universal seccomp
-// tracing instead of preload interception. Deno does not distribute a musl
-// runtime. Node remains covered on every target.
+// Deno does not distribute a musl runtime. Node and Bun are covered on every
+// target (Bun's direct syscalls on Linux are traced via `fspy_preload_linux`).
 #[test_case("node")]
 #[ignore = "requires node"]
-#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
-#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
+#[test_case("bun")]
+#[ignore = "requires node"]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn read_sync(runtime: &str) -> anyhow::Result<()> {
@@ -70,8 +69,8 @@ fn read_sync(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
-#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
-#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
+#[test_case("bun")]
+#[ignore = "requires node"]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn exist_sync(runtime: &str) -> anyhow::Result<()> {
@@ -82,8 +81,8 @@ fn exist_sync(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
-#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
-#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
+#[test_case("bun")]
+#[ignore = "requires node"]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn stat_sync(runtime: &str) -> anyhow::Result<()> {
@@ -94,8 +93,8 @@ fn stat_sync(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
-#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
-#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
+#[test_case("bun")]
+#[ignore = "requires node"]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn create_read_stream(runtime: &str) -> anyhow::Result<()> {
@@ -110,8 +109,8 @@ fn create_read_stream(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
-#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
-#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
+#[test_case("bun")]
+#[ignore = "requires node"]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn create_write_stream(runtime: &str) -> anyhow::Result<()> {
@@ -128,8 +127,8 @@ fn create_write_stream(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
-#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
-#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
+#[test_case("bun")]
+#[ignore = "requires node"]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn write_sync(runtime: &str) -> anyhow::Result<()> {
@@ -146,8 +145,8 @@ fn write_sync(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
-#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
-#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
+#[test_case("bun")]
+#[ignore = "requires node"]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn symlink_junction_sync(runtime: &str) -> anyhow::Result<()> {
@@ -174,8 +173,8 @@ fn symlink_junction_sync(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
-#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
-#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
+#[test_case("bun")]
+#[ignore = "requires node"]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn read_dir_sync(runtime: &str) -> anyhow::Result<()> {
@@ -186,8 +185,8 @@ fn read_dir_sync(runtime: &str) -> anyhow::Result<()> {
 
 #[test_case("node")]
 #[ignore = "requires node"]
-#[cfg_attr(not(target_os = "linux"), test_case("bun"))]
-#[cfg_attr(not(target_os = "linux"), ignore = "requires node")]
+#[test_case("bun")]
+#[ignore = "requires node"]
 #[cfg_attr(not(target_env = "musl"), test_case("deno"))]
 #[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
 fn subprocess(runtime: &str) -> anyhow::Result<()> {
@@ -202,5 +201,37 @@ fn subprocess(runtime: &str) -> anyhow::Result<()> {
         &[],
     )?;
     assert_contains(&accesses, current_dir().unwrap().join("hello").as_path(), PathAccess::Read);
+    Ok(())
+}
+
+#[test_case("node")]
+#[ignore = "requires node"]
+#[test_case("bun")]
+#[ignore = "requires node"]
+#[cfg_attr(not(target_env = "musl"), test_case("deno"))]
+#[cfg_attr(not(target_env = "musl"), ignore = "requires node")]
+fn fork_ipc(runtime: &str) -> anyhow::Result<()> {
+    let tmpdir = tempfile::tempdir()?;
+    let tmp_path = std::fs::canonicalize(tmpdir.path())?;
+    let data_path = tmp_path.join("data.txt");
+    std::fs::write(&data_path, "hello-ipc")?;
+    let child_path = tmp_path.join("child.cjs");
+    std::fs::write(
+        &child_path,
+        "const fs = require('node:fs');\n\
+         const content = fs.readFileSync(process.argv.at(-1), 'utf8');\n\
+         process.send(content, () => { process.disconnect(); });\n",
+    )?;
+    let accesses = track_script(
+        runtime,
+        "const child = child_process.fork(process.argv.at(-2), [process.argv.at(-1)]); \
+         let received = null; \
+         child.on('message', (msg) => { received = msg; }); \
+         child.on('exit', (code) => { \
+           if (code !== 0 || received !== 'hello-ipc') process.exit(1); \
+         });",
+        &[child_path.as_os_str(), data_path.as_os_str()],
+    )?;
+    assert_contains(&accesses, &data_path, PathAccess::Read);
     Ok(())
 }

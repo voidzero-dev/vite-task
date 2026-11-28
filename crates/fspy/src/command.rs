@@ -4,10 +4,10 @@ use std::{
     process::Stdio,
 };
 
-#[cfg(unix)]
-use allocator_api2::alloc::Global;
-#[cfg(unix)]
-use fspy_shared_unix::exec::{Exec, to_vec_in};
+#[cfg(target_os = "macos")]
+use allocator_api2::{alloc::Global, vec::Vec as AllocVec};
+#[cfg(target_os = "macos")]
+use fspy_shared_unix::Exec;
 use rustc_hash::FxHashMap;
 use tokio::process::Command as TokioCommand;
 use tokio_util::sync::CancellationToken;
@@ -53,32 +53,29 @@ impl Command {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
     #[must_use]
     pub(crate) fn get_exec(&self) -> Exec<Global> {
         use std::{iter::once, os::unix::ffi::OsStrExt};
 
+        let copy = |bytes: &[u8]| {
+            let mut out = AllocVec::with_capacity_in(bytes.len(), Global);
+            out.extend_from_slice(bytes);
+            out
+        };
         let arg0 = self.arg0.as_ref().unwrap_or(&self.program);
         Exec {
-            program: to_vec_in(self.program.as_bytes(), Global),
-            args: once(arg0)
-                .chain(&self.args)
-                .map(|arg| to_vec_in(arg.as_bytes(), Global))
-                .collect(),
+            program: copy(self.program.as_bytes()),
+            args: once(arg0).chain(&self.args).map(|arg| copy(arg.as_bytes())).collect(),
             envs: self
                 .envs
                 .iter()
-                .map(|(name, value)| {
-                    (
-                        to_vec_in(name.inner().as_bytes(), Global),
-                        Some(to_vec_in(value.as_bytes(), Global)),
-                    )
-                })
+                .map(|(name, value)| (copy(name.inner().as_bytes()), Some(copy(value.as_bytes()))))
                 .collect(),
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
     pub(crate) fn set_exec(&mut self, mut exec: Exec<Global>) {
         use std::os::unix::ffi::OsStrExt;
 
@@ -96,6 +93,20 @@ impl Command {
                 )
             })
             .collect();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[must_use]
+    pub(crate) fn target_program(&self) -> &OsStr {
+        &self.program
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn redirect_program(&mut self, loader_program: &OsStr) {
+        if self.arg0.is_none() {
+            self.arg0 = Some(self.program.clone());
+        }
+        self.program = loader_program.to_os_string();
     }
 
     pub fn env_remove<K: AsRef<OsStr>>(&mut self, key: K) -> &mut Self {

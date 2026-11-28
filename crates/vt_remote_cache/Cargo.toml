@@ -8,7 +8,7 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-base64 = { workspace = true }
+base64 = { workspace = true, features = ["alloc"] }
 bytes = { workspace = true }
 ciborium = { workspace = true }
 reqwest = { workspace = true, features = [

@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "index": {
+      "command": "pagefind --site site --output-path dist/pagefind --silent",
+      "cache": true
+    }
+  }
+}

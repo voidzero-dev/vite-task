@@ -1,0 +1,930 @@
+#![cfg(target_os = "macos")]
+mod test_utils;
+
+use std::{
+    ffi::CString,
+    fs::{self, Permissions},
+    os::unix::fs::PermissionsExt as _,
+    path::Path,
+    ptr::null,
+};
+
+use fspy::PathAccess;
+use test_log::test;
+use test_utils::{assert_contains, assert_not_contains};
+
+fn write_executable(path: &Path, content: &str) -> anyhow::Result<()> {
+    fs::write(path, content)?;
+    fs::set_permissions(path, Permissions::from_mode(0o755))?;
+    Ok(())
+}
+
+/// Runs `f` in a forked child process and asserts it exits cleanly with code 0.
+fn run_in_fork(f: impl FnOnce()) {
+    // SAFETY: `fork()` is followed immediately by `exec*` or `_exit`.
+    let pid = unsafe { libc::fork() };
+    assert!(pid >= 0, "fork failed: {}", std::io::Error::last_os_error());
+    if pid == 0 {
+        f();
+        // SAFETY: terminate child immediately without running parent destructors.
+        unsafe { libc::_exit(127) };
+    }
+    let mut status: libc::c_int = 0;
+    // SAFETY: `pid` is our child and `status` is valid writable storage.
+    let waited = unsafe { libc::waitpid(pid, &raw mut status, 0) };
+    assert_eq!(waited, pid);
+    assert!(
+        libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+        "child failed with raw status {status:#x}"
+    );
+}
+
+#[test(tokio::test)]
+async fn exec_family_variants_succeed_and_preserve_tracking() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+    let bin_dir = root.join("bin");
+    fs::create_dir(&bin_dir)?;
+
+    let execve_marker = root.join("marker_execve");
+    let execv_marker = root.join("marker_execv");
+    let execvp_marker = root.join("marker_execvp");
+    let execlp_marker = root.join("marker_execlp");
+    let execle_marker = root.join("marker_execle");
+    for marker in [&execve_marker, &execv_marker, &execvp_marker, &execlp_marker, &execle_marker] {
+        fs::write(marker, "ok")?;
+    }
+
+    let script_execve = root.join("s_execve.sh");
+    write_executable(
+        &script_execve,
+        &format!(
+            "#!/bin/sh\n[ \"$CUSTOM_ENV\" = \"from_execve\" ] || exit 2\ncat \"{}\" >/dev/null\n",
+            execve_marker.display()
+        ),
+    )?;
+    let script_execv = root.join("s_execv.sh");
+    write_executable(
+        &script_execv,
+        &format!("#!/bin/sh\ncat \"{}\" >/dev/null\n", execv_marker.display()),
+    )?;
+    let script_execvp = bin_dir.join("fspy_test_execvp_cmd");
+    write_executable(
+        &script_execvp,
+        &format!("#!/bin/sh\ncat \"{}\" >/dev/null\n", execvp_marker.display()),
+    )?;
+    let script_execlp = bin_dir.join("fspy_test_execlp_cmd");
+    write_executable(
+        &script_execlp,
+        &format!("#!/bin/sh\ncat \"{}\" >/dev/null\n", execlp_marker.display()),
+    )?;
+    let script_execle = root.join("s_execle.sh");
+    write_executable(
+        &script_execle,
+        &format!(
+            "#!/bin/sh\n[ \"$CUSTOM_ENV\" = \"from_execle\" ] || exit 2\ncat \"{}\" >/dev/null\n",
+            execle_marker.display()
+        ),
+    )?;
+
+    let args = (
+        script_execve.to_str().unwrap().to_owned(),
+        script_execv.to_str().unwrap().to_owned(),
+        script_execle.to_str().unwrap().to_owned(),
+        bin_dir.to_str().unwrap().to_owned(),
+    );
+
+    let accesses = track_fn!(args, |(script_execve, script_execv, script_execle, bin_dir): (
+        String,
+        String,
+        String,
+        String
+    )| {
+        // 1. execve with custom envp (fspy must inject tracking env into it)
+        run_in_fork(|| {
+            let prog = CString::new(script_execve.as_str()).unwrap();
+            let argv = [prog.as_ptr(), null()];
+            let env0 = CString::new("CUSTOM_ENV=from_execve").unwrap();
+            let env1 = CString::new("PATH=/bin:/usr/bin").unwrap();
+            let envp = [env0.as_ptr(), env1.as_ptr(), null()];
+            // SAFETY: all pointers are valid NUL-terminated strings / arrays.
+            unsafe { libc::execve(prog.as_ptr(), argv.as_ptr(), envp.as_ptr()) };
+        });
+
+        // 2. execv
+        run_in_fork(|| {
+            let prog = CString::new(script_execv.as_str()).unwrap();
+            let argv = [prog.as_ptr(), null()];
+            // SAFETY: `prog` and `argv` are valid.
+            unsafe { libc::execv(prog.as_ptr(), argv.as_ptr()) };
+        });
+
+        // 3. execvp (searches PATH)
+        run_in_fork(|| {
+            let new_path = format!("{bin_dir}:/bin:/usr/bin");
+            // SAFETY: running in single-threaded forked child.
+            unsafe { std::env::set_var("PATH", new_path) };
+            let prog = c"fspy_test_execvp_cmd";
+            let argv = [prog.as_ptr(), null()];
+            // SAFETY: `prog` and `argv` are valid.
+            unsafe { libc::execvp(prog.as_ptr(), argv.as_ptr()) };
+        });
+
+        // 4. execlp (searches PATH, variadic argv)
+        run_in_fork(|| {
+            let new_path = format!("{bin_dir}:/bin:/usr/bin");
+            // SAFETY: running in single-threaded forked child.
+            unsafe { std::env::set_var("PATH", new_path) };
+            let prog = c"fspy_test_execlp_cmd";
+            // SAFETY: variadic args terminated by NULL.
+            unsafe { libc::execlp(prog.as_ptr(), prog.as_ptr(), null::<libc::c_char>()) };
+        });
+
+        // 5. execle (variadic argv + trailing envp)
+        run_in_fork(|| {
+            let prog = CString::new(script_execle.as_str()).unwrap();
+            let env0 = CString::new("CUSTOM_ENV=from_execle").unwrap();
+            let env1 = CString::new("PATH=/bin:/usr/bin").unwrap();
+            let envp = [env0.as_ptr(), env1.as_ptr(), null()];
+            // SAFETY: variadic args terminated by NULL followed by valid `envp`.
+            unsafe {
+                libc::execle(prog.as_ptr(), prog.as_ptr(), null::<libc::c_char>(), envp.as_ptr())
+            };
+        });
+    })
+    .await?;
+
+    for marker in [&execve_marker, &execv_marker, &execvp_marker, &execlp_marker, &execle_marker] {
+        assert_contains(&accesses, marker, PathAccess::Read);
+    }
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn which_path_search_handles_unset_empty_and_directory_entries() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+
+    let dir_with_subdir = root.join("dir_with_subdir");
+    let dir_with_real = root.join("dir_with_real");
+    let empty_entry_cwd = root.join("empty_entry_cwd");
+    fs::create_dir(&dir_with_subdir)?;
+    fs::create_dir(&dir_with_real)?;
+    fs::create_dir(&empty_entry_cwd)?;
+
+    // Place a directory named `same_name` in the first PATH entry, and an executable
+    // script with the same name in the second PATH entry.
+    fs::create_dir(dir_with_subdir.join("same_name"))?;
+    let skipped_marker = root.join("marker_dir_skip");
+    fs::write(&skipped_marker, "ok")?;
+    write_executable(
+        &dir_with_real.join("same_name"),
+        &format!("#!/bin/sh\ncat \"{}\" >/dev/null\n", skipped_marker.display()),
+    )?;
+
+    // Place an executable in `empty_entry_cwd` to be found via an empty PATH component.
+    let empty_marker = root.join("marker_empty_path");
+    fs::write(&empty_marker, "ok")?;
+    write_executable(
+        &empty_entry_cwd.join("local_cmd"),
+        &format!("#!/bin/sh\ncat \"{}\" >/dev/null\n", empty_marker.display()),
+    )?;
+
+    let args = (
+        dir_with_subdir.to_str().unwrap().to_owned(),
+        dir_with_real.to_str().unwrap().to_owned(),
+        empty_entry_cwd.to_str().unwrap().to_owned(),
+    );
+
+    let accesses = track_fn!(args, |(dir_with_subdir, dir_with_real, empty_entry_cwd): (
+        String,
+        String,
+        String
+    )| {
+        // 1. Directory on PATH is skipped in favor of a later regular executable.
+        run_in_fork(|| {
+            let path = format!("{dir_with_subdir}:{dir_with_real}:/bin:/usr/bin");
+            // SAFETY: single-threaded forked child.
+            unsafe { std::env::set_var("PATH", path) };
+            let prog = c"same_name";
+            let argv = [prog.as_ptr(), null()];
+            // SAFETY: `prog` and `argv` are valid.
+            unsafe { libc::execvp(prog.as_ptr(), argv.as_ptr()) };
+        });
+
+        // 2. Directory on PATH with no later match fails with EACCES.
+        run_in_fork(|| {
+            // SAFETY: single-threaded forked child.
+            unsafe { std::env::set_var("PATH", &dir_with_subdir) };
+            let prog = c"same_name";
+            let argv = [prog.as_ptr(), null()];
+            // SAFETY: `prog` and `argv` are valid.
+            let ret = unsafe { libc::execvp(prog.as_ptr(), argv.as_ptr()) };
+            assert_eq!(ret, -1);
+            assert_eq!(
+                std::io::Error::last_os_error().raw_os_error(),
+                Some(libc::EACCES),
+                "directory-only PATH match must fail with EACCES"
+            );
+            // SAFETY: exit child cleanly after checking errno.
+            unsafe { libc::_exit(0) };
+        });
+
+        // 3. Unset PATH falls back to default PATH (`/usr/local/bin:/bin:/usr/bin`).
+        run_in_fork(|| {
+            // SAFETY: single-threaded forked child.
+            unsafe { std::env::remove_var("PATH") };
+            let prog = c"true";
+            let argv = [prog.as_ptr(), null()];
+            // SAFETY: `prog` and `argv` are valid.
+            unsafe { libc::execvp(prog.as_ptr(), argv.as_ptr()) };
+        });
+
+        // 4. Empty PATH component searches the current working directory.
+        run_in_fork(|| {
+            std::env::set_current_dir(&empty_entry_cwd).unwrap();
+            // Leading colon creates an empty first PATH entry (= CWD).
+            // SAFETY: single-threaded forked child.
+            unsafe { std::env::set_var("PATH", ":/bin:/usr/bin") };
+            let prog = c"local_cmd";
+            let argv = [prog.as_ptr(), null()];
+            // SAFETY: `prog` and `argv` are valid.
+            unsafe { libc::execvp(prog.as_ptr(), argv.as_ptr()) };
+        });
+    })
+    .await?;
+
+    assert_contains(&accesses, &skipped_marker, PathAccess::Read);
+    assert_contains(&accesses, &empty_marker, PathAccess::Read);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn sip_stripping_and_dyld_insert_libraries_merging() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+    let sed_input = root.join("input.txt");
+    fs::write(&sed_input, "hello world\n")?;
+    let awk_link = root.join("awk_link");
+    std::os::unix::fs::symlink("/usr/bin/awk", &awk_link)?;
+
+    let args = (sed_input.to_str().unwrap().to_owned(), awk_link.to_str().unwrap().to_owned());
+
+    let accesses = track_fn!(args, |(sed_input, awk_link): (String, String)| {
+        // 1. Non-injectable SIP binary (`/usr/bin/sed`) executes cleanly.
+        let out = std::process::Command::new("/usr/bin/sed")
+            .args(["s/world/fspy/", &sed_input])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "sed failed: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(out.stdout, b"hello fspy\n");
+
+        // 2. Non-injectable SIP binary invoked via symlink strips FSPY_PAYLOAD.
+        let out = std::process::Command::new(&awk_link)
+            .arg("BEGIN { printf \"%s\", ENVIRON[\"FSPY_PAYLOAD\"] }")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "awk failed: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.stdout.is_empty(),
+            "FSPY_PAYLOAD must be stripped for symlinked SIP binary, got {:?}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+
+        // 3. Pre-existing DYLD_INSERT_LIBRARIES on an injectable binary is preserved
+        //    with fspy's preload appended rather than clobbered.
+        let user_lib = "/usr/lib/libSystem.B.dylib";
+        let out = std::process::Command::new("/bin/sh")
+            .env("DYLD_INSERT_LIBRARIES", user_lib)
+            .args(["-c", "printf '%s' \"$DYLD_INSERT_LIBRARIES\""])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "sh failed: {}", String::from_utf8_lossy(&out.stderr));
+        let dyld = String::from_utf8(out.stdout).unwrap();
+        let parts: Vec<&str> = dyld.split(':').collect();
+        assert!(
+            parts.len() >= 2
+                && parts[0] == user_lib
+                && Path::new(parts.last().unwrap())
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("dylib")),
+            "expected user preload preserved before fspy preload, got {dyld:?}"
+        );
+    })
+    .await?;
+
+    assert_contains(&accesses, Path::new("/usr/bin/sed"), PathAccess::Read);
+    assert_contains(&accesses, &awk_link, PathAccess::Read);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn fopen_and_freopen_plus_modes_record_read_write() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+
+    let p_r = root.join("mode_r");
+    let p_w = root.join("mode_w");
+    let p_a = root.join("mode_a");
+    let p_rplus = root.join("mode_rplus");
+    let p_wplus = root.join("mode_wplus");
+    let p_aplus = root.join("mode_aplus");
+    let p_freopen = root.join("mode_freopen_rplus");
+    fs::write(&p_r, "r")?;
+    fs::write(&p_rplus, "r+")?;
+    fs::write(&p_freopen, "freopen")?;
+
+    let root_str = root.to_str().unwrap().to_owned();
+    let accesses = track_fn!(root_str, |root_str: String| {
+        let open_and_close = |name: &str, mode: &core::ffi::CStr| {
+            let p = CString::new(format!("{root_str}/{name}")).unwrap();
+            // SAFETY: `p` and `mode` are valid NUL-terminated C strings.
+            let fp = unsafe { libc::fopen(p.as_ptr(), mode.as_ptr()) };
+            assert!(!fp.is_null(), "fopen({name}, {mode:?}) failed");
+            // SAFETY: `fp` was returned by `fopen` above.
+            unsafe { libc::fclose(fp) };
+        };
+
+        open_and_close("mode_r", c"r");
+        open_and_close("mode_w", c"w");
+        open_and_close("mode_a", c"a");
+        open_and_close("mode_rplus", c"r+");
+        open_and_close("mode_wplus", c"w+");
+        open_and_close("mode_aplus", c"a+");
+
+        let p_tmp = CString::new(format!("{root_str}/mode_r")).unwrap();
+        let p_re = CString::new(format!("{root_str}/mode_freopen_rplus")).unwrap();
+        // SAFETY: valid C strings and FILE stream from `fopen`.
+        unsafe {
+            let fp = libc::fopen(p_tmp.as_ptr(), c"r".as_ptr());
+            assert!(!fp.is_null());
+            let fp2 = libc::freopen(p_re.as_ptr(), c"r+".as_ptr(), fp);
+            assert!(!fp2.is_null());
+            libc::fclose(fp2);
+        }
+    })
+    .await?;
+
+    assert_contains(&accesses, &p_r, PathAccess::Read);
+    assert_contains(&accesses, &p_w, PathAccess::Write);
+    assert_contains(&accesses, &p_a, PathAccess::Write);
+    assert_contains(&accesses, &p_rplus, PathAccess::ReadWrite);
+    assert_contains(&accesses, &p_wplus, PathAccess::ReadWrite);
+    assert_contains(&accesses, &p_aplus, PathAccess::ReadWrite);
+    assert_contains(&accesses, &p_freopen, PathAccess::ReadWrite);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn empty_path_calls_do_not_record_cwd_or_dirfd() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+    let sub_dir = root.join("sub");
+    fs::create_dir(&sub_dir)?;
+
+    let args = (root.to_str().unwrap().to_owned(), sub_dir.to_str().unwrap().to_owned());
+    let accesses = track_fn!(args, |(root_str, sub_str): (String, String)| {
+        std::env::set_current_dir(&root_str).unwrap();
+        let sub_c = CString::new(sub_str).unwrap();
+        // SAFETY: `sub_c` and `c""` are valid NUL-terminated C strings.
+        unsafe {
+            assert_eq!(libc::open(c"".as_ptr(), libc::O_RDONLY), -1);
+            let mut st = std::mem::MaybeUninit::<libc::stat>::zeroed();
+            assert_eq!(libc::stat(c"".as_ptr(), st.as_mut_ptr()), -1);
+            assert_eq!(libc::lstat(c"".as_ptr(), st.as_mut_ptr()), -1);
+            assert_eq!(libc::access(c"".as_ptr(), libc::F_OK), -1);
+
+            let dirfd = libc::open(sub_c.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY);
+            assert!(dirfd >= 0);
+            assert_eq!(libc::openat(dirfd, c"".as_ptr(), libc::O_RDONLY), -1);
+            assert_eq!(libc::fstatat(dirfd, c"".as_ptr(), st.as_mut_ptr(), 0), -1);
+            libc::close(dirfd);
+        }
+    })
+    .await?;
+
+    assert_not_contains(&accesses, &root);
+    // `sub_dir` itself was opened with `O_RDONLY`, not written or re-recorded via `openat("", ...)`.
+    assert_contains(&accesses, &sub_dir, PathAccess::Read);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn open_rdonly_with_creat_or_trunc_and_rename_swap() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+
+    let p_creat = root.join("rdonly_creat");
+    let p_trunc = root.join("rdonly_trunc");
+    fs::write(&p_trunc, "content")?;
+    let swap_a = root.join("swap_a");
+    let swap_b = root.join("swap_b");
+    fs::write(&swap_a, "aaa")?;
+    fs::write(&swap_b, "bbb")?;
+
+    let root_str = root.to_str().unwrap().to_owned();
+    let accesses = track_fn!(root_str, |root_str: String| {
+        let c_creat = CString::new(format!("{root_str}/rdonly_creat")).unwrap();
+        let c_trunc = CString::new(format!("{root_str}/rdonly_trunc")).unwrap();
+        let c_a = CString::new(format!("{root_str}/swap_a")).unwrap();
+        let c_b = CString::new(format!("{root_str}/swap_b")).unwrap();
+        // SAFETY: all paths are valid NUL-terminated C strings.
+        unsafe {
+            let fd = libc::open(c_creat.as_ptr(), libc::O_RDONLY | libc::O_CREAT, 0o644);
+            assert!(fd >= 0, "open(O_RDONLY|O_CREAT) failed: {}", std::io::Error::last_os_error());
+            libc::close(fd);
+
+            let fd = libc::open(c_trunc.as_ptr(), libc::O_RDONLY | libc::O_TRUNC);
+            if fd >= 0 {
+                libc::close(fd);
+            }
+
+            assert_eq!(
+                libc::renamex_np(c_a.as_ptr(), c_b.as_ptr(), libc::RENAME_SWAP),
+                0,
+                "renamex_np(RENAME_SWAP) failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+    })
+    .await?;
+
+    assert_contains(&accesses, &p_creat, PathAccess::ReadWrite);
+    assert_contains(&accesses, &p_trunc, PathAccess::ReadWrite);
+    assert_contains(&accesses, &swap_a, PathAccess::RenameTarget);
+    assert_contains(&accesses, &swap_b, PathAccess::RenameTarget);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn posix_spawn_addchdir_np_resolves_relative_program() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+    let sub = root.join("child_cwd");
+    fs::create_dir(&sub)?;
+    let marker = sub.join("marker_chdir");
+    fs::write(&marker, "ok")?;
+    let script = sub.join("run.sh");
+    write_executable(&script, "#!/bin/sh\ncat marker_chdir >/dev/null\n")?;
+
+    let sub_str = sub.to_str().unwrap().to_owned();
+    let accesses = track_fn!(sub_str, |sub_str: String| {
+        // `std::process::Command::current_dir` uses `posix_spawn_file_actions_addchdir_np`
+        // on macOS.
+        let status = std::process::Command::new("./run.sh")
+            .current_dir(&sub_str)
+            .status()
+            .expect("posix_spawn with addchdir_np failed");
+        assert!(status.success());
+    })
+    .await?;
+
+    assert_contains(&accesses, &script, PathAccess::Read);
+    assert_contains(&accesses, &marker, PathAccess::Read);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn posix_spawn_addchdir_np_is_fork_safe_under_concurrent_churn() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+    let sub = root.join("fork_child_cwd");
+    fs::create_dir(&sub)?;
+    let marker = sub.join("marker_fork_chdir");
+    fs::write(&marker, "ok")?;
+    let script = sub.join("run.sh");
+    write_executable(&script, "#!/bin/sh\ncat marker_fork_chdir >/dev/null\n")?;
+
+    let sub_str = sub.to_str().unwrap().to_owned();
+    let accesses = track_fn!(sub_str, |sub_str: String| {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        unsafe extern "C" {
+            fn posix_spawn_file_actions_addchdir_np(
+                file_actions: *mut libc::posix_spawn_file_actions_t,
+                path: *const libc::c_char,
+            ) -> libc::c_int;
+        }
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let sub_c = CString::new(sub_str).unwrap();
+
+        // Spawn background threads hammering `addchdir_np` + `destroy` while the
+        // main thread repeatedly calls `fork()` and uses `addchdir_np` +
+        // `posix_spawn` in the forked child.
+        let mut workers = Vec::new();
+        for _ in 0..2 {
+            let stop_flag = Arc::clone(&stop);
+            let dir_c = sub_c.clone();
+            workers.push(std::thread::spawn(move || {
+                while !stop_flag.load(Ordering::Relaxed) {
+                    let mut actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+                    // SAFETY: valid uninitialized handle and NUL-terminated path.
+                    unsafe {
+                        if libc::posix_spawn_file_actions_init(&raw mut actions) == 0 {
+                            let _ = posix_spawn_file_actions_addchdir_np(
+                                &raw mut actions,
+                                dir_c.as_ptr(),
+                            );
+                            let _ = libc::posix_spawn_file_actions_destroy(&raw mut actions);
+                        }
+                    }
+                }
+            }));
+        }
+
+        let prog = c"./run.sh";
+        let argv = [prog.as_ptr().cast_mut(), std::ptr::null_mut()];
+        let path_env = c"PATH=/bin:/usr/bin";
+        let envp = [path_env.as_ptr().cast_mut(), std::ptr::null_mut()];
+
+        for _ in 0..16 {
+            // SAFETY: child executes only raw libc / `posix_spawn` + `_exit`.
+            let pid = unsafe { libc::fork() };
+            assert!(pid >= 0, "fork failed: {}", std::io::Error::last_os_error());
+            if pid == 0 {
+                let mut actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+                // SAFETY: all pointers are pre-allocated valid C strings / arrays.
+                unsafe {
+                    if libc::posix_spawn_file_actions_init(&raw mut actions) != 0 {
+                        libc::_exit(10);
+                    }
+                    if posix_spawn_file_actions_addchdir_np(&raw mut actions, sub_c.as_ptr()) != 0 {
+                        libc::_exit(11);
+                    }
+                    let mut grandchild: libc::pid_t = 0;
+                    let rc = libc::posix_spawn(
+                        &raw mut grandchild,
+                        prog.as_ptr(),
+                        &raw const actions,
+                        std::ptr::null(),
+                        argv.as_ptr(),
+                        envp.as_ptr(),
+                    );
+                    let _ = libc::posix_spawn_file_actions_destroy(&raw mut actions);
+                    if rc != 0 {
+                        libc::_exit(12);
+                    }
+                    let mut gc_status: libc::c_int = 0;
+                    if libc::waitpid(grandchild, &raw mut gc_status, 0) != grandchild
+                        || !libc::WIFEXITED(gc_status)
+                        || libc::WEXITSTATUS(gc_status) != 0
+                    {
+                        libc::_exit(13);
+                    }
+                    libc::_exit(0);
+                }
+            }
+            let mut status: libc::c_int = 0;
+            // SAFETY: `pid` is our child and `status` is writable.
+            let waited = unsafe { libc::waitpid(pid, &raw mut status, 0) };
+            assert_eq!(waited, pid);
+            assert!(
+                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                "forked child failed with status {status:#x}"
+            );
+        }
+
+        stop.store(true, Ordering::Relaxed);
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    })
+    .await?;
+
+    assert_contains(&accesses, &script, PathAccess::Read);
+    assert_contains(&accesses, &marker, PathAccess::Read);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn posix_spawn_defers_relative_addchdir_and_addfchdir_resolution_to_spawn_time()
+-> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+
+    let dir_a = root.join("dir_a");
+    let dir_b = root.join("dir_b");
+    let sub_a = dir_a.join("sub");
+    let sub_b = dir_b.join("sub");
+    fs::create_dir_all(&sub_a)?;
+    fs::create_dir_all(&sub_b)?;
+
+    let marker_rel_a = sub_a.join("marker_rel_a");
+    let marker_rel_b = sub_b.join("marker_rel_b");
+    let marker_fd_a = dir_a.join("marker_fd_a");
+    let marker_fd_b = dir_b.join("marker_fd_b");
+    for m in [&marker_rel_a, &marker_rel_b, &marker_fd_a, &marker_fd_b] {
+        fs::write(m, "ok")?;
+    }
+
+    let script_rel_a = sub_a.join("run.sh");
+    let script_rel_b = sub_b.join("run.sh");
+    let script_fd_a = dir_a.join("run_fd.sh");
+    let script_fd_b = dir_b.join("run_fd.sh");
+    write_executable(&script_rel_a, "#!/bin/sh\ncat marker_rel_a >/dev/null\n")?;
+    write_executable(&script_rel_b, "#!/bin/sh\ncat marker_rel_b >/dev/null\n")?;
+    write_executable(&script_fd_a, "#!/bin/sh\ncat marker_fd_a >/dev/null\n")?;
+    write_executable(&script_fd_b, "#!/bin/sh\ncat marker_fd_b >/dev/null\n")?;
+
+    let args = (dir_a.to_str().unwrap().to_owned(), dir_b.to_str().unwrap().to_owned());
+    let accesses = track_fn!(args, |(dir_a, dir_b): (String, String)| {
+        unsafe extern "C" {
+            fn posix_spawn_file_actions_addchdir_np(
+                file_actions: *mut libc::posix_spawn_file_actions_t,
+                path: *const libc::c_char,
+            ) -> libc::c_int;
+            fn posix_spawn_file_actions_addfchdir_np(
+                file_actions: *mut libc::posix_spawn_file_actions_t,
+                fd: libc::c_int,
+            ) -> libc::c_int;
+        }
+
+        let spawn_and_wait = |prog: &std::ffi::CStr, actions: &libc::posix_spawn_file_actions_t| {
+            let argv = [prog.as_ptr().cast_mut(), std::ptr::null_mut()];
+            let path_env = c"PATH=/bin:/usr/bin";
+            let envp = [path_env.as_ptr().cast_mut(), std::ptr::null_mut()];
+            let mut child: libc::pid_t = 0;
+            // SAFETY: all pointers are valid C strings/arrays and `actions` is initialized.
+            let rc = unsafe {
+                libc::posix_spawn(
+                    &raw mut child,
+                    prog.as_ptr(),
+                    std::ptr::from_ref(actions),
+                    std::ptr::null(),
+                    argv.as_ptr(),
+                    envp.as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0, "posix_spawn({prog:?}) failed with errno {rc}");
+            let mut status: libc::c_int = 0;
+            // SAFETY: `child` is our child and `status` is writable.
+            assert_eq!(unsafe { libc::waitpid(child, &raw mut status, 0) }, child);
+            assert!(
+                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                "child for {prog:?} failed with raw status {status:#x}"
+            );
+        };
+
+        // 1. Single `file_actions` with relative `addchdir_np("sub")` reused across `chdir`.
+        std::env::set_current_dir(&dir_a).unwrap();
+        let mut rel_actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+        // SAFETY: valid uninitialized handle and NUL-terminated relative path.
+        unsafe {
+            assert_eq!(libc::posix_spawn_file_actions_init(&raw mut rel_actions), 0);
+            assert_eq!(
+                posix_spawn_file_actions_addchdir_np(&raw mut rel_actions, c"sub".as_ptr()),
+                0
+            );
+        }
+        spawn_and_wait(c"./run.sh", &rel_actions);
+
+        std::env::set_current_dir(&dir_b).unwrap();
+        spawn_and_wait(c"./run.sh", &rel_actions);
+        // SAFETY: destroying initialized `rel_actions`.
+        unsafe { assert_eq!(libc::posix_spawn_file_actions_destroy(&raw mut rel_actions), 0) };
+
+        // 2. Single `file_actions` with `addfchdir_np(fd)` where `dup2` retargets `fd`
+        //    from `dir_a` to `dir_b` before the second spawn.
+        let dir_a_c = CString::new(dir_a.as_str()).unwrap();
+        let dir_b_c = CString::new(dir_b.as_str()).unwrap();
+        // SAFETY: valid C path strings for opening directory fds.
+        let fd_a = unsafe { libc::open(dir_a_c.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) };
+        assert!(fd_a >= 0, "open(dir_a) failed: {}", std::io::Error::last_os_error());
+        // SAFETY: valid C path string.
+        let fd_b = unsafe { libc::open(dir_b_c.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) };
+        assert!(fd_b >= 0, "open(dir_b) failed: {}", std::io::Error::last_os_error());
+
+        let mut fd_actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+        // SAFETY: valid uninitialized handle and open directory descriptor `fd_a`.
+        unsafe {
+            assert_eq!(libc::posix_spawn_file_actions_init(&raw mut fd_actions), 0);
+            assert_eq!(posix_spawn_file_actions_addfchdir_np(&raw mut fd_actions, fd_a), 0);
+        }
+        spawn_and_wait(c"./run_fd.sh", &fd_actions);
+
+        // Retarget `fd_a` to point at `dir_b` and spawn again with the same `fd_actions`.
+        // SAFETY: `fd_b` and `fd_a` are valid open descriptors.
+        assert_eq!(unsafe { libc::dup2(fd_b, fd_a) }, fd_a);
+        spawn_and_wait(c"./run_fd.sh", &fd_actions);
+
+        // SAFETY: destroying initialized handle and closing owned descriptors.
+        unsafe {
+            assert_eq!(libc::posix_spawn_file_actions_destroy(&raw mut fd_actions), 0);
+            libc::close(fd_a);
+            libc::close(fd_b);
+        }
+    })
+    .await?;
+
+    assert_contains(&accesses, &script_rel_a, PathAccess::Read);
+    assert_contains(&accesses, &marker_rel_a, PathAccess::Read);
+    assert_contains(&accesses, &script_rel_b, PathAccess::Read);
+    assert_contains(&accesses, &marker_rel_b, PathAccess::Read);
+    assert_contains(&accesses, &script_fd_a, PathAccess::Read);
+    assert_contains(&accesses, &marker_fd_a, PathAccess::Read);
+    assert_contains(&accesses, &script_fd_b, PathAccess::Read);
+    assert_contains(&accesses, &marker_fd_b, PathAccess::Read);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn posix_spawn_addfchdir_np_child_only_fd_and_realloc_actions() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let root = tmp_dir.path().canonicalize()?;
+    let sub = root.join("child_only_fd_dir");
+    fs::create_dir(&sub)?;
+
+    let marker = sub.join("marker_child_only_fd");
+    fs::write(&marker, "ok")?;
+
+    // Build a non-SIP relative `./helper` executable in `sub` by symlinking the
+    // test binary and passing `command_for_fn!`'s dispatch args.
+    let helper_cmd =
+        test_utils::command_for_fn!(marker.to_str().unwrap().to_owned(), |marker_path: String| {
+            assert_eq!(std::env::var("CUSTOM_ONLY").as_deref(), Ok("1"));
+            assert_eq!(fs::read(&marker_path).unwrap(), b"ok");
+        });
+    let helper_link = sub.join("helper");
+    std::os::unix::fs::symlink(&helper_cmd.program, &helper_link)?;
+    let helper_args: Vec<String> =
+        helper_cmd.args.into_iter().map(|s| s.into_string().unwrap()).collect();
+
+    // Place a decoy `./helper` in `root` (the parent's CWD) that fails if run,
+    // so we prove `ResolvedChdir::Unresolvable` never falls back to parent CWD.
+    write_executable(&root.join("helper"), "#!/bin/sh\nexit 99\n")?;
+
+    let args = (root.to_str().unwrap().to_owned(), sub.to_str().unwrap().to_owned(), helper_args);
+    let accesses =
+        track_fn!(args, |(root_dir, sub_dir, helper_args): (String, String, Vec<String>)| {
+            unsafe extern "C" {
+                fn posix_spawn_file_actions_addchdir_np(
+                    file_actions: *mut libc::posix_spawn_file_actions_t,
+                    path: *const libc::c_char,
+                ) -> libc::c_int;
+                fn posix_spawn_file_actions_addfchdir_np(
+                    file_actions: *mut libc::posix_spawn_file_actions_t,
+                    fd: libc::c_int,
+                ) -> libc::c_int;
+            }
+
+            std::env::set_current_dir(&root_dir).unwrap();
+
+            // Pick an fd number that is not open in the parent so `addopen`
+            // creates it exclusively in the spawned child.
+            let child_fd = (40..200)
+                // SAFETY: `F_GETFD` on a candidate fd only queries descriptor state.
+                .find(|&fd| unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1)
+                .expect("no unused fd in 40..200");
+
+            let sub_c = CString::new(sub_dir.as_str()).unwrap();
+            let prog = c"./helper";
+            let c_args: Vec<CString> =
+                helper_args.iter().map(|s| CString::new(s.as_str()).unwrap()).collect();
+            let mut argv: Vec<*mut libc::c_char> = Vec::with_capacity(c_args.len() + 2);
+            argv.push(prog.as_ptr().cast_mut());
+            for arg in &c_args {
+                argv.push(arg.as_ptr().cast_mut());
+            }
+            argv.push(std::ptr::null_mut());
+
+            // Explicit custom `envp` without inheriting `environ` (no `DYLD_INSERT_LIBRARIES`
+            // or `FSPY_PAYLOAD`); `fspy_preload_macos` must inject both into it.
+            let custom_env = c"CUSTOM_ONLY=1";
+            let envp = [custom_env.as_ptr().cast_mut(), std::ptr::null_mut()];
+
+            // 1. `addopen(child_fd, sub)` + `addfchdir_np(child_fd)` + `addclose(child_fd)`.
+            //    On current XNU, `PSFA_FCHDIR` checks the parent's fd table before
+            //    `addopen` runs and returns `EBADF`; on a POSIX.1-2024 sequential
+            //    kernel it succeeds in `sub`. Either way, fspy must not fail with
+            //    spurious `ENOENT` or execute the decoy `./helper` in `root_dir`.
+            let mut actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+            // SAFETY: valid uninitialized handle and NUL-terminated directory path.
+            unsafe {
+                assert_eq!(libc::posix_spawn_file_actions_init(&raw mut actions), 0);
+                assert_eq!(
+                    libc::posix_spawn_file_actions_addopen(
+                        &raw mut actions,
+                        child_fd,
+                        sub_c.as_ptr(),
+                        libc::O_RDONLY | libc::O_DIRECTORY,
+                        0,
+                    ),
+                    0
+                );
+                assert_eq!(posix_spawn_file_actions_addfchdir_np(&raw mut actions, child_fd), 0);
+                assert_eq!(libc::posix_spawn_file_actions_addclose(&raw mut actions, child_fd), 0);
+            }
+
+            let mut child: libc::pid_t = 0;
+            // SAFETY: all pointers are valid C strings/arrays and `actions` is initialized.
+            let rc = unsafe {
+                libc::posix_spawn(
+                    &raw mut child,
+                    prog.as_ptr(),
+                    &raw const actions,
+                    std::ptr::null(),
+                    argv.as_ptr(),
+                    envp.as_ptr(),
+                )
+            };
+            // SAFETY: destroying initialized `actions`.
+            unsafe { assert_eq!(libc::posix_spawn_file_actions_destroy(&raw mut actions), 0) };
+            if rc == 0 {
+                let mut status: libc::c_int = 0;
+                // SAFETY: `child` is our child and `status` is writable.
+                assert_eq!(unsafe { libc::waitpid(child, &raw mut status, 0) }, child);
+                assert!(
+                    libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                    "child failed with raw status {status:#x}"
+                );
+            } else {
+                assert_eq!(
+                    rc,
+                    libc::EBADF,
+                    "expected EBADF from XNU (or 0 on sequential kernels), not spurious errno {rc}"
+                );
+            }
+
+            // 2. `addchdir_np(sub)` followed by multiple file actions that force
+            //    libsystem to `realloc` `*file_actions`, with explicit custom `envp`:
+            //    verifies rekeying survives reallocation and child access is tracked.
+            let mut realloc_actions: libc::posix_spawn_file_actions_t = std::ptr::null_mut();
+            // SAFETY: valid uninitialized handle and NUL-terminated paths.
+            unsafe {
+                assert_eq!(libc::posix_spawn_file_actions_init(&raw mut realloc_actions), 0);
+                assert_eq!(
+                    posix_spawn_file_actions_addchdir_np(&raw mut realloc_actions, sub_c.as_ptr()),
+                    0
+                );
+                assert_eq!(
+                    libc::posix_spawn_file_actions_addopen(
+                        &raw mut realloc_actions,
+                        child_fd,
+                        c"/dev/null".as_ptr(),
+                        libc::O_RDONLY,
+                        0,
+                    ),
+                    0
+                );
+                assert_eq!(
+                    libc::posix_spawn_file_actions_adddup2(
+                        &raw mut realloc_actions,
+                        child_fd,
+                        child_fd + 1,
+                    ),
+                    0
+                );
+                assert_eq!(
+                    libc::posix_spawn_file_actions_addclose(&raw mut realloc_actions, child_fd),
+                    0
+                );
+                assert_eq!(
+                    libc::posix_spawn_file_actions_addclose(&raw mut realloc_actions, child_fd + 1),
+                    0
+                );
+            }
+            let mut child2: libc::pid_t = 0;
+            // SAFETY: all pointers are valid C strings/arrays and `realloc_actions` is initialized.
+            let rc2 = unsafe {
+                libc::posix_spawn(
+                    &raw mut child2,
+                    prog.as_ptr(),
+                    &raw const realloc_actions,
+                    std::ptr::null(),
+                    argv.as_ptr(),
+                    envp.as_ptr(),
+                )
+            };
+            // SAFETY: destroying initialized `realloc_actions`.
+            unsafe {
+                assert_eq!(libc::posix_spawn_file_actions_destroy(&raw mut realloc_actions), 0);
+            }
+            assert_eq!(rc2, 0, "posix_spawn(./helper) after file_actions realloc failed: {rc2}");
+
+            let mut status2: libc::c_int = 0;
+            // SAFETY: `child2` is our child and `status2` is writable.
+            assert_eq!(unsafe { libc::waitpid(child2, &raw mut status2, 0) }, child2);
+            assert!(
+                libc::WIFEXITED(status2) && libc::WEXITSTATUS(status2) == 0,
+                "child2 failed with raw status {status2:#x}"
+            );
+        })
+        .await?;
+
+    assert_contains(&accesses, &marker, PathAccess::Read);
+
+    Ok(())
+}

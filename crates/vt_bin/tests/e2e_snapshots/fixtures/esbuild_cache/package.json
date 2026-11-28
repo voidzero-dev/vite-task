@@ -1,0 +1,5 @@
+{
+  "name": "esbuild-cache",
+  "private": true,
+  "type": "module"
+}

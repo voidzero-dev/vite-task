@@ -38,7 +38,7 @@ use syn::{
 /// Construct a `vt_materialized_artifact::Artifact` from an env var holding a
 /// file path at compile time.
 ///
-/// Usage: `artifact!("fspy_preload", "CARGO_CDYLIB_FILE_FSPY_PRELOAD_UNIX")`
+/// Usage: `artifact!("fspy_preload", "CARGO_CDYLIB_FILE_FSPY_PRELOAD_MACOS")`
 /// where the first argument is the artifact name (used in the materialized
 /// filename) and the second is the env var holding the file's path: a Cargo
 /// artifact dependency's `CARGO_<KIND>_FILE_<DEP>`, or a var the consuming

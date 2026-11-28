@@ -1,0 +1,33 @@
+[[e2e]]
+name = "biome_cache"
+comment = """
+`biome check` checks and lints `src/index.js`. Editing `src/index.js` invalidates the cache.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "check",
+  ], comment = "first run: cache miss", redact = { 'in \d+(\.\d+)?[µu]s' = 'in <duration>' } },
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "check",
+  ], comment = "second run: cache hit", redact = { 'in \d+(\.\d+)?[µu]s' = 'in <duration>' } },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/index.js",
+    "initial-biome",
+    "edited-biome",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "check",
+  ], comment = "third run: cache miss after editing src/index.js", redact = { 'in \d+(\.\d+)?[µu]s' = 'in <duration>' } },
+]

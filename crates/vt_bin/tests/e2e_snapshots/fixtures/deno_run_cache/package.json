@@ -1,0 +1,5 @@
+{
+  "name": "deno-run-cache",
+  "private": true,
+  "type": "module"
+}

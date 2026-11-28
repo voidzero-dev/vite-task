@@ -1,0 +1,45 @@
+[[e2e]]
+name = "rspack_build_cache"
+comment = """
+`rspack build` (Rust N-API bundler with `mimalloc` + rayon) bundles `src/index.js` and `src/dep.js` into `dist/main.js`. Editing `src/dep.js` invalidates the cache.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "first run: cache miss" },
+  [
+    "vtt",
+    "grep-file",
+    "dist/main.js",
+    "initial-rspack",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "second run: cache hit" },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/dep.js",
+    "initial-rspack",
+    "edited-rspack",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "third run: cache miss after editing src/dep.js" },
+  [
+    "vtt",
+    "grep-file",
+    "dist/main.js",
+    "edited-rspack",
+  ],
+]

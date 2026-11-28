@@ -1,0 +1,45 @@
+[[e2e]]
+name = "tailwindcss_v4_cache"
+comment = """
+`@tailwindcss/cli` v4 (Rust `oxide` + `lightningcss` rayon globbing) scans `src/index.html` and compiles `src/input.css` to `dist/output.css`. Editing `src/index.html` invalidates the cache.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "first run: cache miss", redact = { 'tailwindcss v\d+\.\d+\.\d+' = 'tailwindcss v<version>' } },
+  [
+    "vtt",
+    "grep-file",
+    "dist/output.css",
+    "text-red-500",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "second run: cache hit", redact = { 'tailwindcss v\d+\.\d+\.\d+' = 'tailwindcss v<version>' } },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/index.html",
+    "text-red-500",
+    "text-blue-500",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "third run: cache miss after editing src/index.html", redact = { 'tailwindcss v\d+\.\d+\.\d+' = 'tailwindcss v<version>' } },
+  [
+    "vtt",
+    "grep-file",
+    "dist/output.css",
+    "text-blue-500",
+  ],
+]

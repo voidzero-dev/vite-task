@@ -1,0 +1,45 @@
+[[e2e]]
+name = "esbuild_cache"
+comment = """
+`esbuild` JS API spawns the Go `esbuild` child service to bundle `src/index.js` and `src/dep.js` into `dist/out.js`. Editing `src/dep.js` invalidates the cache.
+"""
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "first run: cache miss" },
+  [
+    "vtt",
+    "grep-file",
+    "dist/out.js",
+    "initial-esbuild",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "second run: cache hit" },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/dep.js",
+    "initial-esbuild",
+    "edited-esbuild",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "third run: cache miss after editing src/dep.js" },
+  [
+    "vtt",
+    "grep-file",
+    "dist/out.js",
+    "edited-esbuild",
+  ],
+]

@@ -1,0 +1,47 @@
+[[e2e]]
+name = "sass_embedded_cache"
+comment = """
+`sass-embedded` (Dart VM AOT binary) compiles `src/main.scss` (which `@use`s `src/_vars.scss`) to `dist/main.css`. Editing `src/_vars.scss` invalidates the cache.
+"""
+# On macOS, sass-embedded's `dart` binary is signed with Hardened Runtime
+# without `com.apple.security.cs.allow-dyld-environment-variables`, so macOS
+# strips `DYLD_INSERT_LIBRARIES` and prevents fspy from tracing `dart`.
+cfg = 'not(target_os = "macos")'
+ignore = true
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "first run: cache miss" },
+  [
+    "vtt",
+    "print-file",
+    "dist/main.css",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "second run: cache hit" },
+  [
+    "vtt",
+    "replace-file-content",
+    "src/_vars.scss",
+    "#ff0000",
+    "#0000ff",
+  ],
+  { argv = [
+    "vt",
+    "run",
+    "--cache",
+    "build",
+  ], comment = "third run: cache miss after editing src/_vars.scss" },
+  [
+    "vtt",
+    "print-file",
+    "dist/main.css",
+  ],
+]

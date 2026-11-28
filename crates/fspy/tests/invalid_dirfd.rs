@@ -30,7 +30,7 @@ const STATX_BASIC_STATS: libc::c_uint = 0x7ff;
 #[repr(C, align(8))]
 struct StatxBuf([u8; 256]);
 
-/// Calls `statx` through `syscall`, which fspy intercepts on glibc.
+/// Calls `statx` directly through `syscall(2)`.
 ///
 /// The libc `statx` wrapper is not called directly: glibc added it in 2.28,
 /// so a test built for an older glibc fails to link.
@@ -55,8 +55,7 @@ fn syscall_statx(
     }
 }
 
-/// Calls the glibc `statx` wrapper, resolved at run time. With `LD_PRELOAD`,
-/// the lookup finds the fspy interposer first.
+/// Calls the glibc `statx` wrapper, resolved at run time.
 ///
 /// # Panics
 ///
@@ -187,6 +186,68 @@ async fn absolute_path_at_invalid_dirfd() -> anyhow::Result<()> {
         unsafe { libc::close(fd) };
     })
     .await?;
+    assert_contains(&accesses, &tmp_path, PathAccess::Read);
+
+    Ok(())
+}
+
+/// An unopened positive descriptor passes `BorrowedFd::try_borrow_raw` and
+/// exercises `fd_path` returning `Ok(None)` (`EBADF` / `ENOENT`) on both Linux
+/// and macOS.
+#[test(tokio::test)]
+async fn relative_path_at_unopened_positive_dirfd() -> anyhow::Result<()> {
+    let tmp_dir = tempfile::tempdir()?;
+    let tmp_path = std::fs::canonicalize(tmp_dir.path())?.join("abs_via_unopened");
+    std::fs::write(&tmp_path, "")?;
+
+    let accesses = track_fn!(tmp_path.to_str().unwrap().to_owned(), |tmp_path: String| {
+        let unopened_fd: libc::c_int = 9999;
+        // Confirm `9999` is not open in this process.
+        // SAFETY: `F_GETFD` on a closed descriptor simply fails with `EBADF`.
+        assert_eq!(unsafe { libc::fcntl(unopened_fd, libc::F_GETFD) }, -1);
+        assert_eq!(errno(), libc::EBADF);
+
+        let path = c"hello_unopened";
+        // SAFETY: valid C strings and output buffers; kernel rejects the unopened fd.
+        unsafe {
+            assert_eq!(libc::openat(unopened_fd, path.as_ptr(), libc::O_RDONLY), -1);
+            assert_eq!(errno(), libc::EBADF);
+
+            let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+            assert_eq!(libc::fstatat(unopened_fd, path.as_ptr(), stat.as_mut_ptr(), 0), -1);
+            assert_eq!(errno(), libc::EBADF);
+
+            assert_eq!(libc::faccessat(unopened_fd, path.as_ptr(), libc::F_OK, 0), -1);
+            assert_eq!(errno(), libc::EBADF);
+
+            assert!(libc::fdopendir(unopened_fd).is_null());
+            assert_eq!(errno(), libc::EBADF);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(syscall_statx(unopened_fd, path.as_ptr(), 0), -1);
+            assert_eq!(errno(), libc::EBADF);
+        }
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        {
+            assert_eq!(glibc_statx(unopened_fd, path.as_ptr(), 0), -1);
+            assert_eq!(errno(), libc::EBADF);
+
+            assert_eq!(glibc_execveat(unopened_fd, path), -1);
+            assert_eq!(errno(), libc::EBADF);
+        }
+
+        // An absolute path ignores the unopened positive dirfd and succeeds.
+        let abs = std::ffi::CString::new(tmp_path).unwrap();
+        // SAFETY: `abs` is a valid C string; absolute paths ignore `dirfd`.
+        let fd = unsafe { libc::openat(unopened_fd, abs.as_ptr(), libc::O_RDONLY) };
+        assert!(fd >= 0, "openat with absolute path failed with errno {}", errno());
+        // SAFETY: `fd` was opened above.
+        unsafe { libc::close(fd) };
+    })
+    .await?;
+
+    assert_not_contains(&accesses, &std::env::current_dir()?.join("hello_unopened"));
     assert_contains(&accesses, &tmp_path, PathAccess::Read);
 
     Ok(())

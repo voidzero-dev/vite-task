@@ -94,8 +94,14 @@ jobs:
           [[ "$RUNNER_OS" == "Windows" ]] && exe=.exe
           cp "$CARGO_TARGET_DIR/release/fspy_benchmark_launcher$exe" "$RUNNER_TEMP/fspy-base-launcher$exe"
           # A baseline worktree created after the head can leave newer
-          # workspace artifacts that Cargo considers fresh for the head.
+          # workspace artifacts that Cargo considers fresh for the head,
+          # including cross-target artifact dependencies like fspy_preload_linux.
           cargo clean --release --workspace
+          for target in x86_64-unknown-none aarch64-unknown-none-softfloat; do
+            if [[ -d "$CARGO_TARGET_DIR/$target" ]]; then
+              cargo clean --release --workspace --target "$target"
+            fi
+          done
 
       - name: Run benchmark
         run: |

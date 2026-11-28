@@ -1,128 +1,117 @@
-//! Tests for the untracked-exec fallback: when the preload cannot install
-//! the seccomp filter, the exec must proceed untracked and the run must be
-//! reported as incompletely tracked (so it is not cached), rather than
-//! every spawn failing. Skipped on musl: no preload library exists there.
-#![cfg(all(target_os = "linux", not(target_env = "musl")))]
+//! Tests for Linux untracked fallback and authentic exec errors:
+//! - When `seccomp` is blocked by an outer sandbox, `fspy` runs commands
+//!   untracked and reports `Err(TrackingIncomplete)` rather than failing every
+//!   spawn.
+//! - Authentic exec errors (such as `ENOEXEC` on a script without a `#!` line)
+//!   propagate normally and keep the trace complete.
+#![cfg(target_os = "linux")]
 
 use std::{
-    ffi::OsStr,
     fs::{self, Permissions},
-    os::unix::{ffi::OsStrExt as _, fs::PermissionsExt as _},
-    path::{Path, PathBuf},
-    process::Command,
+    mem::offset_of,
+    os::unix::fs::PermissionsExt as _,
+    process::Stdio,
 };
 
-use allocator_api2::alloc::Global;
-use fspy_seccomp_unotify::payload::SeccompPayload;
-use fspy_shared::ipc::{
-    IpcStr,
-    channel::{Receiver, RecordsLost, channel},
+use fspy::TrackingIncomplete;
+use linux_raw_sys::{
+    errno::EPERM,
+    prctl::PR_SET_NO_NEW_PRIVS,
+    ptrace::{
+        BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_RET, BPF_W, SECCOMP_RET_ALLOW,
+        SECCOMP_RET_DATA, SECCOMP_RET_ERRNO, SECCOMP_SET_MODE_FILTER, seccomp_data, sock_filter,
+        sock_fprog,
+    },
 };
-use fspy_shared_unix::payload::{Payload, encode_payload};
+use syscalls::Sysno;
+use test_log::test;
+use tokio::io::AsyncReadExt as _;
+use tokio_util::sync::CancellationToken;
+use vt_subprocess_test::command_for_fn;
 
-use crate::test_utils::test_bin_path;
-
-mod test_utils;
-
-/// The preload cdylib, built as a dependency of this crate.
-const PRELOAD_CDYLIB: &str = env!("CARGO_CDYLIB_FILE_FSPY_PRELOAD_UNIX");
-
-/// Clears `command`'s environment and preloads fspy into it with a seccomp
-/// payload whose install always fails. Returns the channel the preload
-/// reports to.
-fn preload_with_failing_seccomp(command: &mut Command) -> Receiver<Global> {
-    let receiver = channel(1 << 30, Global).unwrap();
-    {
-        let preload_path: &IpcStr = Path::new(PRELOAD_CDYLIB).into();
-        let payload = Payload {
-            ipc_channel_conf: receiver.conf(),
-            preload_path,
-            seccomp_payload: SeccompPayload::unreachable(
-                b"/nonexistent/fspy-unreachable-supervisor".to_vec(),
-            ),
-        };
-        let bump = bumpalo::Bump::new();
-        let encoded = encode_payload(payload, &bump);
-        command
-            .env_clear()
-            .env("LD_PRELOAD", PRELOAD_CDYLIB)
-            .env("FSPY_PAYLOAD", OsStr::from_bytes(encoded.encoded_string.as_ref()));
-    }
-    receiver
-}
-
-/// A static binary exec'd from a traced process needs the preload's inline
-/// seccomp install. When that install fails (here: the payload's empty
-/// filter, which the kernel refuses), the binary must still run — untracked
-/// — and the channel must report the loss.
-#[test]
-fn static_binary_runs_untracked_when_injection_fails() {
-    let mut command = Command::new("/bin/sh");
-    let receiver = preload_with_failing_seccomp(&mut command);
-    let output = command
-        .arg("-c")
-        .arg(format!("exec {} stat /hello", test_bin_path().display()))
-        .output()
-        .expect("failed to spawn the shell");
-    assert!(
-        output.status.success(),
-        "the static binary did not run: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let Err(RecordsLost) = receiver.close() else {
-        panic!("the channel did not report the untracked exec");
-    };
-}
-
-/// The untracked fallback must replay the interposed call as it was made,
-/// not as `execve`. GNU `env` runs its command through `execvp`, so a bare
-/// program name found only on `PATH` still runs when injection fails;
-/// forwarding it to `execve` would fail with `ENOENT` instead.
-#[test]
-fn execvp_fallback_keeps_path_search() {
-    let test_bin = test_bin_path();
-    let mut command = Command::new("/usr/bin/env");
-    let receiver = preload_with_failing_seccomp(&mut command);
-    let output = command
-        .arg(test_bin.file_name().unwrap())
-        .arg("stat")
-        .arg("/hello")
-        .env("PATH", test_bin.parent().unwrap())
-        .current_dir("/")
-        .output()
-        .expect("failed to spawn env");
-    assert!(
-        output.status.success(),
-        "the execvp fallback lost its PATH search: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let Err(RecordsLost) = receiver.close() else {
-        panic!("the channel did not report the untracked exec");
-    };
-}
-
-/// Only a failed seccomp install takes the untracked path. An exec that
-/// fails the way the real exec would, here `ENOEXEC` for a script without a
-/// `#!` line, keeps its errno and leaves the trace complete. `sh` then runs
-/// the script itself, as it does without tracking.
-#[test]
-fn exec_errors_are_not_reported_as_lost() {
-    let script = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fspy-script-without-shebang");
+/// An authentic exec error (`ENOEXEC` for a script without a `#!` line) keeps
+/// its errno and leaves the trace complete so `/bin/sh` runs the script itself,
+/// as it does without tracking.
+#[test(tokio::test)]
+async fn exec_errors_are_not_reported_as_lost() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let script = dir.path().join("fspy-script-without-shebang");
     fs::write(&script, "exit 0\n").expect("failed to write the script");
     fs::set_permissions(&script, Permissions::from_mode(0o755))
         .expect("failed to set permissions on the script");
 
-    let mut command = Command::new("/bin/sh");
-    let receiver = preload_with_failing_seccomp(&mut command);
-    let output =
-        command.arg("-c").arg(script.as_os_str()).output().expect("failed to spawn the shell");
+    let mut command = fspy::Command::new("/bin/sh");
+    command.arg("-c").arg(script.as_os_str()).stdin(Stdio::null());
+    let tracked = command.spawn(CancellationToken::new()).await.expect("failed to spawn /bin/sh");
+    let termination = tracked.wait_handle.await.expect("failed to wait for /bin/sh");
+    assert!(termination.status.success(), "the script without a shebang did not run");
+    assert!(
+        termination.path_accesses.is_ok(),
+        "an authentic exec error was reported as an untracked exec"
+    );
+}
+
+/// When an outer sandbox blocks `SYS_seccomp` with `EPERM`, `fspy` detects
+/// this during initialization, runs spawned commands untracked, and reports
+/// `Err(TrackingIncomplete)` so callers do not cache partial traces.
+#[test]
+fn seccomp_blocked_sandbox_falls_back_to_untracked() {
+    let cmd = command_for_fn!((), |()| {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "cBPF opcodes and offsets fit in u16/u32"
+        )]
+        let filter = [
+            sock_filter {
+                code: (BPF_LD | BPF_W | BPF_ABS) as u16,
+                jt: 0,
+                jf: 0,
+                k: offset_of!(seccomp_data, nr) as u32,
+            },
+            sock_filter {
+                code: (BPF_JMP | BPF_JEQ | BPF_K) as u16,
+                jt: 0,
+                jf: 1,
+                k: Sysno::seccomp as u32,
+            },
+            sock_filter {
+                code: (BPF_RET | BPF_K) as u16,
+                jt: 0,
+                jf: 0,
+                k: SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA),
+            },
+            sock_filter { code: (BPF_RET | BPF_K) as u16, jt: 0, jf: 0, k: SECCOMP_RET_ALLOW },
+        ];
+        let prog = sock_fprog { len: 4, filter: filter.as_ptr().cast_mut() };
+        // SAFETY: installs a valid 4-instruction seccomp filter on this test subprocess.
+        unsafe {
+            syscalls::syscall!(Sysno::prctl, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0).unwrap();
+            syscalls::syscall!(Sysno::seccomp, SECCOMP_SET_MODE_FILTER, 0, &raw const prog)
+                .unwrap();
+        }
+
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let mut command = fspy::Command::new("/bin/echo");
+            command.arg("sandbox-ok").stdout(Stdio::piped()).stdin(Stdio::null());
+            let mut tracked = command
+                .spawn(CancellationToken::new())
+                .await
+                .expect("sandboxed spawn should fall back untracked");
+            let mut stdout = Vec::new();
+            tracked.stdout.take().unwrap().read_to_end(&mut stdout).await.unwrap();
+            let termination = tracked.wait_handle.await.unwrap();
+            assert!(termination.status.success());
+            assert_eq!(stdout, b"sandbox-ok\n");
+            assert!(matches!(termination.path_accesses, Err(TrackingIncomplete)));
+        });
+    });
+
+    let output = std::process::Command::from(cmd).output().expect("failed to run sandbox test");
     assert!(
         output.status.success(),
-        "the script without a shebang did not run: {}",
-        String::from_utf8_lossy(&output.stderr)
+        "sandboxed subprocess failed: stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
     );
-
-    assert!(receiver.close().is_ok(), "an authentic exec error was reported as an untracked exec");
 }
