@@ -12,6 +12,21 @@ use test_log::test;
 use test_utils::assert_contains;
 use tokio::fs;
 
+/// Coordinates script creation (`O_WRONLY`) against concurrent `fork`/`vfork`
+/// spawns across tests in this binary so no sibling spawn briefly inherits a
+/// writable script descriptor and triggers a transient Linux `ETXTBSY`.
+static SCRIPT_EXEC_LOCK: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
+async fn write_executable_script(
+    path: impl AsRef<Path>,
+    content: impl AsRef<[u8]>,
+) -> anyhow::Result<()> {
+    let _write_guard = SCRIPT_EXEC_LOCK.write().await;
+    fs::write(path.as_ref(), content).await?;
+    fs::set_permissions(path.as_ref(), std::fs::Permissions::from_mode(0o755)).await?;
+    Ok(())
+}
+
 #[test(tokio::test)]
 async fn spawn_sh_shebang() -> anyhow::Result<()> {
     let tmp_dir = tempfile::TempDir::new()?;
@@ -19,12 +34,9 @@ async fn spawn_sh_shebang() -> anyhow::Result<()> {
     let shebang_script_path = tmp_dir.path().join("fspy_test_shebang_script.sh");
     let shebang_script_path = shebang_script_path.into_os_string().into_string().unwrap();
 
-    fs::write(&shebang_script_path, "#!/bin/sh\ncat hello\n").await?;
+    write_executable_script(&shebang_script_path, "#!/bin/sh\ncat hello\n").await?;
 
-    let mut perms = fs::metadata(&shebang_script_path).await?.permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&shebang_script_path, perms).await?;
-
+    let _exec_guard = SCRIPT_EXEC_LOCK.read().await;
     let accesses = track_fn!(shebang_script_path.clone(), |shebang_script_path: String| {
         let _ignored = Command::new(&shebang_script_path)
             .current_dir("/")
@@ -61,10 +73,11 @@ async fn spawn_shebang_with_long_interpreter_path() -> anyhow::Result<()> {
     fs::symlink("/bin/sh", &interpreter).await?;
 
     let script_path = tmp_dir.path().join("long_shebang.sh");
-    fs::write(&script_path, format!("#!{}\necho ok\n", interpreter.display())).await?;
-    fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).await?;
+    write_executable_script(&script_path, format!("#!{}\necho ok\n", interpreter.display()))
+        .await?;
     let script_path = script_path.into_os_string().into_string().unwrap();
 
+    let _exec_guard = SCRIPT_EXEC_LOCK.read().await;
     let accesses = track_fn!(script_path, |script_path: String| {
         let output = Command::new(&script_path).stdin(Stdio::null()).output();
         // On macOS, fspy only swaps the arm64e `/bin/sh` for its own shell when
@@ -94,8 +107,7 @@ async fn spawn_shebang_with_long_interpreter_path() -> anyhow::Result<()> {
 async fn shebang_argument_splitting_matches_platform() -> anyhow::Result<()> {
     let tmp_dir = tempfile::TempDir::new()?;
     let script_path = tmp_dir.path().canonicalize()?.join("split_args.sh");
-    fs::write(&script_path, "#!/bin/echo   foo   bar\n").await?;
-    fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).await?;
+    write_executable_script(&script_path, "#!/bin/echo   foo   bar\n").await?;
     let script_str = script_path.to_str().unwrap().to_owned();
 
     let expected = if cfg!(target_os = "macos") {
@@ -103,6 +115,7 @@ async fn shebang_argument_splitting_matches_platform() -> anyhow::Result<()> {
     } else {
         format!("foo   bar {script_str}\n")
     };
+    let _exec_guard = SCRIPT_EXEC_LOCK.read().await;
     let untraced = Command::new(&script_str).stdin(Stdio::null()).output()?;
     assert!(untraced.status.success());
     assert_eq!(String::from_utf8_lossy(&untraced.stdout), expected);
@@ -132,16 +145,14 @@ async fn chained_shebang_depth_matches_platform() -> anyhow::Result<()> {
 
     let mut scripts = Vec::new();
     let base = root.join("hop1.sh");
-    fs::write(&base, "#!/bin/sh\necho chained-ok\n").await?;
-    fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).await?;
+    write_executable_script(&base, "#!/bin/sh\necho chained-ok\n").await?;
     scripts.push(base);
 
     let max_hops = if cfg!(target_os = "macos") { 2 } else { 6 };
     for i in 2..=max_hops {
         let prev = scripts.last().unwrap();
         let next = root.join(format!("hop{i}.sh"));
-        fs::write(&next, format!("#!{}\n", prev.display())).await?;
-        fs::set_permissions(&next, std::fs::Permissions::from_mode(0o755)).await?;
+        write_executable_script(&next, format!("#!{}\n", prev.display())).await?;
         scripts.push(next);
     }
 
@@ -150,6 +161,7 @@ async fn chained_shebang_depth_matches_platform() -> anyhow::Result<()> {
     let expected_errno = if cfg!(target_os = "macos") { libc::ENOEXEC } else { libc::ELOOP };
 
     let args = (max_ok, too_deep, expected_errno);
+    let _exec_guard = SCRIPT_EXEC_LOCK.read().await;
     let accesses =
         track_fn!(args, |(max_ok, too_deep, expected_errno): (String, String, libc::c_int)| {
             let output = Command::new(&max_ok)
@@ -204,13 +216,13 @@ async fn overlong_shebang_is_rejected_with_enoexec() -> anyhow::Result<()> {
     let script_path = tmp_dir.path().canonicalize()?.join("overlong.sh");
     // Longer than both Linux's 256-byte and macOS's 512-byte kernel buffers.
     let content = format!("#!/{}\n", "a".repeat(520));
-    fs::write(&script_path, content).await?;
-    fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).await?;
+    write_executable_script(&script_path, content).await?;
     let script_str = script_path.to_str().unwrap().to_owned();
 
     // Use `posix_spawn` directly: `posix_spawnp` (used by `std::process::Command`)
     // falls back to `/bin/sh` on `ENOEXEC` on macOS.
     let c_script = std::ffi::CString::new(script_str.as_str())?;
+    let _exec_guard = SCRIPT_EXEC_LOCK.read().await;
     assert_eq!(posix_spawn_errno(&c_script), libc::ENOEXEC);
 
     let accesses = track_fn!(script_str, |script_str: String| {
@@ -235,6 +247,7 @@ async fn exec_fifo_does_not_block_and_returns_eacces() -> anyhow::Result<()> {
     assert_eq!(unsafe { libc::mkfifo(fifo_cstr.as_ptr(), 0o755) }, 0);
     let fifo_str = fifo_path.to_str().unwrap().to_owned();
 
+    let _exec_guard = SCRIPT_EXEC_LOCK.read().await;
     let untraced_err = Command::new(&fifo_str).stdin(Stdio::null()).status().unwrap_err();
     assert_eq!(untraced_err.raw_os_error(), Some(libc::EACCES));
 
