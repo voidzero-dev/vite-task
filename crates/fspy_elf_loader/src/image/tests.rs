@@ -1,3 +1,5 @@
+use fspy_nostd::OwnedFd;
+
 use super::*;
 
 #[test]
@@ -17,7 +19,7 @@ fn check_bss(page: usize, flags: u32, expected_protection: &str) {
         let bytes = fixture(page, memory_size, flags);
         let image = map_bytes(&bytes);
         assert_eq!(image.bias % (2 * page), 0);
-        assert_eq!(image.phdr, Some(image.bias + EHDR_SIZE));
+        assert_eq!(image.phdr, image.bias + EHDR_SIZE);
         let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
         let protection = |address| {
             maps.lines()
@@ -119,6 +121,61 @@ fn unordered_shared_page_does_not_wipe_higher_segment() {
 }
 
 #[test]
+fn padzero_clamps_to_higher_segment_overlapping_bss() {
+    let page = fspy_nostd::param::page_size();
+    let mut bytes = std::vec![0xa5; 3 * page];
+    write_header(&mut bytes, 3, 0x200);
+    load(&mut bytes, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    // Higher vaddr first at page + 0x300; lower vaddr second at page + 0x100
+    // with filesz = 0x100 (file_end = page + 0x200) and memsz = 0x300
+    // (end = page + 0x400 > other_start).
+    load(&mut bytes, 1, page + 0x300, 0x100, 0x100, abi::PF_R | abi::PF_W, page);
+    load(&mut bytes, 2, page + 0x100, 0x100, 0x300, abi::PF_R | abi::PF_W, page);
+    bytes[page + 0x300] = 0x11;
+    bytes[page + 0x100] = 0x22;
+    let image = map_bytes(&bytes);
+    // SAFETY: both segments on the shared page are mapped readable.
+    unsafe {
+        assert_eq!(ptr::with_exposed_provenance::<u8>(image.bias + page + 0x100).read(), 0x22);
+        let bss = core::slice::from_raw_parts(
+            ptr::with_exposed_provenance::<u8>(image.bias + page + 0x200),
+            0x100,
+        );
+        assert!(bss.iter().all(|byte| *byte == 0));
+        assert_eq!(
+            ptr::with_exposed_provenance::<u8>(image.bias + page + 0x300).read(),
+            0x11,
+            "padzero must clamp at other_start >= file_end even when other_start < end"
+        );
+    }
+}
+
+#[test]
+fn at_phdr_requires_full_program_header_table_within_p_filesz() {
+    let page = fspy_nostd::param::page_size();
+    let table_end = EHDR_SIZE + 2 * PHDR_SIZE;
+
+    // p_filesz covers e_phoff (headers.start) but ends inside the second Phdr.
+    let mut partial = std::vec![0; 2 * page];
+    write_header(&mut partial, 2, 0x200);
+    load(&mut partial, 0, 0, table_end - 1, page, abi::PF_R | abi::PF_X, page);
+    load(&mut partial, 1, page, 0x40, 0x40, abi::PF_R | abi::PF_W, page);
+    let partial_image = map_bytes(&partial);
+    assert_eq!(
+        partial_image.phdr, partial_image.bias,
+        "AT_PHDR must not point to a program-header table partially past p_filesz"
+    );
+
+    // Exact boundary: p_filesz == headers.end maps the entire table.
+    let mut exact = std::vec![0; 2 * page];
+    write_header(&mut exact, 2, 0x200);
+    load(&mut exact, 0, 0, table_end, page, abi::PF_R | abi::PF_X, page);
+    load(&mut exact, 1, page, 0x40, 0x40, abi::PF_R | abi::PF_W, page);
+    let exact_image = map_bytes(&exact);
+    assert_eq!(exact_image.phdr, exact_image.bias + EHDR_SIZE);
+}
+
+#[test]
 fn preserves_previous_load_when_bss_only_starts_mid_page() {
     let page = fspy_nostd::param::page_size();
     for memory_size in [0x180, page + 0x180] {
@@ -192,40 +249,279 @@ fn accepts_page_congruent_segment_incongruent_with_large_p_align() {
 }
 
 #[test]
-#[should_panic(expected = "overlapping ELF segments")]
-fn rejects_overlapping_load_segments() {
-    let page = fspy_nostd::param::page_size();
-    let mut bytes = std::vec![0xa5; 2 * page];
-    write_header(&mut bytes, 2, 0x80);
-    load(&mut bytes, 0, 0, 0x200, 0x200, abi::PF_R | abi::PF_X, page);
-    load(&mut bytes, 1, 0x100, 0x200, 0x200, abi::PF_R | abi::PF_W, page);
-    map_bytes(&bytes);
-}
-
-#[test]
 fn reports_no_interpreter_when_pt_interp_is_absent() {
     let page = fspy_nostd::param::page_size();
-    let file = File::new(open_bytes(&fixture(page, 0x180, abi::PF_R | abi::PF_W)));
-    assert!(file.interpreter().is_none());
+    let fd = open_bytes(&fixture(page, 0x180, abi::PF_R | abi::PF_W));
+    let file = File::open(fd.as_fd()).unwrap();
+    assert!(file.interpreter().unwrap().is_none());
 }
 
 #[test]
 fn accepts_pt_interp_padded_with_extra_nuls() {
-    let file = File::new(open_bytes(&interp_image(b"ld.so\0\0\0")));
-    let path = file.interpreter().unwrap();
+    let fd = open_bytes(&interp_image(b"ld.so\0\0\0"));
+    let file = File::open(fd.as_fd()).unwrap();
+    let path = file.interpreter().unwrap().unwrap();
     assert_eq!(path.as_units(), b"ld.so");
 }
 
 #[test]
-#[should_panic(expected = "unterminated PT_INTERP")]
-fn rejects_unterminated_pt_interp() {
-    let _ = File::new(open_bytes(&interp_image(b"ld.so"))).interpreter();
+fn rejects_unterminated_and_empty_pt_interp() {
+    let fd_unterm = open_bytes(&interp_image(b"ld.so"));
+    assert_eq!(File::open(fd_unterm.as_fd()).unwrap().interpreter().err(), Some(Error::NOEXEC));
+
+    let fd_empty = open_bytes(&interp_image(b"\0\0\0"));
+    assert_eq!(File::open(fd_empty.as_fd()).unwrap().interpreter().err(), Some(Error::NOEXEC));
 }
 
 #[test]
-#[should_panic(expected = "empty PT_INTERP path")]
-fn rejects_empty_pt_interp() {
-    let _ = File::new(open_bytes(&interp_image(b"\0\0\0"))).interpreter();
+fn validate_exec_checks_valid_and_invalid_images_without_closing_fd() {
+    let page = fspy_nostd::param::page_size();
+
+    // Valid ET_DYN (PIE) image.
+    let valid_pie = open_bytes(&fixture(page, 0x180, abi::PF_R | abi::PF_W));
+    assert_eq!(crate::validate_exec(valid_pie.as_fd()), Ok(()));
+    // Verify `fd` was NOT closed by `validate_exec`.
+    assert!(fs::fstat(valid_pie.as_fd()).is_ok());
+
+    // Valid ET_EXEC image at a non-zero fixed load address.
+    let exec_base = 0x40_0000_u64;
+    let mut exec_bytes = std::vec![0xa5; 2 * page];
+    write_header(&mut exec_bytes, 1, exec_base + 0x200);
+    exec_bytes[16..18].copy_from_slice(&abi::ET_EXEC.to_le_bytes());
+    Phdr {
+        p_type: abi::PT_LOAD,
+        p_flags: abi::PF_R | abi::PF_X,
+        p_offset: 0,
+        p_vaddr: exec_base,
+        p_filesz: u64::try_from(page + 0x100).unwrap(),
+        p_memsz: u64::try_from(page + 0x100).unwrap(),
+        p_align: u64::try_from(page).unwrap(),
+    }
+    .write_to(&mut exec_bytes, 0);
+    let valid_exec = open_bytes(&exec_bytes);
+    assert_eq!(crate::validate_exec(valid_exec.as_fd()), Ok(()));
+    assert!(fs::fstat(valid_exec.as_fd()).is_ok());
+
+    // Zero-address ET_EXEC image -> NOEXEC (cannot reserve address 0).
+    let mut zero_exec_bytes = fixture(page, 0x180, abi::PF_R | abi::PF_W);
+    zero_exec_bytes[16..18].copy_from_slice(&abi::ET_EXEC.to_le_bytes());
+    let zero_exec = open_bytes(&zero_exec_bytes);
+    assert_eq!(crate::validate_exec(zero_exec.as_fd()), Err(Error::NOEXEC));
+
+    // Non-ELF -> NOEXEC, fd stays open.
+    let non_elf = open_bytes(b"#!/bin/sh\necho hi\n");
+    assert_eq!(crate::validate_exec(non_elf.as_fd()), Err(Error::NOEXEC));
+    assert!(fs::fstat(non_elf.as_fd()).is_ok());
+
+    // Truncated ELF header -> NOEXEC.
+    let truncated = open_bytes(&exec_bytes[..32]);
+    assert_eq!(crate::validate_exec(truncated.as_fd()), Err(Error::NOEXEC));
+
+    // Wrong architecture -> NOEXEC.
+    let mut bad_arch = fixture(page, 0x180, abi::PF_R | abi::PF_W);
+    bad_arch[18..20].copy_from_slice(&0_u16.to_le_bytes());
+    let bad_arch_fd = open_bytes(&bad_arch);
+    assert_eq!(crate::validate_exec(bad_arch_fd.as_fd()), Err(Error::NOEXEC));
+
+    // Executable PT_GNU_STACK is accepted, as Linux does, and recorded.
+    let mut exec_stack = std::vec![0; 2 * page];
+    write_header(&mut exec_stack, 2, 0x200);
+    load(&mut exec_stack, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    Phdr {
+        p_type: abi::PT_GNU_STACK,
+        p_flags: abi::PF_R | abi::PF_W | abi::PF_X,
+        p_offset: 0,
+        p_vaddr: 0,
+        p_filesz: 0,
+        p_memsz: 0,
+        p_align: 16,
+    }
+    .write_to(&mut exec_stack, 1);
+    let exec_stack_fd = open_bytes(&exec_stack);
+    assert_eq!(crate::validate_exec(exec_stack_fd.as_fd()), Ok(()));
+    let exec_stack_file = File::open(exec_stack_fd.as_fd()).unwrap();
+    assert!(exec_stack_file.validate_segments(page).unwrap().exec_stack);
+
+    // Missing PT_INTERP -> NOENT.
+    let missing_interp_path = b"/nonexistent-fspy-interp-for-test\0";
+    let mut missing_interp = std::vec![0; 2 * page];
+    write_header(&mut missing_interp, 2, 0x200);
+    load(&mut missing_interp, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    let path_off = page - missing_interp_path.len();
+    missing_interp[path_off..page].copy_from_slice(missing_interp_path);
+    Phdr {
+        p_type: abi::PT_INTERP,
+        p_flags: abi::PF_R,
+        p_offset: u64::try_from(path_off).unwrap(),
+        p_vaddr: u64::try_from(path_off).unwrap(),
+        p_filesz: u64::try_from(missing_interp_path.len()).unwrap(),
+        p_memsz: u64::try_from(missing_interp_path.len()).unwrap(),
+        p_align: 1,
+    }
+    .write_to(&mut missing_interp, 1);
+    let missing_interp_fd = open_bytes(&missing_interp);
+    assert_eq!(crate::validate_exec(missing_interp_fd.as_fd()), Err(Error::NOENT));
+    assert!(fs::fstat(missing_interp_fd.as_fd()).is_ok());
+
+    // Valid PT_INTERP pointing to a valid ET_DYN or (as Linux allows) ET_EXEC
+    // interpreter succeeds.
+    let dyn_interp_file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(dyn_interp_file.path(), fixture(page, 0x180, abi::PF_R | abi::PF_W)).unwrap();
+    let dyn_interp_path =
+        std::ffi::CString::new(dyn_interp_file.path().as_os_str().as_encoded_bytes()).unwrap();
+    let mut with_valid_interp = std::vec![0; 2 * page];
+    write_header(&mut with_valid_interp, 2, 0x200);
+    load(&mut with_valid_interp, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    let pbytes = dyn_interp_path.as_bytes_with_nul();
+    let p_off = page - pbytes.len();
+    with_valid_interp[p_off..page].copy_from_slice(pbytes);
+    Phdr {
+        p_type: abi::PT_INTERP,
+        p_flags: abi::PF_R,
+        p_offset: u64::try_from(p_off).unwrap(),
+        p_vaddr: u64::try_from(p_off).unwrap(),
+        p_filesz: u64::try_from(pbytes.len()).unwrap(),
+        p_memsz: u64::try_from(pbytes.len()).unwrap(),
+        p_align: 1,
+    }
+    .write_to(&mut with_valid_interp, 1);
+    let valid_dyn_fd = open_bytes(&with_valid_interp);
+    assert_eq!(crate::validate_exec(valid_dyn_fd.as_fd()), Ok(()));
+
+    std::fs::write(dyn_interp_file.path(), &exec_bytes).unwrap();
+    assert_eq!(crate::validate_exec(valid_dyn_fd.as_fd()), Ok(()));
+}
+
+#[test]
+fn maps_et_dyn_with_high_nonzero_p_vaddr_without_underflow() {
+    let page = fspy_nostd::param::page_size();
+    let high_vaddr = 0x7000_0000_0000_u64;
+    let mut bytes = std::vec![0x3c; 2 * page];
+    write_header(&mut bytes, 1, high_vaddr + 0x200);
+    Phdr {
+        p_type: abi::PT_LOAD,
+        p_flags: abi::PF_R | abi::PF_X,
+        p_offset: 0,
+        p_vaddr: high_vaddr,
+        p_filesz: u64::try_from(page + 0x100).unwrap(),
+        p_memsz: u64::try_from(page + 0x100).unwrap(),
+        p_align: u64::try_from(page).unwrap(),
+    }
+    .write_to(&mut bytes, 0);
+
+    let file = open_bytes(&bytes);
+    let parsed = File::open(file.as_fd()).unwrap();
+    let layout = parsed.validate_segments(page).unwrap();
+    let image = parsed.map(page, &layout);
+    let mapped_base = image.bias.wrapping_add(layout.low);
+    assert_eq!(image.entry, mapped_base + 0x200);
+    assert_eq!(image.phdr, mapped_base + EHDR_SIZE);
+}
+
+#[test]
+fn accepts_non_ev_current_ident_and_header_versions() {
+    let page = fspy_nostd::param::page_size();
+    for (ei_version, e_version) in [(0_u8, 0_u32), (0, 1), (1, 0), (2, 2), (2, 0)] {
+        let mut bytes = fixture(page, 0x180, abi::PF_R | abi::PF_W);
+        bytes[abi::EI_VERSION] = ei_version;
+        bytes[20..24].copy_from_slice(&e_version.to_le_bytes());
+
+        let fd = open_bytes(&bytes);
+        let parsed = File::open(fd.as_fd()).expect("non-EV_CURRENT ELF should open");
+        let _layout = parsed.validate_segments(page).expect("non-EV_CURRENT ELF should validate");
+        assert_eq!(crate::validate_exec(fd.as_fd()), Ok(()));
+    }
+
+    // Magic, ELF64 class, and little-endian data checks must still reject invalid images.
+    for (offset, bad_byte) in
+        [(0_usize, 0x00_u8), (abi::EI_CLASS, abi::ELFCLASS32), (abi::EI_DATA, abi::ELFDATA2MSB)]
+    {
+        let mut bytes = fixture(page, 0x180, abi::PF_R | abi::PF_W);
+        bytes[offset] = bad_byte;
+        let fd = open_bytes(&bytes);
+        assert_eq!(File::open(fd.as_fd()).err(), Some(Error::NOEXEC));
+    }
+}
+
+#[test]
+fn validate_exec_rejects_et_exec_overlapping_launcher_region_with_eexist() {
+    let page = fspy_nostd::param::page_size();
+    let eexist = Error::from_raw_os_error(linux_raw_sys::errno::EEXIST.cast_signed());
+    let (region_base, region_limit) = crate::LAUNCHER_REGION;
+
+    let make_et_exec = |vaddr: usize, memsz: usize| {
+        let mut bytes = std::vec![0xa5; 2 * page];
+        let vaddr_u64 = u64::try_from(vaddr).unwrap();
+        write_header(&mut bytes, 1, vaddr_u64 + 0x200);
+        bytes[16..18].copy_from_slice(&abi::ET_EXEC.to_le_bytes());
+        Phdr {
+            p_type: abi::PT_LOAD,
+            p_flags: abi::PF_R | abi::PF_X,
+            p_offset: 0,
+            p_vaddr: vaddr_u64,
+            p_filesz: u64::try_from(page).unwrap(),
+            p_memsz: u64::try_from(memsz).unwrap(),
+            p_align: u64::try_from(page).unwrap(),
+        }
+        .write_to(&mut bytes, 0);
+        bytes
+    };
+
+    // 1. Segment strictly inside LAUNCHER_REGION -> EEXIST.
+    let inside = open_bytes(&make_et_exec(region_base + 4 * page, 2 * page));
+    assert_eq!(crate::validate_exec(inside.as_fd()), Err(eexist));
+
+    // 2a. Segment straddling the lower boundary of LAUNCHER_REGION -> EEXIST.
+    let straddle_low = open_bytes(&make_et_exec(region_base - page, 2 * page));
+    assert_eq!(crate::validate_exec(straddle_low.as_fd()), Err(eexist));
+
+    // 2b. Segment straddling the upper boundary of LAUNCHER_REGION -> EEXIST.
+    let straddle_high = open_bytes(&make_et_exec(region_limit - page, 2 * page));
+    assert_eq!(crate::validate_exec(straddle_high.as_fd()), Err(eexist));
+
+    // 3. Segment fully containing LAUNCHER_REGION -> EEXIST.
+    let containing =
+        open_bytes(&make_et_exec(region_base - page, (region_limit - region_base) + 2 * page));
+    assert_eq!(crate::validate_exec(containing.as_fd()), Err(eexist));
+
+    // 4. PIE executable with a fixed-address (ET_EXEC) PT_INTERP overlapping
+    //    LAUNCHER_REGION -> EEXIST.
+    let interp_file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(interp_file.path(), make_et_exec(region_base + 2 * page, page)).unwrap();
+    let interp_path =
+        std::ffi::CString::new(interp_file.path().as_os_str().as_encoded_bytes()).unwrap();
+    let mut pie_with_bad_interp = std::vec![0; 2 * page];
+    write_header(&mut pie_with_bad_interp, 2, 0x200);
+    load(&mut pie_with_bad_interp, 0, 0, page, page, abi::PF_R | abi::PF_X, page);
+    let pbytes = interp_path.as_bytes_with_nul();
+    let p_off = page - pbytes.len();
+    pie_with_bad_interp[p_off..page].copy_from_slice(pbytes);
+    Phdr {
+        p_type: abi::PT_INTERP,
+        p_flags: abi::PF_R,
+        p_offset: u64::try_from(p_off).unwrap(),
+        p_vaddr: u64::try_from(p_off).unwrap(),
+        p_filesz: u64::try_from(pbytes.len()).unwrap(),
+        p_memsz: u64::try_from(pbytes.len()).unwrap(),
+        p_align: 1,
+    }
+    .write_to(&mut pie_with_bad_interp, 1);
+    let pie_fd = open_bytes(&pie_with_bad_interp);
+    assert_eq!(crate::validate_exec(pie_fd.as_fd()), Err(eexist));
+
+    // 5. Normal ET_EXEC outside LAUNCHER_REGION (and adjacent non-overlapping
+    //    boundaries) -> Ok(()).
+    for (vaddr, memsz) in
+        [(0x40_0000_usize, 2 * page), (region_base - 2 * page, 2 * page), (region_limit, 2 * page)]
+    {
+        let ok_fd = open_bytes(&make_et_exec(vaddr, memsz));
+        assert_eq!(
+            crate::validate_exec(ok_fd.as_fd()),
+            Ok(()),
+            "non-overlapping ET_EXEC at {vaddr:#x}..{:#x} should validate",
+            vaddr + memsz
+        );
+    }
 }
 
 fn fixture(page: usize, memory_size: usize, flags: u32) -> std::vec::Vec<u8> {
@@ -318,7 +614,11 @@ fn load(
 }
 
 fn map_bytes(bytes: &[u8]) -> Image {
-    File::new(open_bytes(bytes)).map(fspy_nostd::param::page_size())
+    let page = fspy_nostd::param::page_size();
+    let fd = open_bytes(bytes);
+    let file = File::open(fd.as_fd()).unwrap();
+    let layout = file.validate_segments(page).unwrap();
+    file.map(page, &layout)
 }
 
 fn open_bytes(bytes: &[u8]) -> OwnedFd {

@@ -18,8 +18,9 @@ the kernel will not, once it never sees the target.
 
 ## Support
 
-Native little-endian ELF64 on x86-64 and AArch64. `PT_GNU_STACK` must be
-non-executable. `ET_EXEC` that overlaps any retained mapping is rejected.
+Native little-endian ELF64 on x86-64 and AArch64. An executable `PT_GNU_STACK`
+maps the stack executable, as Linux does. `ET_EXEC` that overlaps any retained
+mapping is rejected.
 
 |           | `PT_INTERP`                                       | no `PT_INTERP`                                     |
 | --------- | ------------------------------------------------- | -------------------------------------------------- |

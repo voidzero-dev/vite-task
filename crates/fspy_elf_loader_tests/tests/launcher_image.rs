@@ -15,8 +15,8 @@ fn launcher_uses_high_fixed_addresses_without_runtime_relocations() {
     // Keep the entire image inside a sanitizer application region: x86-64
     // C/C++ TSan's 85–90 TiB region, or AArch64 39-bit TSan's low 20 GiB.
     let (base, limit) = match image.ehdr.e_machine {
-        abi::EM_X86_64 => (0x5500_0000_0000, 0x5a00_0000_0000),
-        abi::EM_AARCH64 => (0x0002_0000_0000, 0x0005_0000_0000),
+        abi::EM_X86_64 => fspy_elf_loader::LAUNCHER_REGION_X86_64,
+        abi::EM_AARCH64 => fspy_elf_loader::LAUNCHER_REGION_AARCH64,
         machine => panic!("unsupported launcher machine: {machine}"),
     };
     let segments: Vec<_> = image.segments().unwrap().iter().collect();
