@@ -772,41 +772,6 @@ async fn posix_spawn_setsigdef_resets_child_sigsys_without_mutating_parent() -> 
 }
 
 #[test(tokio::test)]
-async fn nested_fspy_falls_back_cleanly_while_outer_tracks_subtree() -> anyhow::Result<()> {
-    let probe_path = Path::new("/fspy-nested-inner-child-probe");
-    let cmd = vt_subprocess_test::command_for_fn!(
-        (test_bin_path().to_str().unwrap().to_owned(), probe_path.to_str().unwrap().to_owned()),
-        |(static_bin, probe_path): (String, String)| {
-            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-            rt.block_on(async move {
-                let mut inner_cmd = fspy::Command::new(&static_bin);
-                inner_cmd.args(["open_read", &probe_path]);
-                let termination = inner_cmd
-                    .spawn(tokio_util::sync::CancellationToken::new())
-                    .await
-                    .expect("nested fspy spawn must succeed via untracked fallback")
-                    .wait_handle
-                    .await
-                    .expect("nested fspy child wait failed");
-                assert!(
-                    termination.status.success(),
-                    "nested child exited unsuccessfully: {:?}",
-                    termination.status
-                );
-                assert!(
-                    termination.path_accesses.is_err(),
-                    "nested fspy must report TrackingIncomplete while delegating to outer tracker"
-                );
-            });
-        }
-    );
-
-    let accesses = test_utils::spawn_command(cmd).await?;
-    assert_contains(&accesses, probe_path, fspy::PathAccess::Read);
-    Ok(())
-}
-
-#[test(tokio::test)]
 async fn execve_of_et_exec_overlapping_launcher_region_returns_eexist_cleanly() -> anyhow::Result<()>
 {
     #[cfg(target_arch = "x86_64")]

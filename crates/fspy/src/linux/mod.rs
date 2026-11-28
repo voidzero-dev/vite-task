@@ -10,11 +10,10 @@ use fspy_shared::ipc::{IpcStr, PathAccess, channel::channel};
 use fspy_shared_unix::linux::{BOOTSTRAP_ENV_NAME, Bootstrap, Target, encode_bootstrap};
 use futures_util::FutureExt as _;
 use linux_raw_sys::{
-    prctl::{PR_GET_SECCOMP, PR_SET_NO_NEW_PRIVS},
+    prctl::PR_SET_NO_NEW_PRIVS,
     ptrace::{
-        BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_RET, BPF_W, SECCOMP_MODE_FILTER,
-        SECCOMP_RET_ALLOW, SECCOMP_RET_TRAP, SECCOMP_SET_MODE_FILTER, seccomp_data, sock_filter,
-        sock_fprog,
+        BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_RET, BPF_W, SECCOMP_RET_ALLOW,
+        SECCOMP_RET_TRAP, SECCOMP_SET_MODE_FILTER, seccomp_data, sock_filter, sock_fprog,
     },
 };
 use syscalls::Sysno;
@@ -48,12 +47,6 @@ impl SpyImpl {
         reason = "matches cross-platform SpyImpl::init() -> io::Result<Self> signature"
     )]
     pub fn init() -> io::Result<Self> {
-        if is_already_tracked_by_fspy() {
-            tracing::debug!(
-                "nested inside an active fspy tracker; delegating tracking to outer tracker"
-            );
-            return Ok(Self { preload_path: RwLock::new(None), seccomp_available: false });
-        }
         let seccomp_available = probe_seccomp_available();
         let preload_path = if seccomp_available {
             let materialized = materialize_preload();
@@ -280,81 +273,6 @@ fn materialize_preload() -> Option<Box<IpcStr>> {
         .at_user_temp_dir("vp_run")
         .ok()
         .map(|p| p.as_path().into())
-}
-
-/// Detects whether the current process is already running inside an outer
-/// `fspy` Linux launcher (`fspy_preload_linux`).
-///
-/// Because `fspy_preload_linux` is linked at a fixed address in
-/// [`fspy_elf_loader::LAUNCHER_REGION`], spawning another `fspy_preload_linux`
-/// directly from inside a tracked process would collide with the outer
-/// launcher's resident mappings (`EEXIST`). Falling back to untracked
-/// execution lets the inner spawn succeed while the outer tracker records the
-/// entire nested subtree.
-fn is_already_tracked_by_fspy() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    const NATIVE_MACHINE: u16 = 62; // EM_X86_64
-    #[cfg(target_arch = "aarch64")]
-    const NATIVE_MACHINE: u16 = 183; // EM_AARCH64
-
-    // 1. Confirm seccomp filter mode (`SECCOMP_MODE_FILTER == 2`) is active.
-    // SAFETY: `PR_GET_SECCOMP` takes no pointer arguments and only queries
-    // the calling thread's seccomp mode.
-    let seccomp_mode = unsafe { syscalls::syscall!(Sysno::prctl, PR_GET_SECCOMP, 0, 0, 0, 0) };
-    if seccomp_mode != Ok(SECCOMP_MODE_FILTER as usize) {
-        return false;
-    }
-
-    // 2. Check whether `LAUNCHER_REGION.0` is mapped (read-only; `ENOMEM`
-    //    means unmapped).
-    let region_base = fspy_elf_loader::LAUNCHER_REGION.0;
-    // SAFETY: `_SC_PAGESIZE` is a standard `sysconf` query.
-    let page_size = usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) })
-        .ok()
-        .filter(|&n| n > 0)
-        .unwrap_or(4096);
-    let mut vec: u8 = 0;
-    // SAFETY: `mincore` writes one residency byte per page (`1` page -> `vec`).
-    if unsafe {
-        libc::mincore(core::ptr::with_exposed_provenance_mut(region_base), page_size, &raw mut vec)
-    } != 0
-    {
-        return false;
-    }
-
-    // 3. Safely read the first 64 bytes at `LAUNCHER_REGION.0` via
-    //    `process_vm_readv` (returns `EFAULT` without crashing if unreadable or
-    //    `PROT_NONE`) and confirm it is a native little-endian ELF64 `ET_EXEC`
-    //    header matching `fspy_preload_linux`.
-    let mut hdr = [0_u8; 64];
-    let local = libc::iovec { iov_base: hdr.as_mut_ptr().cast(), iov_len: hdr.len() };
-    let remote = libc::iovec {
-        iov_base: core::ptr::with_exposed_provenance_mut(region_base),
-        iov_len: hdr.len(),
-    };
-    // SAFETY: `local` points to our writable 64-byte buffer and `remote` is
-    // validated by the kernel in `process_vm_readv`.
-    let n = unsafe {
-        libc::process_vm_readv(libc::getpid(), &raw const local, 1, &raw const remote, 1, 0)
-    };
-    if n < 0 {
-        // Hardened container seccomp profiles may deny `process_vm_readv`
-        // (`EPERM`/`ENOSYS`). Since `PR_GET_SECCOMP == SECCOMP_MODE_FILTER` and
-        // `mincore` already confirmed `LAUNCHER_REGION.0` is mapped, fail safe
-        // as nested so inner `fspy` falls back to untracked instead of failing
-        // with `EEXIST`.
-        let err = io::Error::last_os_error().raw_os_error();
-        return matches!(err, Some(libc::EPERM | libc::ENOSYS));
-    }
-    if n != hdr.len().cast_signed() {
-        return false;
-    }
-
-    hdr[0..4] == *b"\x7fELF"
-        && hdr[4] == 2 // ELFCLASS64
-        && hdr[5] == 1 // ELFDATA2LSB
-        && u16::from_le_bytes([hdr[16], hdr[17]]) == 2 // ET_EXEC
-        && u16::from_le_bytes([hdr[18], hdr[19]]) == NATIVE_MACHINE
 }
 
 /// Probes once on a dedicated short-lived OS thread whether
