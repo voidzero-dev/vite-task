@@ -1,4 +1,4 @@
-use std::io::{Write, stdout};
+use std::io::{BufWriter, Write, stdout};
 
 use crossterm::{
     cursor::{self, MoveToColumn},
@@ -256,24 +256,27 @@ fn render_interactive_items(
     header: Option<&str>,
     interactive: &InteractiveRender<'_>,
 ) -> anyhow::Result<usize> {
+    // Erasing after a full-width row would erase its last cell while the terminal
+    // cursor is waiting to wrap. Clear each row before writing its contents.
+    const CLEAR_ROW: &str = "\x1b[K";
     const LINE_ENDING: &str = "\r\n";
 
     let mut lines = 0usize;
 
     // Header (e.g. error message)
     if let Some(header) = header {
-        write!(writer, "{header}{LINE_ENDING}")?;
+        write!(writer, "{CLEAR_ROW}{header}{LINE_ENDING}")?;
         lines += 1;
     }
 
     // Print " " separator before query only when query is non-empty,
     // to avoid a trailing space that Windows ConPTY would strip.
     if interactive.query.is_empty() {
-        write!(writer, "{}{LINE_ENDING}", interactive.prompt)?;
+        write!(writer, "{CLEAR_ROW}{}{LINE_ENDING}", interactive.prompt)?;
     } else {
-        write!(writer, "{} {}{LINE_ENDING}", interactive.prompt, interactive.query)?;
+        write!(writer, "{CLEAR_ROW}{} {}{LINE_ENDING}", interactive.prompt, interactive.query)?;
     }
-    write!(writer, "{LINE_ENDING}")?;
+    write!(writer, "{CLEAR_ROW}{LINE_ENDING}")?;
     lines += 2;
 
     // Single pre-pass: compute has_groups, max_name_width, has_items, and
@@ -310,7 +313,7 @@ fn render_interactive_items(
             DisplayRow::Header(group_name) => {
                 write!(
                     writer,
-                    "    {dim}{name}{reset}{LINE_ENDING}",
+                    "{CLEAR_ROW}    {dim}{name}{reset}{LINE_ENDING}",
                     dim = SetAttribute(Attribute::Dim),
                     name = group_name,
                     reset = SetAttribute(Attribute::Reset),
@@ -348,7 +351,7 @@ fn render_interactive_items(
                     let bold = SetAttribute(Attribute::Bold);
                     write!(
                         writer,
-                        "{dark_grey}{prefix}{reset}{blue}{bold}{name}{reset}{dark_grey}{:>pad$} {desc}{reset}{LINE_ENDING}",
+                        "{CLEAR_ROW}{dark_grey}{prefix}{reset}{blue}{bold}{name}{reset}{dark_grey}{:>pad$} {desc}{reset}{LINE_ENDING}",
                         "",
                         pad = name_padding,
                         desc = display_desc,
@@ -356,7 +359,7 @@ fn render_interactive_items(
                 } else {
                     write!(
                         writer,
-                        "{prefix}{name}{dark_grey}{:>pad$} {desc}{reset}{LINE_ENDING}",
+                        "{CLEAR_ROW}{prefix}{name}{dark_grey}{:>pad$} {desc}{reset}{LINE_ENDING}",
                         "",
                         pad = name_padding,
                         desc = display_desc,
@@ -369,17 +372,19 @@ fn render_interactive_items(
 
     // Footer: hidden items count
     if interactive.hidden_count > 0 {
-        write!(writer, "  (\u{2026}{} more){LINE_ENDING}", interactive.hidden_count)?;
+        write!(writer, "{CLEAR_ROW}  (\u{2026}{} more){LINE_ENDING}", interactive.hidden_count)?;
         lines += 1;
     }
 
     // Empty state
     if !has_items {
-        write!(writer, "  No matching tasks. Press Escape to clear search.{LINE_ENDING}")?;
+        write!(
+            writer,
+            "{CLEAR_ROW}  No matching tasks. Press Escape to clear search.{LINE_ENDING}"
+        )?;
         lines += 1;
     }
 
-    writer.flush()?;
     Ok(lines)
 }
 
@@ -416,23 +421,20 @@ fn render(
     header: Option<&str>,
     prompt: &str,
 ) -> anyhow::Result<()> {
-    // Move cursor up to clear previous render
+    // Buffer the update while writing to the terminal. Flushing a clear
+    // before the replacement content can expose an empty intermediate frame.
+    let mut frame = BufWriter::new(stdout);
     if state.rendered_lines > 0 {
         let move_up = u16::try_from(state.rendered_lines)
             .expect("rendered_lines fits in u16: at most header + page_size + footer lines");
-        crossterm::execute!(
-            stdout,
-            cursor::MoveUp(move_up),
-            MoveToColumn(0),
-            Clear(ClearType::FromCursorDown),
-        )?;
+        crossterm::queue!(frame, cursor::MoveUp(move_up), MoveToColumn(0),)?;
     }
 
     // Query terminal width on each render to handle resize
     let max_line_width = terminal::size().map_or(80, |(w, _)| w as usize);
 
     let lines = render_interactive_items(
-        stdout,
+        &mut frame,
         state.items,
         &state.display_rows,
         header,
@@ -446,6 +448,10 @@ fn render(
         },
     )?;
 
+    // Remove rows left behind when filtering makes the list shorter, only
+    // after the new content has replaced the previous frame.
+    crossterm::queue!(frame, Clear(ClearType::FromCursorDown))?;
+    frame.flush()?;
     state.rendered_lines = lines;
     Ok(())
 }
@@ -880,5 +886,25 @@ mod tests {
         assert!(matches!(&rows[4], DisplayRow::Item { item_index: 1 }));
         assert!(matches!(&rows[5], DisplayRow::Header(h) if h.as_str() == "root (workspace root)"));
         assert!(matches!(&rows[6], DisplayRow::Item { item_index: 4 }));
+    }
+
+    #[test]
+    fn navigation_overwrites_the_previous_frame_before_clearing() {
+        let items = make_items(&[("build", "vp build"), ("test", "vp test")]);
+        let mut state = State::new(&items, None, 12);
+        render(&mut Vec::new(), &mut state, None, TASK_PROMPT).unwrap();
+        state.move_down();
+
+        let mut writer = Vec::new();
+        render(&mut writer, &mut state, None, TASK_PROMPT).unwrap();
+
+        let output = std::str::from_utf8(&writer).unwrap();
+        let before_clear = output.strip_suffix("\x1b[J").expect("clear stale rows after redraw");
+        assert!(!before_clear.contains("\x1b[J"));
+        for row in before_clear.split_terminator("\r\n") {
+            assert!(row.contains("\x1b[K"));
+            assert!(!row.ends_with("\x1b[K") || row == "\x1b[K");
+        }
+        assert!(strip_ansi(before_clear).contains("  \u{203a} test"));
     }
 }
