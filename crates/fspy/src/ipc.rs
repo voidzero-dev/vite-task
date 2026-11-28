@@ -4,7 +4,7 @@ use fspy_shared::ipc::{
     channel::{FrameReader, Receiver},
 };
 
-use crate::error::TrackingIncomplete;
+use crate::error::UntrackedReason;
 
 /// Shared memory for one tracked run's file-access records.
 ///
@@ -39,7 +39,7 @@ pub struct ChannelAccesses {
 }
 
 impl TryFrom<Receiver<Global>> for ChannelAccesses {
-    type Error = TrackingIncomplete;
+    type Error = UntrackedReason;
 
     /// Closes the channel and takes every record it collected.
     ///
@@ -50,11 +50,11 @@ impl TryFrom<Receiver<Global>> for ChannelAccesses {
     ///
     /// # Errors
     ///
-    /// [`TrackingIncomplete`] when a tracked process could not record
+    /// [`UntrackedReason::Incomplete`] when a tracked process could not record
     /// something it went on to do. What did arrive is then a subset of
     /// what the run really touched, so none of it is handed back.
-    fn try_from(receiver: Receiver<Global>) -> Result<Self, TrackingIncomplete> {
-        Ok(Self { frames: receiver.close().map_err(|_| TrackingIncomplete)? })
+    fn try_from(receiver: Receiver<Global>) -> Result<Self, UntrackedReason> {
+        Ok(Self { frames: receiver.close().map_err(|_| UntrackedReason::Incomplete)? })
     }
 }
 

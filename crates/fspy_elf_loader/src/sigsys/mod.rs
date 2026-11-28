@@ -622,6 +622,10 @@ unsafe fn dispatch_phase1(
             // SAFETY: `call` holds the live (and rewritten) trapped arguments.
             match unsafe { (interceptor.handle)(&call) } {
                 Ok(SyscallAction::Replay) => {}
+                Ok(SyscallAction::Return(rc)) => {
+                    finish_in_phase1(ucontext, packet, rc);
+                    return;
+                }
                 Ok(SyscallAction::Execve { prog, argv, envp, cleanup }) => {
                     packet.inv = SyscallInvocation {
                         nr: Sysno::execve as usize,

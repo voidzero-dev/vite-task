@@ -27,9 +27,12 @@ mod runtime {
         fs::{fd_path, resolve_path_at},
         page_bump, pooled_bump,
     };
-    use fspy_shared::ipc::{
-        AccessMode, IpcPath, IpcStr,
-        channel::{ChannelConf, Sender},
+    use fspy_shared::{
+        ipc::{
+            AccessMode, IpcPath, IpcStr,
+            channel::{ChannelConf, Sender},
+        },
+        probe::NESTED_PROBE_PATH_UNIX_BYTES,
     };
     use fspy_shared_unix::{
         Exec, RawExec,
@@ -39,8 +42,8 @@ mod runtime {
         },
     };
     use linux_raw_sys::general::{
-        AT_EMPTY_PATH, O_ACCMODE, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, RENAME_EXCHANGE,
-        SIG_SETMASK, open_how,
+        AT_EMPTY_PATH, AT_FDCWD, O_ACCMODE, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY,
+        RENAME_EXCHANGE, SIG_SETMASK, open_how,
     };
     use syscalls::Sysno;
 
@@ -519,6 +522,17 @@ mod runtime {
         }
     }
 
+    fn is_nested_probe(call: &Syscall) -> bool {
+        if arg_i32(call.args[0]) != AT_FDCWD || call.args[2] != 0 {
+            return false;
+        }
+        // SAFETY: `call.args[1]` is the trapped `faccessat` pathname pointer.
+        let Ok(c_path) = (unsafe { fspy_elf_loader::user_cstr(call.args[1]) }) else {
+            return false;
+        };
+        c_path.count().as_units() == NESTED_PROBE_PATH_UNIX_BYTES
+    }
+
     /// `SIGSYS` interceptor callback invoked by `fspy_elf_loader`.
     ///
     /// # Safety
@@ -531,6 +545,13 @@ mod runtime {
         let borrow_dirfd = |raw: usize| unsafe { BorrowedFd::try_borrow_raw(arg_i32(raw)) };
 
         match call.sysno {
+            Sysno::faccessat => {
+                if is_nested_probe(call) {
+                    return Ok(SyscallAction::Return(0));
+                }
+                handle_fs_syscall(call);
+                Ok(SyscallAction::Replay)
+            }
             Sysno::execve => handle_exec(
                 Some(CWD),
                 call.args[0],

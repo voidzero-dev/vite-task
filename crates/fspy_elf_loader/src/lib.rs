@@ -125,6 +125,11 @@ pub type ExecveCleanup = (unsafe fn(*mut core::ffi::c_void), *mut core::ffi::c_v
 pub enum SyscallAction {
     /// Replay the (possibly `/proc/*/exe`-rewritten) trapped syscall.
     Replay,
+    /// Short-circuit the trapped syscall in Phase 1 and return the exact raw
+    /// `isize` result to the caller without replaying it to the kernel.
+    /// Non-negative values represent successful return values (such as `0`),
+    /// while negative values are delivered directly as raw `-errno` results.
+    Return(isize),
     /// Execute a replacement `SYS_execve(prog, argv, envp)` on the entry stack
     /// after releasing the private `SIGSYS` stack and clearing the calling
     /// thread's virtual `SIGSYS` mask entry.
@@ -149,8 +154,10 @@ pub enum SyscallAction {
 /// already-rewritten target executable path.
 ///
 /// Returning `Ok(SyscallAction::Replay)` replays the syscall; returning
-/// `Ok(SyscallAction::Execve { .. })` releases the private `SIGSYS` stack
-/// before executing the replacement `SYS_execve`; returning `Err(error)`
+/// `Ok(SyscallAction::Return(rc))` short-circuits the syscall in Phase 1 and
+/// delivers `rc` directly to the caller without replaying it to the kernel;
+/// returning `Ok(SyscallAction::Execve { .. })` releases the private `SIGSYS`
+/// stack before executing the replacement `SYS_execve`; returning `Err(error)`
 /// short-circuits the syscall and returns `-error.raw_os_error()` directly to
 /// the caller.
 #[cfg(any(target_os = "linux", target_os = "none"))]

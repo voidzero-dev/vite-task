@@ -17,7 +17,10 @@ mod freestanding {
     fspy_nostd::no_global_alloc!();
 
     const INTERCEPTOR_SHORT_CIRCUIT_ARG: usize = 0xdead_beef;
+    const INTERCEPTOR_RETURN_ZERO_ARG: usize = 0xdead_0000;
+    const INTERCEPTOR_RETURN_VALUE_ARG: usize = 0xdead_0042;
     const INTERCEPTOR_REWRITE_PROBE_MODE: usize = 0x7777;
+    const INTERCEPTOR_RETURN_PROBE_MODE: usize = 0x7778;
     const INTERCEPTOR_EXEC_PROBE_ARGV: usize = 0x5555_1234;
     const INTERCEPTOR_EXEC_FAIL_CLEANUP_ARGV: usize = 0x5555_2345;
     const INTERCEPTOR_EXEC_FAIL_NO_CLEANUP_ARGV: usize = 0x5555_2346;
@@ -43,10 +46,13 @@ mod freestanding {
 
     /// Test interceptor exercising:
     /// - `getegid(0xdead_beef)` -> short-circuits with `Err(Error::ACCES)`
+    /// - `getegid(0xdead_0000)` -> short-circuits with `Ok(SyscallAction::Return(0))`
+    /// - `getegid(0xdead_0042)` -> short-circuits with `Ok(SyscallAction::Return(42))`
     /// - `getegid(_)` -> replays normally (`Ok(SyscallAction::Replay)`)
     /// - `faccessat(_, path, 0x7777)` -> checks `/proc/self/exe` was rewritten
     ///   to an absolute non-`/proc/` path, returning `Err(Error::LOOP)` on
     ///   match or `Err(Error::NOENT)` on mismatch
+    /// - `faccessat(_, _, 0x7778)` -> short-circuits with `Ok(SyscallAction::Return(0))`
     /// - `execve(path, 0x5555_1234, _)` / `execveat(dirfd, path, 0x5555_1234, _, _)`
     ///   -> checks `/proc/self/exe` was rewritten to an absolute non-`/proc/`
     ///   path (and `dirfd == AT_FDCWD` for `execveat`)
@@ -74,11 +80,20 @@ mod freestanding {
                 if call.args[0] == INTERCEPTOR_SHORT_CIRCUIT_ARG {
                     return Err(Error::ACCES);
                 }
+                if call.args[0] == INTERCEPTOR_RETURN_ZERO_ARG {
+                    return Ok(SyscallAction::Return(0));
+                }
+                if call.args[0] == INTERCEPTOR_RETURN_VALUE_ARG {
+                    return Ok(SyscallAction::Return(42));
+                }
                 Ok(SyscallAction::Replay)
             }
             Sysno::faccessat => {
                 if call.args[2] == INTERCEPTOR_REWRITE_PROBE_MODE {
                     return check_rewritten_path(call.args[1]);
+                }
+                if call.args[2] == INTERCEPTOR_RETURN_PROBE_MODE {
+                    return Ok(SyscallAction::Return(0));
                 }
                 Ok(SyscallAction::Replay)
             }

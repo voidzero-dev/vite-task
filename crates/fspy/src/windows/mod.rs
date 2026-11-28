@@ -24,7 +24,8 @@ use winapi::{
 use winsafe::co::{CP, WC};
 
 use crate::{
-    ChildTermination, TrackedChild, command::Command, error::SpawnError, ipc::ChannelAccesses,
+    ChildTermination, TrackedChild, UntrackedReason, command::Command, error::SpawnError,
+    ipc::ChannelAccesses,
 };
 
 const INTERPOSE_CDYLIB: Artifact =
@@ -51,13 +52,23 @@ impl PathAccessIterable {
 
 #[derive(Debug, Clone)]
 pub struct SpyImpl {
-    ansi_dll_path_with_nul: Arc<CStr>,
+    /// Materialized interpose DLL path, or `None` when nested inside an active
+    /// outer `fspy` tracker (in which case spawns run untracked so the outer
+    /// tracker captures the subtree).
+    ansi_dll_path_with_nul: Option<Arc<CStr>>,
 }
 
 impl SpyImpl {
     /// Initialize the fs access spy by writing the interpose DLL on disk, in the
     /// current user's own `vp_run` folder in the system temp dir.
     pub fn init() -> io::Result<Self> {
+        if crate::nested::is_nested() {
+            tracing::debug!(
+                "nested inside an active fspy tracker; delegating tracking to outer tracker"
+            );
+            return Ok(Self { ansi_dll_path_with_nul: None });
+        }
+
         let dll_path = INTERPOSE_CDYLIB.materialize().suffix(".dll").at_user_temp_dir("vp_run")?;
 
         let wide_dll_path = dll_path.as_os_str().encode_wide().collect::<Vec<u16>>();
@@ -70,7 +81,7 @@ impl SpyImpl {
         // SAFETY: we just pushed a NUL byte, so the slice is NUL-terminated
         let ansi_dll_path_with_nul =
             unsafe { CStr::from_bytes_with_nul_unchecked(ansi_dll_path.as_slice()) };
-        Ok(Self { ansi_dll_path_with_nul: ansi_dll_path_with_nul.into() })
+        Ok(Self { ansi_dll_path_with_nul: Some(ansi_dll_path_with_nul.into()) })
     }
 
     pub(crate) fn spawn(
@@ -86,7 +97,42 @@ impl SpyImpl {
         mut command: Command,
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
-        let ansi_dll_path_with_nul = &self.ansi_dll_path_with_nul;
+        let Some(ansi_dll_path_with_nul) = &self.ansi_dll_path_with_nul else {
+            let mut command = command.into_tokio_command();
+            let mut child = command.spawn().map_err(SpawnError::OsSpawn)?;
+            // Duplicate the process handle before the child is moved into the background
+            // task so it stays valid after Tokio closes its copy when the process exits.
+            // SAFETY: the child owns this handle and is not waited on during this borrow.
+            let process = unsafe { BorrowedHandle::borrow_raw(child.raw_handle().unwrap()) };
+            let process_handle = match process.try_clone_to_owned() {
+                Ok(handle) => handle,
+                Err(err) => {
+                    let _ = child.start_kill();
+                    return Err(SpawnError::OsSpawn(err));
+                }
+            };
+            return Ok(TrackedChild {
+                stdin: child.stdin.take(),
+                stdout: child.stdout.take(),
+                stderr: child.stderr.take(),
+                process_handle,
+                wait_handle: tokio::spawn(async move {
+                    let status = tokio::select! {
+                        status = child.wait() => status?,
+                        () = cancellation_token.cancelled() => {
+                            child.start_kill()?;
+                            child.wait().await?
+                        }
+                    };
+                    io::Result::Ok(ChildTermination {
+                        status,
+                        path_accesses: Err(UntrackedReason::Nested),
+                    })
+                })
+                .map(|f| f?)
+                .boxed(),
+            });
+        };
         command.env("FSPY", "1");
 
         let receiver = channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)

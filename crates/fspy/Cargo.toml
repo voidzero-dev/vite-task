@@ -16,6 +16,7 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "process", "io-util", "sync", "rt"] }
 tokio-util = { workspace = true }
+tracing = { workspace = true }
 vt_casefold = { workspace = true }
 vt_materialized_artifact = { workspace = true }
 which = { workspace = true, features = ["tracing"] }
@@ -35,7 +36,6 @@ fspy_shared_unix = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 linux-raw-sys = { workspace = true, features = ["general", "prctl", "ptrace"] }
 syscalls = { workspace = true }
-tracing = { workspace = true }
 
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
 fspy_preload_linux = { path = "../fspy_preload_linux", artifact = "bin", target = "x86_64-unknown-none" }
@@ -51,7 +51,7 @@ ouroboros = { workspace = true }
 fspy_detours_sys = { workspace = true }
 fspy_preload_windows = { workspace = true }
 ntapi = { workspace = true }
-winapi = { workspace = true, features = ["winbase", "securitybaseapi", "handleapi"] }
+winapi = { workspace = true, features = ["winbase", "securitybaseapi", "handleapi", "ntstatus"] }
 winsafe = { workspace = true, features = ["kernel"] }
 
 [dev-dependencies]

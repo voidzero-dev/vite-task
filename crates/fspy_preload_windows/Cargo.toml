@@ -24,6 +24,7 @@ winapi = { workspace = true, features = [
   "winbase",
   "namedpipeapi",
   "memoryapi",
+  "ntstatus",
   "std",
 ] }
 windows-sys = { workspace = true, features = [

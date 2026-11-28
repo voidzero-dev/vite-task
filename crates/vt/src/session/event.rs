@@ -117,6 +117,11 @@ pub enum CacheNotUpdatedReason {
     /// that are not all of them.
     #[cfg_attr(not(fspy), expect(dead_code, reason = "only fspy tracking can be incomplete"))]
     TrackingIncomplete,
+    /// Automatic file tracking is already active in a parent task, so this
+    /// nested task ran untracked and its file accesses were recorded by the
+    /// parent task instead.
+    #[cfg_attr(not(fspy), expect(dead_code, reason = "only fspy tracking can be nested"))]
+    NestedTracking,
 }
 
 /// Outcome of the post-run cache update after a spawned process exited with

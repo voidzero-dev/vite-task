@@ -22,21 +22,26 @@ use tokio_util::sync::CancellationToken;
 use vt_materialized_artifact::{Artifact, artifact};
 
 use crate::{
-    ChildTermination, Command, TrackedChild, TrackingIncomplete, error::SpawnError,
+    ChildTermination, Command, TrackedChild, UntrackedReason, error::SpawnError,
     ipc::ChannelAccesses,
 };
 
 const PRELOAD_LINUX: Artifact = artifact!("fspy_preload", "CARGO_BIN_FILE_FSPY_PRELOAD_LINUX");
 
 #[derive(Debug)]
+enum LinuxTracker {
+    /// Materialized executable path to `fspy_preload_linux`. Wrapped in
+    /// `RwLock` so a file reaped from the temp directory (e.g. by
+    /// `systemd-tmpfiles`) can be lazily re-materialized on `ENOENT`, or
+    /// cleared to `None` if re-materialization fails.
+    Active(RwLock<Option<Box<IpcStr>>>),
+    /// Untracked fallback with the exact reason (`Nested` or `Incomplete`).
+    Untracked(UntrackedReason),
+}
+
+#[derive(Debug)]
 pub struct SpyImpl {
-    /// Materialized executable path to `fspy_preload_linux`, or `None` when
-    /// seccomp is unavailable or materialization failed (in which case `spawn`
-    /// falls back to untracked execution). Wrapped in `RwLock` so a file reaped
-    /// from the temp directory (e.g. by `systemd-tmpfiles`) can be lazily
-    /// re-materialized on `ENOENT`.
-    preload_path: RwLock<Option<Box<IpcStr>>>,
-    seccomp_available: bool,
+    tracker: LinuxTracker,
 }
 
 impl SpyImpl {
@@ -47,36 +52,42 @@ impl SpyImpl {
         reason = "matches cross-platform SpyImpl::init() -> io::Result<Self> signature"
     )]
     pub fn init() -> io::Result<Self> {
-        let seccomp_available = probe_seccomp_available();
-        let preload_path = if seccomp_available {
-            let materialized = materialize_preload();
-            if materialized.is_none() {
-                tracing::warn!(
-                    "failed to materialize the Linux task tracker binary, so Linux task \
-                     tracking is off and caching is disabled"
-                );
-            }
-            materialized
-        } else {
-            None
+        if crate::nested::is_nested() {
+            tracing::debug!(
+                "nested inside an active fspy tracker; delegating tracking to outer tracker"
+            );
+            return Ok(Self { tracker: LinuxTracker::Untracked(UntrackedReason::Nested) });
+        }
+        if !probe_seccomp_available() {
+            return Ok(Self { tracker: LinuxTracker::Untracked(UntrackedReason::Incomplete) });
+        }
+        let Some(preload_path) = materialize_preload() else {
+            tracing::warn!(
+                "failed to materialize the Linux task tracker binary, so Linux task \
+                 tracking is off and caching is disabled"
+            );
+            return Ok(Self { tracker: LinuxTracker::Untracked(UntrackedReason::Incomplete) });
         };
-        Ok(Self { preload_path: RwLock::new(preload_path), seccomp_available })
+        Ok(Self { tracker: LinuxTracker::Active(RwLock::new(Some(preload_path))) })
     }
 
-    fn preload_path(&self) -> Option<Box<IpcStr>> {
-        if !self.seccomp_available {
-            return None;
+    fn preload_path(&self) -> Result<Box<IpcStr>, UntrackedReason> {
+        match &self.tracker {
+            LinuxTracker::Untracked(reason) => Err(*reason),
+            LinuxTracker::Active(lock) => lock
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_deref()
+                .map(clone_ipc_str)
+                .ok_or(UntrackedReason::Incomplete),
         }
-        self.preload_path
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_deref()
-            .map(clone_ipc_str)
     }
 
     fn rematerialize_preload(&self, failed_path: &IpcStr) -> Option<Box<IpcStr>> {
-        let mut guard =
-            self.preload_path.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let LinuxTracker::Active(lock) = &self.tracker else {
+            return None;
+        };
+        let mut guard = lock.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(current) = guard.as_deref()
             && (current.as_bytes() != failed_path.as_bytes()
                 || Path::new(current.as_os_str()).exists())
@@ -93,8 +104,9 @@ impl SpyImpl {
         mut command: Command,
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
-        let Some(mut preload_path) = self.preload_path() else {
-            return spawn_untracked(command, cancellation_token);
+        let mut preload_path = match self.preload_path() {
+            Ok(path) => path,
+            Err(reason) => return spawn_untracked(command, cancellation_token, reason),
         };
         // If the cached launcher binary was removed mid-process (e.g. by
         // `systemd-tmpfiles`), re-materialize before building `tokio_command`
@@ -103,7 +115,13 @@ impl SpyImpl {
         if !Path::new(preload_path.as_os_str()).exists() {
             match self.rematerialize_preload(&preload_path) {
                 Some(new_path) => preload_path = new_path,
-                None => return spawn_untracked(command, cancellation_token),
+                None => {
+                    return spawn_untracked(
+                        command,
+                        cancellation_token,
+                        UntrackedReason::Incomplete,
+                    );
+                }
             }
         }
 
@@ -240,6 +258,7 @@ async fn await_startup_handshake(
 fn spawn_untracked(
     command: Command,
     cancellation_token: CancellationToken,
+    reason: UntrackedReason,
 ) -> Result<TrackedChild, SpawnError> {
     let mut tokio_command = command.into_tokio_command();
     let mut child = tokio_command.spawn().map_err(SpawnError::OsSpawn)?;
@@ -255,7 +274,7 @@ fn spawn_untracked(
                     child.wait().await?
                 }
             };
-            io::Result::Ok(ChildTermination { status, path_accesses: Err(TrackingIncomplete) })
+            io::Result::Ok(ChildTermination { status, path_accesses: Err(reason) })
         })
         .map(|f| f?)
         .boxed(),

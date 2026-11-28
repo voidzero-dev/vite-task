@@ -1,4 +1,6 @@
-use fspy_shared::ipc::AccessMode;
+use std::ffi::CStr;
+
+use fspy_shared::{ipc::AccessMode, probe::NESTED_PROBE_PATH_UNIX_BYTES};
 use libc::{c_char, c_int};
 
 use crate::{
@@ -21,6 +23,12 @@ unsafe extern "C" fn faccessat(
     mode: c_int,
     flags: c_int,
 ) -> c_int {
+    if dirfd == libc::AT_FDCWD && mode == libc::F_OK && flags == 0 && !pathname.is_null() {
+        // SAFETY: pathname is a non-null NUL-terminated C string provided by the caller.
+        if unsafe { CStr::from_ptr(pathname) }.to_bytes() == NESTED_PROBE_PATH_UNIX_BYTES {
+            return 0;
+        }
+    }
     // SAFETY: dirfd is -1 or valid, and pathname is a valid C string.
     unsafe { handle_open_at(dirfd, pathname, AccessMode::Read) };
     // SAFETY: calling the original libc faccessat() with forwarded arguments.

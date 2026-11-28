@@ -1355,6 +1355,17 @@ static int run_interceptor_test(void) {
         fail("intercepted getegid short-circuit did not return EACCES");
     }
 
+    /* 2b. SyscallAction::Return(rc) short-circuits in Phase 1 with exact rc. */
+    if (syscall(SYS_getegid, 0xdead0000UL) != 0) {
+        fail("SyscallAction::Return(0) did not return 0");
+    }
+    if (syscall(SYS_getegid, 0xdead0042UL) != 42) {
+        fail("SyscallAction::Return(42) did not return 42");
+    }
+    if (syscall(SYS_faccessat, AT_FDCWD, "/dev/null/fspy_return_probe", 0x7778UL) != 0) {
+        fail("SyscallAction::Return(0) on faccessat did not short-circuit");
+    }
+
     /* 3. /proc/self/exe rewrite is visible to interceptor on faccessat. */
     errno = 0;
     if (syscall(SYS_faccessat, AT_FDCWD, "/proc/self/exe", 0x7777UL) != -1 || errno != ELOOP) {

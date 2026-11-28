@@ -71,7 +71,7 @@ pub(super) async fn update_cache(
     workspace_root: &Arc<AbsolutePath>,
     cache_dir: &AbsolutePath,
     state: CacheState<'_>,
-    #[cfg(fspy)] path_accesses: Option<&Result<fspy::PathAccessIterable, fspy::TrackingIncomplete>>,
+    #[cfg(fspy)] path_accesses: Option<&Result<fspy::PathAccessIterable, fspy::UntrackedReason>>,
     reports: Option<&Reports>,
     duration: Duration,
     cancel_token: &CancellationToken,
@@ -102,12 +102,17 @@ pub(super) async fn update_cache(
     }
 
     // The accesses, or `None` when the task was not tracked at all. An
-    // `Err` means tracking could not record everything it did, so what
-    // arrived is a subset of what it touched, and an entry
-    // built from a subset would replay with inputs and outputs missing.
+    // `Err` means tracking was incomplete or delegated to an outer tracker, so
+    // we must not build a cache entry from missing or partial accesses.
     #[cfg(fspy)]
-    let Ok(path_accesses) = path_accesses.map(Result::as_ref).transpose() else {
-        return CacheUpdateOutcome::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete);
+    let path_accesses = match path_accesses.map(Result::as_ref).transpose() {
+        Ok(accesses) => accesses,
+        Err(fspy::UntrackedReason::Incomplete) => {
+            return CacheUpdateOutcome::NotUpdated(CacheNotUpdatedReason::TrackingIncomplete);
+        }
+        Err(fspy::UntrackedReason::Nested) => {
+            return CacheUpdateOutcome::NotUpdated(CacheNotUpdatedReason::NestedTracking);
+        }
     };
 
     // Every schema version's folder is in the task cache, not only this one.

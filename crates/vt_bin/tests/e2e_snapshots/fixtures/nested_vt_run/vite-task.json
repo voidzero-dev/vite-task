@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "outer": {
+      "command": "vtt pipe-stdout -- vt run -v inner",
+      "cache": true
+    },
+    "inner": {
+      "command": "vtt print-file input.txt && vtt write-file dist/out.txt built",
+      "cache": true
+    }
+  }
+}
