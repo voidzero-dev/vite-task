@@ -104,6 +104,16 @@ fn ensure_init() {
     });
 }
 
+/// Register the `pthread_atfork` handler eagerly at dylib load time while the
+/// process is single-threaded, so a concurrent `fork()` can never race with
+/// the first `ATFORK_INIT.call_once(...)` and leave the `Once` stuck in an
+/// in-progress state in the child.
+#[cfg(not(test))]
+#[ctor::ctor(unsafe)]
+fn init_spawn_chdirs() {
+    ensure_init();
+}
+
 fn set_spawn_chdir(key: usize, entry: SpawnChdir) {
     ensure_init();
     let mut pending = Some(entry);
