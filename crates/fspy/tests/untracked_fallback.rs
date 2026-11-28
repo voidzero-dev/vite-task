@@ -1,6 +1,6 @@
 //! Tests for Linux untracked fallback and authentic exec errors:
 //! - When `seccomp` is blocked by an outer sandbox, `fspy` runs commands
-//!   untracked and reports `Err(TrackingIncomplete)` rather than failing every
+//!   untracked and reports `Err(UntrackedReason::Incomplete)` rather than failing every
 //!   spawn.
 //! - Authentic exec errors (such as `ENOEXEC` on a script without a `#!` line)
 //!   propagate normally and keep the trace complete.
@@ -13,7 +13,7 @@ use std::{
     process::Stdio,
 };
 
-use fspy::TrackingIncomplete;
+use fspy::UntrackedReason;
 use linux_raw_sys::{
     errno::EPERM,
     prctl::PR_SET_NO_NEW_PRIVS,
@@ -53,7 +53,7 @@ async fn exec_errors_are_not_reported_as_lost() {
 
 /// When an outer sandbox blocks `SYS_seccomp` with `EPERM`, `fspy` detects
 /// this during initialization, runs spawned commands untracked, and reports
-/// `Err(TrackingIncomplete)` so callers do not cache partial traces.
+/// `Err(UntrackedReason::Incomplete)` so callers do not cache partial traces.
 #[test]
 fn seccomp_blocked_sandbox_falls_back_to_untracked() {
     let cmd = command_for_fn!((), |()| {
@@ -103,7 +103,7 @@ fn seccomp_blocked_sandbox_falls_back_to_untracked() {
             let termination = tracked.wait_handle.await.unwrap();
             assert!(termination.status.success());
             assert_eq!(stdout, b"sandbox-ok\n");
-            assert!(matches!(termination.path_accesses, Err(TrackingIncomplete)));
+            assert_eq!(termination.path_accesses.err(), Some(UntrackedReason::Incomplete));
         });
     });
 

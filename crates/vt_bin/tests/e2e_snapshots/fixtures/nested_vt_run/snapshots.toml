@@ -1,0 +1,54 @@
+[[e2e]]
+name = "nested_vt_run_delegates_tracking_to_outer"
+comment = """
+When a cached task spawns a nested `vt run` subprocess (wrapped via `vtt pipe-stdout` so it runs as a separate process instead of being inlined), the nested `vt` detects that automatic file tracking is already active in the outer task, runs `inner` untracked with a clear explanation, and does not pollute `inner`'s cache. Meanwhile the outer task tracks `inner`'s reads and writes (`input.txt` and `dist/out.txt`), restores `dist/out.txt` on cache hit, and invalidates when `input.txt` changes.
+"""
+steps = [
+  { argv = [
+    "vt",
+    "run",
+    "-v",
+    "outer",
+  ], comment = "cold run: outer caches, inner reports nested tracking" },
+  { argv = [
+    "vtt",
+    "rm",
+    "-rf",
+    "dist",
+  ], comment = "remove output produced by nested task" },
+  { argv = [
+    "vt",
+    "run",
+    "-v",
+    "outer",
+  ], comment = "outer cache hit restores dist/out.txt" },
+  { argv = [
+    "vtt",
+    "print-file",
+    "dist/out.txt",
+  ], comment = "verify dist/out.txt was restored" },
+  { argv = [
+    "vtt",
+    "write-file",
+    "input.txt",
+    "updated",
+  ], comment = "modify file read only by nested grandchild" },
+  { argv = [
+    "vt",
+    "run",
+    "-v",
+    "outer",
+  ], comment = "outer cache miss because grandchild input changed" },
+  { argv = [
+    "vt",
+    "run",
+    "-v",
+    "inner",
+  ], comment = "direct inner run misses (nested run did not pollute inner cache)" },
+  { argv = [
+    "vt",
+    "run",
+    "-v",
+    "inner",
+  ], comment = "second direct inner run hits cache" },
+]

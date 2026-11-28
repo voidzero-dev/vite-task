@@ -165,6 +165,9 @@ pub enum SavedCacheNotUpdatedReason {
     /// Automatic file tracking could not record everything the task did, so
     /// the inferred inputs and outputs were a subset of what it touched.
     TrackingIncomplete,
+    /// Automatic file tracking is already active in a parent task, so this
+    /// nested task ran untracked and its accesses were tracked by the parent.
+    NestedTracking,
     /// A runner-aware tool called `disableCache()`, skipping cache update.
     ToolRequested,
 }
@@ -335,6 +338,7 @@ impl SavedCacheNotUpdatedReason {
             }
             CacheNotUpdatedReason::ToolRequested => Self::ToolRequested,
             CacheNotUpdatedReason::TrackingIncomplete => Self::TrackingIncomplete,
+            CacheNotUpdatedReason::NestedTracking => Self::NestedTracking,
         }
     }
 }
@@ -582,6 +586,13 @@ impl TaskResult {
                 SavedCacheNotUpdatedReason::TrackingIncomplete => (
                     Str::from(
                         "→ Not cached: automatic file tracking couldn't record everything this task did. Configure `input` and `output` manually to enable caching.",
+                    ),
+                    Vec::new(),
+                    &[],
+                ),
+                SavedCacheNotUpdatedReason::NestedTracking => (
+                    Str::from(
+                        "→ Not cached: automatic file tracking is already active in a parent task. The parent task tracks these accesses; configure `input` and `output` manually to also cache this nested task.",
                     ),
                     Vec::new(),
                     &[],
@@ -1893,6 +1904,7 @@ mod tests {
         let summary = full_summary(vec![
             not_updated("opt-out", SavedCacheNotUpdatedReason::ToolRequested),
             not_updated("incomplete", SavedCacheNotUpdatedReason::TrackingIncomplete),
+            not_updated("nested", SavedCacheNotUpdatedReason::NestedTracking),
             not_updated("no-fspy", SavedCacheNotUpdatedReason::FspyUnsupported),
             not_updated(
                 "ipc",
@@ -1922,6 +1934,9 @@ mod tests {
                 .as_str()
                 .contains("→ Not cached: automatic file tracking couldn't record everything")
         );
+        assert!(summary.as_str().contains(
+            "→ Not cached: automatic file tracking is already active in a parent task. The parent task tracks these accesses; configure `input` and `output` manually to also cache this nested task."
+        ));
         assert!(
             summary
                 .as_str()

@@ -12,7 +12,7 @@ installs a `SECCOMP_RET_TRAP` (`SIGSYS`) filter to record filesystem syscalls
 into the shared-memory IPC channel (`fspy_shared::ipc::channel`) and chain child
 `execve`/`execveat` calls. When `seccomp` is unavailable (such as in a
 restricted sandbox), `fspy` falls back to running the command untracked and
-reports `TrackingIncomplete`. Because seccomp sets `PR_SET_NO_NEW_PRIVS` and
+reports `UntrackedReason::Incomplete`. Because seccomp sets `PR_SET_NO_NEW_PRIVS` and
 userland ELF mapping opens target binaries read-only, setuid/setgid and
 file-capability escalations do not apply, and execute-only (`chmod 0111`)
 binaries cannot be mapped and fail with `EACCES`.
@@ -27,6 +27,14 @@ coreutils for SIP-protected `/bin`/`/usr/bin` binaries.
 
 Windows uses [Detours](https://github.com/microsoft/Detours) with
 `fspy_preload_windows` (`src/windows`) to intercept Win32/NT file system calls.
+
+## Nested tracking
+
+When `fspy` runs inside a process already tracked by an outer `fspy` instance
+on Linux, macOS, or Windows, it detects the active outer tracker by probing a
+sentinel path under the OS null device (intercepted and short-circuited by the
+outer preload without recording a file access), delegates tracking to the outer
+tracker, and reports `UntrackedReason::Nested`.
 
 ## Unified interface
 

@@ -1,6 +1,7 @@
 pub mod error;
 
 mod ipc;
+mod nested;
 
 #[cfg(target_os = "linux")]
 #[path = "./linux/mod.rs"]
@@ -21,7 +22,7 @@ mod command;
 use std::{io, process::ExitStatus, sync::LazyLock};
 
 pub use command::Command;
-pub use error::TrackingIncomplete;
+pub use error::UntrackedReason;
 pub use fspy_shared::ipc::{IpcPath, PathAccess};
 use futures_util::future::BoxFuture;
 pub use os_impl::PathAccessIterable;
@@ -33,8 +34,8 @@ pub struct ChildTermination {
     /// The exit status of the child process.
     pub status: ExitStatus,
     /// The path accesses captured from the child process, or the reason
-    /// they cannot be trusted to be all of them.
-    pub path_accesses: Result<PathAccessIterable, TrackingIncomplete>,
+    /// complete accesses were not collected.
+    pub path_accesses: Result<PathAccessIterable, UntrackedReason>,
 }
 
 pub struct TrackedChild {

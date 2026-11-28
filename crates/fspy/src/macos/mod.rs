@@ -9,16 +9,24 @@ use tokio_util::sync::CancellationToken;
 use vt_materialized_artifact::{Artifact, artifact};
 
 use crate::{
-    ChildTermination, Command, TrackedChild, arena::PathAccessArena, error::SpawnError,
-    ipc::ChannelAccesses,
+    ChildTermination, Command, TrackedChild, UntrackedReason, arena::PathAccessArena,
+    error::SpawnError, ipc::ChannelAccesses,
 };
 
 #[derive(Debug)]
 #[expect(clippy::struct_field_names, reason = "each field names a distinct injected path")]
-pub struct SpyImpl {
+struct MacosArtifacts {
     bash_path: Box<IpcStr>,
     coreutils_path: Box<IpcStr>,
     preload_path: Box<IpcStr>,
+}
+
+#[derive(Debug)]
+pub struct SpyImpl {
+    /// Materialized preload/helper artifacts, or `None` when nested inside an
+    /// active outer `fspy` tracker (in which case spawns run untracked so the
+    /// outer tracker captures the subtree).
+    artifacts: Option<MacosArtifacts>,
 }
 
 impl SpyImpl {
@@ -28,23 +36,32 @@ impl SpyImpl {
         const PRELOAD_CDYLIB: Artifact =
             artifact!("fspy_preload", "CARGO_CDYLIB_FILE_FSPY_PRELOAD_MACOS");
 
+        if crate::nested::is_nested() {
+            tracing::debug!(
+                "nested inside an active fspy tracker; delegating tracking to outer tracker"
+            );
+            return Ok(Self { artifacts: None });
+        }
+
         let preload_cdylib_path =
             PRELOAD_CDYLIB.materialize().suffix(".dylib").at_user_temp_dir("vp_run")?;
 
         Ok(Self {
-            preload_path: preload_cdylib_path.as_path().into(),
-            bash_path: macos_artifacts::OILS_BINARY
-                .materialize()
-                .executable()
-                .at_user_temp_dir("vp_run")?
-                .as_path()
-                .into(),
-            coreutils_path: macos_artifacts::COREUTILS_BINARY
-                .materialize()
-                .executable()
-                .at_user_temp_dir("vp_run")?
-                .as_path()
-                .into(),
+            artifacts: Some(MacosArtifacts {
+                preload_path: preload_cdylib_path.as_path().into(),
+                bash_path: macos_artifacts::OILS_BINARY
+                    .materialize()
+                    .executable()
+                    .at_user_temp_dir("vp_run")?
+                    .as_path()
+                    .into(),
+                coreutils_path: macos_artifacts::COREUTILS_BINARY
+                    .materialize()
+                    .executable()
+                    .at_user_temp_dir("vp_run")?
+                    .as_path()
+                    .into(),
+            }),
         })
     }
 
@@ -61,14 +78,39 @@ impl SpyImpl {
         mut command: Command,
         cancellation_token: CancellationToken,
     ) -> Result<TrackedChild, SpawnError> {
+        let Some(artifacts) = &self.artifacts else {
+            let mut tokio_command = command.into_tokio_command();
+            let mut child = tokio_command.spawn().map_err(SpawnError::OsSpawn)?;
+            return Ok(TrackedChild {
+                stdin: child.stdin.take(),
+                stdout: child.stdout.take(),
+                stderr: child.stderr.take(),
+                wait_handle: tokio::spawn(async move {
+                    let status = tokio::select! {
+                        status = child.wait() => status?,
+                        () = cancellation_token.cancelled() => {
+                            child.start_kill()?;
+                            child.wait().await?
+                        }
+                    };
+                    io::Result::Ok(ChildTermination {
+                        status,
+                        path_accesses: Err(UntrackedReason::Nested),
+                    })
+                })
+                .map(|f| f?)
+                .boxed(),
+            });
+        };
+
         let ipc_receiver = channel(crate::ipc::shm_capacity(), allocator_api2::alloc::Global)
             .map_err(SpawnError::ChannelCreation)?;
 
         let payload = Payload {
             ipc_channel_conf: ipc_receiver.conf(),
-            preload_path: &self.preload_path,
-            bash_path: &self.bash_path,
-            coreutils_path: &self.coreutils_path,
+            preload_path: &artifacts.preload_path,
+            bash_path: &artifacts.bash_path,
+            coreutils_path: &artifacts.coreutils_path,
         };
 
         let payload_bump = bumpalo::Bump::new();

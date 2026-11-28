@@ -61,9 +61,9 @@ pub struct InheritedChild {
 pub struct ChildOutcome {
     pub exit_status: std::process::ExitStatus,
     /// Raw fspy accesses. `Some` iff spawned with [`PipedMode::Tracked`], and
-    /// `Err` when a tracked process could not record everything it did.
+    /// `Err` when complete accesses could not be collected (incomplete or nested).
     #[cfg(fspy)]
-    pub path_accesses: Option<Result<PathAccessIterable, fspy::TrackingIncomplete>>,
+    pub path_accesses: Option<Result<PathAccessIterable, fspy::UntrackedReason>>,
 }
 
 /// Spawn a command with piped stdout/stderr (`stdin` set to `/dev/null`) and

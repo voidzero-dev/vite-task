@@ -1,6 +1,9 @@
 use std::mem::{offset_of, size_of, size_of_val};
 
-use fspy_shared::ipc::{AccessMode, IpcPath, PathAccess};
+use fspy_shared::{
+    ipc::{AccessMode, IpcPath, PathAccess},
+    probe::{NESTED_PROBE_PATH_WINDOWS_BYTE_LEN, NESTED_PROBE_PATH_WINDOWS_UTF16},
+};
 use ntapi::{
     ntioapi::{
         FILE_CREATE, FILE_DIRECTORY_FILE, FILE_INFORMATION_CLASS, FILE_OPEN_IF,
@@ -21,6 +24,7 @@ use winapi::{
             BOOLEAN, HANDLE, NTSTATUS, OBJECT_ATTRIBUTES, PHANDLE, PLARGE_INTEGER,
             POBJECT_ATTRIBUTES, PUNICODE_STRING, PVOID, ULONG, UNICODE_STRING,
         },
+        ntstatus::STATUS_SUCCESS,
     },
     um::winnt::{ACCESS_MASK, GENERIC_READ},
 };
@@ -470,6 +474,34 @@ static DETOUR_NT_OPEN_FILE: Detour<
         })
     };
 
+/// Checks whether `object_attributes` refers to `fspy`'s nested-tracker
+/// sentinel path under `\??\NUL`.
+///
+/// # Safety
+///
+/// `object_attributes` must be null or valid for the duration of the
+/// intercepted `NtQueryAttributesFile` call.
+unsafe fn is_nested_probe(object_attributes: POBJECT_ATTRIBUTES) -> bool {
+    if object_attributes.is_null() {
+        return false;
+    }
+    // SAFETY: `object_attributes` is non-null and valid for this NT call.
+    let attrs = unsafe { &*object_attributes };
+    if !attrs.RootDirectory.is_null() || attrs.ObjectName.is_null() {
+        return false;
+    }
+    // SAFETY: `ObjectName` is a non-null `UNICODE_STRING` valid for this NT call.
+    let name = unsafe { &*attrs.ObjectName };
+    if name.Length != NESTED_PROBE_PATH_WINDOWS_BYTE_LEN || name.Buffer.is_null() {
+        return false;
+    }
+    // SAFETY: `Buffer` points to at least `Length / 2` UTF-16 code units.
+    let slice = unsafe {
+        std::slice::from_raw_parts(name.Buffer, usize::from(name.Length) / size_of::<u16>())
+    };
+    slice == NESTED_PROBE_PATH_WINDOWS_UTF16
+}
+
 static DETOUR_NT_QUERY_ATTRIBUTES_FILE: Detour<
     unsafe extern "system" fn(
         object_attributes: POBJECT_ATTRIBUTES,
@@ -483,6 +515,14 @@ static DETOUR_NT_QUERY_ATTRIBUTES_FILE: Detour<
                 object_attributes: POBJECT_ATTRIBUTES,
                 file_information: PFILE_BASIC_INFORMATION,
             ) -> HFILE {
+                // SAFETY: inspecting caller-supplied OBJECT_ATTRIBUTES before forwarding
+                if unsafe { is_nested_probe(object_attributes) } {
+                    if !file_information.is_null() {
+                        // SAFETY: caller supplied a valid writable FILE_BASIC_INFORMATION buffer
+                        unsafe { core::ptr::write_bytes(file_information, 0, 1) };
+                    }
+                    return STATUS_SUCCESS;
+                }
                 // SAFETY: intercepting attribute query to record read access
                 unsafe { handle_open(AccessMode::Read, object_attributes) };
                 // SAFETY: calling the original NtQueryAttributesFile with all original arguments
