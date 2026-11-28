@@ -10,6 +10,7 @@ rust-version.workspace = true
 [target.'cfg(target_os = "none")'.dependencies]
 fspy_elf_loader = { path = "../fspy_elf_loader" }
 fspy_nostd = { workspace = true }
+syscalls = { workspace = true }
 
 [[bin]]
 name = "fspy_elf_loader_test_launcher"

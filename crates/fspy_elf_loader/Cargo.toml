@@ -9,9 +9,18 @@ publish.workspace = true
 rust-version.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "none"))'.dependencies]
+allocator-api2 = { workspace = true }
 elf = { workspace = true }
 fspy_nostd = { workspace = true }
-linux-raw-sys = { workspace = true, features = ["auxvec", "errno", "general", "no_std", "prctl"] }
+fspy_nostd_alloc = { workspace = true }
+linux-raw-sys = { workspace = true, features = [
+  "auxvec",
+  "errno",
+  "general",
+  "no_std",
+  "prctl",
+  "ptrace",
+] }
 syscalls = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]

@@ -9,6 +9,7 @@ fn main() {
         return;
     }
     println!("cargo::rerun-if-changed=fixtures/runtime.c");
+    println!("cargo::rerun-if-changed=fixtures/virtualization.c");
     println!("cargo::rerun-if-env-changed=CC");
 
     let compiler = resolve_compiler();
@@ -17,8 +18,11 @@ fn main() {
         .is_some_and(|path| path.rsplit('/').next().is_some_and(|name| name.starts_with("zigcc-")));
 
     let out = env::var_os("OUT_DIR").unwrap();
-    let mut source = env::var_os("CARGO_MANIFEST_DIR").unwrap();
+    let manifest_dir = env::var_os("CARGO_MANIFEST_DIR").unwrap();
+    let mut source = manifest_dir.clone();
     source.push("/fixtures/runtime.c");
+    let mut virt_source = manifest_dir;
+    virt_source.push("/fixtures/virtualization.c");
 
     // Compile the single C runtime fixture across all four ELF64 cells with
     // explicit PIE/non-PIE flags so GCC, Clang, and zig cc emit identical shapes.
@@ -50,6 +54,24 @@ fn main() {
             compile_zig_musl(musl_target, &source, &dest, flags);
         } else {
             run_compile(Command::new(&compiler), &source, &dest, flags);
+        }
+        println!("cargo::rustc-env={env_name}={}", dest.to_str().unwrap());
+    }
+
+    for (env_name, file_name, flags, is_static) in [
+        ("FIXTURE_VIRT_DYN_PIE", "/fixture_virt_dyn_pie", &["-fPIE", "-pie"][..], false),
+        (
+            "FIXTURE_VIRT_STATIC_EXEC",
+            "/fixture_virt_static_exec",
+            &["-fno-pie", "-static"][..],
+            true,
+        ),
+    ] {
+        let dest = join_out(&out, file_name);
+        if is_static && let Some(musl_target) = musl_target {
+            compile_zig_musl(musl_target, &virt_source, &dest, flags);
+        } else {
+            run_compile(Command::new(&compiler), &virt_source, &dest, flags);
         }
         println!("cargo::rustc-env={env_name}={}", dest.to_str().unwrap());
     }

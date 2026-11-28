@@ -19,12 +19,13 @@ use core::{
 };
 
 use fspy_nostd::{
-    CStr, Thin,
+    CStr, Error, Result, Thin,
     env::AuxEntry,
     mm::{self, MprotectFlags},
 };
 use linux_raw_sys::{
     auxvec as abi,
+    errno::E2BIG,
     general::{RLIMIT_STACK, rlimit64},
 };
 use syscalls::Sysno;
@@ -33,6 +34,8 @@ use crate::{
     image::{Image, PHDR_SIZE},
     mapping::{Mapping, add, align_up, sub},
 };
+
+const ERROR_2BIG: Error = Error::from_raw_os_error(E2BIG.cast_signed());
 
 // Clamp target stack capacity derived from `RLIMIT_STACK` to `[8 MiB, 64 MiB]`.
 const MIN_CAPACITY: usize = 8 * 1024 * 1024;
@@ -85,6 +88,20 @@ fn query_stack_capacity(page: usize) -> usize {
     }
 }
 
+/// Completed target stack mapping awaiting final retention before `enter`.
+pub struct BuiltStack {
+    mapping: Mapping,
+    sp: *mut usize,
+}
+
+impl BuiltStack {
+    pub fn retain(self) -> *mut usize {
+        let sp = self.sp;
+        self.mapping.retain();
+        sp
+    }
+}
+
 struct Builder {
     mapping: Mapping,
     // Offsets from mapping.ptr: first usable byte, staged word count, and payload start.
@@ -94,17 +111,22 @@ struct Builder {
 }
 
 impl Builder {
-    fn new(page: usize, exec_stack: bool) -> Self {
+    fn try_new(page: usize, exec_stack: bool) -> Result<Self> {
         let capacity = query_stack_capacity(page);
-        Self::with_capacity(page, capacity, exec_stack)
+        Self::try_with_capacity(page, capacity, exec_stack)
     }
 
     /// Maps the stack read-write, plus execute when the executable's
     /// `PT_GNU_STACK` asks for it, as Linux does.
-    fn with_capacity(page: usize, capacity: usize, exec_stack: bool) -> Self {
-        assert!(page.is_multiple_of(align_of::<usize>()), "invalid page size");
-        assert!(capacity.is_multiple_of(page), "stack capacity must be page-aligned");
-        let mapping = Mapping::reserve(add(capacity, page));
+    fn try_with_capacity(page: usize, capacity: usize, exec_stack: bool) -> Result<Self> {
+        if !page.is_power_of_two()
+            || !page.is_multiple_of(align_of::<usize>())
+            || !capacity.is_multiple_of(page)
+        {
+            return Err(Error::INVAL);
+        }
+        let total = capacity.checked_add(page).ok_or(Error::NOMEM)?;
+        let mapping = Mapping::try_reserve(total)?;
         let mut protection = MprotectFlags::READ | MprotectFlags::WRITE;
         if exec_stack {
             protection |= MprotectFlags::EXEC;
@@ -113,17 +135,26 @@ impl Builder {
         // instead of writing into a neighboring mapping.
         // SAFETY: the first page remains a guard; the remaining pages are
         // exclusively owned and do not have live references.
-        unsafe { mm::mprotect(mapping.ptr.as_ptr().add(page).cast(), capacity, protection) }
-            .expect("cannot map target stack");
-        Self { strings: mapping.len, mapping, start: page, word_count: 0 }
+        unsafe { mm::mprotect(mapping.ptr.as_ptr().add(page).cast(), capacity, protection) }?;
+        Ok(Self { strings: mapping.len, mapping, start: page, word_count: 0 })
     }
 
-    const fn table_len(&self) -> usize {
-        self.word_count.checked_mul(size_of::<usize>()).expect("initial stack exceeds capacity")
+    const fn try_table_len(&self) -> Result<usize> {
+        match self.word_count.checked_mul(size_of::<usize>()) {
+            Some(len) => Ok(len),
+            None => Err(ERROR_2BIG),
+        }
     }
 
-    const fn table_end(&self) -> usize {
-        add(self.start, self.table_len())
+    const fn try_table_end(&self) -> Result<usize> {
+        let len = match self.try_table_len() {
+            Ok(len) => len,
+            Err(err) => return Err(err),
+        };
+        match self.start.checked_add(len) {
+            Some(end) => Ok(end),
+            None => Err(ERROR_2BIG),
+        }
     }
 
     #[expect(clippy::cast_ptr_alignment, reason = "mapping base and start offset are page-aligned")]
@@ -135,60 +166,66 @@ impl Builder {
 
     const fn words_mut(&mut self) -> &mut [usize] {
         // SAFETY: `self.words_ptr()` is `usize`-aligned, and the staged words
-        // were exclusively written by `push`, disjoint from `[self.strings, mapping.len)`.
+        // were exclusively written by `try_push`, disjoint from `[self.strings, mapping.len)`.
         unsafe { core::slice::from_raw_parts_mut(self.words_ptr(), self.word_count) }
     }
 
-    fn push(&mut self, value: usize) {
-        let end = add(self.table_end(), size_of::<usize>());
-        assert!(end <= self.strings, "initial stack exceeds capacity");
+    fn try_push(&mut self, value: usize) -> Result<()> {
+        let end = self.try_table_end()?.checked_add(size_of::<usize>()).ok_or(ERROR_2BIG)?;
+        if end > self.strings {
+            return Err(ERROR_2BIG);
+        }
         // SAFETY: `self.word_count` lies inside the writable staged region
         // below `self.strings` and is unaliased.
         unsafe { self.words_ptr().add(self.word_count).write(value) };
         self.word_count = add(self.word_count, 1);
+        Ok(())
     }
 
-    fn copy(&mut self, bytes: &[u8]) -> usize {
-        self.copy_aligned(bytes, 1)
+    fn try_copy(&mut self, bytes: &[u8]) -> Result<usize> {
+        self.try_copy_aligned(bytes, 1)
     }
 
-    fn copy_aligned(&mut self, bytes: &[u8], align: usize) -> usize {
-        assert!(align.is_power_of_two(), "invalid stack payload alignment");
-        let start = self.strings.checked_sub(bytes.len()).expect("initial stack exceeds capacity")
-            & !(align - 1);
-        assert!(start >= self.table_end(), "initial stack exceeds capacity");
+    fn try_copy_aligned(&mut self, bytes: &[u8], align: usize) -> Result<usize> {
+        if !align.is_power_of_two() {
+            return Err(Error::INVAL);
+        }
+        let start = self.strings.checked_sub(bytes.len()).ok_or(ERROR_2BIG)? & !(align - 1);
+        if start < self.try_table_end()? {
+            return Err(ERROR_2BIG);
+        }
         // SAFETY: bytes come from the old process image, not this fresh
         // mapping. The destination is writable and outside the pointer table.
         let target = unsafe { self.mapping.ptr.as_ptr().add(start) };
         // SAFETY: source and destination are valid, disjoint byte ranges.
         unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), target, bytes.len()) };
         self.strings = start;
-        target.expose_provenance()
+        Ok(target.expose_provenance())
     }
 
-    fn string(&mut self, value: CStr<'_, Thin>) -> usize {
-        self.copy(value.count().as_units_with_nul())
+    fn try_string(&mut self, value: CStr<'_, Thin>) -> Result<usize> {
+        self.try_copy(value.count().as_units_with_nul())
     }
 
-    fn args_envs<'a>(
+    fn try_args_envs<'a>(
         &mut self,
         argv: impl Iterator<Item = CStr<'a, Thin>>,
         envp: impl Iterator<Item = CStr<'a, Thin>>,
-    ) {
+    ) -> Result<()> {
         let argc_slot = self.word_count;
-        self.push(0);
+        self.try_push(0)?;
         let pointers_start = self.word_count;
         let mut argument_count = 0_usize;
         for arg in argv {
-            self.push(arg.as_ptr().expose_provenance());
-            argument_count = add(argument_count, 1);
+            self.try_push(arg.as_ptr().expose_provenance())?;
+            argument_count = argument_count.checked_add(1).ok_or(ERROR_2BIG)?;
         }
         self.words_mut()[argc_slot] = argument_count;
-        self.push(0);
+        self.try_push(0)?;
         for env in envp {
-            self.push(env.as_ptr().expose_provenance());
+            self.try_push(env.as_ptr().expose_provenance())?;
         }
-        self.push(0);
+        self.try_push(0)?;
 
         // These slots temporarily point into the original strings. Copy from
         // the last environment entry back to argv[0], because allocation grows
@@ -202,40 +239,45 @@ impl Builder {
             // SAFETY: nonzero slots came from the CStr values above, whose
             // original storage remains valid for 'a while we copy it.
             let string = unsafe { CStr::from_ptr(ptr::with_exposed_provenance(source)) };
-            self.words_mut()[index] = self.string(string);
+            self.words_mut()[index] = self.try_string(string)?;
         }
+        Ok(())
     }
 
-    fn aux(&mut self, key: u32, value: usize) {
-        self.push(usize::try_from(key).unwrap());
-        self.push(value);
+    fn try_aux(&mut self, key: u32, value: usize) -> Result<()> {
+        let key = usize::try_from(key).map_err(|_| Error::INVAL)?;
+        self.try_push(key)?;
+        self.try_push(value)
     }
 
-    fn finish(self) -> *mut usize {
+    fn try_finish(self) -> Result<BuiltStack> {
         // Final layout, from low to high addresses:
         // guard | free stack space | argc/argv/envp/auxv | padding | payloads
         //                           ^ new SP, aligned to 16 bytes
         // Keeping the table near the top leaves room below SP for calls. Only
         // table bytes move: its pointers already name the final payloads.
-        let len = self.table_len();
-        let start = self.strings.checked_sub(len).expect("initial stack exceeds capacity") & !15;
-        assert!(start >= add(self.start, MIN_STACK_HEADROOM), "initial stack exceeds capacity");
+        let len = self.try_table_len()?;
+        let start = self.strings.checked_sub(len).ok_or(ERROR_2BIG)? & !15;
+        let min_sp = self.start.checked_add(MIN_STACK_HEADROOM).ok_or(ERROR_2BIG)?;
+        if start < min_sp {
+            return Err(ERROR_2BIG);
+        }
         // SAFETY: both staged source and final destination lie inside the
         // writable region of `self.mapping` below `self.strings`; `ptr::copy`
         // handles any overlap. Zero the vacated staging prefix below SP.
-        unsafe {
+        let sp = unsafe {
             let base = self.mapping.ptr.as_ptr();
             let source = base.add(self.start);
             let target = base.add(start);
             ptr::copy(source, target, len);
             ptr::write_bytes(source, 0, len.min(sub(start, self.start)));
-            self.mapping.retain();
             target.cast()
-        }
+        };
+        Ok(BuiltStack { mapping: self.mapping, sp })
     }
 }
 
-pub unsafe fn build<'a>(
+pub unsafe fn try_build<'a>(
     execfn: CStr<'a, Thin>,
     argv: impl Iterator<Item = CStr<'a, Thin>>,
     envp: impl Iterator<Item = CStr<'a, Thin>>,
@@ -243,13 +285,13 @@ pub unsafe fn build<'a>(
     image: &Image,
     interpreter: Option<&Image>,
     page: usize,
-) -> *mut usize {
-    let mut stack = Builder::new(page, image.exec_stack);
-    stack.args_envs(argv, envp);
+) -> Result<BuiltStack> {
+    let mut stack = Builder::try_new(page, image.exec_stack)?;
+    stack.try_args_envs(argv, envp)?;
     for mut entry in inherited {
         let Ok(key) = u32::try_from(entry.key) else {
-            stack.push(entry.key);
-            stack.push(entry.value);
+            stack.try_push(entry.key)?;
+            stack.try_push(entry.value)?;
             continue;
         };
         match key {
@@ -265,7 +307,9 @@ pub unsafe fn build<'a>(
             | abi::AT_EXECFD
             | abi::AT_FLAGS => continue,
             abi::AT_RANDOM => {
-                assert!(entry.value != 0, "null AT_RANDOM");
+                if entry.value == 0 {
+                    return Err(Error::INVAL);
+                }
                 // The value is a pointer, not the random number itself. Copy
                 // the kernel-provided bytes used by libc for stack canaries.
                 // SAFETY: the exec_elf caller supplies the kernel's readable
@@ -273,36 +317,38 @@ pub unsafe fn build<'a>(
                 let bytes = unsafe {
                     core::slice::from_raw_parts(ptr::with_exposed_provenance(entry.value), 16)
                 };
-                entry.value = stack.copy_aligned(bytes, 16);
+                entry.value = stack.try_copy_aligned(bytes, 16)?;
             }
             abi::AT_PLATFORM | abi::AT_BASE_PLATFORM => {
-                assert!(entry.value != 0, "null auxiliary string");
+                if entry.value == 0 {
+                    return Err(Error::INVAL);
+                }
                 // SAFETY: the caller supplies a live NUL-terminated auxiliary string.
                 let string = unsafe { CStr::from_ptr(ptr::with_exposed_provenance(entry.value)) };
-                entry.value = stack.string(string);
+                entry.value = stack.try_string(string)?;
             }
             // Scalars such as page size and hardware capabilities still apply.
             // Unknown pointers remain usable only while their old mappings
             // survive. This includes the vDSO, kernel-provided userspace code.
             _ => {} // Old mappings, including the vDSO, remain resident.
         }
-        stack.aux(key, entry.value);
+        stack.try_aux(key, entry.value)?;
     }
     // PHDR/PHENT/PHNUM locate and size the executable's header table; ENTRY
     // is its startup address. With PT_INTERP we enter the interpreter first
     // and BASE is that image's load bias. Without one, BASE is 0 as on Linux.
-    stack.aux(abi::AT_PHDR, image.phdr);
-    stack.aux(abi::AT_PHENT, PHDR_SIZE);
-    stack.aux(abi::AT_PHNUM, image.phnum);
-    stack.aux(abi::AT_ENTRY, image.entry);
-    stack.aux(abi::AT_BASE, interpreter.map_or(0, |image| image.bias));
-    stack.aux(abi::AT_FLAGS, 0);
-    let execfn = stack.string(execfn);
+    stack.try_aux(abi::AT_PHDR, image.phdr)?;
+    stack.try_aux(abi::AT_PHENT, PHDR_SIZE)?;
+    stack.try_aux(abi::AT_PHNUM, image.phnum)?;
+    stack.try_aux(abi::AT_ENTRY, image.entry)?;
+    stack.try_aux(abi::AT_BASE, interpreter.map_or(0, |image| image.bias))?;
+    stack.try_aux(abi::AT_FLAGS, 0)?;
+    let execfn = stack.try_string(execfn)?;
     // Execution name and argv[0] are independent: callers can choose a custom
     // argv[0] without changing which pathname AT_EXECFN reports.
-    stack.aux(abi::AT_EXECFN, execfn);
-    stack.aux(abi::AT_NULL, 0);
-    stack.finish()
+    stack.try_aux(abi::AT_EXECFN, execfn)?;
+    stack.try_aux(abi::AT_NULL, 0)?;
+    stack.try_finish()
 }
 
 #[cfg(test)]
@@ -328,7 +374,7 @@ mod tests {
     fn maps_the_stack_executable_only_when_asked() {
         let page = fspy_nostd::param::page_size();
         for (exec_stack, expected) in [(false, "rw-p"), (true, "rwxp")] {
-            let builder = Builder::with_capacity(page, MIN_CAPACITY, exec_stack);
+            let builder = Builder::try_with_capacity(page, MIN_CAPACITY, exec_stack).unwrap();
             let usable = builder.mapping.ptr.as_ptr().addr() + page;
             let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
             let protection = maps
@@ -352,23 +398,21 @@ mod tests {
         let page = fspy_nostd::param::page_size();
         for argc in 0..=args.len() {
             for envc in 0..=envs.len() {
-                let mut builder = Builder::with_capacity(page, MIN_CAPACITY, false);
+                let mut builder = Builder::try_with_capacity(page, MIN_CAPACITY, false).unwrap();
                 let thin = |value: &'static core::ffi::CStr| {
                     CStr::from_units_with_nul(value.to_bytes_with_nul()).unwrap().as_thin()
                 };
-                builder.args_envs(
-                    args[..argc].iter().copied().map(thin),
-                    envs[..envc].iter().copied().map(thin),
-                );
-                builder.aux(abi::AT_NULL, 0);
-                let ptr = builder.mapping.ptr;
-                let len = builder.mapping.len;
-                let sp = builder.finish();
-                // Reclaim the mapping retained by finish after all views expire.
-                let _mapping = Mapping { ptr, len };
+                builder
+                    .try_args_envs(
+                        args[..argc].iter().copied().map(thin),
+                        envs[..envc].iter().copied().map(thin),
+                    )
+                    .unwrap();
+                builder.try_aux(abi::AT_NULL, 0).unwrap();
+                let built = builder.try_finish().unwrap();
+                let sp = built.sp;
                 assert!(sp.addr().is_multiple_of(16));
-                // SAFETY: the builder initialized a complete initial stack;
-                // its mapping stays readable and unchanged throughout this scope.
+                // SAFETY: `built` owns a complete initial stack kept alive across this scope.
                 let stack = unsafe { InitialStack::from_ptr(sp) };
                 assert_eq!(stack.args().len(), argc);
                 assert_eq!(stack.envs().len(), envc);
@@ -410,8 +454,8 @@ mod tests {
             AuxEntry { key: 0x1234, value: 0xdead },
         ];
         // SAFETY: synthetic image/auxv pointers stay valid throughout build.
-        let sp = unsafe {
-            build(
+        let built = unsafe {
+            try_build(
                 thin(c"prog"),
                 [thin(c"a")].into_iter(),
                 core::iter::empty(),
@@ -420,9 +464,10 @@ mod tests {
                 None,
                 page,
             )
-        };
-        // SAFETY: build returned a complete initial stack.
-        let stack = unsafe { InitialStack::from_ptr(sp) };
+        }
+        .unwrap();
+        // SAFETY: `built` owns a complete initial stack kept alive across this scope.
+        let stack = unsafe { InitialStack::from_ptr(built.sp) };
         let aux_random = stack
             .auxv()
             .iter()
@@ -437,12 +482,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "initial stack exceeds capacity")]
     fn rejects_stack_without_call_headroom() {
         let page = fspy_nostd::param::page_size();
-        let mut builder = Builder::with_capacity(page, MIN_CAPACITY, false);
+        let mut builder = Builder::try_with_capacity(page, MIN_CAPACITY, false).unwrap();
         let huge = std::vec![b'x'; MIN_CAPACITY - MIN_STACK_HEADROOM / 2];
-        let _ = builder.copy(&huge);
-        let _ = builder.finish();
+        let _ = builder.try_copy(&huge).unwrap();
+        assert_eq!(builder.try_finish().err(), Some(ERROR_2BIG));
     }
 }

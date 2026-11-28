@@ -50,9 +50,14 @@ reserved ranges.
 - Startup stack: contiguous argv/envp strings, rebuilt auxv, copied
   `AT_RANDOM` / platform strings, inherited scalars and resident vDSO.
 - Naked enter stubs: install SP, clear dirty GPRs, jump (no return address).
+- `SIGSYS` signal, `/proc/*/exe`, and custom `SyscallInterceptor` virtualization
+  with a private pooled `SIGSYS` stack, virtualized `rt_sigaction` /
+  `rt_sigprocmask` / `rt_sigpending` / masked waits / `fork` / `vfork`, and
+  direct user memory copies that assume valid pointers.
+- Wired into `fspy` via `fspy_preload_linux` as the sole Linux tracking backend.
 - [`fspy_elf_loader_tests`](../fspy_elf_loader_tests/README.md): dynamic and
-  static PIE/`ET_EXEC` runtimes, overlap rejection, malformed images. An
-  ignored Node test exists (`--include-ignored` on Linux with Node on `PATH`).
+  static PIE/`ET_EXEC` runtimes, overlap rejection, malformed images, and
+  `SIGSYS` + `/proc/*/exe` virtualization coverage.
 
 ## Not a complete exec
 
@@ -61,25 +66,19 @@ Do not try to close these in this crate unless a real target requires it:
 - **`brk` / `start_brk`.** The kernel's brk belongs to the high launcher
   mapping. It cannot be moved to a Linux-faithful image end. glibc malloc
   still works via mmap; leave brk alone.
-- **`/proc` identity.** `/proc/self/exe` and parent-visible `/proc/<pid>/exe`
-  still name the launcher. Parent `/proc/<pid>/exe` is not a JS/Chromium
-  identity gate. `/proc/self/exe` is, and needs virtualization later.
-- GNU properties, executable stacks, ELF32, other arches, growable stack
-  (fixed 8 MiB + guard), fd/signal/personality cleanup.
+- **External `/proc` views.** `/proc/self/exe` and `/proc/<pid>/exe` are
+  virtualized inside the tracked process, while external `/proc/<pid>/exe`
+  observers still see the launcher binary.
+- **Privileged / unsupported binaries.** `PR_SET_NO_NEW_PRIVS` is enabled for
+  seccomp (so setuid/setgid and file-capability escalations do not apply), and
+  ELF32 and `binfmt_misc` binaries are rejected with `ENOEXEC`.
+- **Launcher path visibility across mount changes.** Every tracked `execve`
+  re-enters the materialized freestanding launcher binary on disk. If a tracked
+  process tree changes its mount namespace or root (`chroot`, `pivot_root`, or
+  a private `/tmp` mount hiding the materialized launcher path), subsequent
+  child `execve` calls fail with `ENOENT`.
+- GNU properties, other arches, growable stack (fixed 8–64 MiB from
+  `RLIMIT_STACK` + guard), and personality cleanup.
 
 Load failures panic and terminate. `exec_elf` is for a fresh single-threaded
 process with no libc or TLS init. Trusted images only; this is not a sandbox.
-
-## Product work (elsewhere)
-
-fspy still spawns with `LD_PRELOAD` or `seccomp_unotify`. The loader is not
-wired in. Remaining work is to make launcher + userland shebang + `exec_elf`
-the only Linux spawn:
-
-1. Shebang and PATH above `exec_elf`, then load the resulting ELF. Scripts
-   never hit kernel `binfmt_script`. Nested `execve` must re-enter this path
-   instead of kernel-execing the child image.
-2. Virtualize `/proc/self/exe` so the target sees its own path (`process.execPath`
-   / `fs.realpath`). The ignored Node test does not do this.
-3. Drop the Linux preload/seccomp spawn split. One intercept setup in the
-   launcher covers dynamic glibc, musl, and static images.

@@ -412,7 +412,7 @@ fn maps_et_dyn_with_high_nonzero_p_vaddr_without_underflow() {
     let file = open_bytes(&bytes);
     let parsed = File::open(file.as_fd()).unwrap();
     let layout = parsed.validate_segments(page).unwrap();
-    let image = parsed.map(page, &layout);
+    let image = parsed.try_map(page, &layout).unwrap();
     let mapped_base = image.bias.wrapping_add(layout.low);
     assert_eq!(image.entry, mapped_base + 0x200);
     assert_eq!(image.phdr, mapped_base + EHDR_SIZE);
@@ -618,7 +618,7 @@ fn map_bytes(bytes: &[u8]) -> Image {
     let fd = open_bytes(bytes);
     let file = File::open(fd.as_fd()).unwrap();
     let layout = file.validate_segments(page).unwrap();
-    file.map(page, &layout)
+    file.try_map(page, &layout).unwrap()
 }
 
 fn open_bytes(bytes: &[u8]) -> OwnedFd {
